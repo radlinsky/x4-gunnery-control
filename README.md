@@ -4,12 +4,10 @@
 
 https://github.com/user-attachments/assets/19c517e6-2c34-4a32-8c1b-6d10ea47cd5b
 
-An open-source X4 Foundations 9.00 extension that makes the **Access Gunnery
+X4 Foundations 9.00 extension that makes the **Access Gunnery
 Control** chair worth sitting in. Instead of the vanilla secondary-control menu,
 you get a full turret console, direct fire orders, and four camera views of your
 turrets at work.
-
-Version `0.20`, live-verified in game on 2026-08-06.
 
 ## What you can do
 
@@ -84,6 +82,10 @@ X4 Foundations/extensions/x4_gunnery_control/
 ```
 
 Launch X4, enable both extensions in the Extensions menu, and load a save.
+
+## Shout-outs
+
+Thanks to [Kuertee](https://github.com/kuertee) for pointers on how to make the cinematic mode work!
 
 ## Development
 
