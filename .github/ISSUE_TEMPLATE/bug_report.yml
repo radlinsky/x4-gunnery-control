@@ -1,0 +1,11 @@
+name: Bug report
+description: Report a reproducible X4 Gunnery Control issue
+body:
+  - type: textarea
+    attributes:
+      label: Environment
+      description: Include X4/UI Extensions versions, active mods, ship, bridge, turret, and debug.log excerpt.
+    validations: { required: true }
+  - type: textarea
+    attributes: { label: Steps to reproduce }
+    validations: { required: true }

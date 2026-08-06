@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+main=ui/gunnery_control.lua
+testlab=testlab/x4_gunnery_control_testlab/ui/testlab.lua
+
+if grep -q 'releaseFrameHandle' "$main" "$testlab"; then
+  echo "obsolete releaseFrameHandle call found" >&2
+  exit 1
+fi
+
+# The ffi.cdef block is C, not Lua. A -- comment inside it aborts the whole file
+# at load, and no Lua test can see it because every test stubs ffi away.
+for f in "$main" "$testlab"; do
+  if awk '/ffi\.cdef *\[\[/,/^\]\]/' "$f" | grep -Eq '^[[:space:]]*--'; then
+    echo "Lua -- comment inside the ffi.cdef block of $f; C needs /* */" >&2
+    exit 1
+  fi
+done
+
+grep -Fq 'frame:display()' "$main"
+grep -Fq 'frame:display()' "$testlab"
+grep -Fq 'controlGroup() == "gunnercontrol"' "$main"
+if grep -Fq 'controlGroup() == "gunnertrigger"' "$main"; then
+  echo "cockpit trigger tag used as runtime control group" >&2
+  exit 1
+fi
+grep -Fq 'C.GetContextByClass(C.GetPlayerID(), "container", false)' "$main"
+grep -Fq 'C.IsComponentClass(ship, "ship")' "$main"
+grep -Fq '; resolved ship ' "$main"
+# A frame that hides the HUD never gets it back: only the fullscreen console
+# (no playerControls) may do so, and it does that by being the non-targetBrowser
+# case of keepHUDVisible = targetBrowser.
+if grep -Fq 'keepHUDVisible = false' "$main"; then
+  echo "no frame may set keepHUDVisible = false; the HUD is not restored afterwards" >&2
+  exit 1
+fi
+# Every frame must agree on it; a browser(true) -> console(false) sequence
+# leaves the standing player with no HUD.
+hud_true=$(grep -c 'keepHUDVisible = true' "$main")
+if [ "$hud_true" -ne 3 ]; then
+  echo "all 3 frames must set keepHUDVisible = true; found $hud_true" >&2
+  exit 1
+fi
+grep -Fq 'showTickerPermanently = false' "$main"
+grep -Fq 'State.beginTargetSelection(session, group, member)' "$main"
+grep -Fq 'GetContainedShips' "$main"
+grep -Fq 'readSurfaceTargets' "$main"
+grep -Fq 'Helper.clearDataForRefresh(menu)' "$main"
+grep -Fq 'returnToConsole("Watch closed")' "$main"
+grep -Fq 'openTargetBrowser()' "$main"
+grep -Fq 'softtargetKey() ~= previousTarget' "$main"
+grep -Fq 'isEligibleEngagementTarget(current.softtargetID)' "$main"
+grep -Fq 'State.turretGroupLabel(entry.group)' "$main"
+grep -Fq 'State.isEngagementTargetAllowed(session and session.shipID, object)' "$main"
+grep -Fq 'local activeExternalMenuName' "$main"
+grep -Fq 'activeExternalMenuName = function()' "$main"
+grep -Fq 'State.lifecycle.suspendingMap' "$main"
+grep -Fq 'sameSession(expectedSession, expectedEpoch)' "$main"
+grep -Fq 'currentSession(expectedSession, expectedEpoch)' "$main"
+grep -Fq 'sessionEpoch = sessionEpoch + 1' "$main"
+if grep -Eq '^[[:space:]]*Helper\.clearMenu\(menu\)' "$main"; then
+  echo "raw clearMenu bypasses X4 tracked-menu cleanup" >&2
+  exit 1
+fi
+grep -Fq 'local function sessionWatchdog()' "$main"
+grep -Fq 'reopenSuspendedSession("returned to " .. tostring(mode))' "$main"
+grep -Fq 'State.lifecycle.suspendedMap' "$main"
+grep -Fq 'MapMenu cleanup callback' "$main"
+grep -Fq 'map.registerCallback("on_menu_cleanup"' "$main"
+grep -Fq 'externalMenu == "MapMenu" and State.isOwned(session)' "$main"
+grep -Fq 'C.SetTrackedMenuFullscreen(menu.name, false)' "$main"
+grep -Fq 'bool IsGamePaused(void)' "$main"
+# Phase rename: "watch"/"direct" are gone; "engaged" + controlMode replace them.
+grep -Fq 'session.phase == "engaged"' "$main"
+grep -Fq 'session.controlMode' "$main"
+# New lifecycle entry point replaces beginWatch/beginDirect.
+grep -Fq 'State.beginEngaged' "$main"
+# Snapshot list; single session.directSnapshot is now session.directSnapshots.
+grep -Fq 'directSnapshots' "$main"
+# MD passthrough for save: list form.
+grep -Fq 'State.snapshotsForSave' "$main"
+# Ensure the old single-phase strings are gone — any hit is a residual bug.
+if grep -Fq 'session.phase == "watch"' "$main"; then
+  echo 'residual session.phase == "watch" found in main file' >&2
+  exit 1
+fi
+if grep -Fq 'session.phase == "direct"' "$main"; then
+  echo 'residual session.phase == "direct" found in main file' >&2
+  exit 1
+fi
+grep -Fq 'local runtimeBuild = "2026-08-06-notify-22"' "$main"
+grep -Fq 'initializing UI; build=" .. runtimeBuild' "$main"
+
+grep -Fq 'automatic frame hide queued for orphan check' "$main"
+grep -Fq 'orphaned menu detected by watchdog' "$main"
+grep -Fq 'engagement transition confirmed by frame creation' "$main"
+grep -Fq 'standardButtons = { back = true, close = true }' "$main"
+# Console group/member name cells span columns 2-4. Turret group labels carry a
+# location and a name and get truncated at one eighth of the table width. The
+# smoke tests cannot see this: their table stub returns a generic cell for any
+# index and ignores setColSpan, so this grep is the only guard.
+grep -Fq 'row[2]:setColSpan(3):createText(label' "$main"
+grep -Fq 'memberRow[2]:setColSpan(3):createText("  " .. member.displayName)' "$main"
+grep -Fq 'viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize' "$main"
+grep -Fq 'endSession("global movement event")' "$main"
+grep -Fq 'endSession("left chair or ship")' "$main"
+grep -Fq 'C.SetPlayerCameraCockpitView(true)' "$main"
+if grep -Fq 'mode ~= "cockpit" and mode ~= "external"' "$main"; then
+  echo "gameplan changes still discard a seated gunnery session" >&2
+  exit 1
+fi
+grep -Fq 'Helper.closeMenu(menu, "close", false, false)' "$main"
+if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
+  echo "camera view still uses auto-returning menu close" >&2
+  exit 1
+fi
+grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"
+grep -Fq 'local function registerUIHooks()' "$main"
+grep -Fq 'if isInGunnerChair() and not menu.shown and not activeExternalMenuName()' "$main"
+grep -Fq 'redirectDockedMenu()' "$main"
+grep -Fq 'Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab"' "$testlab"
+
+grep -Fq 'local seatLeaving = false' "$main"
+grep -Fq 'if not seatLeaving then C.SetPlayerCameraCockpitView(true) end' "$main"
+if grep -A20 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCameraCockpitView(true)' && \
+   ! grep -A20 'local function discardSession' "$main" | grep -Fq 'if not seatLeaving then C.SetPlayerCameraCockpitView(true) end'; then
+  echo "unguarded C.SetPlayerCameraCockpitView(true) found inside discardSession" >&2
+  exit 1
+fi
+grep -Fq 'seatLeaving = true' "$main"
+grep -Fq 'logSession("left chair: "' "$main"
+
+grep -Fq 'cutscene_aim_start' "$main"
+grep -Fq 'cutscene_aim_stop' "$main"
+grep -Fq 'cutscene_aim_start' md/x4_gunnery_control.xml
+grep -Fq 'cutscene_aim_stop' md/x4_gunnery_control.xml
+grep -Fq 'play_cutscene' md/x4_gunnery_control.xml
+grep -Fq 'stop_cutscene' md/x4_gunnery_control.xml
+grep -Fq 'cinematicmode' md/x4_gunnery_control.xml
+# Notify cue: load-bearing popup that cures the dead-Esc engine bug by forcing
+# View.createView/DisplayView in ego_viewhelper. show_help with a custom
+# expression is the mechanism; event.param3.$text carries the Lua string.
+grep -Fq "cue name=\"Notify\"" md/x4_gunnery_control.xml
+grep -Fq 'show_help' md/x4_gunnery_control.xml
+# shellcheck disable=SC2016
+grep -Fq "custom=\"@event.param3.\$text\"" md/x4_gunnery_control.xml
+# Text ids 79 (restored-settings) and 80 (disengaged) used by leaveChair.
+grep -Fq '<t id="79">' t/0001.xml
+grep -Fq '<t id="80">' t/0001.xml
+# Transport contract (live-tested 2026-08-04, final): the engine PREPENDS $ to
+# every Lua string key during Lua->MD conversion, so Lua "anchor" arrives as
+# the MD variable key $anchor, read via event.param3.$anchor. Never pre-prefix
+# $ in Lua (it becomes the unreadable $$anchor). Ids go through
+# ConvertStringToLuaID and the reads keep the null-tolerant @ prefix. The $ is
+# a literal MD sigil, not a shell expansion, hence the single quotes.
+# shellcheck disable=SC2016
+grep -Fq 'event.param3.$anchor' md/x4_gunnery_control.xml
+# shellcheck disable=SC2016
+grep -Fq 'event.param3.$target' md/x4_gunnery_control.xml
+grep -Fq 'ConvertStringToLuaID' "$main"
+# Framing (live-tested 2026-08-04): anchordist=0 puts the camera inside the
+# anchor's hull. Vanilla idiom (cinematiccamera.xml:2504) is a NEGATIVE
+# distance of anchor.size + margin so the camera sits behind the anchor along
+# the anchor->target axis with the anchor fully in frame.
+# shellcheck disable=SC2016
+grep -Fq 'number="-CutsceneAim.$Dist"' md/x4_gunnery_control.xml
+# Per-POV framing tune (round 5): Sit@Turret wants a close camera (~3m class),
+# Sit@Target keeps size + 50m; both need a lateral/vertical offset so the
+# anchor is not dead-center on the camera->target sight line.
+# shellcheck disable=SC2016
+grep -Fq 'CutsceneAim.$Pov' md/x4_gunnery_control.xml
+# shellcheck disable=SC2016
+grep -Fq 'number="CutsceneAim.$Dist * 0.4"' md/x4_gunnery_control.xml
+# Shoulder-cam experiment: the asset cutscenes/x4gc_shoulder_cam.xml exists but
+# is deliberately UNWIRED (no MD cue, not in install/package). Sit@Turret
+# perpendicular-aim clipping is deferred; see docs/goals/engage-camera-aim.md.
+# Its contract checks are intentionally absent until that work resumes.
+grep -Fq 'X4GC_Shoulder_Cam' cutscenes/x4gc_shoulder_cam.xml
+
+# Steps 6-9: console checkboxes, live view, retarget, new text ids.
+# Group row checkbox wired to session.checkedGroupKeys via State.toggleGroup.
+grep -Fq 'createCheckBox' "$main"
+grep -Fq 'State.toggleGroup' "$main"
+# Camera roster drives Next/Prev and is queried to gate those buttons.
+grep -Fq 'State.cameraRoster' "$main"
+# Turret cycling is the only way to move through a multi-member roster.
+grep -Fq 'State.cycleCamera' "$main"
+# applyPov() replaces the old applyEngagePov/setEngagePov pair. It is declared
+# as a forward reference and assigned after sendCutsceneAimStart/Stop.
+grep -Fq 'applyPov' "$main"
+# Auto-retarget: chooseAimTarget picks the nearest operational hostile.
+grep -Fq 'local function chooseAimTarget' "$main"
+# povMode and aimTargetID are live session fields used in the UI and retarget.
+grep -Fq 'session.povMode' "$main"
+grep -Fq 'session.aimTargetID' "$main"
+
+# Auto-next Target lives on the compact direct-control panel and decides what
+# happens when the engaged object dies: re-engage, or reset the view and hand
+# the choice back at the target browser.
+grep -Fq 'session.autoNextTarget' "$main"
+
+# The soft target is X4's global selection. enterCamera borrows it; SetSofttarget(0)
+# is not a clear (no vanilla call ever passes 0), so an empty one must be restored
+# with RemoveSofttarget() or the player is left targeting their own turret.
+grep -Fq 'RemoveSofttarget()' "$main"
+grep -Fq 'restoreSofttarget(savedTargetID, savedConnection)' "$main"
+grep -Fq 'clearOwnShipSofttarget()' "$main"
+if grep -Eq 'C\.SetSofttarget\(savedTargetID' "$main"; then
+  echo 'enterCamera restores the soft target directly again; route it through restoreSofttarget()' >&2
+  exit 1
+fi
+grep -Fq 'onDirectTargetLost' "$main"
+grep -Fq 'autoNextRow[1]:createCheckBox' "$main"
+grep -Fq 'autoNextRow[2]:createText(text(78))' "$main"
+grep -Fq '<t id="78">' t/0001.xml
+# GetComponentData needs a ConvertStringTo64Bit'd id; a raw UniverseID silently
+# returns nil for every key, which made every relation read as Neutral. Every
+# read must go through the componentData() wrapper, so the raw engine call may
+# appear exactly once (inside the wrapper itself).
+grep -Fq 'local function componentData' "$main"
+raw_calls=$(grep -c 'GetComponentData(' "$main")
+if [ "$raw_calls" -ne 1 ]; then
+  echo "GetComponentData must only be called from componentData(); found $raw_calls call sites" >&2
+  exit 1
+fi
+# NEGATIVE: per-member Watch/Engage wiring from member rows must be gone.
+# Previously startAutoEngage and startTargetSelection were called from member
+# row handlers; they must now only be called from the bottom action row.
+if grep -n 'memberRow' "$main" | grep -Eq '(startAutoEngage|startTargetSelection)'; then
+  echo "per-member Watch/Engage button wiring still exists in member rows" >&2
+  exit 1
+fi
+
+# Task 2: cycleEntry and cycleTarget
+grep -Fq 'State.cycleEntry' "$main"
+grep -Eq '(local function cycleTarget|local [a-zA-Z_, ]*cycleTarget|cycleTarget = function)' "$main"
+# Task 4: element frame for target display, unregistered when it goes away
+grep -Fq 'menu.elementFrame' "$main"
+grep -Fq 'Helper.clearFrame(menu, elementFrameLayer)' "$main"
+# Select-all checkbox over the group column.
+grep -Fq 'State.toggleAllGroups(session)' "$main"
+grep -Fq 'State.allGroupsChecked(session)' "$main"
+# Every frame gets a semi-transparent background so cell text stays legible.
+bg_calls=$(grep -c 'setBackground("solid"' "$main")
+if [ "$bg_calls" -ne 3 ]; then
+  echo "all 3 frames must set a semi-transparent background; found $bg_calls" >&2
+  exit 1
+fi
+# Teardown order: Helper.closeMenu() untracks the menu before its views are
+# unregistered. Unregistering first left the engine ignoring Esc after a session
+# that had opened a playerControls frame.
+if grep -Eq 'Helper\.clearFrame\(menu, layer\)' "$main"; then
+  echo "teardown unregisters views itself again; that must happen inside Helper.closeMenu" >&2
+  exit 1
+fi
+
+# Color names resolve at runtime: one the game does not define only shows up as
+# "Tried to access non-existing color" spam in the log, once per display().
+# Every name below was checked against the 9.00 UI source.
+known_colors=(frame_background_semitransparent row_background_unselectable
+  row_title_background text_error text_inactive text_normal)
+unknown=$(grep -o 'Color\["[a-z_0-9]*"\]' "$main" | sed 's/.*\["//;s/"\]//' | sort -u \
+  | grep -vxF -f <(printf '%s\n' "${known_colors[@]}") || true)
+if [ -n "$unknown" ]; then
+  echo "unknown color(s) in $main: $unknown; verify each against the vanilla UI source" >&2
+  exit 1
+fi
+
+# Task 1: target_detail must be gone
+if grep -Fq 'target_detail' "$main"; then
+  echo "target_detail still present in $main" >&2
+  exit 1
+fi
+
+grep -Fq 'local lastPostExitProbe' "$main"
+grep -Fq 'IsEncryptedDirectInputModeActive' "$main"
+grep -Fq 'IsConversationActive' "$main"
+grep -Fq 'SetPlayerCameraCockpitView' "$main"
+
+echo "runtime UI contract checks passed"

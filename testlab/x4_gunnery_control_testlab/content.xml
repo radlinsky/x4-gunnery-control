@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<content id="x4_gunnery_control_testlab" name="X4 Gunnery Control — Test Lab" author="X4 Gunnery Control contributors" version="10" date="2026-08-03" save="false" enabled="1">
+  <dependency version="900"/>
+  <dependency id="x4_gunnery_control" version="10" optional="false" name="X4 Gunnery Control"/>
+  <dependency id="kuerteeUIExtensionsAndHUD" version="900" optional="false" name="kuertee UI Extensions and HUD"/>
+  <text language="" description="Developer-only companion for repeatable current-ship turret-camera and Engage restoration tests. Requires the main X4 Gunnery Control extension."/>
+</content>

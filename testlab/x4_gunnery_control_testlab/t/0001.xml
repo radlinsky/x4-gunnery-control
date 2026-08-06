@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language>
+  <page id="20992" voice="no">
+    <t id="1">Gunnery Control Test Lab</t><t id="2">Start Current Ship Sweep</t><t id="3">Resume Current Ship Sweep</t>
+    <t id="4">Inspecting turret camera</t><t id="5">Visual Pass</t><t id="6">Visual Fail</t><t id="7">Retry</t><t id="8">Skip</t>
+    <t id="9">Abort</t><t id="10">Technical result</t><t id="11">Awaiting your visual verdict</t>
+    <t id="12">No active sweep</t><t id="13">Sweep complete</t><t id="14">Current ship</t>
+    <t id="15">Progress</t><t id="16">Group verification</t><t id="17">Not seated in a gunnery chair</t>
+    <t id="18">Cease Engagement before starting Test Lab</t><t id="19">Camera unstable or unavailable</t>
+    <t id="20">Camera technically stable; visual confirmation required</t><t id="21">Skip reason</t>
+  </page>
+</language>

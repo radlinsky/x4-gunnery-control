@@ -1,0 +1,4 @@
+interface:
+  display_name: "X4 Modding Research"
+  short_description: "Evidence-backed X4 modding research"
+  default_prompt: "Use $research-x4-modding to investigate this X4 modding question and record verified durable findings."

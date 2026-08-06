@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<cutscene xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="cutscenes.xsd">
+
+  <!--X4 Gunnery Control shoulder cam: camera pinned to the 'anchor' (a turret)
+  at object-local offsets 'pos_x' _y' _z', looking at 'target'. Offsets are
+  OBJECT-LOCAL, so the camera rides the turret's rotation (vanilla passes
+  values like $Anchor.height * 0.6f, and follow_a_lookat_b.xml's own tip says
+  to base anchor_y on height). Structure copied from follow_a_lookat_b.xml;
+  the direct non-keyframed position reference follows the vanilla sibling
+  LookAt_Breath_Follow (cutscene_lookat_and_breath_follow.xml).
+  Key frames: None-->
+
+  <!-- This is the key name used to load and reference the scene. -->
+  <director key="X4GC_Shoulder_Cam">
+    <params>
+      <param name="duration" number="true"/>
+      <param name="anchor" object="true" />
+      <param name="target" object="true" />
+
+      <!--Object-local offsets from the centre of the anchor object.-->
+      <param name="pos_x" number="true" default="0"/>
+      <param name="pos_y" number="true" default="0"/>
+      <param name="pos_z" number="true" default="0"/>
+    </params>
+  </director>
+
+  <!-- The environment is automatically deduced from the reference object. -->
+  <environments>
+    <environment_implicit name="scenezone" zone="@auto:anchor" />
+  </environments>
+
+  <!-- The scene consists of a single sequence of a single shot. -->
+  <presentation>
+    <actions>
+      <sequence name="ShoulderSequence" start="0">
+        <shot name="ShoulderShot" environment="scenezone" duration="param:duration">
+          <camera>
+            <lookdirection>
+              <reference object="target"/>
+            </lookdirection>
+            <position>
+              <reference object="anchor" x="pos_x" y="pos_y" z="pos_z"/>
+            </position>
+          </camera>
+        </shot>
+      </sequence>
+    </actions>
+  </presentation>
+
+</cutscene>

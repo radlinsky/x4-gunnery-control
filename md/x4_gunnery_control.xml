@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdscript name="X4GunneryControl" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../#modding/xsd/md.xsd">
+  <!-- Savegame-side safety record for a temporary Engage override. The console
+       always restores immediately when possible; this cue covers save/load. -->
+  <cues>
+    <cue name="State">
+      <cues>
+        <cue name="BeginSession" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'session_begin'"/>
+          </conditions>
+          <actions>
+            <set_value name="State.$active" exact="event.param3"/>
+          </actions>
+        </cue>
+        <cue name="EndSession" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'session_end'"/>
+          </conditions>
+          <actions>
+            <remove_value name="State.$active"/>
+          </actions>
+        </cue>
+        <cue name="RequestState" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'state_request'"/>
+          </conditions>
+          <actions>
+            <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
+    <!-- Cinematic aim camera: Follow_A_Lookat_B anchored between a turret and its
+         target. Prototype / live-test; see docs/goals/engage-camera-aim.md. -->
+    <cue name="CutsceneAim">
+      <cues>
+        <cue name="Start" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'cutscene_aim_start'"/>
+          </conditions>
+          <actions>
+            <!-- Guarded restart: stop any in-progress cutscene first. -->
+            <do_if value="CutsceneAim.$Handle">
+              <stop_cutscene cutscene="CutsceneAim.$Handle"/>
+              <set_value name="CutsceneAim.$Handle" exact="null"/>
+            </do_if>
+            <!-- Transport contract (live-tested 2026-08-04, final): the engine
+                 PREPENDS $ to every Lua string key during Lua->MD conversion,
+                 so Lua "anchor" arrives here as the variable key $anchor, read
+                 via event.param3.$anchor. Never pre-prefix $ on the Lua side
+                 (it becomes the unreadable $$anchor). Ids arrive as real
+                 component objects via ConvertStringToLuaID; keep @ so a
+                 malformed event logs instead of erroring. The brace-lookup
+                 fallback covers the only other possible arrival form (a raw
+                 string key), since each live test costs a full relaunch. -->
+            <set_value name="CutsceneAim.$Anchor" exact="@event.param3.$anchor"/>
+            <do_if value="not CutsceneAim.$Anchor">
+              <set_value name="CutsceneAim.$Anchor" exact="@event.param3.{'anchor'}"/>
+            </do_if>
+            <set_value name="CutsceneAim.$Target" exact="@event.param3.$target"/>
+            <do_if value="not CutsceneAim.$Target">
+              <set_value name="CutsceneAim.$Target" exact="@event.param3.{'target'}"/>
+            </do_if>
+            <set_value name="CutsceneAim.$Pov" exact="@event.param3.$pov"/>
+            <do_if value="not CutsceneAim.$Pov">
+              <set_value name="CutsceneAim.$Pov" exact="@event.param3.{'pov'}"/>
+            </do_if>
+            <!-- Robustness: if the id arrived as a number instead of a component,
+                 resolve it. Self-diagnosing because each live test costs a full
+                 game relaunch. -->
+            <do_if value="typeof CutsceneAim.$Anchor != datatype.component and CutsceneAim.$Anchor">
+              <set_value name="CutsceneAim.$Anchor" exact="component.{CutsceneAim.$Anchor}"/>
+            </do_if>
+            <do_if value="typeof CutsceneAim.$Target != datatype.component and CutsceneAim.$Target">
+              <set_value name="CutsceneAim.$Target" exact="component.{CutsceneAim.$Target}"/>
+            </do_if>
+            <!-- Framing (live-tested 2026-08-04, tuned round 5): anchordist=0
+                 puts the camera inside the anchor's hull. Vanilla idiom
+                 (cinematiccamera.xml:2504) is a NEGATIVE distance derived from
+                 anchor.size. Per-POV: Sit@Target keeps size + 50m (verified
+                 right for a small fighter); Sit@Turret wants a close-in camera
+                 (~3m class, size-floored). The anchor_x/anchor_y offsets push
+                 the anchor off the camera->target sight line so it is not
+                 dead-center. Known ceiling: with this between-objects asset,
+                 perpendicular turret aim can still put the camera at/inside
+                 the hull; a custom cutscene asset with turret-local offsets is
+                 a separate research track. All values logged for tuning. -->
+            <set_value name="CutsceneAim.$Dist" exact="CutsceneAim.$Anchor.size + 50m"/>
+            <do_if value="CutsceneAim.$Pov == 'turret'">
+              <set_value name="CutsceneAim.$Dist" exact="[CutsceneAim.$Anchor.size, 3m].max"/>
+            </do_if>
+            <debug_text text="'[X4GC] cutscene_aim_start raw=' + event.param3 + ' anchor=' + CutsceneAim.$Anchor + ' (' + typeof CutsceneAim.$Anchor + ') target=' + CutsceneAim.$Target + ' (' + typeof CutsceneAim.$Target + ') pov=' + CutsceneAim.$Pov + ' dist=' + CutsceneAim.$Dist + ' ax=' + (CutsceneAim.$Dist * 0.4) + ' ay=' + (CutsceneAim.$Dist * 0.2)" chance="100"/>
+            <play_cutscene cinematicmode="true" result="CutsceneAim.$Handle" key="'Follow_A_Lookat_B'">
+              <param name="duration" number="999999"/>
+              <param name="anchor" object="CutsceneAim.$Anchor"/>
+              <param name="target" object="CutsceneAim.$Target"/>
+              <param name="anchordist" number="-CutsceneAim.$Dist"/>
+              <param name="anchor_x" number="CutsceneAim.$Dist * 0.4"/>
+              <param name="anchor_y" number="CutsceneAim.$Dist * 0.2"/>
+              <param name="anchor_z" number="0"/>
+              <param name="target_x" number="0"/>
+              <param name="target_y" number="0"/>
+              <param name="target_z" number="0"/>
+            </play_cutscene>
+            <debug_text text="'[X4GC] cutscene_aim handle=' + CutsceneAim.$Handle" chance="100"/>
+          </actions>
+        </cue>
+
+        <cue name="Stop" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'cutscene_aim_stop'"/>
+          </conditions>
+          <actions>
+            <do_if value="CutsceneAim.$Handle">
+              <stop_cutscene cutscene="CutsceneAim.$Handle"/>
+              <set_value name="CutsceneAim.$Handle" exact="null"/>
+            </do_if>
+            <debug_text text="'[X4GC] cutscene_aim_stop'" chance="100"/>
+          </actions>
+        </cue>
+
+        <cue name="TargetDestroyed" instantiate="true">
+          <conditions>
+            <event_object_destroyed object="CutsceneAim.$Target"/>
+          </conditions>
+          <actions>
+            <do_if value="CutsceneAim.$Handle">
+              <stop_cutscene cutscene="CutsceneAim.$Handle"/>
+              <set_value name="CutsceneAim.$Handle" exact="null"/>
+            </do_if>
+            <debug_text text="'[X4GC] cutscene_aim stopped: target destroyed'" chance="100"/>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
+    <!-- ponytail: this cue is a real user-facing feature AND is load-bearing.
+         X4 engine bug (confirmed by three in-game trials): calling
+         SetPlayerCameraTargetView from a turret seat leaves the Esc key dead
+         after the player gets up. The only observed cure is a menu that calls
+         CreateView/DisplayView (View.createView in ego_viewhelper/viewhelper.lua:38,
+         which only runs when View.frames is empty). Our teardown only reaches
+         View.hideView, so it never creates again. The show_help action below
+         forces CreateView/DisplayView, resetting the engine input context.
+         Known ceiling: if the player has hints/help disabled in game options the
+         popup may not display and the Esc bug would return. The real upgrade path
+         is a direct engine call to reset input context if one is ever found among
+         the undeclared engine exports. Do NOT suppress or make this conditional
+         without re-testing Esc after a camera session. -->
+    <cue name="Notify" instantiate="true">
+      <conditions>
+        <event_ui_triggered screen="'X4GunneryControl'" control="'notify'"/>
+      </conditions>
+      <actions>
+        <show_help custom="@event.param3.$text" duration="5s" position="1" silent="true"/>
+      </actions>
+    </cue>
+  </cues>
+</mdscript>

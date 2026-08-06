@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addon name="x4_gunnery_control" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../ui/core/addon.xsd">
+  <environment type="menus">
+    <dependency name="ego_detailmonitorhelper"/>
+    <dependency name="ego_detailmonitor"/>
+    <dependency name="kuertee_ui_extensions"/>
+    <file name="ui/gunnery_state.lua"/>
+    <file name="ui/gunnery_control.lua"/>
+  </environment>
+</addon>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language>
+  <page id="20991" voice="no">
+    <t id="1">Gunnery Control</t><t id="2">Current Target</t><t id="3">No Target</t>
+    <t id="4">Turret Group</t><t id="5">Mode</t><t id="6">Armed</t><t id="7">Disarmed</t>
+    <t id="8">Operational</t><t id="9">Damaged</t><t id="10">Destroyed</t>
+    <t id="11">Watch</t><t id="12">Engage</t><t id="13">Cease Engagement</t>
+    <t id="14">Get Up</t><t id="15">Refresh</t><t id="16">Camera unavailable</t>
+    <t id="17">Ship is not player-owned</t><t id="18">No turrets installed</t>
+    <t id="19">Engage arms the linked turret group and tells X4's auto-assist AI to fire at the selected target.</t>
+    <t id="20">Watch leaves normal turret AI unchanged.</t>
+    <t id="21">Esc: return to Gunnery Control</t>
+    <t id="22">GUNNERY CONTROL</t><t id="23">Holding for target</t>
+    <t id="24">Camera</t><t id="25">Engaged group</t><t id="26">Status</t>
+    <t id="27">Release control before uninstalling this extension.</t>
+    <t id="28">Group mapping is ambiguous; configuration is disabled.</t>
+    <t id="29">Turret</t><t id="30">Engagement active</t>
+    <t id="31">Unable to return to the gunnery chair.</t>
+    <t id="32">Test Lab</t>
+    <t id="33">Select Engagement Target</t>
+    <t id="34">Choose a target for this turret group. Your current ship is excluded; friendly, neutral, and other player-owned objects can be selected, but X4's AI still enforces attack legality. Target brackets remain clickable after this browser collapses.</t>
+    <t id="35">Exact current target</t><t id="36">Engage Current Target</t>
+    <t id="37">Nearby Target</t><t id="38">Type</t>
+    <t id="39">Enemy</t><t id="40">Hostile</t><t id="41">Friendly</t><t id="42">Neutral</t>
+    <t id="43">Current</t><t id="44">Ship</t><t id="45">Station</t>
+    <t id="46">Turret</t><t id="47">Shield Generator</t><t id="48">Engine</t>
+    <t id="49">Relation</t><t id="50">Distance</t><t id="51">Unknown Object</t>
+    <t id="52">Target / Surface Elements</t><t id="53">No known ships or stations are within this ship's radar range.</t>
+    <t id="54">Back to Gunnery Control</t><t id="55">Choose Aim Point</t>
+    <t id="56">Choose the hull or a surface element. Selection changes the soft target; the linked group fires only if X4's mayattack checks consider it legal and attackable.</t>
+    <t id="57">Entire ship or station</t><t id="58">Engage Hull</t><t id="59">Surface Element</t>
+    <t id="60">Engage Surface Element</t><t id="61">No operational turret, shield, or engine surface elements were found.</t>
+    <t id="62">Back to Nearby Targets</t><t id="63">Turret POV manual</t><t id="64">Target POV manual</t>
+    <t id="65">Turret POV cinematic</t><t id="66">Target POV cinematic</t><t id="67">Stop Aim Camera</t>
+    <t id="68">Auto-engage</t><t id="69">Direct-control</t>
+    <t id="70">Select at least one turret group.</t>
+    <t id="71">Next Turret</t><t id="72">Previous Turret</t><t id="73">Engaged Target</t>
+    <t id="74">Check turret groups, then choose Auto-engage (camera only) or Direct-control (pick a target for all checked groups).</t>
+    <t id="75">Next Target</t><t id="76">Previous Target</t><t id="77">Select all</t>
+    <t id="78">Auto-next Target when destroyed</t>
+    <t id="79">Turret groups restored to their previous settings.</t>
+    <t id="80">Gunnery Control disengaged.</t>
+  </page>
+</language>

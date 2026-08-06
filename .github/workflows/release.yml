@@ -1,0 +1,21 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y lua5.1 libxml2-utils shellcheck zip
+      - run: ./scripts/validate.sh
+      - run: ./scripts/package.sh "${GITHUB_REF_NAME#v}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          # Hand-written plain-English notes, not the commit log: generated notes
+          # would list every internal refactor, and with no prior tag they would
+          # span the entire history.
+          body_path: release/RELEASE_NOTES.md
+          files: dist/*.zip

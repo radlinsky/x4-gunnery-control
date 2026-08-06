@@ -1,0 +1,6 @@
+event,ship_macro,ship_name,ship_id,group_key,group_path,group_name,turret_macro,turret_name,turret_id,target_id,target_connection,target_name,target_macro,target_preserved,technical,visual,reason,applied,restored,queued,inspected,technical_pass,visual_pass,visual_fail,skipped,retries,group_pass,group_fail
+sweep_start,ship_arg_xl_01_macro,Argon_Odysseus,123,,,,,,,,,,,,,,,,,2,,,,,,,,
+technical,,,,group_1,path,L_Group,turret_l_plasma_macro,L_Plasma_Turret,456,777,engine,Xenon_K,ship_xenon_k_macro,pass,pass,,,,,,,,,,,,,
+verdict,,,,group_1,path,L_Group,turret_l_plasma_macro,L_Plasma_Turret,456,777,engine,Xenon_K,ship_xenon_k_macro,pass,pass,pass,,,,,,,,,,,,
+group_verify,ship_arg_xl_01_macro,Argon_Odysseus,123,group_1,path,L_Group,,,,,,,,,pass,,,true,true,,,,,,,,,
+summary,ship_arg_xl_01_macro,Argon_Odysseus,123,,,,,,,,,,,,,,,,,2,2,2,2,0,0,0,1,0

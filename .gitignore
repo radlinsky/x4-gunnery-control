@@ -1,0 +1,19 @@
+dist/
+.x4-research-cache/
+/XTools_*.zip
+/XTools_*.zip:*
+*.cat
+*.dat
+# Captured game logs land at the repository root under whatever name the trial
+# used, not just debug.log. Root-only, because tests/fixtures/testlab.log is a
+# tracked fixture.
+/*.log
+__folder_managed_by_vortex
+.DS_Store
+
+# Live-test artifacts and captured session material: savegames and screenshots
+# are large binaries, and the filtered log / chat transcript are per-run scratch.
+/save_*.xml.gz
+/debug_filtered.txt
+/*.png
+/*chat.txt

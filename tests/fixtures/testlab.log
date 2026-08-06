@@ -1,0 +1,5 @@
+2026-08-03 16:00:00.000 [General] [X4GC TEST] event=sweep_start groups=1 queued=2 ship_id=123 ship_macro=ship_arg_xl_01_macro ship_name=Argon_Odysseus
+[X4GC TEST] event=technical group_key=group_1 group_name=L_Group group_path=path reason= target_connection=engine target_id=777 target_macro=ship_xenon_k_macro target_name=Xenon_K target_preserved=pass technical=pass turret_id=456 turret_macro=turret_l_plasma_macro turret_name=L_Plasma_Turret
+[X4GC TEST] event=verdict group_key=group_1 group_name=L_Group group_path=path reason= target_connection=engine target_id=777 target_macro=ship_xenon_k_macro target_name=Xenon_K target_preserved=pass technical=pass turret_id=456 turret_macro=turret_l_plasma_macro turret_name=L_Plasma_Turret visual=pass
+[X4GC TEST] applied=true event=group_verify group_key=group_1 group_name=L_Group group_path=path reason= restored=true ship_id=123 ship_macro=ship_arg_xl_01_macro ship_name=Argon_Odysseus technical=pass
+[X4GC TEST] event=summary group_fail=0 group_pass=1 inspected=2 queued=2 retries=0 ship_id=123 ship_macro=ship_arg_xl_01_macro ship_name=Argon_Odysseus skipped=0 technical_pass=2 visual_fail=0 visual_pass=2

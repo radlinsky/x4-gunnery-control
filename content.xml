@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<content id="x4_gunnery_control" name="X4 Gunnery Control" author="X4 Gunnery Control contributors" version="20" date="2026-08-06" save="false" enabled="1">
+  <dependency version="900"/>
+  <dependency id="kuerteeUIExtensionsAndHUD" version="900" optional="false" name="kuertee UI Extensions and HUD"/>
+  <text language="" description="Turn gunnery chairs into turret cameras and an Engage console. Select bracketed objects or explicit hull/surface targets; X4's auto-assist AI retains aiming, firing, and attack-legality control."/>
+</content>
