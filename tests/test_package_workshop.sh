@@ -83,14 +83,37 @@ if [[ "$staged_id2" != "1234567890" ]]; then
   exit 1
 fi
 
+###############################################################################
+# Test 2b: the kuertee dependency is rewritten to its Workshop counterpart
+#
+# WorkshopTool rejects any extension depending on a non-Workshop extension, so a
+# staged copy still naming the Nexus id cannot be published at all.
+###############################################################################
+
+if ! grep -q 'id="ws_3477279743"' "$STAGED_CONTENT"; then
+  echo "FAIL: staged content.xml should depend on the Workshop id ws_3477279743" >&2
+  exit 1
+fi
+if grep -q 'kuerteeUIExtensionsAndHUD"' "$STAGED_CONTENT"; then
+  echo "FAIL: staged content.xml still names the non-Workshop dependency id" >&2
+  exit 1
+fi
+# Dropped on purpose: the repackage's version integer is not ours to predict.
+if grep '<dependency id="ws_3477279743"' "$STAGED_CONTENT" | grep -q 'version='; then
+  echo "FAIL: the Workshop dependency should carry no version attribute" >&2
+  exit 1
+fi
+
 # All OTHER attributes should be identical: compare by stripping the id= attribute
-# from both the staged and repo content.xml and comparing the remainder.
+# from both the staged and repo content.xml and normalising the one dependency
+# line the script is allowed to rewrite.
 # The /<content / address is load-bearing. Stripping id= from every line would
 # also strip it from each <dependency>, which is precisely how an unanchored
 # substitution in package-workshop.sh — one that clobbered the kuertee
 # dependency's id — passed this test before.
 strip_id() {
-  sed '/<content /s/ id="[^"]*"//'
+  sed -e '/<content /s/ id="[^"]*"//' \
+      -e '/kuerteeUIExtensionsAndHUD"\|ws_3477279743"/c\KUERTEE_DEPENDENCY'
 }
 
 staged_no_id=$(strip_id < "$STAGED_CONTENT")

@@ -870,9 +870,13 @@ Prerequisites before the first publish:
 
 - Accept the Steam Workshop Legal Agreement for X4 Foundations in your Steam
   account.
-- `WorkshopTool` ships in the X Tools download. `XTools_1.11.zip` is already at
-  the repository root (gitignored). Extract `WorkshopTool.exe` alongside `X4.exe`
-  in your X4 installation directory.
+- `WorkshopTool.exe` comes from **X Tools**, a free application in your Steam
+  library (app 282160), not from the `XTools_1.11.zip` at the repository root —
+  that 2019 archive contains only `XRCatTool`. Install X Tools from Steam and
+  launch it; it opens a command prompt already in the folder containing
+  `WorkshopTool.exe`. Launching it through Steam is required, because the tool
+  needs the Steam session it initialises.
+- You must stay logged into Steam while WorkshopTool runs.
 - A preview image lives at `release/preview.png` (Steam accepts JPG or PNG,
   640×360 or larger). The script picks up `release/preview.jpg` or
   `release/preview.png`, whichever exists, and passes its path to `-preview`. It
@@ -898,6 +902,28 @@ WorkshopTool update -path "<staged-path>" -buildcat -changenote "Describe your c
 `update` requires `-changenote`; omitting it is an error. The version integer in
 `content.xml` must increase on every `update` unless `-minor` is passed.
 
+### Why the staged content.xml differs from the repository's
+
+WorkshopTool refuses to publish an extension that depends on anything which is
+not itself a Workshop item, failing with `ERROR: There are dependencies on
+non-Workshop extensions` — and it refuses even when the dependency is marked
+`optional="true"`. Our hard dependency names kuertee's Nexus id
+`kuerteeUIExtensionsAndHUD`, which would block the publish outright.
+
+`package-workshop.sh` therefore rewrites that one line in the staged copy to
+point at the [Workshop repackage of the same mod](https://steamcommunity.com/workshop/filedetails/?id=3477279743),
+uploaded by Valador8869/UncommonDLL with kuertee's permission. Workshop-installed
+extensions carry the id form `ws_<workshopid>`, not the bare number — visible in
+any real install (`ws_2042901274` SirNukes Mod Support APIs, `ws_3715253556`
+Options Helper). The `version` attribute is dropped, because the repackage sets
+its own version integer and demanding the wrong one would block loading for every
+subscriber. The script aborts if the rewrite does not take.
+
+The consequence to remember: **Workshop and Nexus builds depend on different
+extension ids.** A Workshop subscriber gets the Workshop UI Extensions; a Nexus
+user gets kuertee's own. Installing both copies at once is a mod conflict, not a
+supported configuration.
+
 Staging exists because WorkshopTool mutates the folder given to `-path`: on a
 successful first publish it rewrites the `id` attribute in that folder's
 `content.xml` with the numeric Workshop id it assigned. Pointing WorkshopTool at
@@ -907,12 +933,14 @@ for the full WorkshopTool reference.
 
 #### After the first publish
 
-WorkshopTool writes the numeric Workshop id into the staged `content.xml`.
-Copy that id into `release/workshop-id.txt` and commit it:
+WorkshopTool writes the assigned Workshop id into the staged `content.xml`.
+Copy it verbatim into `release/workshop-id.txt` and commit it — including the
+`ws_` prefix if the tool wrote one, which is the form every Workshop-installed
+extension uses:
 
 ```bash
-grep 'id=' dist/workshop/x4_gunnery_control/content.xml  # find the id
-echo "<numeric-id>" > release/workshop-id.txt
+grep '<content ' dist/workshop/x4_gunnery_control/content.xml  # find the id
+echo "<id-exactly-as-written>" > release/workshop-id.txt
 git add release/workshop-id.txt
 git commit -m "release: record Steam Workshop id"
 ```

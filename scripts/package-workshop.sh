@@ -64,6 +64,30 @@ if [[ -f "$id_file" ]]; then
   fi
 fi
 
+# --- rewrite the kuertee dependency to its Workshop counterpart ---
+# WorkshopTool refuses to publish an extension whose content.xml depends on
+# anything that is not itself a Workshop item:
+#   "ERROR: There are dependencies on non-Workshop extensions"
+# and it refuses even for optional="true" dependencies.  Our hard dependency
+# names kuertee's Nexus id, so the staged copy has to name the Workshop
+# repackage of the same mod instead -- uploaded by Valador8869/UncommonDLL with
+# kuertee's permission, https://steamcommunity.com/workshop/filedetails/?id=3477279743
+#
+# Workshop-installed extensions carry the id form ws_<workshopid>, not the bare
+# number: every Workshop-sourced extension in a real install shows it
+# (ws_2042901274 SirNukes Mod Support APIs, ws_3715253556 Options Helper), and
+# other mods declare their dependencies that way.
+#
+# The version attribute is dropped deliberately.  The repackage sets its own
+# version integer, which is not ours to predict, and demanding a wrong one would
+# block loading for every subscriber.  version is optional on <dependency>;
+# kuertee's own mods ship dependency elements without it.
+sed -i '/<dependency id="kuerteeUIExtensionsAndHUD"/c\  <dependency id="ws_3477279743" optional="false" name="kuertee UI Extensions and HUD"/>' "$staged_content"
+if grep -q 'kuerteeUIExtensionsAndHUD"' "$staged_content"; then
+  echo "the kuertee dependency was not rewritten; WorkshopTool would reject this build" >&2
+  exit 1
+fi
+
 # --- summary ---
 staged_abs="$(pwd)/$stage"
 # WorkshopTool is a Windows executable, so under WSL the Linux path it would be
