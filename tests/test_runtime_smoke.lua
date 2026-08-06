@@ -1735,4 +1735,49 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
+-- ── 49. startAutoEngage failure path clears controlMode ──────────────────────
+-- Regression: beginEngaged sets session.controlMode = "auto" before trying to
+-- enter the camera. When no operational camera member exists, the old code did
+-- `session.phase = "console"; return false`, leaving controlMode stuck on "auto"
+-- while phase said "console". returnToConsole() must be used instead so phase,
+-- controlMode, povMode, cameraMemberID, and targetObjectID are all cleared together.
+gcMenu.onShowMenu()
+local sess49 = API.getSession()
+assert(sess49 ~= nil, "expected session for startAutoEngage failure test (49)")
+-- Build a group with NO operational members so cameraMember() returns nil and
+-- startAutoEngage hits its first failure exit.
+local grp49 = {
+    key = "grp49", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 30, displayName = "Empty Group", totalCount = 1, operationalCount = 0,
+    mode = "attack", armed = false, members = {
+        { componentID = 30, displayName = "T1", operational = false,
+          cameraSupported = false, componentKey = "30" }
+    }
+}
+sess49.groups = { grp49 }
+sess49.checkedGroupKeys = { ["grp49"] = true }
+sess49.phase = "console"
+sess49.controlMode = nil
+-- Drive startAutoEngage via the public button onClick path — call it through
+-- TestAPI so we do not need a rendered frame. The button handler calls
+-- startAutoEngage(State.checkedGroups(session)); replicate that here.
+local checkedGroups49 = X4GunneryState.checkedGroups(sess49)
+-- startAutoEngage is module-local; drive it through the console display() path
+-- by calling X4GunneryControlAPI.startAutoEngage if exposed, or by invoking the
+-- TestAPI wrapper. It is internal, so we exercise it indirectly: set the session
+-- state exactly as startAutoEngage would see it and call through the TestAPI.
+-- TestAPI.startAutoEngage is the dedicated test hook.
+local ok49, err49 = pcall(function()
+    X4GunneryControlAPI.startAutoEngage(checkedGroups49)
+end)
+assert(ok49, "startAutoEngage raised: " .. tostring(err49))
+-- After the failure, phase must be "console" and controlMode must be nil.
+assert(sess49.phase == "console",
+    "startAutoEngage failure path must leave phase='console'; got '"
+    .. tostring(sess49.phase) .. "'")
+assert(sess49.controlMode == nil,
+    "BUG: startAutoEngage failure path left controlMode='"
+    .. tostring(sess49.controlMode)
+    .. "'; State.returnToConsole must be used instead of raw phase assignment")
+
 print("runtime smoke tests passed")
