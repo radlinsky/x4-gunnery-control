@@ -2,6 +2,8 @@
 
 <img width="790" height="664" alt="preview" src="https://github.com/user-attachments/assets/60dbe5e0-b583-4359-8b56-b9f201fdc52d" />
 
+https://github.com/user-attachments/assets/19c517e6-2c34-4a32-8c1b-6d10ea47cd5b
+
 An open-source X4 Foundations 9.00 extension that makes the **Access Gunnery
 Control** chair worth sitting in. Instead of the vanilla secondary-control menu,
 you get a full turret console, direct fire orders, and four camera views of your
