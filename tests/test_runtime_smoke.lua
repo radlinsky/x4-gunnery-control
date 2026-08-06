@@ -1735,4 +1735,128 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
+-- ── 49. readGroups: ambiguous flag for duplicate path+group names ────────────
+-- Two groups that share path+group ("front"/"grp_front") but have different
+-- contextIDs (as happens on ships with multiple turret zones). The slot API has
+-- no contextID, so readGroups resolves via the representative componentID:
+--   (a) exactly one candidate's componentID matches the slot's component
+--       -> that entry is NOT ambiguous (canMutate is allowed).
+--   (b) two candidates' componentIDs match, OR none matches
+--       -> ALL candidates are marked ambiguous (canMutate returns false).
+
+do
+    -- Override ffi.new for this block so the buffer is zero-based and carries
+    -- the required struct fields.
+    local function makeBuffer(items)
+        local buf = {}
+        for i, item in ipairs(items) do buf[i - 1] = item end
+        return buf
+    end
+
+    -- Two groups sharing the same path+group name, different contextIDs and
+    -- different representative componentIDs (101 vs 102).
+    local groupDefs = {
+        { path = "p", group = "grp_front", contextid = 10, component = 101 },
+        { path = "p", group = "grp_front", contextid = 20, component = 102 },
+    }
+    local groupBuffer = makeBuffer(groupDefs)
+
+    -- Slot-level setup: two slots, one per group.
+    local slotComponents  = { [1] = 101, [2] = 102 }
+    local slotGroupPaths  = { [1] = "p", [2] = "p" }
+    local slotGroupNames  = { [1] = "grp_front", [2] = "grp_front" }
+
+    -- Save and replace the relevant C stubs.
+    local savedGetNumUpgradeGroups  = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups2    = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo2 = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots   = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup  = C.GetUpgradeSlotGroup
+    local savedFfiNew               = ffiStub.new
+
+    C.GetNumUpgradeGroups  = function() return 2 end
+    C.GetUpgradeGroups2    = function(buf, count) return 2 end
+    C.GetUpgradeGroupInfo2 = function(ship, ctx, ctxid, path, group, tag)
+        return { count = 1, currentcomponent = (ctxid == 10) and 101 or 102,
+                 currentmacro = "", slotsize = "", total = 1, operational = 1 }
+    end
+    C.GetNumUpgradeSlots             = function() return 2 end
+    C.GetUpgradeSlotCurrentComponent = function(ship, tag, slot) return slotComponents[slot] or 0 end
+    C.GetUpgradeSlotGroup            = function(ship, ctx, tag, slot)
+        return { path = slotGroupPaths[slot] or "", group = slotGroupNames[slot] or "" }
+    end
+    -- ffi.new must return the 0-based buffer.
+    ffiStub.new = function(spec, count) return groupBuffer end
+
+    -- 49a: exactly one match — slot 1 carries component 101, only groupDefs[1]
+    --      has componentID 101 => unique match => NOT ambiguous, canMutate true.
+    slotComponents = { [1] = 101, [2] = 102 }
+    local groups49a = X4GunneryControlAPI.readGroups(42)
+    -- Find the group whose contextID is 10 (the one matched by slot 1).
+    local matched49a = nil
+    for _, g in ipairs(groups49a) do
+        if type(g.contextID) ~= "nil" and tostring(g.contextID) == "10" then
+            matched49a = g; break
+        end
+    end
+    assert(matched49a ~= nil,
+        "49a: expected a group entry for contextID=10 in readGroups output")
+    assert(not matched49a.ambiguous,
+        "49a BUG: group with a unique componentID match must NOT be ambiguous; "
+        .. "got ambiguous=" .. tostring(matched49a.ambiguous))
+    assert(X4GunneryState.canMutate(matched49a),
+        "49a BUG: uniquely matched group must be mutable (canMutate true); "
+        .. "operationalCount=" .. tostring(matched49a.operationalCount)
+        .. " ambiguous=" .. tostring(matched49a.ambiguous))
+
+    -- 49b: two candidates both match — slot 1 carries component 101, but we
+    --      fabricate BOTH groupDefs reporting componentID=101, so two match.
+    C.GetUpgradeGroupInfo2 = function(ship, ctx, ctxid, path, group, tag)
+        -- Both groups now claim componentID 101 as their representative.
+        return { count = 1, currentcomponent = 101,
+                 currentmacro = "", slotsize = "", total = 1, operational = 1 }
+    end
+    local groups49b = X4GunneryControlAPI.readGroups(42)
+    -- Both candidates must be marked ambiguous because 2 matched.
+    local anyMutable49b = false
+    local groupCount49b = 0
+    for _, g in ipairs(groups49b) do
+        if g.kind == "group" then
+            groupCount49b = groupCount49b + 1
+            if X4GunneryState.canMutate(g) then anyMutable49b = true end
+        end
+    end
+    assert(groupCount49b >= 1,
+        "49b: expected at least one group entry")
+    assert(not anyMutable49b,
+        "49b BUG: when two candidates share the same componentID both must be ambiguous "
+        .. "and canMutate must return false for all of them")
+
+    -- 49c: zero matches — neither candidate's componentID matches the slot
+    --      component. All candidates must be ambiguous.
+    C.GetUpgradeGroupInfo2 = function(ship, ctx, ctxid, path, group, tag)
+        return { count = 1, currentcomponent = 999,   -- 999 != slot component 101
+                 currentmacro = "", slotsize = "", total = 1, operational = 1 }
+    end
+    slotComponents = { [1] = 101, [2] = 102 }
+    local groups49c = X4GunneryControlAPI.readGroups(42)
+    local anyMutable49c = false
+    for _, g in ipairs(groups49c) do
+        if g.kind == "group" and X4GunneryState.canMutate(g) then anyMutable49c = true end
+    end
+    assert(not anyMutable49c,
+        "49c BUG: when no candidate matches the slot component all must be ambiguous "
+        .. "and canMutate must return false for all of them")
+
+    -- Restore stubs.
+    C.GetNumUpgradeGroups             = savedGetNumUpgradeGroups
+    C.GetUpgradeGroups2               = savedGetUpgradeGroups2
+    C.GetUpgradeGroupInfo2            = savedGetUpgradeGroupInfo2
+    C.GetNumUpgradeSlots              = savedGetNumUpgradeSlots
+    C.GetUpgradeSlotCurrentComponent  = savedGetUpgradeSlotCurrentComponent
+    C.GetUpgradeSlotGroup             = savedGetUpgradeSlotGroup
+    ffiStub.new                       = savedFfiNew
+end
+
 print("runtime smoke tests passed")

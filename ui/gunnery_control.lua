@@ -203,15 +203,23 @@ local function readGroups(ship)
             local entry
             if #possible == 1 then entry = possible[1]
             elseif #possible > 1 then
-                -- The slot API has no context ID. A matching representative
-                -- component makes mapping safe; otherwise never mutate it.
+                -- The slot API has no context ID. A unique matching representative
+                -- component makes mapping safe; otherwise mark every candidate
+                -- ambiguous so none of them can be mutated.
+                local matchCount = 0
                 for _, candidate in ipairs(possible) do
                     if sameID(candidate.componentID, component) then
-                        if entry then entry.ambiguous = true else entry = candidate end
+                        matchCount = matchCount + 1
+                        entry = candidate
                     end
                 end
-                if not entry then entry = possible[1] end
-                entry.ambiguous = true
+                if matchCount ~= 1 then
+                    -- Zero or multiple matches: cannot resolve safely.
+                    for _, candidate in ipairs(possible) do
+                        candidate.ambiguous = true
+                    end
+                    entry = possible[1]
+                end
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
@@ -1139,6 +1147,7 @@ end
 
 function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
+function TestAPI.readGroups(ship) return readGroups(ship) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
