@@ -44,7 +44,7 @@ mark a specific surface element (i.e. turret, shield, engine.)
 - **Next Turret** / **Previous Turret** cycle the camera through every
   operational turret in the checked groups. This only moves the camera.
 
-## Honest limitations
+## Limitations
 
 - **This is not manual aiming.** Direct-control tells the turrets
   *what* to hit, not *how*. The engine exposes no way to man a turret yourself.
