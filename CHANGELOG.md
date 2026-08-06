@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+- Remove the post-exit state-change sampler (`startPostExitSampler`). The
+  sampler was diagnostic instrumentation added to identify the
+  `SetPlayerCameraTargetView`-after-get-up Esc bug: it scheduled roughly 47
+  delayed callbacks over 90 seconds and wrote `DebugError` lines every time the
+  player left the gunnery seat. Three in-game trials on 2026-08-06 confirmed
+  the bug is cured by the `show_help` notify popup introduced in 0.20, so the
+  sampler has served its purpose and is now only log noise in players' debug
+  logs. The implementation can be recovered from git history if the Esc bug
+  ever returns.
+
 ## [0.20] - 2026-08-06
 
 - Widen the console's turret group and turret name column so full names are
