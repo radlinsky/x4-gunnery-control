@@ -1735,4 +1735,120 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
+-- ── 49. RestoreSession handler: both plain-key and $-prefixed payloads restore ──
+-- The engine PREPENDS $ to every Lua string key during Lua->MD conversion
+-- (live-tested 2026-08-04). After a save/load, State.$active may come back from
+-- raise_lua_event with keys like "$shipID" instead of "shipID". The handler must
+-- restore turret groups regardless of which form arrives.
+--
+-- The handler is exposed via X4GunneryControlAPI.onRestoreSession for test use.
+
+assert(type(X4GunneryControlAPI.onRestoreSession) == "function",
+    "X4GunneryControlAPI.onRestoreSession must be exposed; add TestAPI.onRestoreSession in gunnery_control.lua")
+
+-- Helper: build a "group" snapshot with a specific key prefix form.
+local function makeSnap49(prefix, shipID, path, group)
+    local p = prefix or ""
+    return {
+        [p .. "shipID"]    = tostring(shipID),
+        [p .. "kind"]      = "group",
+        [p .. "mode"]      = "defend",
+        [p .. "armed"]     = false,
+        [p .. "contextID"] = "1",
+        [p .. "path"]      = path,
+        [p .. "group"]     = group,
+    }
+end
+
+-- Helper: run one RestoreSession handler invocation and capture what was parsed.
+-- Returns (newSessionShipID, capturedDirectSnapshots).
+local function runRestore49(payload)
+    local newSessionShipID = nil
+    local capturedSnapshots = nil
+    local origNewSession = X4GunneryState.newSession
+    X4GunneryState.newSession = function(ship, reason)
+        newSessionShipID = ship
+        return origNewSession(ship, reason)
+    end
+    local origRelease = X4GunneryState.releaseDirect
+    X4GunneryState.releaseDirect = function(sess)
+        capturedSnapshots = sess.directSnapshots
+        return origRelease(sess)
+    end
+    X4GunneryControlAPI.onRestoreSession(nil, payload)
+    X4GunneryState.newSession = origNewSession
+    X4GunneryState.releaseDirect = origRelease
+    return newSessionShipID, capturedSnapshots
+end
+
+-- 49a: plain-key list payload (the form the handler always produced before this fix).
+local plainPayload49 = {
+    makeSnap49("", 42, "p49", "A"),
+    makeSnap49("", 42, "p49", "B"),
+}
+local shipA, snapsA = runRestore49(plainPayload49)
+assert(shipA ~= nil,
+    "RestoreSession with plain-key list must call State.newSession; shipID was nil")
+assert(tostring(shipA) == "42",
+    "RestoreSession plain-key: wrong shipID; expected '42', got " .. tostring(shipA))
+assert(snapsA ~= nil and #snapsA == 2,
+    "RestoreSession plain-key: expected 2 normalised snapshots in directSnapshots; got "
+    .. tostring(snapsA and #snapsA))
+assert(snapsA[1].kind == "group",
+    "RestoreSession plain-key: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsA[1].kind))
+assert(snapsA[1].path == "p49",
+    "RestoreSession plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsA[1].path))
+
+-- 49b: $-prefixed list payload (the form that arrives if MD->Lua keeps the $ prefix).
+local prefixedPayload49 = {
+    makeSnap49("$", 42, "p49", "A"),
+    makeSnap49("$", 42, "p49", "B"),
+}
+local shipB, snapsB = runRestore49(prefixedPayload49)
+assert(shipB ~= nil,
+    "RestoreSession with $-prefixed list must call State.newSession; shipID was nil. "
+    .. "The handler is not reading $-prefixed keys from the MD payload.")
+assert(tostring(shipB) == "42",
+    "RestoreSession $-prefixed: wrong shipID; expected '42', got " .. tostring(shipB))
+assert(snapsB ~= nil and #snapsB == 2,
+    "RestoreSession $-prefixed: expected 2 normalised snapshots; got "
+    .. tostring(snapsB and #snapsB))
+assert(snapsB[1].kind == "group",
+    "RestoreSession $-prefixed: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsB[1].kind))
+assert(snapsB[1].path == "p49",
+    "RestoreSession $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsB[1].path))
+
+-- 49c: legacy single-snapshot plain-key form (shipID present, no [1]).
+local legacyPlain49 = makeSnap49("", 42, "p49", "A")
+local shipC, snapsC = runRestore49(legacyPlain49)
+assert(shipC ~= nil,
+    "RestoreSession legacy plain-key single snapshot must call State.newSession")
+assert(snapsC ~= nil and #snapsC == 1,
+    "RestoreSession legacy plain-key: expected 1 snapshot; got "
+    .. tostring(snapsC and #snapsC))
+assert(snapsC[1].path == "p49",
+    "RestoreSession legacy plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsC[1].path))
+
+-- 49d: legacy single-snapshot $-prefixed form.
+local legacyPrefixed49 = makeSnap49("$", 42, "p49", "A")
+local shipD, snapsD = runRestore49(legacyPrefixed49)
+assert(shipD ~= nil,
+    "RestoreSession legacy $-prefixed single snapshot must call State.newSession. "
+    .. "The handler is not reading the $shipID key from the legacy form.")
+assert(snapsD ~= nil and #snapsD == 1,
+    "RestoreSession legacy $-prefixed: expected 1 snapshot; got "
+    .. tostring(snapsD and #snapsD))
+assert(snapsD[1].path == "p49",
+    "RestoreSession legacy $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsD[1].path))
+
+-- 49e: diagnostic log line is emitted.
+assert(logContains("RestoreSession:"),
+    "RestoreSession handler must emit a diagnostic log line containing 'RestoreSession:'")
+
 print("runtime smoke tests passed")

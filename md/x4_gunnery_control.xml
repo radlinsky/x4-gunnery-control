@@ -26,6 +26,10 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'state_request'"/>
           </conditions>
           <actions>
+            <!-- Diagnostic: log the raw MD table so a live run reveals whether
+                 keys are plain or $-prefixed on the MD side. This settles the
+                 MD->Lua $ question once a save/load is performed in-game. -->
+            <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
             <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
           </actions>
         </cue>
