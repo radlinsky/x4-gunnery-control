@@ -148,7 +148,7 @@ camera and clears the in-memory sweep.
 |---|---|
 | Bridge | Argon XL, Paranid XL, Teladi L/XL, every installed DLC bridge whose cockpit trigger declares `gunnertrigger` and whose chair reports `gunnercontrol` |
 | Turret | beam, projectile, missile, mining, and at least one damaged/destroyed turret |
-| Grouping | ungrouped turret (appears as its own single-member group), linked group, ambiguous mapping (camera only) |
+| Grouping | ungrouped turret (appears as its own single-member group), linked group, fully destroyed group (camera only) |
 | Motion | stationary, player ship turning, NPC captain moving the ship |
 | Checkbox gate | Auto-engage and Direct-control greyed with no checked groups; activated once at least one mutable group is checked |
 | Auto-engage | Mode and armed state of every checked group unchanged after entering and exiting; Next/Prev cycles and wraps when two or more groups are checked; Next/Prev greyed when only one operational turret qualifies |

@@ -1796,4 +1796,99 @@ assert(shipScanCount51 >= 1,
     "target-browser display() must always sweep (force=true); GetContainedShips was called "
     .. tostring(shipScanCount51) .. " time(s)")
 
+-- ── 52. readGroups: duplicate path+group names must stay controllable ─────
+-- Two groups sharing path+group but with different contextIDs. The slot API
+-- returns no contextID, so slot->group attribution is a guess -- but mode and
+-- armed commands address contextID+path+group directly and are always exact.
+-- So a duplicate name must never make a group read-only.
+--
+-- The 2-turrets-per-group shape is the one that matters: only one slot per
+-- group carries the group's representative componentID, so any scheme that
+-- keys off "did this slot match" fails on the other slots.
+
+do
+    local savedGetNumUpgradeGroups  = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups2    = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo2 = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots   = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup  = C.GetUpgradeSlotGroup
+    local savedFfiNew               = ffiStub.new
+
+    -- ffi.new must hand back a 0-based buffer of UpgradeGroup2-shaped entries.
+    local groupBuffer = {}
+    groupBuffer[0] = { path = "p", group = "grp_front", contextid = 10 }
+    groupBuffer[1] = { path = "p", group = "grp_front", contextid = 20 }
+    local turretsPerGroup, slotComponents = 2, {}
+
+    C.GetNumUpgradeGroups  = function() return 2 end
+    C.GetUpgradeGroups2    = function() return 2 end
+    C.GetUpgradeGroupInfo2 = function(ship, macro, ctxid)
+        -- Each group reports ONE representative component: 101 for ctx 10,
+        -- 102 for ctx 20. The group's other turrets are not reported here.
+        return { count = turretsPerGroup, currentcomponent = (tostring(ctxid) == "10") and 101 or 102,
+                 currentmacro = "", slotsize = "", total = turretsPerGroup, operational = turretsPerGroup }
+    end
+    C.GetNumUpgradeSlots             = function() return #slotComponents end
+    C.GetUpgradeSlotCurrentComponent = function(ship, tag, slot) return slotComponents[slot] or 0 end
+    C.GetUpgradeSlotGroup            = function() return { path = "p", group = "grp_front" } end
+    ffiStub.new                      = function() return groupBuffer end
+
+    local function groupByContext(groups, ctx)
+        for _, g in ipairs(groups) do
+            if g.kind == "group" and tostring(g.contextID) == ctx then return g end
+        end
+    end
+    local function hasMember(group, componentID)
+        for _, m in ipairs(group.members or {}) do
+            if tostring(m.componentID) == tostring(componentID) then return true end
+        end
+        return false
+    end
+
+    -- 52a: two turrets per group. Slots 1/3 carry the representatives (101,
+    --      102); slots 2/4 carry non-representative turrets (103, 104) that
+    --      match no group's componentID.
+    turretsPerGroup = 2
+    slotComponents = { 101, 103, 102, 104 }
+    local groups52a = X4GunneryControlAPI.readGroups(42)
+    local front52a, rear52a = groupByContext(groups52a, "10"), groupByContext(groups52a, "20")
+    assert(front52a and rear52a,
+        "52a: expected group entries for contextID 10 and 20")
+    assert(X4GunneryState.canMutate(front52a) and X4GunneryState.canMutate(rear52a),
+        "52a BUG: a duplicate path+group name must not make a group read-only. "
+        .. "Mode/armed commands address contextID+path+group, which is exact. Got canMutate "
+        .. tostring(X4GunneryState.canMutate(front52a)) .. "/" .. tostring(X4GunneryState.canMutate(rear52a)))
+    assert(front52a.ambiguous == nil and rear52a.ambiguous == nil,
+        "52a: readGroups must not set an ambiguous flag any more")
+    assert(hasMember(front52a, 101),
+        "52a: the slot carrying group 10's representative component (101) must be listed under group 10")
+    assert(hasMember(rear52a, 102),
+        "52a: the slot carrying group 20's representative component (102) must be listed under group 20")
+    local members52a = #front52a.members + #rear52a.members
+    assert(members52a == #slotComponents,
+        "52a: every turret slot must appear exactly once across the groups; expected "
+        .. tostring(#slotComponents) .. " members, got " .. tostring(members52a))
+
+    -- 52b: one turret per group -- the common case, and the only shape the
+    --      previous fix handled. Both groups still resolve and stay mutable.
+    turretsPerGroup = 1
+    slotComponents = { 101, 102 }
+    local groups52b = X4GunneryControlAPI.readGroups(42)
+    local front52b, rear52b = groupByContext(groups52b, "10"), groupByContext(groups52b, "20")
+    assert(front52b and rear52b, "52b: expected group entries for contextID 10 and 20")
+    assert(X4GunneryState.canMutate(front52b) and X4GunneryState.canMutate(rear52b),
+        "52b: single-turret duplicate-named groups must be mutable")
+    assert(hasMember(front52b, 101) and hasMember(rear52b, 102),
+        "52b: each representative component must land in its own group")
+
+    C.GetNumUpgradeGroups             = savedGetNumUpgradeGroups
+    C.GetUpgradeGroups2               = savedGetUpgradeGroups2
+    C.GetUpgradeGroupInfo2            = savedGetUpgradeGroupInfo2
+    C.GetNumUpgradeSlots              = savedGetNumUpgradeSlots
+    C.GetUpgradeSlotCurrentComponent  = savedGetUpgradeSlotCurrentComponent
+    C.GetUpgradeSlotGroup             = savedGetUpgradeSlotGroup
+    ffiStub.new                       = savedFfiNew
+end
+
 print("runtime smoke tests passed")

@@ -75,7 +75,12 @@ local snapshot = snaps[1]
 State.returnToConsole(session); eq(session.phase, "console", "camera return phase"); assert(session.cameraMemberID == nil, "camera return clears member")
 session.phase = "engaged"
 local released = State.releaseDirect(session); eq(released[1], snapshot, "release returns snapshot list entry"); eq(session.phase, "console", "release phase")
-assert(State.canMutate(group)); group.ambiguous = true; assert(not State.canMutate(group))
+-- Only a destroyed group (no operational turret) is unwritable. A duplicate
+-- group name never blocks mutation: commands address contextID+path+group.
+assert(State.canMutate(group))
+local savedOperational = group.operationalCount
+group.operationalCount = 0; assert(not State.canMutate(group))
+group.operationalCount = savedOperational
 local savedGroup = State.snapshotForSave(snapshot)
 eq(savedGroup.shipID, "99", "save payload converts ship ID")
 eq(savedGroup.contextID, "7", "save payload converts group context")

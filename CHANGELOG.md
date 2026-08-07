@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Turret groups are no longer locked to camera-only when two of them share a
+  name. `readGroups()` walks turret slots to build each group's member list, and
+  because the slot API reports no context ID it could not always tell same-named
+  groups apart. That uncertainty was wired into `canMutate()`, so an unresolved
+  group had its mode dropdown and armed button greyed and was dropped from
+  Auto-engage and Direct-control.
+
+  It was guarding nothing. Mode and armed commands address a group by
+  `contextID`+`path`+`group`, which `GetUpgradeGroups2` always reports exactly —
+  the slot walk never feeds the write path. Vanilla does the same thing: it
+  walks turret slots only for *ungrouped* turrets and drives grouped ones purely
+  through the context ID. `canMutate()` now asks only whether the group still
+  has an operational turret.
+
+  Known limitation, left as-is: if two groups really do share a name, turrets
+  other than each group's representative all get listed under the first of them,
+  so member rows can sit under the wrong group name and Direct-control may open
+  the camera on a sibling group's turret. Commands still reach the right group.
+  No X4 API resolves this, and no shipped ship macro produces the case — all 53
+  turret group declarations across the 126 stock 9.00 ship macros use path `..`
+  with unique names.
+
 - Fix every null-ID guard in the runtime. A `UniverseID` read out of an FFI
   struct is boxed cdata, so `tostring()` on an unset one gives `"0ULL"`, not
   `"0"`. Nine guards tested `tostring(x) == "0"` and therefore never fired in

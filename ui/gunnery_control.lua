@@ -202,18 +202,20 @@ local function readGroups(ship)
             local slotGroup, path, name = C.GetUpgradeSlotGroup(ship, "", "turret", slot), "", ""
             path, name = str(slotGroup.path), str(slotGroup.group)
             local possible = candidates[path .. "\31" .. name] or {}
-            local entry
-            if #possible == 1 then entry = possible[1]
-            elseif #possible > 1 then
-                -- The slot API has no context ID. A matching representative
-                -- component makes mapping safe; otherwise never mutate it.
+            local entry = possible[1]
+            if #possible > 1 then
+                -- The slot API returns no context ID, so same-named groups on
+                -- different contexts cannot be told apart here. This only picks
+                -- which group a turret is listed under; group commands address
+                -- contextID+path+group and are always exact. Every shipped ship
+                -- macro uses path ".." with unique group names, so this branch
+                -- is defensive.
+                -- ponytail: representative-component match, first candidate
+                -- otherwise. Worst case is a member row under the wrong group
+                -- name, never a write to the wrong group.
                 for _, candidate in ipairs(possible) do
-                    if sameID(candidate.componentID, component) then
-                        if entry then entry.ambiguous = true else entry = candidate end
-                    end
+                    if sameID(candidate.componentID, component) then entry = candidate; break end
                 end
-                if not entry then entry = possible[1] end
-                entry.ambiguous = true
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
@@ -618,7 +620,7 @@ local function engageTarget(targetID)
     else
         -- First engagement: snapshot and arm every checked group we may touch.
         -- Only mutable groups are snapshotted, because restoreDirect writes back
-        -- every snapshot it holds and an ambiguous group must never be written
+        -- every snapshot it holds and a destroyed group must never be written
         -- at all -- not even back to the value it already has.
         local orderable = {}
         for _, group in ipairs(State.checkedGroups(session)) do
@@ -940,7 +942,7 @@ function TestAPI.verifyTestGroup(groupKey)
     if not session or not isInGunnerChair() then return { pass = false, reason = "not seated in gunnery control" } end
     refresh()
     local group = currentGroup(groupKey)
-    if not State.canMutate(group) then return { pass = false, reason = "group unavailable or ambiguous" } end
+    if not State.canMutate(group) then return { pass = false, reason = "group unavailable" } end
     local snapshot = { mode = group.mode, armed = group.armed }
     local target = C.GetSofttarget2()
     local targetID, targetConnection = target.softtargetID, str(target.softtargetConnectionName)
@@ -1056,6 +1058,7 @@ end
 
 function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
+function TestAPI.readGroups(ship) return readGroups(ship) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
