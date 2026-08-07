@@ -1891,4 +1891,74 @@ do
     ffiStub.new                       = savedFfiNew
 end
 
+-- ── 53. camera gate accepts the container X4 returns on small ships ──────────
+-- Issue #11: on an M-class ship (Katana) SetPlayerCameraTargetView(turret) is
+-- accepted but GetExternalTargetViewComponent() reads back the turret's
+-- *container* (the ship). The old gate compared against the turret id only, saw
+-- a mismatch, and bounced the player from target_select to the console after
+-- ~30 ms, so Direct-control was unusable there. The container is a match.
+do
+    local savedContextByClass53 = C.GetContextByClass
+    local savedFocus53 = C.GetExternalTargetViewComponent
+    local savedOperational53 = C.IsComponentOperational
+
+    local grp53 = {
+        key = "grp53", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 60, displayName = "Katana Front", totalCount = 1, operationalCount = 1,
+        mode = "attack", armed = false, members = {
+            { componentID = 60, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "60" }
+        }
+    }
+    local function startSelection53()
+        gcMenu.onShowMenu()
+        local sess = API.getSession()
+        assert(sess ~= nil, "expected session for camera gate test (53)")
+        sess.groups = { grp53 }
+        sess.checkedGroupKeys = { ["grp53"] = true }
+        sess.phase = "console"
+        local before = #pendingCallbacks
+        assert(API.startTargetSelection(X4GunneryState.checkedGroups(sess)) == true,
+            "53: startTargetSelection must return true for a mutable operational group")
+        -- Drain the chained camera callbacks (0.05 s + 0.05 s) plus the deferred display.
+        for _ = 1, 3 do
+            for _, fn in ipairs(callbacksAfter(before)) do fn() end
+        end
+        return sess
+    end
+
+    C.IsComponentOperational = function() return true end
+    -- Turret 60 lives in ship 99, and the engine resolves the target view to it.
+    C.GetContextByClass = function() return 99 end
+    C.GetExternalTargetViewComponent = function() return 99 end
+
+    local logLen53 = #capturedLog
+    local sess53 = startSelection53()
+    assert(sess53.phase == "target_select",
+        "BUG (issue #11): the camera gate must accept the container the engine "
+        .. "returns; phase was '" .. tostring(sess53.phase) .. "' instead of 'target_select'")
+    for i = logLen53 + 1, #capturedLog do
+        assert(not string.find(capturedLog[i], "camera gate failed", 1, true),
+            "53: resolving to the container must not log a camera gate failure")
+    end
+
+    -- 53b: a focus that is neither the turret nor its container is a real
+    -- failure — but it must cost the player the camera, not the target browser.
+    C.GetExternalTargetViewComponent = function() return 12345 end
+    local logLen53b = #capturedLog
+    local sess53b = startSelection53()
+    assert(sess53b.phase == "target_select",
+        "BUG: a failed camera must leave the player in target_select, not bounce "
+        .. "them to the console; phase was '" .. tostring(sess53b.phase) .. "'")
+    local logged53b = false
+    for i = logLen53b + 1, #capturedLog do
+        if string.find(capturedLog[i], "camera gate failed", 1, true) then logged53b = true end
+    end
+    assert(logged53b, "53b: an unrelated camera focus must still log the gate failure")
+
+    C.GetContextByClass = savedContextByClass53
+    C.GetExternalTargetViewComponent = savedFocus53
+    C.IsComponentOperational = savedOperational53
+end
+
 print("runtime smoke tests passed")

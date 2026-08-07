@@ -498,6 +498,18 @@ local function leaveChair(reason)
     return true
 end
 
+local targetRoot, isEligibleEngagementTarget, cycleTarget
+
+-- X4 resolves an own-turret target view to the turret's container on small
+-- ships (verified on a Katana, an M corvette): the readback is the ship, not the
+-- turret we asked for. The camera is still where we pointed it, so treat the
+-- container as a match. Capital ships resolve to the turret component itself.
+local function cameraFocusMatches(componentID)
+    local focus = C.GetExternalTargetViewComponent()
+    return focus ~= 0
+        and (sameID(focus, componentID) or sameID(focus, targetRoot(componentID)))
+end
+
 local function enterCamera(member, options)
     if not member or not member.cameraSupported then return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
@@ -512,13 +524,13 @@ local function enterCamera(member, options)
     local savedTargetID, savedConnection = savedTarget.softtargetID, str(savedTarget.softtargetConnectionName)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not stillCurrent() then return end
-        if sameID(C.GetExternalTargetViewComponent(), member.componentID) then return end
+        if cameraFocusMatches(member.componentID) then return end
         C.SetSofttarget(member.componentID, "")
         C.SetPlayerCameraTargetView(member.componentID, true)
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) then return end
             restoreSofttarget(savedTargetID, savedConnection)
-            if not sameID(C.GetExternalTargetViewComponent(), member.componentID) then
+            if not cameraFocusMatches(member.componentID) then
                 log("camera gate failed for turret " .. tostring(member.componentID))
                 if options and options.onFailure then
                     options.onFailure(member)
@@ -581,7 +593,10 @@ local function startTargetSelection(groups)
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
     session.targetCandidates = {}
-    if not enterCamera(member) then State.returnToConsole(session); return false end
+    -- Losing the camera must not cost the player target selection: log it and
+    -- keep the browser open instead of bouncing back to the console.
+    local cameraOptions = { onFailure = function() log("target selection continues without a camera") end }
+    if not enterCamera(member, cameraOptions) then State.returnToConsole(session); return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch) and session.phase == "target_select" then menu.display() end
@@ -596,8 +611,6 @@ local function openTargetBrowser()
     menu.display()
     return true
 end
-
-local targetRoot, isEligibleEngagementTarget, cycleTarget
 
 local function engageTarget(targetID)
     if targetID == nil then return false end
@@ -1489,10 +1502,11 @@ function menu.onUpdate()
             end
         end
         if session.phase == "engaged" and session.cameraMemberID ~= nil then
-            local focus = C.GetExternalTargetViewComponent()
             -- Once per refresh, not per frame: this used to emit ~60 lines/s and
-            -- bury everything else in the log.
-            if focus ~= 0 and not sameID(focus, session.cameraMemberID) then
+            -- bury everything else in the log. focus==0 is "no camera attached
+            -- yet", not a mismatch, so it stays quiet.
+            if C.GetExternalTargetViewComponent() ~= 0
+                and not cameraFocusMatches(session.cameraMemberID) then
                 log("camera focus differs from selected turret; runtime camera gate failed")
             end
         end
@@ -1704,6 +1718,9 @@ local function init()
     -- Exposed for unit tests only: lets tests drive the startAutoEngage failure
     -- path to verify State.returnToConsole is used (controlMode must be nil after).
     TestAPI.startAutoEngage = startAutoEngage
+    -- Exposed for unit tests only: lets tests drive the camera gate that
+    -- Direct-control goes through (issue #11).
+    TestAPI.startTargetSelection = startTargetSelection
     RegisterEvent("playerGetUp", endForMovement)
     RegisterEvent("playerUndock", endForMovement)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)

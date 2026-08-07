@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Direct-control works on small ships again. On a Katana the target browser
+  appeared for a split second and then dumped the player back on the console.
+  `enterCamera()` asks the engine for a target view on one turret and then reads
+  the view back to confirm it took. On S/M ships the engine accepts the request
+  but resolves the view to the turret's *container* — the ship — so the readback
+  never matched the turret id, the gate declared failure, and it tore the session
+  down 100 ms after the browser painted. Capital ships resolve to the turret
+  component itself, which is why this was never seen there.
+
+  The container now counts as a match: the camera is where we pointed it, just
+  wider. Auto-engage ran through the same gate and is fixed with it. The wider
+  view is a real consequence and is noted under Limitations in the README.
+
+  Second change on the same path: a camera that genuinely cannot attach no longer
+  closes the target browser. It is logged and target selection carries on. Losing
+  the camera should never cost the player the ability to pick a target.
+
 - Turret groups are no longer locked to camera-only when two of them share a
   name. `readGroups()` walks turret slots to build each group's member list, and
   because the slot API reports no context ID it could not always tell same-named
