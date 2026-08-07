@@ -21,6 +21,10 @@ All notable changes to this project are documented in this file.
   numbers, where `tostring(0)` really is `"0"` — so `test_runtime_ui_contract.sh`
   now rejects the `tostring(x) == "0"` shape outright.
 
+- Remove the post-exit diagnostic sampler. It wrote `DebugError` lines for 90
+  seconds every time you left the gunnery seat; the bug it was hunting was
+  fixed in 0.20.
+
 ## [0.20] - 2026-08-06
 
 - Widen the console's turret group and turret name column so full names are

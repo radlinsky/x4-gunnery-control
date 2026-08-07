@@ -29,10 +29,6 @@ const char* GetComponentName(UniverseID componentid); SofttargetDetails2 GetSoft
 bool IsPlayerCameraTargetViewPossible(UniverseID targetid, bool force); void SetPlayerCameraTargetView(UniverseID targetid, bool force);
 UniverseID GetExternalTargetViewComponent(void); void SetPlayerCameraCockpitView(bool force); bool GetUp(void);
 bool IsHUDActive(void); bool IsFullscreenCutsceneActive(void);
-bool IsExternalViewActive(void); bool IsExternalTargetMode(void);
-bool CanSetPlayerCameraCinematicView(void);
-bool IsConversationActive(void); bool IsConversationCancelling(void);
-bool IsEncryptedDirectInputModeActive(void);
 bool IsFullscreenMenuDisplayed(bool anymenu, const char* menuname);
 bool IsGamePaused(void); void SetTrackedMenuFullscreen(const char* menu, bool fullscreen);
 bool SetSofttarget(UniverseID componentid, const char*const connectionname);
@@ -60,8 +56,6 @@ local sessionEpoch = 0
 local reopenSuspendedSession
 local activeExternalMenuName
 local lastWatchdogSignature
-local postExitGeneration = 0
-local lastPostExitProbe
 
 local function text(id) return ReadText(20991, id) end
 local function str(pointer) return pointer ~= nil and ffi.string(pointer) or "" end
@@ -437,115 +431,6 @@ function menu.cleanup()
     end
 end
 
--- Post-exit state-change recorder (Item 3c). Records state for up to 90 s
--- after the player leaves the chair, logging only when the probe payload
--- changes. The long window is deliberate: the Esc-after-get-up bug clears the
--- moment the player opens and closes any menu; comparing the sample before and
--- after that workaround identifies the stuck engine state directly instead of
--- by guesswork. The first callback always logs; subsequent identical payloads
--- are silently dropped. Never alters game state. Must not raise.
---
--- A module-level generation counter (postExitGeneration) ensures that if a
--- new exit supersedes a running sampler, the stale callbacks are silently
--- dropped: each callback captures its own generation at schedule time and
--- returns immediately when the counter has advanced. The counter is also
--- advanced by leaveChair/endForMovement so that re-seating followed by a
--- second exit still silences the first sampler.
---
--- Each callback also stops early when a live session exists: the player has
--- re-seated, and continuing to sample would be noise.
--- Elapsed time is the scheduled offset itself, so no start time is needed.
-local function startPostExitSampler()
-    postExitGeneration = postExitGeneration + 1
-    local myGeneration = postExitGeneration
-    lastPostExitProbe = nil
-    -- Fixed offsets in seconds. Build the list programmatically: four early
-    -- samples for immediate state, then every 2 s up to 90 s. This list is
-    -- fixed at schedule time; no callback ever re-schedules itself.
-    local offsets = { 0.5, 1.0, 2.0, 4.0 }
-    local t = 6.0
-    while t <= 90.0 do
-        offsets[#offsets + 1] = t
-        t = t + 2.0
-    end
-    for _, offset in ipairs(offsets) do
-        local capturedOffset = offset
-        Helper.addDelayedOneTimeCallbackOnUpdate(function()
-            -- Overlap guard: a newer exit has started, stay silent.
-            if postExitGeneration ~= myGeneration then return end
-            -- Re-entry guard: a new session means the player is reseated.
-            if session ~= nil then return end
-            -- Defensive: log returns nothing and cannot raise. All C calls are
-            -- individually guarded so a nil or bad return never propagates.
-            local elapsed = capturedOffset
-            local ok, err = pcall(function()
-                local camera = tostring(C.GetExternalTargetViewComponent())
-                local cg = tostring(controlGroup())
-                local occupied = tostring(C.GetPlayerOccupiedShipID())
-                local shown = tostring(menu.shown and true or false)
-                local extmenu = (activeExternalMenuName and activeExternalMenuName()) or "<none>"
-                -- The global selection and the object it belongs to. A soft
-                -- target still sitting on a component of the ship we just left
-                -- means enterCamera's borrow was never put back, which is the
-                -- current Esc suspect.
-                local soft = C.GetSofttarget2().softtargetID
-                local softInfo = tostring(soft) .. "/root="
-                    .. tostring(soft ~= 0 and C.GetContextByClass(id(soft), "container", true) or 0)
-                -- hud= tells a missing-HUD report apart: false means the engine
-                -- still has the HUD switched off (a view or camera state we left
-                -- behind), true means it is on and merely not being redrawn.
-                local hud = tostring(C.IsHUDActive())
-                    .. "/cutscene=" .. tostring(C.IsFullscreenCutsceneActive())
-                    .. "/extview=" .. tostring(C.IsExternalViewActive())
-                    .. "/exttarget=" .. tostring(C.IsExternalTargetMode())
-                    -- Proxy for the CutsceneManager's cinematic mode: the only
-                    -- readable state near it, and the cinematic run is the one
-                    -- thing trial 1 did that trial 2 (Esc worked) did not.
-                    .. "/cancinematic=" .. tostring(C.CanSetPlayerCameraCinematicView())
-                -- Conversation: active and cancelling state. A conversation
-                -- opened and closed via Esc workaround would appear here.
-                -- Signatures from ego_detailmonitorhelper/helper.lua:400-401.
-                local conv = tostring(C.IsConversationActive())
-                    .. "/" .. tostring(C.IsConversationCancelling())
-                -- Direct-input mode suppresses normal keyboard routing; any
-                -- edit box left open by our teardown would show here.
-                local dirinput = tostring(C.IsEncryptedDirectInputModeActive())
-                -- Player-control aggregate from ego_viewhelper/viewhelper.lua:314.
-                -- False means at least one registered view has playerControls=false,
-                -- which blocks Esc from reaching the native game menu.
-                local pctrl = View and tostring(View.hasPlayerControls()) or "<n/a>"
-                -- Tracked-menu topology (ego_detailmonitorhelper/helper.lua).
-                local helpermenus = tostring(Helper.dockedMenu ~= nil)
-                    .. "/" .. tostring(Helper.topLevelMenu ~= nil)
-                    .. "/" .. tostring(Helper.minimizedMenu ~= nil)
-                -- Build comparison payload WITHOUT the timestamp (the timestamp
-                -- changes every tick; including it would defeat suppression).
-                local payload = "camera=" .. camera
-                    .. "; control=" .. (cg ~= "" and cg or "<none>")
-                    .. "; occupied=" .. occupied
-                    .. "; shown=" .. shown
-                    .. "; extmenu=" .. tostring(extmenu)
-                    .. "; views=" .. viewSummary()
-                    .. "; fsmenu=" .. trackedMenuSummary()
-                    .. "; soft=" .. softInfo
-                    .. "; hud=" .. hud
-                    .. "; conv=" .. conv
-                    .. "; dirinput=" .. dirinput
-                    .. "; pctrl=" .. pctrl
-                    .. "; helpermenus=" .. helpermenus
-                if payload == lastPostExitProbe then return end
-                lastPostExitProbe = payload
-                log("post-exit sample"
-                    .. "; t=+" .. string.format("%.1f", elapsed) .. "s"
-                    .. "; " .. payload)
-            end)
-            if not ok then
-                log("post-exit sample error at t=+" .. string.format("%.1f", elapsed) .. "s: " .. tostring(err))
-            end
-        end, false, getElapsedTime() + offset)
-    end
-end
-
 -- The soft target is X4's global selection, not ours: enterCamera borrows it to
 -- force the camera onto a turret and puts it back a tick later. No vanilla call
 -- ever passes 0 to SetSofttarget -- RemoveSofttarget() is the engine's clear
@@ -601,7 +486,6 @@ local function leaveChair(reason)
     -- discardSession emits the notify (seatLeaving=true) covering both this
     -- path and the playerGetUp/playerUndock route (endForMovement).
     discardSession(reason)
-    startPostExitSampler()
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         -- Not endSession(): the session is already gone, and its
         -- "nothing to do" guard would skip the frame teardown entirely.
@@ -650,8 +534,8 @@ local function startAutoEngage(groups)
     restoreDirect("auto-engage")
     State.beginEngaged(session, groups, "auto")
     local member = cameraMember()
-    if not member then session.phase = "console"; return false end
-    if not enterCamera(member) then session.phase = "console"; return false end
+    if not member then State.returnToConsole(session); return false end
+    if not enterCamera(member) then State.returnToConsole(session); return false end
     -- Finish the button callback before replacing the blurred console frame.
     -- Rebuilding a view during the click dispatch can leave the old frame
     -- visible until a second click on some X4/UI Extensions combinations.
@@ -664,6 +548,16 @@ local function startAutoEngage(groups)
     end, false, getElapsedTime() + 0.01)
     return true
 end
+
+-- readTargetCandidates cache: a 1 s TTL is long enough that four 0.25 s repaints
+-- share a single sector sweep, but short enough that the target browser list
+-- feels live when the player is actively browsing it.  Callers that must see
+-- live data pass bypassCache=true (target browser display, cycleTarget,
+-- chooseAimTarget), so there are no manual invalidation points.  The cache
+-- auto-invalidates whenever sessionEpoch changes (i.e. the session is
+-- discarded).
+local targetCandidatesTime = -math.huge
+local targetCandidatesEpoch = -1
 
 local function startTargetSelection(groups)
     -- Refuse when no checked group can be mutated.
@@ -685,7 +579,7 @@ local function startTargetSelection(groups)
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
     session.targetCandidates = {}
-    if not enterCamera(member) then session.phase = "console"; return false end
+    if not enterCamera(member) then State.returnToConsole(session); return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch) and session.phase == "target_select" then menu.display() end
@@ -778,7 +672,19 @@ isEligibleEngagementTarget = function(component)
     return State.isEngagementTargetAllowed(session and session.shipID, object), object
 end
 
-local function readTargetCandidates()
+local function readTargetCandidates(bypassCache)
+    local now = getElapsedTime()
+    if not bypassCache
+        and targetCandidatesEpoch == sessionEpoch
+        and now - targetCandidatesTime < 1
+        -- An empty result is cached too: a sector full of ineligible objects is
+        -- the most expensive sweep there is, and re-running it every repaint is
+        -- exactly the cost this cache exists to avoid.
+        and session and session.targetCandidates then
+        return session.targetCandidates
+    end
+    targetCandidatesTime = now
+    targetCandidatesEpoch = sessionEpoch
     local candidates, seen = {}, {}
     local sector = GetPlayerContextByClass("sector")
     local radarRange = tonumber(componentData(session.shipID, "maxradarrange")) or 40000
@@ -825,7 +731,7 @@ end
 
 cycleTarget = function(delta)
     if not session or session.controlMode ~= "direct" then return false end
-    local entry = State.cycleEntry(readTargetCandidates(), session.targetObjectID, delta)
+    local entry = State.cycleEntry(readTargetCandidates(true), session.targetObjectID, delta)
     if not entry then return false end
     return engageTarget(entry.componentID)
 end
@@ -1070,7 +976,10 @@ end
 -- is the best available target. Returns nil when nothing qualifies.
 local function chooseAimTarget()
     if not session then return nil end
-    local candidates = readTargetCandidates()
+    -- Always sweep fresh: updateAimTarget is already throttled to 5 s and
+    -- onDirectTargetLost is rare, so neither wants a cached list, and forcing
+    -- here means no caller has to remember to invalidate.
+    local candidates = readTargetCandidates(true)
     for _, c in ipairs(candidates) do
         if C.IsComponentOperational(id(c.componentID)) then
             return c.componentID
@@ -1212,7 +1121,11 @@ function menu.display()
         Helper.clearFrame(menu, elementFrameLayer)
         menu.elementFrame = nil
     end
-    if session and session.phase == "engaged" then
+    -- Every call path into display() holds a live session: callers either guard
+    -- with `if session then` or return early when it is nil. Stated once here so
+    -- nothing below has to repeat the check.
+    if not session then return end
+    if session.phase == "engaged" then
         -- One compact upper-right panel for both controlModes (step 7).
         -- Frame properties match the old direct panel exactly so the contract
         -- test grep for viewFrame.properties.height still passes.
@@ -1378,7 +1291,7 @@ function menu.display()
         return
     end
 
-    local targetBrowser = session and session.phase == "target_select"
+    local targetBrowser = session.phase == "target_select"
     local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)
     local frame = Helper.createFrameHandle(menu, {
@@ -1395,13 +1308,12 @@ function menu.display()
     -- A solid semi-transparent frame background keeps every cell's text legible
     -- over the live view (vanilla pattern, e.g. menu_docked.lua:341).
     frame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-    menu.frame = frame
     -- Inset the table so column 1 (the checkboxes) is not flush with the screen
     -- edge; the console frame starts at x = 0.
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
 
-    if session and session.phase == "target_select" then
+    if session.phase == "target_select" then
         local tableView = frame:addTable(8, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
         title[1]:setColSpan(8):createText(text(33), Helper.headerRowCenteredProperties)
@@ -1417,7 +1329,7 @@ function menu.display()
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(3):createText(text(37)); header[4]:createText(text(38))
         header[5]:createText(text(49)); header[6]:createText(text(50)); header[7]:setColSpan(2):createText("")
-        local candidates = readTargetCandidates()
+        local candidates = readTargetCandidates(true)
         for _, candidate in ipairs(candidates) do
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(3):createText(candidate.name ~= "" and candidate.name or text(51))
@@ -1782,11 +1694,13 @@ local function init()
         seatLeaving = true
         endSession("global movement event")
         seatLeaving = false
-        startPostExitSampler()
     end
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.
     TestAPI.endForMovement = endForMovement
+    -- Exposed for unit tests only: lets tests drive the startAutoEngage failure
+    -- path to verify State.returnToConsole is used (controlMode must be nil after).
+    TestAPI.startAutoEngage = startAutoEngage
     RegisterEvent("playerGetUp", endForMovement)
     RegisterEvent("playerUndock", endForMovement)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
@@ -1803,30 +1717,93 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
-    RegisterEvent("X4GunneryControl.RestoreSession", function(_, payload)
+    local function onRestoreSession(_, payload)
         -- Do not resume a camera session after loading. Reconstruct only enough
         -- state to return the pre-Engage mode/armed settings, then clear MD state.
-        if type(payload) ~= "table" then return end
-        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID,
-        -- no [1]). Wrap the legacy form so restoreDirect always sees a list.
-        local snapshots
+        --
+        -- KNOWN BROKEN, and everything below this point is currently
+        -- unreachable. raise_lua_event carries one scalar (a string, a number,
+        -- or a single component object); the snapshot LIST arrives here as nil.
+        -- Live-confirmed 2026-08-06: MD logged a fully populated State.$active
+        -- and this handler logged "payload type=nil" on the same tick. No
+        -- shipped 9.00 MD script passes a table through raise_lua_event either.
+        -- A second defect waits behind it: component IDs are reassigned on load
+        -- (the same ship was 441090 before a save and 2080707 after), so the
+        -- stored shipID/contextID would not match even once transport works.
+        -- The path/group names ARE stable and are what a fix should match on.
+        -- Kept, with the key handling below, because both are correct and will
+        -- be needed the moment transport is fixed. See the save/load restore
+        -- issue before touching this.
+        log("RestoreSession event received; payload type=" .. type(payload)
+            .. "; tostring=" .. tostring(payload))
+        if type(payload) ~= "table" then
+            log("RestoreSession: payload is not a table, so nothing was restored."
+                .. " Expected while save/load restore is broken; turret groups"
+                .. " stay as they were when the game was saved.")
+            return
+        end
+
+        -- MD->Lua key-prefix diagnostic: the engine PREPENDS $ to every Lua
+        -- string key during Lua->MD conversion (live-tested 2026-08-04). When
+        -- State.$active is returned via raise_lua_event the keys may therefore
+        -- arrive as "$shipID", "$kind", etc. This helper reads either form so the
+        -- handler works regardless of whether the $ survives the round-trip.
+        local function field(t, name)
+            if t[name] ~= nil then return t[name] end
+            return t["$" .. name]
+        end
+
+        -- Normalise one snapshot table (plain or $-prefixed keys) into a plain-
+        -- keyed copy that the rest of the Lua code can use without further guards.
+        local function normaliseSnap(s)
+            return {
+                shipID      = field(s, "shipID"),
+                kind        = field(s, "kind"),
+                mode        = field(s, "mode"),
+                armed       = field(s, "armed"),
+                componentID = field(s, "componentID"),
+                contextID   = field(s, "contextID"),
+                path        = field(s, "path"),
+                group       = field(s, "group"),
+            }
+        end
+
+        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID
+        -- or .$shipID, no [1]). Wrap the legacy form so restoreDirect sees a list.
+        local raw
         if payload[1] ~= nil then
-            snapshots = payload
-        elseif payload.shipID ~= nil then
-            snapshots = { payload }
+            raw = payload
+        elseif field(payload, "shipID") ~= nil then
+            raw = { payload }
         else
+            log("RestoreSession: payload has no snapshots; skipping restore")
             return  -- empty or unrecognised table
         end
+        local snapshots = {}
+        for _, s in ipairs(raw) do snapshots[#snapshots + 1] = normaliseSnap(s) end
         if #snapshots == 0 then return end
+
+        -- Diagnostic: report parse result and which key form was present. The
+        -- legacy single snapshot is wrapped into raw[1] above, so this one test
+        -- covers both arrival shapes.
+        local prefixed = raw[1]["$shipID"] ~= nil
+        log("RestoreSession: " .. tostring(#snapshots)
+            .. " snapshot(s) parsed; keys were "
+            .. (prefixed and "$-prefixed (MD->Lua adds $)" or "plain"))
+
         sessionEpoch = sessionEpoch + 1
         session = State.newSession(id(snapshots[1].shipID), "")
         refresh()
-        -- Assign the list so restoreDirect can loop over every group.
+        -- Assign the normalised list so restoreDirect can loop over every group.
         session.directSnapshots = snapshots
         restoreDirect("savegame recovery")
         session = nil
         sessionEpoch = sessionEpoch + 1
-    end)
+    end
+    -- Exposed for unit tests only: lets tests drive the RestoreSession path with
+    -- arbitrary payload shapes (plain-key and $-prefixed) without a live event.
+    TestAPI.onRestoreSession = onRestoreSession
+    RegisterEvent("X4GunneryControl.RestoreSession", onRestoreSession)
     AddUITriggeredEvent("X4GunneryControl", "state_request")
     registerForEvent("gameLoadingDone", getElement("Scene.UIContract"), function()
         registerUIHooks()
