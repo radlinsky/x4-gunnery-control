@@ -28,8 +28,17 @@
           <actions>
             <!-- Diagnostic: log the raw MD table so a live run reveals whether
                  keys are plain or $-prefixed on the MD side. This settles the
-                 MD->Lua $ question once a save/load is performed in-game. -->
-            <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
+                 MD->Lua $ question once a save/load is performed in-game.
+                 The @ and the do_if are both required: State.$active does not
+                 exist until a Direct-control session has run, and referencing a
+                 missing variable raises "Property lookup failed" into the log on
+                 every load for every player. -->
+            <do_if value="@State.$active">
+              <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC] RequestState: no saved session state'" chance="100"/>
+            </do_else>
             <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
           </actions>
         </cue>
