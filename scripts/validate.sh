@@ -17,6 +17,12 @@ elif command -v lua >/dev/null; then for file in tests/*.lua; do lua "$file"; do
 else echo "warning: Lua runtime unavailable; skipped unit tests" >&2; fi
 if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh tests/*.sh; else echo "warning: shellcheck unavailable" >&2; fi
 for file in tests/*.sh; do "$file"; done
+# Line 19 runs the test scripts directly, so a .sh committed as 100644 fails
+# validation on a fresh clone (it only worked where a local chmod +x was left).
+if git ls-files -s '*.sh' | grep -v '^100755'; then
+  echo "the shell scripts above are not executable; git update-index --chmod=+x them" >&2
+  exit 1
+fi
 if git ls-files | grep -Eq '(^|/)(__folder_managed_by_vortex|.*\.(cat|dat)|debug\.log|x4-gunnery-control-debug\.log)$'; then
   echo "forbidden generated or Vortex files are tracked" >&2
   exit 1
