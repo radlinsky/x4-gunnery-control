@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-07-snapdiag-3"
+local runtimeBuild = "2026-08-07-prefer-target-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -398,25 +398,20 @@ local function restoreDirect(reason)
             log("could not resolve directed group during restore: " .. reason)
         end
     end
-    -- Captured into locals because restoreDirect runs on teardown paths that
-    -- null out session before this callback fires.
-    local readbackShipID, readbackSnapshots = session.shipID, snapshots
+    -- snapshots is closed over rather than re-read off the session, because
+    -- releaseDirect has already emptied the session's own list.
     local expectedSession, expectedEpoch = session, sessionEpoch
+    -- Deferred rather than immediate: the engine's mode read-back lags the
+    -- write, so a same-frame refresh() would re-cache the pre-restore value.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        local ok, fresh = pcall(readGroups, readbackShipID)
-        if not ok then fresh = {} end
-        for _, snapshot in ipairs(readbackSnapshots) do
-            local found
-            for _, group in ipairs(fresh or {}) do
-                if matchesSnapshot(group, snapshot) then found = group; break end
-            end
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        refresh()
+        for _, snapshot in ipairs(snapshots) do
+            local found = findSnapshotGroup(snapshot)
             log("post-restore readback " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
         end
-        -- Deferred rather than immediate: the engine's mode read-back lags the
-        -- write, so a same-frame refresh() would re-cache the pre-restore value.
-        if not currentSession(expectedSession, expectedEpoch) then return end
         if session.phase ~= "console" then return end
-        refresh(); menu.display()
+        menu.display()
         log("repainted console after restore: " .. reason)
     end, false, getElapsedTime() + 0.5)
     clearSnapshot()
@@ -1542,7 +1537,7 @@ function menu.display()
             row[2]:setColSpan(3):createText(label, { color = active and Color["text_normal"] or Color["text_error"] })
             row[5]:createText(tostring(group.operationalCount) .. " / " .. tostring(group.totalCount))
             row[6]:createDropDown(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key), { startOption = function() return group.mode end, active = active and not directed })
-            row[6].handlers.onDropDownConfirmed = function(_, value) setMode(group, value); refresh(); local after = currentGroup(group.key); log("dropdown wrote " .. tostring(value) .. "; read back " .. tostring(after and after.mode)); menu.display() end
+            row[6].handlers.onDropDownConfirmed = function(_, value) setMode(group, value); refresh(); menu.display() end
             row[7]:createButton({ active = active and not directed }):setText(group.armed and text(6) or text(7))
             row[7].handlers.onClick = function() setArmed(group, not group.armed); refresh(); menu.display() end
             row[8]:createText("")

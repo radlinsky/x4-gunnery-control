@@ -10,6 +10,10 @@ All notable changes to this project are documented in this file.
   rest of the ship back while your checked groups stay on your target; ceasing
   or getting up releases everything.
 
+- The turret Mode column now updates when you cease an engagement. It used to
+  keep showing `autoassist` afterwards even though the turrets had already gone
+  back to their own mode, so the panel disagreed with the ship.
+
 - Turret groups are no longer locked to camera-only when two of them share a
   name. `readGroups()` walks turret slots to build each group's member list, and
   because the slot API reports no context ID it could not always tell same-named
