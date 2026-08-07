@@ -1735,38 +1735,17 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
--- ── 49. readGroups: ambiguous flag for duplicate path+group names ────────────
--- Two groups that share path+group ("front"/"grp_front") but have different
--- contextIDs (as happens on ships with multiple turret zones). The slot API has
--- no contextID, so readGroups resolves via the representative componentID:
---   (a) exactly one candidate's componentID matches the slot's component
---       -> that entry is NOT ambiguous (canMutate is allowed).
---   (b) two candidates' componentIDs match, OR none matches
---       -> ALL candidates are marked ambiguous (canMutate returns false).
+-- ── 49. readGroups: duplicate path+group names must stay controllable ─────
+-- Two groups sharing path+group but with different contextIDs. The slot API
+-- returns no contextID, so slot->group attribution is a guess -- but mode and
+-- armed commands address contextID+path+group directly and are always exact.
+-- So a duplicate name must never make a group read-only.
+--
+-- The 2-turrets-per-group shape is the one that matters: only one slot per
+-- group carries the group's representative componentID, so any scheme that
+-- keys off "did this slot match" fails on the other slots.
 
 do
-    -- Override ffi.new for this block so the buffer is zero-based and carries
-    -- the required struct fields.
-    local function makeBuffer(items)
-        local buf = {}
-        for i, item in ipairs(items) do buf[i - 1] = item end
-        return buf
-    end
-
-    -- Two groups sharing the same path+group name, different contextIDs and
-    -- different representative componentIDs (101 vs 102).
-    local groupDefs = {
-        { path = "p", group = "grp_front", contextid = 10, component = 101 },
-        { path = "p", group = "grp_front", contextid = 20, component = 102 },
-    }
-    local groupBuffer = makeBuffer(groupDefs)
-
-    -- Slot-level setup: two slots, one per group.
-    local slotComponents  = { [1] = 101, [2] = 102 }
-    local slotGroupPaths  = { [1] = "p", [2] = "p" }
-    local slotGroupNames  = { [1] = "grp_front", [2] = "grp_front" }
-
-    -- Save and replace the relevant C stubs.
     local savedGetNumUpgradeGroups  = C.GetNumUpgradeGroups
     local savedGetUpgradeGroups2    = C.GetUpgradeGroups2
     local savedGetUpgradeGroupInfo2 = C.GetUpgradeGroupInfo2
@@ -1775,81 +1754,73 @@ do
     local savedGetUpgradeSlotGroup  = C.GetUpgradeSlotGroup
     local savedFfiNew               = ffiStub.new
 
+    -- ffi.new must hand back a 0-based buffer of UpgradeGroup2-shaped entries.
+    local groupBuffer = {}
+    groupBuffer[0] = { path = "p", group = "grp_front", contextid = 10 }
+    groupBuffer[1] = { path = "p", group = "grp_front", contextid = 20 }
+    local turretsPerGroup, slotComponents = 2, {}
+
     C.GetNumUpgradeGroups  = function() return 2 end
-    C.GetUpgradeGroups2    = function(buf, count) return 2 end
-    C.GetUpgradeGroupInfo2 = function(ship, ctx, ctxid, path, group, tag)
-        return { count = 1, currentcomponent = (ctxid == 10) and 101 or 102,
-                 currentmacro = "", slotsize = "", total = 1, operational = 1 }
+    C.GetUpgradeGroups2    = function() return 2 end
+    C.GetUpgradeGroupInfo2 = function(ship, macro, ctxid)
+        -- Each group reports ONE representative component: 101 for ctx 10,
+        -- 102 for ctx 20. The group's other turrets are not reported here.
+        return { count = turretsPerGroup, currentcomponent = (tostring(ctxid) == "10") and 101 or 102,
+                 currentmacro = "", slotsize = "", total = turretsPerGroup, operational = turretsPerGroup }
     end
-    C.GetNumUpgradeSlots             = function() return 2 end
+    C.GetNumUpgradeSlots             = function() return #slotComponents end
     C.GetUpgradeSlotCurrentComponent = function(ship, tag, slot) return slotComponents[slot] or 0 end
-    C.GetUpgradeSlotGroup            = function(ship, ctx, tag, slot)
-        return { path = slotGroupPaths[slot] or "", group = slotGroupNames[slot] or "" }
-    end
-    -- ffi.new must return the 0-based buffer.
-    ffiStub.new = function(spec, count) return groupBuffer end
+    C.GetUpgradeSlotGroup            = function() return { path = "p", group = "grp_front" } end
+    ffiStub.new                      = function() return groupBuffer end
 
-    -- 49a: exactly one match — slot 1 carries component 101, only groupDefs[1]
-    --      has componentID 101 => unique match => NOT ambiguous, canMutate true.
-    slotComponents = { [1] = 101, [2] = 102 }
+    local function groupByContext(groups, ctx)
+        for _, g in ipairs(groups) do
+            if g.kind == "group" and tostring(g.contextID) == ctx then return g end
+        end
+    end
+    local function hasMember(group, componentID)
+        for _, m in ipairs(group.members or {}) do
+            if tostring(m.componentID) == tostring(componentID) then return true end
+        end
+        return false
+    end
+
+    -- 49a: two turrets per group. Slots 1/3 carry the representatives (101,
+    --      102); slots 2/4 carry non-representative turrets (103, 104) that
+    --      match no group's componentID.
+    turretsPerGroup = 2
+    slotComponents = { 101, 103, 102, 104 }
     local groups49a = X4GunneryControlAPI.readGroups(42)
-    -- Find the group whose contextID is 10 (the one matched by slot 1).
-    local matched49a = nil
-    for _, g in ipairs(groups49a) do
-        if type(g.contextID) ~= "nil" and tostring(g.contextID) == "10" then
-            matched49a = g; break
-        end
-    end
-    assert(matched49a ~= nil,
-        "49a: expected a group entry for contextID=10 in readGroups output")
-    assert(not matched49a.ambiguous,
-        "49a BUG: group with a unique componentID match must NOT be ambiguous; "
-        .. "got ambiguous=" .. tostring(matched49a.ambiguous))
-    assert(X4GunneryState.canMutate(matched49a),
-        "49a BUG: uniquely matched group must be mutable (canMutate true); "
-        .. "operationalCount=" .. tostring(matched49a.operationalCount)
-        .. " ambiguous=" .. tostring(matched49a.ambiguous))
+    local front49a, rear49a = groupByContext(groups49a, "10"), groupByContext(groups49a, "20")
+    assert(front49a and rear49a,
+        "49a: expected group entries for contextID 10 and 20")
+    assert(X4GunneryState.canMutate(front49a) and X4GunneryState.canMutate(rear49a),
+        "49a BUG: a duplicate path+group name must not make a group read-only. "
+        .. "Mode/armed commands address contextID+path+group, which is exact. Got canMutate "
+        .. tostring(X4GunneryState.canMutate(front49a)) .. "/" .. tostring(X4GunneryState.canMutate(rear49a)))
+    assert(front49a.ambiguous == nil and rear49a.ambiguous == nil,
+        "49a: readGroups must not set an ambiguous flag any more")
+    assert(hasMember(front49a, 101),
+        "49a: the slot carrying group 10's representative component (101) must be listed under group 10")
+    assert(hasMember(rear49a, 102),
+        "49a: the slot carrying group 20's representative component (102) must be listed under group 20")
+    local members49a = #front49a.members + #rear49a.members
+    assert(members49a == #slotComponents,
+        "49a: every turret slot must appear exactly once across the groups; expected "
+        .. tostring(#slotComponents) .. " members, got " .. tostring(members49a))
 
-    -- 49b: two candidates both match — slot 1 carries component 101, but we
-    --      fabricate BOTH groupDefs reporting componentID=101, so two match.
-    C.GetUpgradeGroupInfo2 = function(ship, ctx, ctxid, path, group, tag)
-        -- Both groups now claim componentID 101 as their representative.
-        return { count = 1, currentcomponent = 101,
-                 currentmacro = "", slotsize = "", total = 1, operational = 1 }
-    end
+    -- 49b: one turret per group -- the common case, and the only shape the
+    --      previous fix handled. Both groups still resolve and stay mutable.
+    turretsPerGroup = 1
+    slotComponents = { 101, 102 }
     local groups49b = X4GunneryControlAPI.readGroups(42)
-    -- Both candidates must be marked ambiguous because 2 matched.
-    local anyMutable49b = false
-    local groupCount49b = 0
-    for _, g in ipairs(groups49b) do
-        if g.kind == "group" then
-            groupCount49b = groupCount49b + 1
-            if X4GunneryState.canMutate(g) then anyMutable49b = true end
-        end
-    end
-    assert(groupCount49b >= 1,
-        "49b: expected at least one group entry")
-    assert(not anyMutable49b,
-        "49b BUG: when two candidates share the same componentID both must be ambiguous "
-        .. "and canMutate must return false for all of them")
+    local front49b, rear49b = groupByContext(groups49b, "10"), groupByContext(groups49b, "20")
+    assert(front49b and rear49b, "49b: expected group entries for contextID 10 and 20")
+    assert(X4GunneryState.canMutate(front49b) and X4GunneryState.canMutate(rear49b),
+        "49b: single-turret duplicate-named groups must be mutable")
+    assert(hasMember(front49b, 101) and hasMember(rear49b, 102),
+        "49b: each representative component must land in its own group")
 
-    -- 49c: zero matches — neither candidate's componentID matches the slot
-    --      component. All candidates must be ambiguous.
-    C.GetUpgradeGroupInfo2 = function(ship, ctx, ctxid, path, group, tag)
-        return { count = 1, currentcomponent = 999,   -- 999 != slot component 101
-                 currentmacro = "", slotsize = "", total = 1, operational = 1 }
-    end
-    slotComponents = { [1] = 101, [2] = 102 }
-    local groups49c = X4GunneryControlAPI.readGroups(42)
-    local anyMutable49c = false
-    for _, g in ipairs(groups49c) do
-        if g.kind == "group" and X4GunneryState.canMutate(g) then anyMutable49c = true end
-    end
-    assert(not anyMutable49c,
-        "49c BUG: when no candidate matches the slot component all must be ambiguous "
-        .. "and canMutate must return false for all of them")
-
-    -- Restore stubs.
     C.GetNumUpgradeGroups             = savedGetNumUpgradeGroups
     C.GetUpgradeGroups2               = savedGetUpgradeGroups2
     C.GetUpgradeGroupInfo2            = savedGetUpgradeGroupInfo2

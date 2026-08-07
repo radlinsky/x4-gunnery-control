@@ -348,8 +348,11 @@ function State.snapshotsForSave(list)
     return result
 end
 
+-- Mode and armed commands address a group by contextID+path+group, which
+-- GetUpgradeGroups2 always reports exactly, so the only thing that can make a
+-- group unwritable is having no operational turret left in it.
 function State.canMutate(group)
-    return group and not group.ambiguous and (group.operationalCount or 0) > 0
+    return group and (group.operationalCount or 0) > 0
 end
 
 function State.statusLabel(group)
