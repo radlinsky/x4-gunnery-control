@@ -313,8 +313,48 @@ local function isDirectedGroup(group)
     return false
 end
 
+-- Ship-wide "prefer my target" override. Tells X4 to treat the engaged target
+-- as every turret's priority; a turret with no shot at it engages something
+-- else in range instead of tracking a target it can never hit (live-tested
+-- 2026-08-07, see md-ai.md). A turret's mode decides whether it receives the
+-- instruction, not what it shoots once it has it: in that trial, missiledefence
+-- turrets engaged ships. Do not describe the fallback as "its own mode".
+--
+-- Two details are load-bearing, both learned from the 2026-08-07 trial:
+--
+-- 1. Every group the console took over is put back into its own mode FIRST.
+--    X4 ignores supplied targets for autoassist turrets -- the shipped comment
+--    at aiscripts/fight.attack.object.capital.xml:1756 says target acquisition
+--    for that mode is handled in code. An override applied on top of the
+--    console's own autoassist silently does nothing and the turret keeps
+--    idling, which looks identical to success from the cockpit.
+-- 2. The event is raised a tick later, because MD reads the ship's turret
+--    modes back when it runs. In the trial three of five presses still saw
+--    autoassist in that read, so the mode writes above had not landed yet.
+--
+-- A group the player themselves left in autoassist stays there: that already
+-- means "shoot my target", so the override has nothing to add, and forcing it
+-- out would be the console rewriting a setting nobody asked it to touch.
+-- Defined after refresh(), which it calls; declared here because restoreDirect
+-- and engageTarget both sit above that definition.
+local applyPreferAllTurrets
+
+-- Hands every turret back. Safe to call when the override was never applied.
+local function clearPreferAllTurrets(reason)
+    if not session or not session.preferAllTurrets then return false end
+    session.preferAllTurrets = false
+    AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets_clear", {
+        ["ship"] = ConvertStringToLuaID(tostring(session.shipID)),
+    })
+    log("prefer_all_turrets_clear emitted: " .. tostring(reason))
+    return true
+end
+
 local function restoreDirect(reason)
     if not session then return end
+    -- Before the early return below: the override can outlive the snapshots,
+    -- and leaving the chair must never leave the ship altered.
+    clearPreferAllTurrets(reason)
     local snapshots = State.releaseDirect(session)
     if #snapshots == 0 then return end
     for _, snapshot in ipairs(snapshots) do
@@ -635,6 +675,11 @@ local function engageTarget(targetID)
     -- cycleTarget and the element panel can identify the engaged object.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    -- The override names one specific target, so it dies with that target.
+    -- Every direct-mode target change funnels through here (auto-next, Next /
+    -- Previous Target, and picking a surface element), so re-issuing here is
+    -- what stops the turrets falling silent the moment a target is destroyed.
+    if session.preferAllTurrets then applyPreferAllTurrets() end
     -- A target click and the replacement compact frame occur on separate UI
     -- ticks. Keep this explicit so an auto-hide or failed frame creation can
     -- restore the snapshot rather than leaving autoassist armed invisibly.
@@ -654,6 +699,33 @@ end
 local function refresh()
     if not session then return end
     State.retainSelection(session, readGroups(session.shipID))
+end
+
+-- Forward-declared above restoreDirect; see the contract comment there.
+applyPreferAllTurrets = function()
+    if not session or session.phase ~= "engaged" then return false end
+    if isNullID(session.aimTargetID) then return false end
+    for _, snapshot in ipairs(session.directSnapshots or {}) do
+        local group = findSnapshotGroup(snapshot)
+        if group and sameID(snapshot.shipID, session.shipID) then
+            -- Mode only. The group stays armed, or it could not act on the
+            -- override at all.
+            setMode(group, snapshot.mode)
+        end
+    end
+    refresh()
+    session.preferAllTurrets = true
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    local shipID, targetID = session.shipID, session.aimTargetID
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
+            ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
+            ["target"] = ConvertStringToLuaID(tostring(targetID)),
+        })
+        log("prefer_all_turrets emitted target=" .. tostring(targetID))
+    end, false, getElapsedTime() + 0.01)
+    return true
 end
 
 local function relationLabel(component)
@@ -902,6 +974,9 @@ local function sendCutsceneAimStart(pov)
     log("cutscene_aim_start pov=" .. tostring(pov)
         .. " anchor=" .. tostring(anchorID) .. " target=" .. tostring(tgtID))
 end
+
+function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
+function TestAPI.clearPreferAllTurrets(reason) return clearPreferAllTurrets(reason) end
 
 function TestAPI.sendCutsceneAimStart(pov) sendCutsceneAimStart(pov) end
 function TestAPI.sendCutsceneAimStop() sendCutsceneAimStop() end
@@ -1239,6 +1314,21 @@ function menu.display()
                 menu.display()
             end
             autoNextRow[2]:createText(text(78))
+            -- Ship-wide override. Lives here rather than on the console because
+            -- it needs an engaged target to prefer, and Direct-control's target
+            -- browser is the only way to choose one. Release stays greyed until
+            -- there is something to release.
+            local overrideRow = controls:addRow("prefer_all_turrets", {})
+            -- All Turrets: Prefer My Target (id 81)
+            overrideRow[1]:createButton({ active = not session.preferAllTurrets }):setText(text(81))
+            overrideRow[1].handlers.onClick = function()
+                applyPreferAllTurrets(); menu.display()
+            end
+            -- Release All Turrets (id 82)
+            overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
+            overrideRow[2].handlers.onClick = function()
+                clearPreferAllTurrets("release button"); menu.display()
+            end
         end
         -- Auto-size frame height like the old direct panel (contract grep).
         viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize

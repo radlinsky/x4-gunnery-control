@@ -40,5 +40,8 @@
     <t id="78">Auto-next Target when destroyed</t>
     <t id="79">Turret groups restored to their previous settings.</t>
     <t id="80">Gunnery Control disengaged.</t>
+    <t id="81">All Turrets: Prefer My Target</t>
+    <t id="82">Release All Turrets</t>
+    <t id="83">All turrets released.</t>
   </page>
 </language>

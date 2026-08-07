@@ -34,6 +34,14 @@ mark a specific surface element (e.g. turret, shield, engine).
   the next target yourself, which is closer to actually manning the gun.
 - **Next Target** / **Previous Target** step through the same candidate list
   without reopening the browser.
+- **All Turrets: Prefer My Target**: every turret on the ship shoots your target
+  when it can. A turret that has no shot at your target shoots something else in
+  range instead of waiting.
+
+  This affects every turret on the ship, not just the groups you checked, and
+  turrets are no longer held to their **Mode** while it is on: turrets set to
+  missile defence will fire on ships. **Release All Turrets** undoes it, and so
+  does ceasing or getting up.
 
 ## Four viewing modes
 

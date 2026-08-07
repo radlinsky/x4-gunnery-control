@@ -127,6 +127,12 @@ function State.newSession(shipID, controlGroup)
         -- Direct-control only: take the turrets to the next target when the
         -- engaged one dies. Off sends the player back to the target browser.
         autoNextTarget = true,
+        -- Direct-control only: the ship-wide "prefer my target" override. Off
+        -- until the player explicitly asks for it, and always cleared before
+        -- the session ends. It reaches every turret on the ship rather than
+        -- just the checked groups, which is why it is an explicit action with
+        -- its own button and not a default.
+        preferAllTurrets = false,
         directSnapshots = {},
         selectedGroupKey = nil, selectedMemberID = nil, cameraMemberID = nil,
         targetObjectID = nil, targetCandidates = {},

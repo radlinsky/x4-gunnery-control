@@ -23,6 +23,34 @@
   `player.target` and `mayattack`/attack-legality checks as X4-owned gates, and
   verify firing against a hostile target in a disposable live test.
 
+### Autoassist turrets track a target they cannot hit, and stay silent
+- X4: 9.00
+- Status: live-tested
+- Source: in-game trial 2026-08-07; player-owned multi-turret ship, one hostile
+  off a single flank, every turret group armed `autoassist` via Gunnery Control
+  Direct-control
+- Finding: a turret on the flank facing away from the target rotates to track
+  it but never fires, observed over 30 seconds. Autoassist therefore hands the
+  target to every armed turret regardless of firing solution, and a turret with
+  no solution neither picks another target nor reverts to its own behaviour. It
+  is the assignment that is exclusive, not merely the firing. This is the
+  idle-turret cost of Direct-control.
+
+### A preferred target without a target list frees turrets from their mode
+- X4: 9.00
+- Status: live-tested
+- Source: in-game trial 2026-08-07; `set_turret_targets` issued with
+  `preferredtarget` and no `target` list, once per distinct turret mode on a
+  player-owned ship
+- Finding: turrets that cannot attack the preferred target engage something
+  else in range rather than holding fire, and that choice is **not** limited by
+  the turret's own mode. Every turret on a ship set entirely to
+  `missiledefence` opened fire on ships once the preference was applied, with
+  no missiles present. Treat `weaponmode` on `set_turret_targets` as selecting
+  which turrets receive the instruction, not as a constraint on what they
+  subsequently shoot. The exact fallback selection rule is unverified; do not
+  claim it is nearest-first.
+
 ### `mayattack` includes relation and fire-authorisation gates
 - X4: 9.00
 - Status: shipped-source
