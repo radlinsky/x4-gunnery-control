@@ -26,7 +26,7 @@ and watch them work.
 **Direct-control**: you tell the checked groups exactly what to shoot.
 The **Select Engagement Target** menu lists the ships and stations in radar range; click
 one and its hull is engaged immediately, but you can instead
-mark a specific surface element (i.e. turret, shield, engine.)
+mark a specific surface element (e.g. turret, shield, engine).
 
 - **Auto-next Target when destroyed** is checked by default: when the target
   dies, the turret(s) and camera automatically select the next target.
@@ -52,10 +52,11 @@ mark a specific surface element (i.e. turret, shield, engine.)
   *what* to hit, not *how*. The engine exposes no way to man a turret yourself.
 - **Turret POV cinematic often clips the camera into your own hull.** It looks
   rough. Target POV cinematic is the better-looking of the two.
-- If you have turned help texts off in the game options, the confirmation popup
-  cannot appear — and it also happens to work around an X4 bug where `Esc` goes
-  dead after a camera session. Without it, press `Esc` once after standing up;
-  it stays unresponsive until any other menu opens and closes (i.e. M for map).
+- The confirmation popup that appears when you stand up also works around an X4
+  bug that leaves `Esc` dead after a camera session. If you have turned help
+  texts off in the game options, that popup never shows — and the workaround
+  goes with it. Press `Esc` once after standing up; it stays unresponsive until
+  any other menu opens and closes (e.g. M for map).
 
 ## Requirements
 
@@ -71,9 +72,11 @@ combat AI scripts.
 **Nexus / Vortex**: install UI Extensions and HUD first, then install the ZIP
 without changing its top-level `x4_gunnery_control` folder.
 
-**Steam Workshop**: subscribe, then install UI Extensions and HUD from Nexus
-Mods as well. It is not on the Workshop, and the game will not load this mod
-without it.
+**Steam Workshop**:
+[subscribe](https://steamcommunity.com/sharedfiles/filedetails/?id=3778864325).
+The Workshop build depends on the
+[Workshop repackage of UI Extensions and HUD](https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743),
+so Steam pulls that in for you.
 
 **Manual** — extract the archive so you end up with:
 

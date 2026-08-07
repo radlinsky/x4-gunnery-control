@@ -206,7 +206,7 @@ Lua 5.1, libxml2, ShellCheck, zip, and unzip. Run repository scripts from the
 same MSYS2 shell. Do not mix Windows and WSL tool paths in one command. If native
 tool setup becomes difficult, use WSL and access the game through `/mnt/c`.
 
-## XML schemas and VS Code validation
+### XML schemas and VS Code validation
 
 X4 resolves the `#modding` schema path through its virtual filesystem; VS Code
 does not. For the installed X4 9.00 build, use the X Catalog Tool to extract
@@ -367,6 +367,7 @@ live-fire tests.
 | `scripts/package-testlab.sh` | Developer Test Lab ZIP builder |
 | `scripts/parse-testlab-log.sh` | Converts Test Lab log records to CSV |
 | `scripts/package-workshop.sh` | Stages the Steam Workshop folder for `WorkshopTool` |
+| `scripts/release-workshop.sh` | Stages and pushes a Workshop update in one command |
 | `release/` | Release assets: Workshop `preview.png`, GitHub release body |
 | `.agents/skills/research-x4-modding/` | The `$research-x4-modding` skill and its evidence KB |
 | `.claude/skills/research-x4-modding` | Symlink to the above; see the note below |
@@ -902,6 +903,29 @@ WorkshopTool update -path "<staged-path>" -buildcat -changenote "Describe your c
 `update` requires `-changenote`; omitting it is an error. The version integer in
 `content.xml` must increase on every `update` unless `-minor` is passed.
 
+Once the item exists, the whole update is one command — it stages, then drives
+WorkshopTool for you (extra arguments are forwarded, so `-minor` works):
+
+```bash
+./scripts/release-workshop.sh 0.21 "What changed"
+```
+
+WorkshopTool.exe runs fine from WSL through Windows interop; the script `cd`s
+into the X Tools folder first, because the tool reads `steam_appid.txt` from its
+own directory. Steam must be running and logged in. Override the tool location
+with `X4GC_WORKSHOPTOOL`, or set `X4GC_DRY_RUN=1` to print the command without
+publishing.
+
+The script deliberately refuses to do the *first* publish: that one needs
+`-preview` and a legal-agreement acceptance that is not worth automating once.
+
+The item's title and description are **not** touched by `update` — WorkshopTool
+ignores both unless `-namedesc up` is passed. So the long description is edited
+on the Workshop website and survives every release; keep the paste-ready copy in
+`release/workshop-description.bbcode` in step with `release/RELEASE_NOTES.md`.
+The one-line `description` attribute in `content.xml` is what the in-game
+Extensions menu shows, and it seeded the page at first publish.
+
 ### Why the staged content.xml differs from the repository's
 
 WorkshopTool refuses to publish an extension that depends on anything which is
@@ -933,17 +957,17 @@ for the full WorkshopTool reference.
 
 #### After the first publish
 
-WorkshopTool writes the assigned Workshop id into the staged `content.xml`.
-Copy it verbatim into `release/workshop-id.txt` and commit it — including the
-`ws_` prefix if the tool wrote one, which is the form every Workshop-installed
-extension uses:
+This was done on 2026-08-06: the item is
+[3778864325](https://steamcommunity.com/sharedfiles/filedetails/?id=3778864325)
+and `release/workshop-id.txt` holds `ws_3778864325`.
 
-```bash
-grep '<content ' dist/workshop/x4_gunnery_control/content.xml  # find the id
-echo "<id-exactly-as-written>" > release/workshop-id.txt
-git add release/workshop-id.txt
-git commit -m "release: record Steam Workshop id"
-```
+The `ws_` prefix is required. WorkshopTool reports only the bare number on a
+successful publish, but an extension whose own `id` is that bare number is not
+recognised as a Workshop item at all — `WorkshopTool showpage` answers `ERROR:
+Extension does not have a Steam Workshop entry`, and `update` would have no item
+to update. With `ws_` in front, the same command finds the page. Use `showpage`
+to check the id form after any change to it; it is the one read-only command the
+tool has.
 
 `package-workshop.sh` substitutes that id into the staged `content.xml` on
 every future run so `WorkshopTool update` targets the correct item.
