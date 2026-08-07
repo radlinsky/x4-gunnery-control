@@ -1855,13 +1855,51 @@ assert(snapsD[1].path == "p49",
 assert(logContains("RestoreSession:"),
     "RestoreSession handler must emit a diagnostic log line containing 'RestoreSession:'")
 
--- ── 50. readTargetCandidates cache: two quick repaints share one sweep ─────────
+-- ── 50. startAutoEngage failure path clears controlMode ──────────────────────
+-- Regression: beginEngaged sets session.controlMode = "auto" before trying to
+-- enter the camera. When no operational camera member exists, the old code did
+-- `session.phase = "console"; return false`, leaving controlMode stuck on "auto"
+-- while phase said "console". returnToConsole() must be used instead so phase,
+-- controlMode, povMode, cameraMemberID, and targetObjectID are all cleared together.
+gcMenu.onShowMenu()
+local sess50 = API.getSession()
+assert(sess50 ~= nil, "expected session for startAutoEngage failure test (50)")
+-- Build a group with NO operational members so cameraMember() returns nil and
+-- startAutoEngage hits its first failure exit.
+local grp50 = {
+    key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 30, displayName = "Empty Group", totalCount = 1, operationalCount = 0,
+    mode = "attack", armed = false, members = {
+        { componentID = 30, displayName = "T1", operational = false,
+          cameraSupported = false, componentKey = "30" }
+    }
+}
+sess50.groups = { grp50 }
+sess50.checkedGroupKeys = { ["grp50"] = true }
+sess50.phase = "console"
+sess50.controlMode = nil
+-- Same arguments the console Auto-Engage button passes. startAutoEngage is
+-- module-local; TestAPI exposes it, like TestAPI.endForMovement above.
+local engaged50 = API.startAutoEngage(X4GunneryState.checkedGroups(sess50))
+assert(engaged50 == false,
+    "startAutoEngage with no operational camera member must return false; got "
+    .. tostring(engaged50))
+-- After the failure, phase must be "console" and controlMode must be nil.
+assert(sess50.phase == "console",
+    "startAutoEngage failure path must leave phase='console'; got '"
+    .. tostring(sess50.phase) .. "'")
+assert(sess50.controlMode == nil,
+    "BUG: startAutoEngage failure path left controlMode='"
+    .. tostring(sess50.controlMode)
+    .. "'; State.returnToConsole must be used instead of raw phase assignment")
+
+-- ── 51. readTargetCandidates cache: two quick repaints share one sweep ─────────
 -- The cache must serve the second display() call from session.targetCandidates
 -- without calling GetContainedShips a second time. The browser/force path must
 -- always bypass the cache and call GetContainedShips.
 
-local shipScanCount50 = 0
-GetContainedShips = function() shipScanCount50 = shipScanCount50 + 1; return { 98 } end
+local shipScanCount51 = 0
+GetContainedShips = function() shipScanCount51 = shipScanCount51 + 1; return { 98 } end
 GetContainedStations = function() return {} end
 GetPlayerContextByClass = function() return 1 end
 C.GetContextByClass = function(comp, cls, self_) return comp end
@@ -1884,57 +1922,57 @@ GetComponentData = function(component, ...)
 end
 
 gcMenu.onShowMenu()
-local sess50 = API.getSession()
-assert(sess50 ~= nil, "expected session for cache test (50)")
+local sess51 = API.getSession()
+assert(sess51 ~= nil, "expected session for cache test (51)")
 
 -- Set up a direct/engaged session with two snapshots so the compact panel renders.
-local grp50 = { key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, displayName = "G50", totalCount = 1, operationalCount = 1,
+local grp51 = { key = "grp51", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 27, displayName = "G51", totalCount = 1, operationalCount = 1,
     mode = "attack", armed = false, members = {
         { componentID = 27, displayName = "T1", operational = true,
           cameraSupported = true, componentKey = "27" }
     } }
-sess50.groups = { grp50 }
-sess50.checkedGroupKeys = { ["grp50"] = true }
-sess50.phase = "engaged"
-sess50.controlMode = "direct"
-sess50.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
-    shipID = sess50.shipID, mode = "attack", armed = false } }
-sess50.cameraMemberID = 27
-sess50.targetObjectID = 98
-sess50.aimTargetID = 98
-sess50.targetCandidates = {}   -- start empty so first call always sweeps
+sess51.groups = { grp51 }
+sess51.checkedGroupKeys = { ["grp51"] = true }
+sess51.phase = "engaged"
+sess51.controlMode = "direct"
+sess51.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+    shipID = sess51.shipID, mode = "attack", armed = false } }
+sess51.cameraMemberID = 27
+sess51.targetObjectID = 98
+sess51.aimTargetID = 98
+sess51.targetCandidates = {}   -- start empty so first call always sweeps
 
 -- Move the clock forward so the cache from any prior test is stale.
 clock = clock + 100
 getElapsedTime = function() return clock end
 
 -- First display(): must sweep (cache is empty / time-expired).
-shipScanCount50 = 0
-local ok50a, err50a = pcall(function() gcMenu.display() end)
-assert(ok50a, "display() raised on first call (test 50): " .. tostring(err50a))
-local sweepsAfterFirst = shipScanCount50
+shipScanCount51 = 0
+local ok51a, err51a = pcall(function() gcMenu.display() end)
+assert(ok51a, "display() raised on first call (test 51): " .. tostring(err51a))
+local sweepsAfterFirst = shipScanCount51
 assert(sweepsAfterFirst >= 1,
     "first display() must call GetContainedShips at least once; got " .. tostring(sweepsAfterFirst))
 
 -- Second display() immediately (same clock): must reuse cache, no new sweep.
-shipScanCount50 = 0
-local ok50b, err50b = pcall(function() gcMenu.display() end)
-assert(ok50b, "display() raised on second call (test 50): " .. tostring(err50b))
-assert(shipScanCount50 == 0,
+shipScanCount51 = 0
+local ok51b, err51b = pcall(function() gcMenu.display() end)
+assert(ok51b, "display() raised on second call (test 51): " .. tostring(err51b))
+assert(shipScanCount51 == 0,
     "second display() within the TTL must not rescan; GetContainedShips was called "
-    .. tostring(shipScanCount50) .. " time(s). Cache is not working.")
+    .. tostring(shipScanCount51) .. " time(s). Cache is not working.")
 
 -- Target-browser path (force=true): must always sweep even within the TTL.
 -- Simulate the browser by switching to target_select phase (what openTargetBrowser does).
 -- We reach the forced path by calling the browser display branch directly:
 -- set phase to target_select and call display().
-sess50.phase = "target_select"
-shipScanCount50 = 0
-local ok50c, err50c = pcall(function() gcMenu.display() end)
-assert(ok50c, "display() raised in browser phase (test 50): " .. tostring(err50c))
-assert(shipScanCount50 >= 1,
+sess51.phase = "target_select"
+shipScanCount51 = 0
+local ok51c, err51c = pcall(function() gcMenu.display() end)
+assert(ok51c, "display() raised in browser phase (test 51): " .. tostring(err51c))
+assert(shipScanCount51 >= 1,
     "target-browser display() must always sweep (force=true); GetContainedShips was called "
-    .. tostring(shipScanCount50) .. " time(s)")
+    .. tostring(shipScanCount51) .. " time(s)")
 
 print("runtime smoke tests passed")

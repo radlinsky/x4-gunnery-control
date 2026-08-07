@@ -642,8 +642,8 @@ local function startAutoEngage(groups)
     restoreDirect("auto-engage")
     State.beginEngaged(session, groups, "auto")
     local member = cameraMember()
-    if not member then session.phase = "console"; return false end
-    if not enterCamera(member) then session.phase = "console"; return false end
+    if not member then State.returnToConsole(session); return false end
+    if not enterCamera(member) then State.returnToConsole(session); return false end
     -- Finish the button callback before replacing the blurred console frame.
     -- Rebuilding a view during the click dispatch can leave the old frame
     -- visible until a second click on some X4/UI Extensions combinations.
@@ -687,7 +687,7 @@ local function startTargetSelection(groups)
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
     session.targetCandidates = {}
-    if not enterCamera(member) then session.phase = "console"; return false end
+    if not enterCamera(member) then State.returnToConsole(session); return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch) and session.phase == "target_select" then menu.display() end
@@ -1229,7 +1229,11 @@ function menu.display()
         Helper.clearFrame(menu, elementFrameLayer)
         menu.elementFrame = nil
     end
-    if session and session.phase == "engaged" then
+    -- Every call path into display() holds a live session: callers either guard
+    -- with `if session then` or return early when it is nil. Stated once here so
+    -- nothing below has to repeat the check.
+    if not session then return end
+    if session.phase == "engaged" then
         -- One compact upper-right panel for both controlModes (step 7).
         -- Frame properties match the old direct panel exactly so the contract
         -- test grep for viewFrame.properties.height still passes.
@@ -1395,7 +1399,7 @@ function menu.display()
         return
     end
 
-    local targetBrowser = session and session.phase == "target_select"
+    local targetBrowser = session.phase == "target_select"
     local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)
     local frame = Helper.createFrameHandle(menu, {
@@ -1412,13 +1416,12 @@ function menu.display()
     -- A solid semi-transparent frame background keeps every cell's text legible
     -- over the live view (vanilla pattern, e.g. menu_docked.lua:341).
     frame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-    menu.frame = frame
     -- Inset the table so column 1 (the checkboxes) is not flush with the screen
     -- edge; the console frame starts at x = 0.
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
 
-    if session and session.phase == "target_select" then
+    if session.phase == "target_select" then
         local tableView = frame:addTable(8, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
         title[1]:setColSpan(8):createText(text(33), Helper.headerRowCenteredProperties)
@@ -1804,6 +1807,9 @@ local function init()
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.
     TestAPI.endForMovement = endForMovement
+    -- Exposed for unit tests only: lets tests drive the startAutoEngage failure
+    -- path to verify State.returnToConsole is used (controlMode must be nil after).
+    TestAPI.startAutoEngage = startAutoEngage
     RegisterEvent("playerGetUp", endForMovement)
     RegisterEvent("playerUndock", endForMovement)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
