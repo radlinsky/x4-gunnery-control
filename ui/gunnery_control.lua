@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-06-notify-22"
+local runtimeBuild = "2026-08-07-snapdiag-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -274,10 +274,12 @@ end
 local function setMode(group, mode)
     if group.kind == "group" then C.SetTurretGroupMode2(session.shipID, group.contextID, group.path, group.group, mode)
     else C.SetWeaponMode(group.componentID, mode) end
+    log("setMode wrote " .. tostring(group.group or group.componentID) .. " -> " .. tostring(mode))
 end
 local function setArmed(group, armed)
     if group.kind == "group" then C.SetTurretGroupArmed(session.shipID, group.contextID, group.path, group.group, armed)
     else C.SetWeaponArmed(group.componentID, armed) end
+    log("setArmed wrote " .. tostring(group.group or group.componentID) .. " -> " .. tostring(armed))
 end
 
 local function persistSnapshot(snapshots)
@@ -387,7 +389,7 @@ local function restoreDirect(reason)
         local group = findSnapshotGroup(snapshot)
         if group and sameID(snapshot.shipID, session.shipID) then
             setMode(group, snapshot.mode); setArmed(group, snapshot.armed)
-            log("restored directed group: " .. reason)
+            log("restored directed group: " .. reason .. " id=" .. tostring(snapshot.group or snapshot.componentID) .. " mode=" .. tostring(snapshot.mode) .. " armed=" .. tostring(snapshot.armed))
         else
             -- One destroyed turret group must not prevent restoring the others.
             log("could not resolve directed group during restore: " .. reason)
@@ -693,6 +695,7 @@ local function engageTarget(targetID)
             if State.canMutate(group) then orderable[#orderable + 1] = group end
         end
         local snaps = State.beginEngaged(session, orderable, "direct")
+        for _, s in ipairs(snaps) do log("snapshot took " .. tostring(s.group or s.componentID) .. " mode=" .. tostring(s.mode) .. " armed=" .. tostring(s.armed)) end
         persistSnapshot(snaps)
         for _, group in ipairs(orderable) do setMode(group, "autoassist"); setArmed(group, true) end
     end
@@ -1514,7 +1517,7 @@ function menu.display()
             row[2]:setColSpan(3):createText(label, { color = active and Color["text_normal"] or Color["text_error"] })
             row[5]:createText(tostring(group.operationalCount) .. " / " .. tostring(group.totalCount))
             row[6]:createDropDown(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key), { startOption = function() return group.mode end, active = active and not directed })
-            row[6].handlers.onDropDownConfirmed = function(_, value) setMode(group, value); refresh(); menu.display() end
+            row[6].handlers.onDropDownConfirmed = function(_, value) setMode(group, value); refresh(); local after = currentGroup(group.key); log("dropdown wrote " .. tostring(value) .. "; read back " .. tostring(after and after.mode)); menu.display() end
             row[7]:createButton({ active = active and not directed }):setText(group.armed and text(6) or text(7))
             row[7].handlers.onClick = function() setArmed(group, not group.armed); refresh(); menu.display() end
             row[8]:createText("")
