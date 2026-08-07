@@ -26,7 +26,23 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'state_request'"/>
           </conditions>
           <actions>
-            <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
+            <!-- Diagnostic: log the raw MD table so a live run reveals whether
+                 keys are plain or $-prefixed on the MD side. This settles the
+                 MD->Lua $ question once a save/load is performed in-game.
+                 The @ and the do_if are both required: State.$active does not
+                 exist until a Direct-control session has run, and referencing a
+                 missing variable raises "Property lookup failed" into the log on
+                 every load for every player. -->
+            <do_if value="@State.$active">
+              <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
+              <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
+            </do_if>
+            <do_else>
+              <!-- Raising with an unset variable is what produced "Property
+                   lookup failed: State.$active" on every load; there is nothing
+                   to restore in this case, so simply do not raise. -->
+              <debug_text text="'[X4GC] RequestState: no saved session state'" chance="100"/>
+            </do_else>
           </actions>
         </cue>
       </cues>

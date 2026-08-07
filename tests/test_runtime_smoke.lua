@@ -1739,13 +1739,129 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
--- ── 49. readTargetCandidates cache: two quick repaints share one sweep ─────────
+-- ── 49. RestoreSession handler: both plain-key and $-prefixed payloads restore ──
+-- The engine PREPENDS $ to every Lua string key during Lua->MD conversion
+-- (live-tested 2026-08-04). After a save/load, State.$active may come back from
+-- raise_lua_event with keys like "$shipID" instead of "shipID". The handler must
+-- restore turret groups regardless of which form arrives.
+--
+-- The handler is exposed via X4GunneryControlAPI.onRestoreSession for test use.
+
+assert(type(X4GunneryControlAPI.onRestoreSession) == "function",
+    "X4GunneryControlAPI.onRestoreSession must be exposed; add TestAPI.onRestoreSession in gunnery_control.lua")
+
+-- Helper: build a "group" snapshot with a specific key prefix form.
+local function makeSnap49(prefix, shipID, path, group)
+    local p = prefix or ""
+    return {
+        [p .. "shipID"]    = tostring(shipID),
+        [p .. "kind"]      = "group",
+        [p .. "mode"]      = "defend",
+        [p .. "armed"]     = false,
+        [p .. "contextID"] = "1",
+        [p .. "path"]      = path,
+        [p .. "group"]     = group,
+    }
+end
+
+-- Helper: run one RestoreSession handler invocation and capture what was parsed.
+-- Returns (newSessionShipID, capturedDirectSnapshots).
+local function runRestore49(payload)
+    local newSessionShipID = nil
+    local capturedSnapshots = nil
+    local origNewSession = X4GunneryState.newSession
+    X4GunneryState.newSession = function(ship, reason)
+        newSessionShipID = ship
+        return origNewSession(ship, reason)
+    end
+    local origRelease = X4GunneryState.releaseDirect
+    X4GunneryState.releaseDirect = function(sess)
+        capturedSnapshots = sess.directSnapshots
+        return origRelease(sess)
+    end
+    X4GunneryControlAPI.onRestoreSession(nil, payload)
+    X4GunneryState.newSession = origNewSession
+    X4GunneryState.releaseDirect = origRelease
+    return newSessionShipID, capturedSnapshots
+end
+
+-- 49a: plain-key list payload (the form the handler always produced before this fix).
+local plainPayload49 = {
+    makeSnap49("", 42, "p49", "A"),
+    makeSnap49("", 42, "p49", "B"),
+}
+local shipA, snapsA = runRestore49(plainPayload49)
+assert(shipA ~= nil,
+    "RestoreSession with plain-key list must call State.newSession; shipID was nil")
+assert(tostring(shipA) == "42",
+    "RestoreSession plain-key: wrong shipID; expected '42', got " .. tostring(shipA))
+assert(snapsA ~= nil and #snapsA == 2,
+    "RestoreSession plain-key: expected 2 normalised snapshots in directSnapshots; got "
+    .. tostring(snapsA and #snapsA))
+assert(snapsA[1].kind == "group",
+    "RestoreSession plain-key: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsA[1].kind))
+assert(snapsA[1].path == "p49",
+    "RestoreSession plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsA[1].path))
+
+-- 49b: $-prefixed list payload (the form that arrives if MD->Lua keeps the $ prefix).
+local prefixedPayload49 = {
+    makeSnap49("$", 42, "p49", "A"),
+    makeSnap49("$", 42, "p49", "B"),
+}
+local shipB, snapsB = runRestore49(prefixedPayload49)
+assert(shipB ~= nil,
+    "RestoreSession with $-prefixed list must call State.newSession; shipID was nil. "
+    .. "The handler is not reading $-prefixed keys from the MD payload.")
+assert(tostring(shipB) == "42",
+    "RestoreSession $-prefixed: wrong shipID; expected '42', got " .. tostring(shipB))
+assert(snapsB ~= nil and #snapsB == 2,
+    "RestoreSession $-prefixed: expected 2 normalised snapshots; got "
+    .. tostring(snapsB and #snapsB))
+assert(snapsB[1].kind == "group",
+    "RestoreSession $-prefixed: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsB[1].kind))
+assert(snapsB[1].path == "p49",
+    "RestoreSession $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsB[1].path))
+
+-- 49c: legacy single-snapshot plain-key form (shipID present, no [1]).
+local legacyPlain49 = makeSnap49("", 42, "p49", "A")
+local shipC, snapsC = runRestore49(legacyPlain49)
+assert(shipC ~= nil,
+    "RestoreSession legacy plain-key single snapshot must call State.newSession")
+assert(snapsC ~= nil and #snapsC == 1,
+    "RestoreSession legacy plain-key: expected 1 snapshot; got "
+    .. tostring(snapsC and #snapsC))
+assert(snapsC[1].path == "p49",
+    "RestoreSession legacy plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsC[1].path))
+
+-- 49d: legacy single-snapshot $-prefixed form.
+local legacyPrefixed49 = makeSnap49("$", 42, "p49", "A")
+local shipD, snapsD = runRestore49(legacyPrefixed49)
+assert(shipD ~= nil,
+    "RestoreSession legacy $-prefixed single snapshot must call State.newSession. "
+    .. "The handler is not reading the $shipID key from the legacy form.")
+assert(snapsD ~= nil and #snapsD == 1,
+    "RestoreSession legacy $-prefixed: expected 1 snapshot; got "
+    .. tostring(snapsD and #snapsD))
+assert(snapsD[1].path == "p49",
+    "RestoreSession legacy $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsD[1].path))
+
+-- 49e: diagnostic log line is emitted.
+assert(logContains("RestoreSession:"),
+    "RestoreSession handler must emit a diagnostic log line containing 'RestoreSession:'")
+
+-- ── 50. readTargetCandidates cache: two quick repaints share one sweep ─────────
 -- The cache must serve the second display() call from session.targetCandidates
 -- without calling GetContainedShips a second time. The browser/force path must
 -- always bypass the cache and call GetContainedShips.
 
-local shipScanCount49 = 0
-GetContainedShips = function() shipScanCount49 = shipScanCount49 + 1; return { 98 } end
+local shipScanCount50 = 0
+GetContainedShips = function() shipScanCount50 = shipScanCount50 + 1; return { 98 } end
 GetContainedStations = function() return {} end
 GetPlayerContextByClass = function() return 1 end
 C.GetContextByClass = function(comp, cls, self_) return comp end
@@ -1768,57 +1884,57 @@ GetComponentData = function(component, ...)
 end
 
 gcMenu.onShowMenu()
-local sess49 = API.getSession()
-assert(sess49 ~= nil, "expected session for cache test (49)")
+local sess50 = API.getSession()
+assert(sess50 ~= nil, "expected session for cache test (50)")
 
 -- Set up a direct/engaged session with two snapshots so the compact panel renders.
-local grp49 = { key = "grp49", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, displayName = "G49", totalCount = 1, operationalCount = 1,
+local grp50 = { key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 27, displayName = "G50", totalCount = 1, operationalCount = 1,
     mode = "attack", armed = false, members = {
         { componentID = 27, displayName = "T1", operational = true,
           cameraSupported = true, componentKey = "27" }
     } }
-sess49.groups = { grp49 }
-sess49.checkedGroupKeys = { ["grp49"] = true }
-sess49.phase = "engaged"
-sess49.controlMode = "direct"
-sess49.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
-    shipID = sess49.shipID, mode = "attack", armed = false } }
-sess49.cameraMemberID = 27
-sess49.targetObjectID = 98
-sess49.aimTargetID = 98
-sess49.targetCandidates = {}   -- start empty so first call always sweeps
+sess50.groups = { grp50 }
+sess50.checkedGroupKeys = { ["grp50"] = true }
+sess50.phase = "engaged"
+sess50.controlMode = "direct"
+sess50.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+    shipID = sess50.shipID, mode = "attack", armed = false } }
+sess50.cameraMemberID = 27
+sess50.targetObjectID = 98
+sess50.aimTargetID = 98
+sess50.targetCandidates = {}   -- start empty so first call always sweeps
 
 -- Move the clock forward so the cache from any prior test is stale.
 clock = clock + 100
 getElapsedTime = function() return clock end
 
 -- First display(): must sweep (cache is empty / time-expired).
-shipScanCount49 = 0
-local ok49a, err49a = pcall(function() gcMenu.display() end)
-assert(ok49a, "display() raised on first call (test 49): " .. tostring(err49a))
-local sweepsAfterFirst = shipScanCount49
+shipScanCount50 = 0
+local ok50a, err50a = pcall(function() gcMenu.display() end)
+assert(ok50a, "display() raised on first call (test 50): " .. tostring(err50a))
+local sweepsAfterFirst = shipScanCount50
 assert(sweepsAfterFirst >= 1,
     "first display() must call GetContainedShips at least once; got " .. tostring(sweepsAfterFirst))
 
 -- Second display() immediately (same clock): must reuse cache, no new sweep.
-shipScanCount49 = 0
-local ok49b, err49b = pcall(function() gcMenu.display() end)
-assert(ok49b, "display() raised on second call (test 49): " .. tostring(err49b))
-assert(shipScanCount49 == 0,
+shipScanCount50 = 0
+local ok50b, err50b = pcall(function() gcMenu.display() end)
+assert(ok50b, "display() raised on second call (test 50): " .. tostring(err50b))
+assert(shipScanCount50 == 0,
     "second display() within the TTL must not rescan; GetContainedShips was called "
-    .. tostring(shipScanCount49) .. " time(s). Cache is not working.")
+    .. tostring(shipScanCount50) .. " time(s). Cache is not working.")
 
 -- Target-browser path (force=true): must always sweep even within the TTL.
 -- Simulate the browser by switching to target_select phase (what openTargetBrowser does).
 -- We reach the forced path by calling the browser display branch directly:
 -- set phase to target_select and call display().
-sess49.phase = "target_select"
-shipScanCount49 = 0
-local ok49c, err49c = pcall(function() gcMenu.display() end)
-assert(ok49c, "display() raised in browser phase (test 49): " .. tostring(err49c))
-assert(shipScanCount49 >= 1,
+sess50.phase = "target_select"
+shipScanCount50 = 0
+local ok50c, err50c = pcall(function() gcMenu.display() end)
+assert(ok50c, "display() raised in browser phase (test 50): " .. tostring(err50c))
+assert(shipScanCount50 >= 1,
     "target-browser display() must always sweep (force=true); GetContainedShips was called "
-    .. tostring(shipScanCount49) .. " time(s)")
+    .. tostring(shipScanCount50) .. " time(s)")
 
 print("runtime smoke tests passed")
