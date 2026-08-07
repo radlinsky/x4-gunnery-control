@@ -70,6 +70,14 @@ local function log(message) DebugError("[X4GC] " .. message) end
 -- Raw FFI ids stringify with a ULL suffix and id()-converted ones do not, so a
 -- bare tostring comparison judges the same component to be two different ones.
 local function sameID(a, b) return State.normID(a) == State.normID(b) end
+-- "0ULL" (the FFI form of an unset UniverseID) and "0" and nil all mean the
+-- same thing: no component. Guards that only test tostring(v) == "0" silently
+-- miss the cdata form and let zero ids through as if they were real targets.
+-- Comparing a raw cdata id against the number 0 (`softtargetID ~= 0`) is safe --
+-- LuaJIT compares boxed uint64 numerically -- and several sites below still do
+-- that. Only the tostring form breaks, so reach for isNullID() whenever the
+-- value may be nil or may have been through id()/normID().
+local isNullID = State.isNullID
 local function sameSession(expected, epoch)
     return session == expected and sessionEpoch == epoch
 end
@@ -431,7 +439,7 @@ end
 -- is a state vanilla never produces: buttonExternal refuses to target-view the
 -- player's own ship at all (menu_interactmenu.lua:2231).
 local function restoreSofttarget(previousID, previousConnection)
-    if not previousID or tostring(previousID) == "0" then
+    if isNullID(previousID) then
         RemoveSofttarget()
     else
         C.SetSofttarget(previousID, previousConnection)
@@ -444,7 +452,7 @@ end
 clearOwnShipSofttarget = function()
     if not session then return end
     local current = C.GetSofttarget2().softtargetID
-    if not current or tostring(current) == "0" then return end
+    if isNullID(current) then return end
     local root = C.GetContextByClass(id(current), "container", true)
     if sameID(root ~= 0 and root or id(current), session.shipID) then
         RemoveSofttarget()
@@ -855,15 +863,15 @@ local function sendCutsceneAimStart(pov)
     -- Prefer session.aimTargetID (set by updateAimTarget / engageTarget) so
     -- step 8 auto-retarget works correctly; fall back to the current soft target.
     local targetID = session.aimTargetID
-    if not targetID or tostring(targetID) == "0" then
+    if isNullID(targetID) then
         local softtarget = C.GetSofttarget2()
         targetID = softtarget.softtargetID
     end
-    if not turretID or tostring(turretID) == "0" then
+    if isNullID(turretID) then
         log("sendCutsceneAimStart: no turret resolved; ignored")
         return
     end
-    if not targetID or tostring(targetID) == "0" then
+    if isNullID(targetID) then
         log("sendCutsceneAimStart: no softtarget; ignored")
         return
     end
@@ -919,7 +927,7 @@ applyPov = function()
     else
         componentID = session.cameraMemberID
     end
-    if not componentID or tostring(componentID) == "0" then return false end
+    if isNullID(componentID) then return false end
     local ok, err = pcall(function() C.SetPlayerCameraTargetView(componentID, true) end)
     if ok and anchor == "turret" then session.cameraMemberID = id(componentID) end
     logSession("applyPov anchor=" .. anchor .. " mode=" .. mode
@@ -1013,11 +1021,11 @@ local function updateAimTarget()
     if not session or session.phase ~= "engaged" then return end
     local prev = session.aimTargetID
     local now = getElapsedTime()
-    local hadTarget = prev and tostring(prev) ~= "0"
+    local hadTarget = not isNullID(prev)
     if hadTarget and not C.IsComponentOperational(id(prev)) and session.controlMode == "direct" then
         return onDirectTargetLost()
     end
-    if prev and tostring(prev) ~= "0" and C.IsComponentOperational(id(prev)) then
+    if not isNullID(prev) and C.IsComponentOperational(id(prev)) then
         -- Direct-control keeps the ordered target even when it drifts out of
         -- range. Auto-engage may switch to something better, but each scan is a
         -- whole-sector sweep (readTargetCandidates enumerates every ship and
@@ -1153,7 +1161,7 @@ function menu.display()
         headerRow[1]:setColSpan(2):createText(headerText, { halign = "center" })
         -- Six buttons in three rows of two (step 7).
         local hasSoftTarget = (C.GetSofttarget2().softtargetID ~= 0)
-            or (session.aimTargetID and tostring(session.aimTargetID) ~= "0")
+            or not isNullID(session.aimTargetID)
         local roster = State.cameraRoster(session)
         local canCycle = #roster > 1
         -- Grey out the button for the view currently on screen. Defaults match

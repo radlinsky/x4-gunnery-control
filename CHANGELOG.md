@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Fix every null-ID guard in the runtime. A `UniverseID` read out of an FFI
+  struct is boxed cdata, so `tostring()` on an unset one gives `"0ULL"`, not
+  `"0"`. Nine guards tested `tostring(x) == "0"` and therefore never fired in
+  game. `State.isNullID()` now owns the check (nil, `0`, `"0"`, `"0ULL"`) and
+  all nine route through it. Comparing a raw cdata id against the number `0`
+  was always safe — LuaJIT compares boxed uint64 numerically — so the sites
+  written that way were never affected.
+
+  This makes the soft-target restore in 0.20 real: `restoreSofttarget()` was
+  reaching `C.SetSofttarget(0, "")` rather than `RemoveSofttarget()` on every
+  session that started with no soft target, which is exactly the call that
+  release said it had stopped making. See the correction under 0.20 below.
+
+  No Lua test could have caught this — every harness stubs ids as plain
+  numbers, where `tostring(0)` really is `"0"` — so `test_runtime_ui_contract.sh`
+  now rejects the `tostring(x) == "0"` shape outright.
+
 - Remove the post-exit diagnostic sampler. It wrote `DebugError` lines for 90
   seconds every time you left the gunnery seat; the bug it was hunting was
   fixed in 0.20.
@@ -45,6 +62,13 @@ All notable changes to this project are documented in this file.
   as the belt. Candidate fix for Esc not opening the game menu after a session
   that moved the camera. The post-exit sampler logs `soft=<id>/root=<id>` so
   the next log confirms or kills it.
+
+  **Correction:** this did not ship working. The new guard read
+  `tostring(previousID) == "0"`, which is false for the `"0ULL"` that FFI
+  actually hands back, so `RemoveSofttarget()` was never reached and
+  `C.SetSofttarget(0, "")` went out exactly as before. Same for
+  `clearOwnShipSofttarget()`, whose early-out never fired either. Fixed under
+  Unreleased above.
 
 - Add an **Auto-next Target** checkbox to the compact Direct-control panel,
   checked by default (`session.autoNextTarget`). Checked, the death of the
