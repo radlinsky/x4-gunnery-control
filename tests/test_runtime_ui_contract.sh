@@ -274,8 +274,6 @@ if grep -Fq 'target_detail' "$main"; then
   exit 1
 fi
 
-grep -Fq 'IsEncryptedDirectInputModeActive' "$main"
-grep -Fq 'IsConversationActive' "$main"
 grep -Fq 'SetPlayerCameraCockpitView' "$main"
 
 echo "runtime UI contract checks passed"

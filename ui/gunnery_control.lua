@@ -29,10 +29,6 @@ const char* GetComponentName(UniverseID componentid); SofttargetDetails2 GetSoft
 bool IsPlayerCameraTargetViewPossible(UniverseID targetid, bool force); void SetPlayerCameraTargetView(UniverseID targetid, bool force);
 UniverseID GetExternalTargetViewComponent(void); void SetPlayerCameraCockpitView(bool force); bool GetUp(void);
 bool IsHUDActive(void); bool IsFullscreenCutsceneActive(void);
-bool IsExternalViewActive(void); bool IsExternalTargetMode(void);
-bool CanSetPlayerCameraCinematicView(void);
-bool IsConversationActive(void); bool IsConversationCancelling(void);
-bool IsEncryptedDirectInputModeActive(void);
 bool IsFullscreenMenuDisplayed(bool anymenu, const char* menuname);
 bool IsGamePaused(void); void SetTrackedMenuFullscreen(const char* menu, bool fullscreen);
 bool SetSofttarget(UniverseID componentid, const char*const connectionname);

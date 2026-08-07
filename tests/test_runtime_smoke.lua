@@ -437,16 +437,6 @@ assert(not lastFrameProps.useMiniWidgetSystem,
 assert(lastFrameProps.playerControls == true,
     "BUG: engaged/direct frame playerControls is not true")
 
--- Helper to drain and return all pending callbacks accumulated after a given
--- index, so tests can examine just the ones triggered by a specific path.
-local function callbacksAfter(index)
-    local result = {}
-    for i = index + 1, #pendingCallbacks do
-        result[#result + 1] = pendingCallbacks[i]
-    end
-    return result
-end
-
 -- ── 14: Engage POV toggle flips turret <-> target and is guarded ───────────
 -- The camera call is pcall-guarded so a runtime failure logs instead of taking
 -- the session down. Drive the toggle through onCloseElement-independent state.
@@ -1191,6 +1181,16 @@ clock = clock + 10
 gcMenu.onUpdate()
 assert(sess35.povMode == "cinematic",
     "the gap between a cutscene stop and its restart must not cancel the cinematic")
+
+-- Helper to drain and return all pending callbacks accumulated after a given
+-- index, so tests can examine just the ones triggered by a specific path.
+local function callbacksAfter(index)
+    local result = {}
+    for i = index + 1, #pendingCallbacks do
+        result[#result + 1] = pendingCallbacks[i]
+    end
+    return result
+end
 
 -- ── 36. get-up discards the session now but closes the frames a tick later ───
 -- Vanilla closes from the playerGetUp event rather than inside its Get Up
