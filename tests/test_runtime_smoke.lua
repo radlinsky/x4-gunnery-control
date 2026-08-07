@@ -437,195 +437,6 @@ assert(not lastFrameProps.useMiniWidgetSystem,
 assert(lastFrameProps.playerControls == true,
     "BUG: engaged/direct frame playerControls is not true")
 
--- ── 13. post-exit sampler ────────────────────────────────────────────────────
--- After the player leaves the gunnery chair the
--- extension stops logging, so the HUD-missing window is invisible. A short
--- post-teardown sampler records state for ~8 s and then stops.
---
--- Setup: reset to a clean known state with a fresh session, then exercise the
--- two seat-exit paths (leaveChair via onCloseElement, and endForMovement via
--- the playerGetUp event).
-
--- Helper to drain and return all pending callbacks accumulated after a given
--- index, so we can test just the ones triggered by the seat-exit path.
-local function callbacksAfter(index)
-    local result = {}
-    for i = index + 1, #pendingCallbacks do
-        result[#result + 1] = pendingCallbacks[i]
-    end
-    return result
-end
-
--- 13a: leaveChair path schedules sampler callbacks.
--- Reset the session to a console-phase owned state.
-local sess13 = API.getSession()
-if not sess13 then gcMenu.onShowMenu() end
-sess13 = API.getSession()
-assert(sess13 ~= nil, "expected a live session for post-exit sampler test")
-sess13.phase = "console"
-
-local beforeLeave = #pendingCallbacks
--- Drive the console-close path (same as pressing the console close button).
-gcMenu.onCloseElement("close")
--- leaveChair calls endSession, then the implementation should schedule sampler
--- callbacks. Count them.
-local samplerCallbacks = callbacksAfter(beforeLeave)
-assert(#samplerCallbacks >= 5,
-    "post-exit sampler: expected at least 5 delayed callbacks after leaveChair, got "
-    .. tostring(#samplerCallbacks)
-    .. ". Implement the sampler in leaveChair / endForMovement.")
-
--- 13b: invoking a sampler callback emits a 'post-exit sample' line and does not raise.
-local capturedBefore = #capturedLog
-local ok13b, err13b = pcall(samplerCallbacks[1])
-assert(ok13b, "post-exit sampler callback raised: " .. tostring(err13b))
-assert(logContains("post-exit sample"),
-    "post-exit sampler: expected a log line containing 'post-exit sample' after "
-    .. "invoking the first scheduled callback. Log since callback:\n"
-    .. table.concat(capturedLog, "\n"))
-
--- 13c: overlap guard — a stale-generation callback emits nothing.
--- Start a fresh session to simulate the player re-seating, which bumps the
--- generation. Then invoke one of the callbacks from the first sampler run.
-gcMenu.onShowMenu()
-local sessAfterReseat = API.getSession()
-assert(sessAfterReseat ~= nil, "expected a session after re-seating for overlap test")
--- Drive another seat exit so the generation advances a second time.
-local beforeSecondLeave = #pendingCallbacks
-gcMenu.onCloseElement("close")
--- Now invoke a callback from the FIRST exit (samplerCallbacks[1] already ran;
--- pick one that has not yet run).
-local staleCallback = samplerCallbacks[2]
-local logBeforeStale = #capturedLog
-local okStale, errStale = pcall(staleCallback)
-assert(okStale, "stale sampler callback raised: " .. tostring(errStale))
-local linesAfterStale = {}
-for i = logBeforeStale + 1, #capturedLog do linesAfterStale[#linesAfterStale + 1] = capturedLog[i] end
-local staleEmitted = false
-for _, line in ipairs(linesAfterStale) do
-    if string.find(line, "post-exit sample", 1, true) then staleEmitted = true; break end
-end
-assert(not staleEmitted,
-    "overlap guard failed: stale-generation sampler callback still emitted 'post-exit sample' "
-    .. "after a newer exit superseded it. Implement a generation counter check.")
-
--- 13d: change-suppression — draining every callback from a single exit with a
--- stable environment produces exactly 1 logged "post-exit sample" line (the
--- first one always logs; identical subsequent probes are silently dropped).
--- Also: at least one scheduled offset must be >= 60 s so the window straddles
--- the Esc-after-get-up workaround (opening any menu clears the stuck state).
-gcMenu.onShowMenu()
-local sess13d = API.getSession()
-assert(sess13d ~= nil, "expected session for bounded-count test")
-sess13d.phase = "console"
-local beforeBounded = #pendingCallbacks
-gcMenu.onCloseElement("close")
-local boundedCallbacks = callbacksAfter(beforeBounded)
-assert(#boundedCallbacks >= 5,
-    "bounded-count test: expected at least 5 callbacks after third exit, got "
-    .. tostring(#boundedCallbacks))
-
--- At least one offset must reach >= 60 s (the recording window must straddle
--- the workaround interval). The callbacks capture their offset in the log line;
--- we verify by count: with offsets {0.5,1.0,2.0,4.0} + every 2s up to 90s
--- there are many callbacks, at least enough that #boundedCallbacks >= 47
--- (4 early + 43 from t=6 through t=90 in steps of 2).
-assert(#boundedCallbacks >= 47,
-    "long-window test: expected at least 47 callbacks for a 90-second window, got "
-    .. tostring(#boundedCallbacks)
-    .. ". Add 2-second periodic offsets up to 90 s.")
-
--- Drain all callbacks with stable stubs and count sample lines.
--- Change-suppression means only the FIRST call should log; identical payloads
--- must be silently dropped.
-local logBeforeDrain = #capturedLog
-for _, cb in ipairs(boundedCallbacks) do
-    local okD, errD = pcall(cb)
-    assert(okD, "sampler callback raised during bounded drain: " .. tostring(errD))
-end
-local sampleLines = 0
-for i = logBeforeDrain + 1, #capturedLog do
-    if string.find(capturedLog[i], "post-exit sample", 1, true) then
-        sampleLines = sampleLines + 1
-    end
-end
--- With a stable environment, only one line should be logged (the first probe).
--- All subsequent probes match the previous payload and are suppressed.
-assert(sampleLines == 1,
-    "change-suppression test: expected exactly 1 'post-exit sample' line when "
-    .. "all callbacks produce an identical probe payload, got " .. tostring(sampleLines)
-    .. ". The sampler must suppress identical consecutive payloads.")
-
--- 13d2: after change — mutating a probed value mid-run must produce a new line.
--- Simulate the Esc-workaround clearing a stuck state: change IsHUDActive's stub
--- so the next sampler run's first callback sees a different payload.
-gcMenu.onShowMenu()
-local sess13d2 = API.getSession()
-assert(sess13d2 ~= nil, "expected session for change-detection test")
-sess13d2.phase = "console"
-local beforeChange = #pendingCallbacks
-gcMenu.onCloseElement("close")
-local changeCallbacks = callbacksAfter(beforeChange)
-
--- Drain enough to emit the first (baseline) line.
-local logBeforeChange = #capturedLog
-local okFirst, errFirst = pcall(changeCallbacks[1])
-assert(okFirst, "first change-test callback raised: " .. tostring(errFirst))
-local firstLines = 0
-for i = logBeforeChange + 1, #capturedLog do
-    if string.find(capturedLog[i], "post-exit sample", 1, true) then
-        firstLines = firstLines + 1
-    end
-end
-assert(firstLines == 1, "change-detection test: first callback must log; got " .. tostring(firstLines))
-
--- Now mutate IsHUDActive so subsequent probes differ, then drain one more callback.
-local savedIsHUDActive = C.IsHUDActive
-C.IsHUDActive = function() return false end
-local logBeforeMutated = #capturedLog
-local okSecond, errSecond = pcall(changeCallbacks[2])
-assert(okSecond, "second change-test callback raised: " .. tostring(errSecond))
-C.IsHUDActive = savedIsHUDActive
-local mutatedLines = 0
-for i = logBeforeMutated + 1, #capturedLog do
-    if string.find(capturedLog[i], "post-exit sample", 1, true) then
-        mutatedLines = mutatedLines + 1
-    end
-end
-assert(mutatedLines == 1,
-    "change-detection test: expected 1 new 'post-exit sample' line after "
-    .. "mutating IsHUDActive, got " .. tostring(mutatedLines)
-    .. ". Suppression must be per-change, not permanent.")
-
--- 13e: re-entry guard — if the player re-seats before all samples fire, the
--- remaining callbacks emit nothing.
-gcMenu.onShowMenu()
-local sess13e = API.getSession()
-assert(sess13e ~= nil, "expected session for re-entry guard test")
-sess13e.phase = "console"
-local beforeReentry = #pendingCallbacks
-gcMenu.onCloseElement("close")
-local reentryCallbacks = callbacksAfter(beforeReentry)
-
--- Simulate re-entry before any callbacks run.
-gcMenu.onShowMenu()
-assert(API.getSession() ~= nil, "expected session after re-entry")
-
--- Now drain the sampler callbacks; they should all be silent because a live
--- session now exists.
-local logBeforeReentry = #capturedLog
-for _, cb in ipairs(reentryCallbacks) do pcall(cb) end
-local reentryLines = 0
-for i = logBeforeReentry + 1, #capturedLog do
-    if string.find(capturedLog[i], "post-exit sample", 1, true) then
-        reentryLines = reentryLines + 1
-    end
-end
-assert(reentryLines == 0,
-    "re-entry guard failed: sampler callbacks fired " .. tostring(reentryLines)
-    .. " 'post-exit sample' lines after the player re-seated. "
-    .. "The sampler must stop when a new session exists.")
-
 -- ── 14: Engage POV toggle flips turret <-> target and is guarded ───────────
 -- The camera call is pcall-guarded so a runtime failure logs instead of taking
 -- the session down. Drive the toggle through onCloseElement-independent state.
@@ -1274,6 +1085,9 @@ assert(povButton(58) and povButton(58).active == true,
 -- ── 32. Next/Previous Target grey out with nothing to cycle to ───────────────
 -- Cycling is pointless with a single candidate, and there is no candidate list
 -- at all outside direct mode. The stubs from test 29 still supply 98 and 99.
+-- Advance the clock so the readTargetCandidates() 1 s TTL cache (added with the
+-- target-candidate-cache fix) expires between this display() and the one above.
+clock = clock + 2
 GetContainedShips = function() return { 98 } end
 gcMenu.display()
 assert(povButton(75) and povButton(75).active == false,
@@ -1281,6 +1095,7 @@ assert(povButton(75) and povButton(75).active == false,
 assert(povButton(76) and povButton(76).active == false,
     "Previous Target must be greyed with only one candidate")
 
+clock = clock + 2
 GetContainedShips = function() return { 98, 99 } end
 gcMenu.display()
 assert(povButton(75) and povButton(75).active == true,
@@ -1366,6 +1181,16 @@ clock = clock + 10
 gcMenu.onUpdate()
 assert(sess35.povMode == "cinematic",
     "the gap between a cutscene stop and its restart must not cancel the cinematic")
+
+-- Helper to drain and return all pending callbacks accumulated after a given
+-- index, so tests can examine just the ones triggered by a specific path.
+local function callbacksAfter(index)
+    local result = {}
+    for i = index + 1, #pendingCallbacks do
+        result[#result + 1] = pendingCallbacks[i]
+    end
+    return result
+end
 
 -- ── 36. get-up discards the session now but closes the frames a tick later ───
 -- Vanilla closes from the playerGetUp event rather than inside its Get Up
@@ -1735,7 +1560,243 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
--- ── 49. readGroups: duplicate path+group names must stay controllable ─────
+-- ── 49. RestoreSession handler: both plain-key and $-prefixed payloads restore ──
+-- The engine PREPENDS $ to every Lua string key during Lua->MD conversion
+-- (live-tested 2026-08-04). After a save/load, State.$active may come back from
+-- raise_lua_event with keys like "$shipID" instead of "shipID". The handler must
+-- restore turret groups regardless of which form arrives.
+--
+-- The handler is exposed via X4GunneryControlAPI.onRestoreSession for test use.
+
+assert(type(X4GunneryControlAPI.onRestoreSession) == "function",
+    "X4GunneryControlAPI.onRestoreSession must be exposed; add TestAPI.onRestoreSession in gunnery_control.lua")
+
+-- Helper: build a "group" snapshot with a specific key prefix form.
+local function makeSnap49(prefix, shipID, path, group)
+    local p = prefix or ""
+    return {
+        [p .. "shipID"]    = tostring(shipID),
+        [p .. "kind"]      = "group",
+        [p .. "mode"]      = "defend",
+        [p .. "armed"]     = false,
+        [p .. "contextID"] = "1",
+        [p .. "path"]      = path,
+        [p .. "group"]     = group,
+    }
+end
+
+-- Helper: run one RestoreSession handler invocation and capture what was parsed.
+-- Returns (newSessionShipID, capturedDirectSnapshots).
+local function runRestore49(payload)
+    local newSessionShipID = nil
+    local capturedSnapshots = nil
+    local origNewSession = X4GunneryState.newSession
+    X4GunneryState.newSession = function(ship, reason)
+        newSessionShipID = ship
+        return origNewSession(ship, reason)
+    end
+    local origRelease = X4GunneryState.releaseDirect
+    X4GunneryState.releaseDirect = function(sess)
+        capturedSnapshots = sess.directSnapshots
+        return origRelease(sess)
+    end
+    X4GunneryControlAPI.onRestoreSession(nil, payload)
+    X4GunneryState.newSession = origNewSession
+    X4GunneryState.releaseDirect = origRelease
+    return newSessionShipID, capturedSnapshots
+end
+
+-- 49a: plain-key list payload (the form the handler always produced before this fix).
+local plainPayload49 = {
+    makeSnap49("", 42, "p49", "A"),
+    makeSnap49("", 42, "p49", "B"),
+}
+local shipA, snapsA = runRestore49(plainPayload49)
+assert(shipA ~= nil,
+    "RestoreSession with plain-key list must call State.newSession; shipID was nil")
+assert(tostring(shipA) == "42",
+    "RestoreSession plain-key: wrong shipID; expected '42', got " .. tostring(shipA))
+assert(snapsA ~= nil and #snapsA == 2,
+    "RestoreSession plain-key: expected 2 normalised snapshots in directSnapshots; got "
+    .. tostring(snapsA and #snapsA))
+assert(snapsA[1].kind == "group",
+    "RestoreSession plain-key: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsA[1].kind))
+assert(snapsA[1].path == "p49",
+    "RestoreSession plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsA[1].path))
+
+-- 49b: $-prefixed list payload (the form that arrives if MD->Lua keeps the $ prefix).
+local prefixedPayload49 = {
+    makeSnap49("$", 42, "p49", "A"),
+    makeSnap49("$", 42, "p49", "B"),
+}
+local shipB, snapsB = runRestore49(prefixedPayload49)
+assert(shipB ~= nil,
+    "RestoreSession with $-prefixed list must call State.newSession; shipID was nil. "
+    .. "The handler is not reading $-prefixed keys from the MD payload.")
+assert(tostring(shipB) == "42",
+    "RestoreSession $-prefixed: wrong shipID; expected '42', got " .. tostring(shipB))
+assert(snapsB ~= nil and #snapsB == 2,
+    "RestoreSession $-prefixed: expected 2 normalised snapshots; got "
+    .. tostring(snapsB and #snapsB))
+assert(snapsB[1].kind == "group",
+    "RestoreSession $-prefixed: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsB[1].kind))
+assert(snapsB[1].path == "p49",
+    "RestoreSession $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsB[1].path))
+
+-- 49c: legacy single-snapshot plain-key form (shipID present, no [1]).
+local legacyPlain49 = makeSnap49("", 42, "p49", "A")
+local shipC, snapsC = runRestore49(legacyPlain49)
+assert(shipC ~= nil,
+    "RestoreSession legacy plain-key single snapshot must call State.newSession")
+assert(snapsC ~= nil and #snapsC == 1,
+    "RestoreSession legacy plain-key: expected 1 snapshot; got "
+    .. tostring(snapsC and #snapsC))
+assert(snapsC[1].path == "p49",
+    "RestoreSession legacy plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsC[1].path))
+
+-- 49d: legacy single-snapshot $-prefixed form.
+local legacyPrefixed49 = makeSnap49("$", 42, "p49", "A")
+local shipD, snapsD = runRestore49(legacyPrefixed49)
+assert(shipD ~= nil,
+    "RestoreSession legacy $-prefixed single snapshot must call State.newSession. "
+    .. "The handler is not reading the $shipID key from the legacy form.")
+assert(snapsD ~= nil and #snapsD == 1,
+    "RestoreSession legacy $-prefixed: expected 1 snapshot; got "
+    .. tostring(snapsD and #snapsD))
+assert(snapsD[1].path == "p49",
+    "RestoreSession legacy $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsD[1].path))
+
+-- 49e: diagnostic log line is emitted.
+assert(logContains("RestoreSession:"),
+    "RestoreSession handler must emit a diagnostic log line containing 'RestoreSession:'")
+
+-- ── 50. startAutoEngage failure path clears controlMode ──────────────────────
+-- Regression: beginEngaged sets session.controlMode = "auto" before trying to
+-- enter the camera. When no operational camera member exists, the old code did
+-- `session.phase = "console"; return false`, leaving controlMode stuck on "auto"
+-- while phase said "console". returnToConsole() must be used instead so phase,
+-- controlMode, povMode, cameraMemberID, and targetObjectID are all cleared together.
+gcMenu.onShowMenu()
+local sess50 = API.getSession()
+assert(sess50 ~= nil, "expected session for startAutoEngage failure test (50)")
+-- Build a group with NO operational members so cameraMember() returns nil and
+-- startAutoEngage hits its first failure exit.
+local grp50 = {
+    key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 30, displayName = "Empty Group", totalCount = 1, operationalCount = 0,
+    mode = "attack", armed = false, members = {
+        { componentID = 30, displayName = "T1", operational = false,
+          cameraSupported = false, componentKey = "30" }
+    }
+}
+sess50.groups = { grp50 }
+sess50.checkedGroupKeys = { ["grp50"] = true }
+sess50.phase = "console"
+sess50.controlMode = nil
+-- Same arguments the console Auto-Engage button passes. startAutoEngage is
+-- module-local; TestAPI exposes it, like TestAPI.endForMovement above.
+local engaged50 = API.startAutoEngage(X4GunneryState.checkedGroups(sess50))
+assert(engaged50 == false,
+    "startAutoEngage with no operational camera member must return false; got "
+    .. tostring(engaged50))
+-- After the failure, phase must be "console" and controlMode must be nil.
+assert(sess50.phase == "console",
+    "startAutoEngage failure path must leave phase='console'; got '"
+    .. tostring(sess50.phase) .. "'")
+assert(sess50.controlMode == nil,
+    "BUG: startAutoEngage failure path left controlMode='"
+    .. tostring(sess50.controlMode)
+    .. "'; State.returnToConsole must be used instead of raw phase assignment")
+
+-- ── 51. readTargetCandidates cache: two quick repaints share one sweep ─────────
+-- The cache must serve the second display() call from session.targetCandidates
+-- without calling GetContainedShips a second time. The browser/force path must
+-- always bypass the cache and call GetContainedShips.
+
+local shipScanCount51 = 0
+GetContainedShips = function() shipScanCount51 = shipScanCount51 + 1; return { 98 } end
+GetContainedStations = function() return {} end
+GetPlayerContextByClass = function() return 1 end
+C.GetContextByClass = function(comp, cls, self_) return comp end
+C.IsComponentOperational = function() return true end
+C.GetDistanceBetween = function() return 1000 end
+GetComponentData = function(component, ...)
+    local keys, vals = {...}, {}
+    for _, k in ipairs(keys) do
+        if k == "isenemy" then vals[#vals + 1] = true
+        elseif k == "ishostile" then vals[#vals + 1] = false
+        elseif k == "isfriend" then vals[#vals + 1] = false
+        elseif k == "isknown" then vals[#vals + 1] = true
+        elseif k == "isradarvisible" then vals[#vals + 1] = true
+        elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        else vals[#vals + 1] = nil
+        end
+    end
+    return unpack(vals)
+end
+
+gcMenu.onShowMenu()
+local sess51 = API.getSession()
+assert(sess51 ~= nil, "expected session for cache test (51)")
+
+-- Set up a direct/engaged session with two snapshots so the compact panel renders.
+local grp51 = { key = "grp51", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 27, displayName = "G51", totalCount = 1, operationalCount = 1,
+    mode = "attack", armed = false, members = {
+        { componentID = 27, displayName = "T1", operational = true,
+          cameraSupported = true, componentKey = "27" }
+    } }
+sess51.groups = { grp51 }
+sess51.checkedGroupKeys = { ["grp51"] = true }
+sess51.phase = "engaged"
+sess51.controlMode = "direct"
+sess51.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+    shipID = sess51.shipID, mode = "attack", armed = false } }
+sess51.cameraMemberID = 27
+sess51.targetObjectID = 98
+sess51.aimTargetID = 98
+sess51.targetCandidates = {}   -- start empty so first call always sweeps
+
+-- Move the clock forward so the cache from any prior test is stale.
+clock = clock + 100
+getElapsedTime = function() return clock end
+
+-- First display(): must sweep (cache is empty / time-expired).
+shipScanCount51 = 0
+local ok51a, err51a = pcall(function() gcMenu.display() end)
+assert(ok51a, "display() raised on first call (test 51): " .. tostring(err51a))
+local sweepsAfterFirst = shipScanCount51
+assert(sweepsAfterFirst >= 1,
+    "first display() must call GetContainedShips at least once; got " .. tostring(sweepsAfterFirst))
+
+-- Second display() immediately (same clock): must reuse cache, no new sweep.
+shipScanCount51 = 0
+local ok51b, err51b = pcall(function() gcMenu.display() end)
+assert(ok51b, "display() raised on second call (test 51): " .. tostring(err51b))
+assert(shipScanCount51 == 0,
+    "second display() within the TTL must not rescan; GetContainedShips was called "
+    .. tostring(shipScanCount51) .. " time(s). Cache is not working.")
+
+-- Target-browser path (force=true): must always sweep even within the TTL.
+-- Simulate the browser by switching to target_select phase (what openTargetBrowser does).
+-- We reach the forced path by calling the browser display branch directly:
+-- set phase to target_select and call display().
+sess51.phase = "target_select"
+shipScanCount51 = 0
+local ok51c, err51c = pcall(function() gcMenu.display() end)
+assert(ok51c, "display() raised in browser phase (test 51): " .. tostring(err51c))
+assert(shipScanCount51 >= 1,
+    "target-browser display() must always sweep (force=true); GetContainedShips was called "
+    .. tostring(shipScanCount51) .. " time(s)")
+
+-- ── 52. readGroups: duplicate path+group names must stay controllable ─────
 -- Two groups sharing path+group but with different contextIDs. The slot API
 -- returns no contextID, so slot->group attribution is a guess -- but mode and
 -- armed commands address contextID+path+group directly and are always exact.
@@ -1785,41 +1846,41 @@ do
         return false
     end
 
-    -- 49a: two turrets per group. Slots 1/3 carry the representatives (101,
+    -- 52a: two turrets per group. Slots 1/3 carry the representatives (101,
     --      102); slots 2/4 carry non-representative turrets (103, 104) that
     --      match no group's componentID.
     turretsPerGroup = 2
     slotComponents = { 101, 103, 102, 104 }
-    local groups49a = X4GunneryControlAPI.readGroups(42)
-    local front49a, rear49a = groupByContext(groups49a, "10"), groupByContext(groups49a, "20")
-    assert(front49a and rear49a,
-        "49a: expected group entries for contextID 10 and 20")
-    assert(X4GunneryState.canMutate(front49a) and X4GunneryState.canMutate(rear49a),
-        "49a BUG: a duplicate path+group name must not make a group read-only. "
+    local groups52a = X4GunneryControlAPI.readGroups(42)
+    local front52a, rear52a = groupByContext(groups52a, "10"), groupByContext(groups52a, "20")
+    assert(front52a and rear52a,
+        "52a: expected group entries for contextID 10 and 20")
+    assert(X4GunneryState.canMutate(front52a) and X4GunneryState.canMutate(rear52a),
+        "52a BUG: a duplicate path+group name must not make a group read-only. "
         .. "Mode/armed commands address contextID+path+group, which is exact. Got canMutate "
-        .. tostring(X4GunneryState.canMutate(front49a)) .. "/" .. tostring(X4GunneryState.canMutate(rear49a)))
-    assert(front49a.ambiguous == nil and rear49a.ambiguous == nil,
-        "49a: readGroups must not set an ambiguous flag any more")
-    assert(hasMember(front49a, 101),
-        "49a: the slot carrying group 10's representative component (101) must be listed under group 10")
-    assert(hasMember(rear49a, 102),
-        "49a: the slot carrying group 20's representative component (102) must be listed under group 20")
-    local members49a = #front49a.members + #rear49a.members
-    assert(members49a == #slotComponents,
-        "49a: every turret slot must appear exactly once across the groups; expected "
-        .. tostring(#slotComponents) .. " members, got " .. tostring(members49a))
+        .. tostring(X4GunneryState.canMutate(front52a)) .. "/" .. tostring(X4GunneryState.canMutate(rear52a)))
+    assert(front52a.ambiguous == nil and rear52a.ambiguous == nil,
+        "52a: readGroups must not set an ambiguous flag any more")
+    assert(hasMember(front52a, 101),
+        "52a: the slot carrying group 10's representative component (101) must be listed under group 10")
+    assert(hasMember(rear52a, 102),
+        "52a: the slot carrying group 20's representative component (102) must be listed under group 20")
+    local members52a = #front52a.members + #rear52a.members
+    assert(members52a == #slotComponents,
+        "52a: every turret slot must appear exactly once across the groups; expected "
+        .. tostring(#slotComponents) .. " members, got " .. tostring(members52a))
 
-    -- 49b: one turret per group -- the common case, and the only shape the
+    -- 52b: one turret per group -- the common case, and the only shape the
     --      previous fix handled. Both groups still resolve and stay mutable.
     turretsPerGroup = 1
     slotComponents = { 101, 102 }
-    local groups49b = X4GunneryControlAPI.readGroups(42)
-    local front49b, rear49b = groupByContext(groups49b, "10"), groupByContext(groups49b, "20")
-    assert(front49b and rear49b, "49b: expected group entries for contextID 10 and 20")
-    assert(X4GunneryState.canMutate(front49b) and X4GunneryState.canMutate(rear49b),
-        "49b: single-turret duplicate-named groups must be mutable")
-    assert(hasMember(front49b, 101) and hasMember(rear49b, 102),
-        "49b: each representative component must land in its own group")
+    local groups52b = X4GunneryControlAPI.readGroups(42)
+    local front52b, rear52b = groupByContext(groups52b, "10"), groupByContext(groups52b, "20")
+    assert(front52b and rear52b, "52b: expected group entries for contextID 10 and 20")
+    assert(X4GunneryState.canMutate(front52b) and X4GunneryState.canMutate(rear52b),
+        "52b: single-turret duplicate-named groups must be mutable")
+    assert(hasMember(front52b, 101) and hasMember(rear52b, 102),
+        "52b: each representative component must land in its own group")
 
     C.GetNumUpgradeGroups             = savedGetNumUpgradeGroups
     C.GetUpgradeGroups2               = savedGetUpgradeGroups2

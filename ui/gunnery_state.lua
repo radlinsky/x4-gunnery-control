@@ -72,6 +72,12 @@ end
 -- targetRoot() hands back a raw FFI id, id() hands back a converted one.
 State.normID = normID
 
+-- Returns true when v represents "no component": nil, plain 0, or the
+-- LuaJIT cdata form "0ULL" / "0ull" that the FFI hands back for unset
+-- UniverseID fields. All three mean the same thing at runtime; guards that
+-- only test tostring(v) == "0" silently miss the cdata form.
+function State.isNullID(v) return v == nil or normID(v) == "0" end
+
 -- A surface element belongs to the ship/station returned by targetRoot(). The
 -- occupied ship and its own surfaces must never appear as engagement targets;
 -- other player-owned objects remain selectable so the UI reflects what X4 can
@@ -170,7 +176,7 @@ function State.retainSelection(session, groups)
         if group.key == session.selectedGroupKey then
             selectedGroup = group
             for _, member in ipairs(group.members) do
-                if member.componentID == session.selectedMemberID and member.operational then
+                if normID(member.componentID) == normID(session.selectedMemberID) and member.operational then
                     selectedMember = member
                     break
                 end

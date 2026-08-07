@@ -349,4 +349,15 @@ assert(ce == nil, "cycleEntry: empty list returns nil")
 ce = State.cycleEntry(ceEntries, "20", 1)
 eq(ce.componentID, 30, "cycleEntry: string currentID matches numeric componentID")
 
+-- State.isNullID: guards that once tested tostring(v) == "0" missed the cdata
+-- form "0ULL" that FFI hands back for unset UniverseID fields. isNullID accepts
+-- all three null representations so they fire correctly in game.
+assert(State.isNullID(nil),    "isNullID: nil is null")
+assert(State.isNullID(0),      "isNullID: numeric 0 is null")
+assert(State.isNullID("0"),    "isNullID: string '0' is null")
+assert(State.isNullID("0ULL"), "isNullID: '0ULL' cdata form is null")
+assert(State.isNullID("0ull"), "isNullID: '0ull' lowercase cdata form is null")
+assert(not State.isNullID("463766"),    "isNullID: real id is not null")
+assert(not State.isNullID("463766ULL"), "isNullID: real id with ULL suffix is not null")
+
 print("gunnery_state tests passed")
