@@ -211,6 +211,16 @@ if grep -Eq 'C\.SetSofttarget\(savedTargetID' "$main"; then
   echo 'enterCamera restores the soft target directly again; route it through restoreSofttarget()' >&2
   exit 1
 fi
+# A UniverseID out of the FFI is boxed cdata: tostring() gives "0ULL", so
+# tostring(x) == "0" is false for a null id and the guard never fires in game.
+# No Lua test can catch this -- every harness stubs ids as plain numbers, where
+# tostring(0) really is "0" -- so this grep is the only guard. Use isNullID().
+for f in "$main" ui/gunnery_state.lua "$testlab"; do
+  if grep -nE 'tostring\([^()]*\)[[:space:]]*[=~]=[[:space:]]*"0"' "$f" | grep -vq '^[0-9]*:[[:space:]]*--'; then
+    echo "null-id check by tostring in $f; \"0ULL\" slips through -- use State.isNullID()" >&2
+    exit 1
+  fi
+done
 grep -Fq 'onDirectTargetLost' "$main"
 grep -Fq 'autoNextRow[1]:createCheckBox' "$main"
 grep -Fq 'autoNextRow[2]:createText(text(78))' "$main"

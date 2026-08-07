@@ -79,7 +79,11 @@ local function sameID(a, b) return State.normID(a) == State.normID(b) end
 -- "0ULL" (the FFI form of an unset UniverseID) and "0" and nil all mean the
 -- same thing: no component. Guards that only test tostring(v) == "0" silently
 -- miss the cdata form and let zero ids through as if they were real targets.
-local function isNullID(v) return State.isNullID(v) end
+-- Comparing a raw cdata id against the number 0 (`softtargetID ~= 0`) is safe --
+-- LuaJIT compares boxed uint64 numerically -- and several sites below still do
+-- that. Only the tostring form breaks, so reach for isNullID() whenever the
+-- value may be nil or may have been through id()/normID().
+local isNullID = State.isNullID
 local function sameSession(expected, epoch)
     return session == expected and sessionEpoch == epoch
 end
