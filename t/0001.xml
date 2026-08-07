@@ -27,7 +27,7 @@
     <t id="49">Relation</t><t id="50">Distance</t><t id="51">Unknown Object</t>
     <t id="52">Target / Surface Elements</t><t id="53">No known ships or stations are within this ship's radar range.</t>
     <t id="54">Back to Gunnery Control</t><t id="55">Choose Aim Point</t>
-    <t id="56">Choose the hull or a surface element. Selection changes the soft target; the linked group fires only if X4's mayattack checks consider it legal and attackable.</t>
+    <t id="56">Choose the hull or a surface element. Selection changes the soft target; the linked group fires only if X4 considers the target legal to attack.</t>
     <t id="57">Entire ship or station</t><t id="58">Engage Hull</t><t id="59">Surface Element</t>
     <t id="60">Engage Surface Element</t><t id="61">No operational turret, shield, or engine surface elements were found.</t>
     <t id="62">Back to Nearby Targets</t><t id="63">Turret POV manual</t><t id="64">Target POV manual</t>
