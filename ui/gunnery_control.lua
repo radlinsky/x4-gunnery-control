@@ -339,14 +339,40 @@ end
 -- and engageTarget both sit above that definition.
 local applyPreferAllTurrets
 
--- Hands every turret back. Safe to call when the override was never applied.
-local function clearPreferAllTurrets(reason)
+-- Puts the checked groups back under Direct-control after a release. The clear
+-- is ship-wide -- there is no per-group form of set_turret_targets -- so without
+-- this the groups the player is actually directing fall back to their own mode
+-- and stop shooting the engaged target, which is not what "release the others"
+-- means. Deferred a tick for the same reason the override is: MD reads the
+-- ship's turret modes back when it runs, and the release has to see each turret
+-- in its own mode rather than in autoassist.
+local function resumeDirectControl()
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        if session.phase ~= "engaged" or session.controlMode ~= "direct" then return end
+        for _, snapshot in ipairs(session.directSnapshots or {}) do
+            local group = findSnapshotGroup(snapshot)
+            if group and sameID(snapshot.shipID, session.shipID) then
+                setMode(group, "autoassist"); setArmed(group, true)
+            end
+        end
+        log("resumed direct control after release")
+        menu.display()
+    end, false, getElapsedTime() + 0.02)
+end
+
+-- Hands the rest of the ship back. Safe to call when the override was never
+-- applied. resume=true keeps the checked groups directed; teardown paths pass
+-- nothing, because restoreDirect writes their snapshots back straight after.
+local function clearPreferAllTurrets(reason, resume)
     if not session or not session.preferAllTurrets then return false end
     session.preferAllTurrets = false
     AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets_clear", {
         ["ship"] = ConvertStringToLuaID(tostring(session.shipID)),
     })
     log("prefer_all_turrets_clear emitted: " .. tostring(reason))
+    if resume then resumeDirectControl() end
     return true
 end
 
@@ -976,7 +1002,7 @@ local function sendCutsceneAimStart(pov)
 end
 
 function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
-function TestAPI.clearPreferAllTurrets(reason) return clearPreferAllTurrets(reason) end
+function TestAPI.clearPreferAllTurrets(reason, resume) return clearPreferAllTurrets(reason, resume) end
 
 function TestAPI.sendCutsceneAimStart(pov) sendCutsceneAimStart(pov) end
 function TestAPI.sendCutsceneAimStop() sendCutsceneAimStop() end
@@ -1327,7 +1353,7 @@ function menu.display()
             -- Release All Turrets (id 82)
             overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
             overrideRow[2].handlers.onClick = function()
-                clearPreferAllTurrets("release button"); menu.display()
+                clearPreferAllTurrets("release button", true); menu.display()
             end
         end
         -- Auto-size frame height like the old direct panel (contract grep).

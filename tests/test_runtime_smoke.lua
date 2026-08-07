@@ -1986,6 +1986,37 @@ do
     assert(API.clearPreferAllTurrets("test again") == false,
         "release must be a no-op when the override is not held")
 
+    -- Releasing from the button takes the checked groups straight back under
+    -- Direct-control. The clear is ship-wide, so without this the groups the
+    -- player is directing drop to their own mode and stop shooting the engaged
+    -- target -- reported in game on 2026-08-07, missile-defence groups went
+    -- silent on release.
+    local armedWrites53 = {}
+    local savedSetArmed53 = C.SetTurretGroupArmed
+    C.SetTurretGroupArmed = function(_, _, _, _, armed)
+        armedWrites53[#armedWrites53 + 1] = armed
+    end
+    sess53.preferAllTurrets = true
+    sess53.phase, sess53.controlMode = "engaged", "direct"
+    -- The refresh inside applyPreferAllTurrets replaced the group list with
+    -- whatever the stubbed readGroups returns, so put ours back.
+    sess53.groups = { grp53 }
+    sess53.checkedGroupKeys = { ["grp53"] = true }
+    local modeCount53 = #modeWrites53
+    local before53d = #pendingCallbacks
+    assert(API.clearPreferAllTurrets("resume test", true) == true,
+        "release with resume must report success")
+    assert(#modeWrites53 == modeCount53,
+        "resuming must be deferred a tick, or MD reads autoassist back and the "
+        .. "release never reaches those turrets")
+    for i = before53d + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
+    assert(modeWrites53[#modeWrites53] == "autoassist",
+        "releasing from the button must put the checked groups back under "
+        .. "Direct-control; wrote " .. tostring(modeWrites53[#modeWrites53]))
+    assert(armedWrites53[#armedWrites53] == true,
+        "a resumed group must be armed, or Direct-control is silent")
+    C.SetTurretGroupArmed = savedSetArmed53
+
     -- Leaving the chair must never leave the ship altered. restoreDirect is the
     -- funnel every exit route uses (cease, get up, undock, target-destroyed with
     -- auto-next off), so clearing there covers all of them at once.

@@ -40,8 +40,10 @@ mark a specific surface element (e.g. turret, shield, engine).
 
   This affects every turret on the ship, not just the groups you checked, and
   turrets are no longer held to their **Mode** while it is on: turrets set to
-  missile defence will fire on ships. **Release All Turrets** undoes it, and so
-  does ceasing or getting up.
+  missile defence will fire on ships.
+- **Release Other Turrets**: gives the rest of the ship back to its own
+  settings. The groups you checked keep shooting your target, because you are
+  still directing them. Ceasing engagement or getting up releases everything.
 
 ## Four viewing modes
 

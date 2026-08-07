@@ -6,8 +6,9 @@ All notable changes to this project are documented in this file.
 
 - New **All Turrets: Prefer My Target** during Direct-control: no more idle
   turrets. Every turret on the ship shoots your target when it can, and shoots
-  something else in range when it cannot. **Release All Turrets** undoes it, and
-  so does ceasing or getting up.
+  something else in range when it cannot. **Release Other Turrets** hands the
+  rest of the ship back while your checked groups stay on your target; ceasing
+  or getting up releases everything.
 
 - Turret groups are no longer locked to camera-only when two of them share a
   name. `readGroups()` walks turret slots to build each group's member list, and
