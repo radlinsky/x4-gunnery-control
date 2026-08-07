@@ -1735,42 +1735,158 @@ assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
 
--- ── 49. startAutoEngage failure path clears controlMode ──────────────────────
+-- ── 49. RestoreSession handler: both plain-key and $-prefixed payloads restore ──
+-- The engine PREPENDS $ to every Lua string key during Lua->MD conversion
+-- (live-tested 2026-08-04). After a save/load, State.$active may come back from
+-- raise_lua_event with keys like "$shipID" instead of "shipID". The handler must
+-- restore turret groups regardless of which form arrives.
+--
+-- The handler is exposed via X4GunneryControlAPI.onRestoreSession for test use.
+
+assert(type(X4GunneryControlAPI.onRestoreSession) == "function",
+    "X4GunneryControlAPI.onRestoreSession must be exposed; add TestAPI.onRestoreSession in gunnery_control.lua")
+
+-- Helper: build a "group" snapshot with a specific key prefix form.
+local function makeSnap49(prefix, shipID, path, group)
+    local p = prefix or ""
+    return {
+        [p .. "shipID"]    = tostring(shipID),
+        [p .. "kind"]      = "group",
+        [p .. "mode"]      = "defend",
+        [p .. "armed"]     = false,
+        [p .. "contextID"] = "1",
+        [p .. "path"]      = path,
+        [p .. "group"]     = group,
+    }
+end
+
+-- Helper: run one RestoreSession handler invocation and capture what was parsed.
+-- Returns (newSessionShipID, capturedDirectSnapshots).
+local function runRestore49(payload)
+    local newSessionShipID = nil
+    local capturedSnapshots = nil
+    local origNewSession = X4GunneryState.newSession
+    X4GunneryState.newSession = function(ship, reason)
+        newSessionShipID = ship
+        return origNewSession(ship, reason)
+    end
+    local origRelease = X4GunneryState.releaseDirect
+    X4GunneryState.releaseDirect = function(sess)
+        capturedSnapshots = sess.directSnapshots
+        return origRelease(sess)
+    end
+    X4GunneryControlAPI.onRestoreSession(nil, payload)
+    X4GunneryState.newSession = origNewSession
+    X4GunneryState.releaseDirect = origRelease
+    return newSessionShipID, capturedSnapshots
+end
+
+-- 49a: plain-key list payload (the form the handler always produced before this fix).
+local plainPayload49 = {
+    makeSnap49("", 42, "p49", "A"),
+    makeSnap49("", 42, "p49", "B"),
+}
+local shipA, snapsA = runRestore49(plainPayload49)
+assert(shipA ~= nil,
+    "RestoreSession with plain-key list must call State.newSession; shipID was nil")
+assert(tostring(shipA) == "42",
+    "RestoreSession plain-key: wrong shipID; expected '42', got " .. tostring(shipA))
+assert(snapsA ~= nil and #snapsA == 2,
+    "RestoreSession plain-key: expected 2 normalised snapshots in directSnapshots; got "
+    .. tostring(snapsA and #snapsA))
+assert(snapsA[1].kind == "group",
+    "RestoreSession plain-key: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsA[1].kind))
+assert(snapsA[1].path == "p49",
+    "RestoreSession plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsA[1].path))
+
+-- 49b: $-prefixed list payload (the form that arrives if MD->Lua keeps the $ prefix).
+local prefixedPayload49 = {
+    makeSnap49("$", 42, "p49", "A"),
+    makeSnap49("$", 42, "p49", "B"),
+}
+local shipB, snapsB = runRestore49(prefixedPayload49)
+assert(shipB ~= nil,
+    "RestoreSession with $-prefixed list must call State.newSession; shipID was nil. "
+    .. "The handler is not reading $-prefixed keys from the MD payload.")
+assert(tostring(shipB) == "42",
+    "RestoreSession $-prefixed: wrong shipID; expected '42', got " .. tostring(shipB))
+assert(snapsB ~= nil and #snapsB == 2,
+    "RestoreSession $-prefixed: expected 2 normalised snapshots; got "
+    .. tostring(snapsB and #snapsB))
+assert(snapsB[1].kind == "group",
+    "RestoreSession $-prefixed: snapshot[1].kind must be 'group'; got "
+    .. tostring(snapsB[1].kind))
+assert(snapsB[1].path == "p49",
+    "RestoreSession $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsB[1].path))
+
+-- 49c: legacy single-snapshot plain-key form (shipID present, no [1]).
+local legacyPlain49 = makeSnap49("", 42, "p49", "A")
+local shipC, snapsC = runRestore49(legacyPlain49)
+assert(shipC ~= nil,
+    "RestoreSession legacy plain-key single snapshot must call State.newSession")
+assert(snapsC ~= nil and #snapsC == 1,
+    "RestoreSession legacy plain-key: expected 1 snapshot; got "
+    .. tostring(snapsC and #snapsC))
+assert(snapsC[1].path == "p49",
+    "RestoreSession legacy plain-key: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsC[1].path))
+
+-- 49d: legacy single-snapshot $-prefixed form.
+local legacyPrefixed49 = makeSnap49("$", 42, "p49", "A")
+local shipD, snapsD = runRestore49(legacyPrefixed49)
+assert(shipD ~= nil,
+    "RestoreSession legacy $-prefixed single snapshot must call State.newSession. "
+    .. "The handler is not reading the $shipID key from the legacy form.")
+assert(snapsD ~= nil and #snapsD == 1,
+    "RestoreSession legacy $-prefixed: expected 1 snapshot; got "
+    .. tostring(snapsD and #snapsD))
+assert(snapsD[1].path == "p49",
+    "RestoreSession legacy $-prefixed: snapshot[1].path must be 'p49'; got "
+    .. tostring(snapsD[1].path))
+
+-- 49e: diagnostic log line is emitted.
+assert(logContains("RestoreSession:"),
+    "RestoreSession handler must emit a diagnostic log line containing 'RestoreSession:'")
+
+-- ── 50. startAutoEngage failure path clears controlMode ──────────────────────
 -- Regression: beginEngaged sets session.controlMode = "auto" before trying to
 -- enter the camera. When no operational camera member exists, the old code did
 -- `session.phase = "console"; return false`, leaving controlMode stuck on "auto"
 -- while phase said "console". returnToConsole() must be used instead so phase,
 -- controlMode, povMode, cameraMemberID, and targetObjectID are all cleared together.
 gcMenu.onShowMenu()
-local sess49 = API.getSession()
-assert(sess49 ~= nil, "expected session for startAutoEngage failure test (49)")
+local sess50 = API.getSession()
+assert(sess50 ~= nil, "expected session for startAutoEngage failure test (50)")
 -- Build a group with NO operational members so cameraMember() returns nil and
 -- startAutoEngage hits its first failure exit.
-local grp49 = {
-    key = "grp49", kind = "group", contextID = 5, path = "p", group = "g",
+local grp50 = {
+    key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
     componentID = 30, displayName = "Empty Group", totalCount = 1, operationalCount = 0,
     mode = "attack", armed = false, members = {
         { componentID = 30, displayName = "T1", operational = false,
           cameraSupported = false, componentKey = "30" }
     }
 }
-sess49.groups = { grp49 }
-sess49.checkedGroupKeys = { ["grp49"] = true }
-sess49.phase = "console"
-sess49.controlMode = nil
+sess50.groups = { grp50 }
+sess50.checkedGroupKeys = { ["grp50"] = true }
+sess50.phase = "console"
+sess50.controlMode = nil
 -- Same arguments the console Auto-Engage button passes. startAutoEngage is
 -- module-local; TestAPI exposes it, like TestAPI.endForMovement above.
-local engaged49 = API.startAutoEngage(X4GunneryState.checkedGroups(sess49))
-assert(engaged49 == false,
+local engaged50 = API.startAutoEngage(X4GunneryState.checkedGroups(sess50))
+assert(engaged50 == false,
     "startAutoEngage with no operational camera member must return false; got "
-    .. tostring(engaged49))
+    .. tostring(engaged50))
 -- After the failure, phase must be "console" and controlMode must be nil.
-assert(sess49.phase == "console",
+assert(sess50.phase == "console",
     "startAutoEngage failure path must leave phase='console'; got '"
-    .. tostring(sess49.phase) .. "'")
-assert(sess49.controlMode == nil,
+    .. tostring(sess50.phase) .. "'")
+assert(sess50.controlMode == nil,
     "BUG: startAutoEngage failure path left controlMode='"
-    .. tostring(sess49.controlMode)
+    .. tostring(sess50.controlMode)
     .. "'; State.returnToConsole must be used instead of raw phase assignment")
 
 print("runtime smoke tests passed")

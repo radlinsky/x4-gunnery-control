@@ -1801,30 +1801,93 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
-    RegisterEvent("X4GunneryControl.RestoreSession", function(_, payload)
+    local function onRestoreSession(_, payload)
         -- Do not resume a camera session after loading. Reconstruct only enough
         -- state to return the pre-Engage mode/armed settings, then clear MD state.
-        if type(payload) ~= "table" then return end
-        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID,
-        -- no [1]). Wrap the legacy form so restoreDirect always sees a list.
-        local snapshots
+        --
+        -- KNOWN BROKEN, and everything below this point is currently
+        -- unreachable. raise_lua_event carries one scalar (a string, a number,
+        -- or a single component object); the snapshot LIST arrives here as nil.
+        -- Live-confirmed 2026-08-06: MD logged a fully populated State.$active
+        -- and this handler logged "payload type=nil" on the same tick. No
+        -- shipped 9.00 MD script passes a table through raise_lua_event either.
+        -- A second defect waits behind it: component IDs are reassigned on load
+        -- (the same ship was 441090 before a save and 2080707 after), so the
+        -- stored shipID/contextID would not match even once transport works.
+        -- The path/group names ARE stable and are what a fix should match on.
+        -- Kept, with the key handling below, because both are correct and will
+        -- be needed the moment transport is fixed. See the save/load restore
+        -- issue before touching this.
+        log("RestoreSession event received; payload type=" .. type(payload)
+            .. "; tostring=" .. tostring(payload))
+        if type(payload) ~= "table" then
+            log("RestoreSession: payload is not a table, so nothing was restored."
+                .. " Expected while save/load restore is broken; turret groups"
+                .. " stay as they were when the game was saved.")
+            return
+        end
+
+        -- MD->Lua key-prefix diagnostic: the engine PREPENDS $ to every Lua
+        -- string key during Lua->MD conversion (live-tested 2026-08-04). When
+        -- State.$active is returned via raise_lua_event the keys may therefore
+        -- arrive as "$shipID", "$kind", etc. This helper reads either form so the
+        -- handler works regardless of whether the $ survives the round-trip.
+        local function field(t, name)
+            if t[name] ~= nil then return t[name] end
+            return t["$" .. name]
+        end
+
+        -- Normalise one snapshot table (plain or $-prefixed keys) into a plain-
+        -- keyed copy that the rest of the Lua code can use without further guards.
+        local function normaliseSnap(s)
+            return {
+                shipID      = field(s, "shipID"),
+                kind        = field(s, "kind"),
+                mode        = field(s, "mode"),
+                armed       = field(s, "armed"),
+                componentID = field(s, "componentID"),
+                contextID   = field(s, "contextID"),
+                path        = field(s, "path"),
+                group       = field(s, "group"),
+            }
+        end
+
+        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID
+        -- or .$shipID, no [1]). Wrap the legacy form so restoreDirect sees a list.
+        local raw
         if payload[1] ~= nil then
-            snapshots = payload
-        elseif payload.shipID ~= nil then
-            snapshots = { payload }
+            raw = payload
+        elseif field(payload, "shipID") ~= nil then
+            raw = { payload }
         else
+            log("RestoreSession: payload has no snapshots; skipping restore")
             return  -- empty or unrecognised table
         end
+        local snapshots = {}
+        for _, s in ipairs(raw) do snapshots[#snapshots + 1] = normaliseSnap(s) end
         if #snapshots == 0 then return end
+
+        -- Diagnostic: report parse result and which key form was present. The
+        -- legacy single snapshot is wrapped into raw[1] above, so this one test
+        -- covers both arrival shapes.
+        local prefixed = raw[1]["$shipID"] ~= nil
+        log("RestoreSession: " .. tostring(#snapshots)
+            .. " snapshot(s) parsed; keys were "
+            .. (prefixed and "$-prefixed (MD->Lua adds $)" or "plain"))
+
         sessionEpoch = sessionEpoch + 1
         session = State.newSession(id(snapshots[1].shipID), "")
         refresh()
-        -- Assign the list so restoreDirect can loop over every group.
+        -- Assign the normalised list so restoreDirect can loop over every group.
         session.directSnapshots = snapshots
         restoreDirect("savegame recovery")
         session = nil
         sessionEpoch = sessionEpoch + 1
-    end)
+    end
+    -- Exposed for unit tests only: lets tests drive the RestoreSession path with
+    -- arbitrary payload shapes (plain-key and $-prefixed) without a live event.
+    TestAPI.onRestoreSession = onRestoreSession
+    RegisterEvent("X4GunneryControl.RestoreSession", onRestoreSession)
     AddUITriggeredEvent("X4GunneryControl", "state_request")
     registerForEvent("gameLoadingDone", getElement("Scene.UIContract"), function()
         registerUIHooks()
