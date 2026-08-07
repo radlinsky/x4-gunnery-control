@@ -613,6 +613,61 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   snapshot cached in `.x4-research-cache/exports/`. It cannot exclude a function
   that exists under a non-obvious name.
 
+## Turret upgrade groups — mapping a turret slot to its group
+
+### A turret slot cannot be attributed to a group, and on a ship it never needs to be
+
+- X4: 9.00
+- Status: live-tested (probe on a Boron L destroyer, 2026-08-07);
+  shipped-source (FFI declarations, vanilla callers, ship macros);
+  inference (the uniqueness argument)
+- Source: live probe logged as `[X4GC PROBE]` on
+  `ship_bor_l_destroyer_01_a_macro` (14 turret slots, 9 groups);
+  1924 unique FFI declarations across `ui-9.00`;
+  `ui/addons/ego_interactmenu/menu_interactmenu.lua` `areTurretsArmed()`;
+  `ui/addons/ego_detailmonitor/menu_docked.lua`;
+  `libraries/scriptproperties.xml` (extracted to
+  `.x4-research-cache/extracted/props-9.00`);
+  126 stock ship macros in `.x4-research-cache/extracted/ships-9.00`
+- Live test: yes — 2026-08-07, X4 9.00, Boron L destroyer
+- Finding: `GetUpgradeSlotGroup` returns `{path, group}` with **no context ID**,
+  and `GetUpgradeGroupInfo2` returns a single representative component rather
+  than a member list. There is no `GetUpgradeSlotGroup2`. So when two groups
+  share `path`+`group`, the turrets between them cannot be attributed. Four
+  candidate resolutions were tested live and all failed or were useless:
+  1. `GetComponentData(turret, "grouptag")` → `nil` on all 14 turrets. The
+     `grouptag` property exists on the `component` datatype in
+     `scriptproperties.xml` ("Parent group tag") but is not populated for
+     turrets.
+  2. `GetComponentData(turret, "parent")` and `"container"` → both return the
+     ship. `"defensible"` → `nil`.
+  3. `GetParentComponent(turret)` → returns the ship for every turret. The
+     function is declared in `menu_map.lua` but called by no shipped Lua file;
+     it works, it just cannot disambiguate.
+  4. `GetNumUpgradeSlots(contextID, ...)` → untested in effect, because every
+     context on the probed ship *was* the ship.
+- Consequence: the case does not arise on a ship. `GetUpgradeGroups2` keys
+  groups by `contextid`+`path`+`group`, so two entries sharing `path`+`group`
+  must differ in `contextid` — otherwise they are the same group. Every group on
+  the probed ship reported `contextid == ship`, and all 53 `<turrets>`
+  declarations across the 126 stock ship macros use `path=".."` with unique
+  group names. Vanilla's `entry.context == menu.object -- mainship` check in
+  `menu_ship_configuration.lua` implies contexts only diverge for stations with
+  modules. Treat `#candidates > 1` on a ship as unreachable defensive code.
+- Vanilla does not attempt this mapping at all: `areTurretsArmed()` and
+  `menu_docked.lua` walk turret slots **only** for ungrouped turrets
+  (`path == ".."` and empty group) and drive grouped turrets purely through
+  `contextid`+`path`+`group`. Any per-turret member list for a group is a
+  mod-only construct.
+- Upgrade path, if a modded ship ever produces duplicate group names: on the
+  probed ship the representative component was always the group's **first slot
+  in scan order** (`group_front_up_left` rep=445809 → slot 2 of 2,3;
+  `group_rear_down_mid` rep=445808 → slot 13 of 13,14; and so on for all 9
+  groups). Combined with `GetUpgradeGroupInfo2().total`, that partitions slots
+  exactly: on hitting a representative, claim the next `total` slots for it.
+  Ceiling: one ship of evidence for an undocumented ordering guarantee. Confirm
+  on several hulls before relying on it.
+
 ## Engine bug: SetPlayerCameraTargetView leaves Esc dead after get-up
 
 ### Trigger and symptom
