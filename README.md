@@ -71,9 +71,11 @@ combat AI scripts.
 **Nexus / Vortex**: install UI Extensions and HUD first, then install the ZIP
 without changing its top-level `x4_gunnery_control` folder.
 
-**Steam Workshop**: subscribe, then install UI Extensions and HUD from Nexus
-Mods as well. It is not on the Workshop, and the game will not load this mod
-without it.
+**Steam Workshop**:
+[subscribe](https://steamcommunity.com/sharedfiles/filedetails/?id=3778864325).
+The Workshop build depends on the
+[Workshop repackage of UI Extensions and HUD](https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743),
+so Steam pulls that in for you.
 
 **Manual** — extract the archive so you end up with:
 
