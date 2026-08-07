@@ -29,10 +29,6 @@ const char* GetComponentName(UniverseID componentid); SofttargetDetails2 GetSoft
 bool IsPlayerCameraTargetViewPossible(UniverseID targetid, bool force); void SetPlayerCameraTargetView(UniverseID targetid, bool force);
 UniverseID GetExternalTargetViewComponent(void); void SetPlayerCameraCockpitView(bool force); bool GetUp(void);
 bool IsHUDActive(void); bool IsFullscreenCutsceneActive(void);
-bool IsExternalViewActive(void); bool IsExternalTargetMode(void);
-bool CanSetPlayerCameraCinematicView(void);
-bool IsConversationActive(void); bool IsConversationCancelling(void);
-bool IsEncryptedDirectInputModeActive(void);
 bool IsFullscreenMenuDisplayed(bool anymenu, const char* menuname);
 bool IsGamePaused(void); void SetTrackedMenuFullscreen(const char* menu, bool fullscreen);
 bool SetSofttarget(UniverseID componentid, const char*const connectionname);
@@ -60,8 +56,6 @@ local sessionEpoch = 0
 local reopenSuspendedSession
 local activeExternalMenuName
 local lastWatchdogSignature
-local postExitGeneration = 0
-local lastPostExitProbe
 
 local function text(id) return ReadText(20991, id) end
 local function str(pointer) return pointer ~= nil and ffi.string(pointer) or "" end
@@ -429,115 +423,6 @@ function menu.cleanup()
     end
 end
 
--- Post-exit state-change recorder (Item 3c). Records state for up to 90 s
--- after the player leaves the chair, logging only when the probe payload
--- changes. The long window is deliberate: the Esc-after-get-up bug clears the
--- moment the player opens and closes any menu; comparing the sample before and
--- after that workaround identifies the stuck engine state directly instead of
--- by guesswork. The first callback always logs; subsequent identical payloads
--- are silently dropped. Never alters game state. Must not raise.
---
--- A module-level generation counter (postExitGeneration) ensures that if a
--- new exit supersedes a running sampler, the stale callbacks are silently
--- dropped: each callback captures its own generation at schedule time and
--- returns immediately when the counter has advanced. The counter is also
--- advanced by leaveChair/endForMovement so that re-seating followed by a
--- second exit still silences the first sampler.
---
--- Each callback also stops early when a live session exists: the player has
--- re-seated, and continuing to sample would be noise.
--- Elapsed time is the scheduled offset itself, so no start time is needed.
-local function startPostExitSampler()
-    postExitGeneration = postExitGeneration + 1
-    local myGeneration = postExitGeneration
-    lastPostExitProbe = nil
-    -- Fixed offsets in seconds. Build the list programmatically: four early
-    -- samples for immediate state, then every 2 s up to 90 s. This list is
-    -- fixed at schedule time; no callback ever re-schedules itself.
-    local offsets = { 0.5, 1.0, 2.0, 4.0 }
-    local t = 6.0
-    while t <= 90.0 do
-        offsets[#offsets + 1] = t
-        t = t + 2.0
-    end
-    for _, offset in ipairs(offsets) do
-        local capturedOffset = offset
-        Helper.addDelayedOneTimeCallbackOnUpdate(function()
-            -- Overlap guard: a newer exit has started, stay silent.
-            if postExitGeneration ~= myGeneration then return end
-            -- Re-entry guard: a new session means the player is reseated.
-            if session ~= nil then return end
-            -- Defensive: log returns nothing and cannot raise. All C calls are
-            -- individually guarded so a nil or bad return never propagates.
-            local elapsed = capturedOffset
-            local ok, err = pcall(function()
-                local camera = tostring(C.GetExternalTargetViewComponent())
-                local cg = tostring(controlGroup())
-                local occupied = tostring(C.GetPlayerOccupiedShipID())
-                local shown = tostring(menu.shown and true or false)
-                local extmenu = (activeExternalMenuName and activeExternalMenuName()) or "<none>"
-                -- The global selection and the object it belongs to. A soft
-                -- target still sitting on a component of the ship we just left
-                -- means enterCamera's borrow was never put back, which is the
-                -- current Esc suspect.
-                local soft = C.GetSofttarget2().softtargetID
-                local softInfo = tostring(soft) .. "/root="
-                    .. tostring(soft ~= 0 and C.GetContextByClass(id(soft), "container", true) or 0)
-                -- hud= tells a missing-HUD report apart: false means the engine
-                -- still has the HUD switched off (a view or camera state we left
-                -- behind), true means it is on and merely not being redrawn.
-                local hud = tostring(C.IsHUDActive())
-                    .. "/cutscene=" .. tostring(C.IsFullscreenCutsceneActive())
-                    .. "/extview=" .. tostring(C.IsExternalViewActive())
-                    .. "/exttarget=" .. tostring(C.IsExternalTargetMode())
-                    -- Proxy for the CutsceneManager's cinematic mode: the only
-                    -- readable state near it, and the cinematic run is the one
-                    -- thing trial 1 did that trial 2 (Esc worked) did not.
-                    .. "/cancinematic=" .. tostring(C.CanSetPlayerCameraCinematicView())
-                -- Conversation: active and cancelling state. A conversation
-                -- opened and closed via Esc workaround would appear here.
-                -- Signatures from ego_detailmonitorhelper/helper.lua:400-401.
-                local conv = tostring(C.IsConversationActive())
-                    .. "/" .. tostring(C.IsConversationCancelling())
-                -- Direct-input mode suppresses normal keyboard routing; any
-                -- edit box left open by our teardown would show here.
-                local dirinput = tostring(C.IsEncryptedDirectInputModeActive())
-                -- Player-control aggregate from ego_viewhelper/viewhelper.lua:314.
-                -- False means at least one registered view has playerControls=false,
-                -- which blocks Esc from reaching the native game menu.
-                local pctrl = View and tostring(View.hasPlayerControls()) or "<n/a>"
-                -- Tracked-menu topology (ego_detailmonitorhelper/helper.lua).
-                local helpermenus = tostring(Helper.dockedMenu ~= nil)
-                    .. "/" .. tostring(Helper.topLevelMenu ~= nil)
-                    .. "/" .. tostring(Helper.minimizedMenu ~= nil)
-                -- Build comparison payload WITHOUT the timestamp (the timestamp
-                -- changes every tick; including it would defeat suppression).
-                local payload = "camera=" .. camera
-                    .. "; control=" .. (cg ~= "" and cg or "<none>")
-                    .. "; occupied=" .. occupied
-                    .. "; shown=" .. shown
-                    .. "; extmenu=" .. tostring(extmenu)
-                    .. "; views=" .. viewSummary()
-                    .. "; fsmenu=" .. trackedMenuSummary()
-                    .. "; soft=" .. softInfo
-                    .. "; hud=" .. hud
-                    .. "; conv=" .. conv
-                    .. "; dirinput=" .. dirinput
-                    .. "; pctrl=" .. pctrl
-                    .. "; helpermenus=" .. helpermenus
-                if payload == lastPostExitProbe then return end
-                lastPostExitProbe = payload
-                log("post-exit sample"
-                    .. "; t=+" .. string.format("%.1f", elapsed) .. "s"
-                    .. "; " .. payload)
-            end)
-            if not ok then
-                log("post-exit sample error at t=+" .. string.format("%.1f", elapsed) .. "s: " .. tostring(err))
-            end
-        end, false, getElapsedTime() + offset)
-    end
-end
-
 -- The soft target is X4's global selection, not ours: enterCamera borrows it to
 -- force the camera onto a turret and puts it back a tick later. No vanilla call
 -- ever passes 0 to SetSofttarget -- RemoveSofttarget() is the engine's clear
@@ -593,7 +478,6 @@ local function leaveChair(reason)
     -- discardSession emits the notify (seatLeaving=true) covering both this
     -- path and the playerGetUp/playerUndock route (endForMovement).
     discardSession(reason)
-    startPostExitSampler()
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         -- Not endSession(): the session is already gone, and its
         -- "nothing to do" guard would skip the frame teardown entirely.
@@ -1802,7 +1686,6 @@ local function init()
         seatLeaving = true
         endSession("global movement event")
         seatLeaving = false
-        startPostExitSampler()
     end
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.

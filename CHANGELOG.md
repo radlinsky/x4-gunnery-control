@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+- Remove the post-exit diagnostic sampler. It wrote `DebugError` lines for 90
+  seconds every time you left the gunnery seat; the bug it was hunting was
+  fixed in 0.20.
+
 ## [0.20] - 2026-08-06
 
 - Widen the console's turret group and turret name column so full names are
