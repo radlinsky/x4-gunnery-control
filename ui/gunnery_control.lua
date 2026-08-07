@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-07-snapdiag-1"
+local runtimeBuild = "2026-08-07-snapdiag-3"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -340,6 +340,9 @@ end
 -- Defined after refresh(), which it calls; declared here because restoreDirect
 -- and engageTarget both sit above that definition.
 local applyPreferAllTurrets
+-- Same reason: restoreDirect's deferred repaint calls refresh(), which is
+-- defined below it.
+local refresh
 
 -- Puts the checked groups back under Direct-control after a release. The clear
 -- is ship-wide -- there is no per-group form of set_turret_targets -- so without
@@ -395,6 +398,27 @@ local function restoreDirect(reason)
             log("could not resolve directed group during restore: " .. reason)
         end
     end
+    -- Captured into locals because restoreDirect runs on teardown paths that
+    -- null out session before this callback fires.
+    local readbackShipID, readbackSnapshots = session.shipID, snapshots
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        local ok, fresh = pcall(readGroups, readbackShipID)
+        if not ok then fresh = {} end
+        for _, snapshot in ipairs(readbackSnapshots) do
+            local found
+            for _, group in ipairs(fresh or {}) do
+                if matchesSnapshot(group, snapshot) then found = group; break end
+            end
+            log("post-restore readback " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
+        end
+        -- Deferred rather than immediate: the engine's mode read-back lags the
+        -- write, so a same-frame refresh() would re-cache the pre-restore value.
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        if session.phase ~= "console" then return end
+        refresh(); menu.display()
+        log("repainted console after restore: " .. reason)
+    end, false, getElapsedTime() + 0.5)
     clearSnapshot()
 end
 
@@ -725,7 +749,8 @@ local function engageTarget(targetID)
     return true
 end
 
-local function refresh()
+-- Forward-declared above restoreDirect; see the contract comment there.
+refresh = function()
     if not session then return end
     State.retainSelection(session, readGroups(session.shipID))
 end
