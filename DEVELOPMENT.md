@@ -206,7 +206,7 @@ Lua 5.1, libxml2, ShellCheck, zip, and unzip. Run repository scripts from the
 same MSYS2 shell. Do not mix Windows and WSL tool paths in one command. If native
 tool setup becomes difficult, use WSL and access the game through `/mnt/c`.
 
-## XML schemas and VS Code validation
+### XML schemas and VS Code validation
 
 X4 resolves the `#modding` schema path through its virtual filesystem; VS Code
 does not. For the installed X4 9.00 build, use the X Catalog Tool to extract
