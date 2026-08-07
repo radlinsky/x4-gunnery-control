@@ -1798,7 +1798,16 @@ local function init()
     local function onRestoreSession(_, payload)
         -- Do not resume a camera session after loading. Reconstruct only enough
         -- state to return the pre-Engage mode/armed settings, then clear MD state.
-        if type(payload) ~= "table" then return end
+        -- Diagnostic: the handler was observed producing no log at all on a live
+        -- load even though MD had raised the event with a populated table, which
+        -- means it returned at the type check below without leaving a trace.
+        -- Log what actually arrives before deciding anything.
+        log("RestoreSession event received; payload type=" .. type(payload)
+            .. "; tostring=" .. tostring(payload))
+        if type(payload) ~= "table" then
+            log("RestoreSession: payload is not a table; nothing restored")
+            return
+        end
 
         -- MD->Lua key-prefix diagnostic: the engine PREPENDS $ to every Lua
         -- string key during Lua->MD conversion (live-tested 2026-08-04). When

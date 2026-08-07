@@ -35,11 +35,14 @@
                  every load for every player. -->
             <do_if value="@State.$active">
               <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
+              <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
             </do_if>
             <do_else>
+              <!-- Raising with an unset variable is what produced "Property
+                   lookup failed: State.$active" on every load; there is nothing
+                   to restore in this case, so simply do not raise. -->
               <debug_text text="'[X4GC] RequestState: no saved session state'" chance="100"/>
             </do_else>
-            <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
           </actions>
         </cue>
       </cues>
