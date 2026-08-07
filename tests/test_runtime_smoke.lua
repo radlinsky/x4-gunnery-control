@@ -1851,4 +1851,42 @@ assert(snapsD[1].path == "p49",
 assert(logContains("RestoreSession:"),
     "RestoreSession handler must emit a diagnostic log line containing 'RestoreSession:'")
 
+-- ── 50. startAutoEngage failure path clears controlMode ──────────────────────
+-- Regression: beginEngaged sets session.controlMode = "auto" before trying to
+-- enter the camera. When no operational camera member exists, the old code did
+-- `session.phase = "console"; return false`, leaving controlMode stuck on "auto"
+-- while phase said "console". returnToConsole() must be used instead so phase,
+-- controlMode, povMode, cameraMemberID, and targetObjectID are all cleared together.
+gcMenu.onShowMenu()
+local sess50 = API.getSession()
+assert(sess50 ~= nil, "expected session for startAutoEngage failure test (50)")
+-- Build a group with NO operational members so cameraMember() returns nil and
+-- startAutoEngage hits its first failure exit.
+local grp50 = {
+    key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 30, displayName = "Empty Group", totalCount = 1, operationalCount = 0,
+    mode = "attack", armed = false, members = {
+        { componentID = 30, displayName = "T1", operational = false,
+          cameraSupported = false, componentKey = "30" }
+    }
+}
+sess50.groups = { grp50 }
+sess50.checkedGroupKeys = { ["grp50"] = true }
+sess50.phase = "console"
+sess50.controlMode = nil
+-- Same arguments the console Auto-Engage button passes. startAutoEngage is
+-- module-local; TestAPI exposes it, like TestAPI.endForMovement above.
+local engaged50 = API.startAutoEngage(X4GunneryState.checkedGroups(sess50))
+assert(engaged50 == false,
+    "startAutoEngage with no operational camera member must return false; got "
+    .. tostring(engaged50))
+-- After the failure, phase must be "console" and controlMode must be nil.
+assert(sess50.phase == "console",
+    "startAutoEngage failure path must leave phase='console'; got '"
+    .. tostring(sess50.phase) .. "'")
+assert(sess50.controlMode == nil,
+    "BUG: startAutoEngage failure path left controlMode='"
+    .. tostring(sess50.controlMode)
+    .. "'; State.returnToConsole must be used instead of raw phase assignment")
+
 print("runtime smoke tests passed")
