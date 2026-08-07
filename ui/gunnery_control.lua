@@ -657,6 +657,16 @@ local function startAutoEngage(groups)
     return true
 end
 
+-- readTargetCandidates cache: a 1 s TTL is long enough that four 0.25 s repaints
+-- share a single sector sweep, but short enough that the target browser list
+-- feels live when the player is actively browsing it.  Callers that must see
+-- live data pass bypassCache=true (target browser display, cycleTarget,
+-- chooseAimTarget), so there are no manual invalidation points.  The cache
+-- auto-invalidates whenever sessionEpoch changes (i.e. the session is
+-- discarded).
+local targetCandidatesTime = -math.huge
+local targetCandidatesEpoch = -1
+
 local function startTargetSelection(groups)
     -- Refuse when no checked group can be mutated.
     local anyMutable = false
@@ -770,7 +780,19 @@ isEligibleEngagementTarget = function(component)
     return State.isEngagementTargetAllowed(session and session.shipID, object), object
 end
 
-local function readTargetCandidates()
+local function readTargetCandidates(bypassCache)
+    local now = getElapsedTime()
+    if not bypassCache
+        and targetCandidatesEpoch == sessionEpoch
+        and now - targetCandidatesTime < 1
+        -- An empty result is cached too: a sector full of ineligible objects is
+        -- the most expensive sweep there is, and re-running it every repaint is
+        -- exactly the cost this cache exists to avoid.
+        and session and session.targetCandidates then
+        return session.targetCandidates
+    end
+    targetCandidatesTime = now
+    targetCandidatesEpoch = sessionEpoch
     local candidates, seen = {}, {}
     local sector = GetPlayerContextByClass("sector")
     local radarRange = tonumber(componentData(session.shipID, "maxradarrange")) or 40000
@@ -817,7 +839,7 @@ end
 
 cycleTarget = function(delta)
     if not session or session.controlMode ~= "direct" then return false end
-    local entry = State.cycleEntry(readTargetCandidates(), session.targetObjectID, delta)
+    local entry = State.cycleEntry(readTargetCandidates(true), session.targetObjectID, delta)
     if not entry then return false end
     return engageTarget(entry.componentID)
 end
@@ -1062,7 +1084,10 @@ end
 -- is the best available target. Returns nil when nothing qualifies.
 local function chooseAimTarget()
     if not session then return nil end
-    local candidates = readTargetCandidates()
+    -- Always sweep fresh: updateAimTarget is already throttled to 5 s and
+    -- onDirectTargetLost is rare, so neither wants a cached list, and forcing
+    -- here means no caller has to remember to invalidate.
+    local candidates = readTargetCandidates(true)
     for _, c in ipairs(candidates) do
         if C.IsComponentOperational(id(c.componentID)) then
             return c.componentID
@@ -1412,7 +1437,7 @@ function menu.display()
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(3):createText(text(37)); header[4]:createText(text(38))
         header[5]:createText(text(49)); header[6]:createText(text(50)); header[7]:setColSpan(2):createText("")
-        local candidates = readTargetCandidates()
+        local candidates = readTargetCandidates(true)
         for _, candidate in ipairs(candidates) do
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(3):createText(candidate.name ~= "" and candidate.name or text(51))
