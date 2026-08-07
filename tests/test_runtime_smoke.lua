@@ -1274,6 +1274,9 @@ assert(povButton(58) and povButton(58).active == true,
 -- ── 32. Next/Previous Target grey out with nothing to cycle to ───────────────
 -- Cycling is pointless with a single candidate, and there is no candidate list
 -- at all outside direct mode. The stubs from test 29 still supply 98 and 99.
+-- Advance the clock so the readTargetCandidates() 1 s TTL cache (added with the
+-- target-candidate-cache fix) expires between this display() and the one above.
+clock = clock + 2
 GetContainedShips = function() return { 98 } end
 gcMenu.display()
 assert(povButton(75) and povButton(75).active == false,
@@ -1281,6 +1284,7 @@ assert(povButton(75) and povButton(75).active == false,
 assert(povButton(76) and povButton(76).active == false,
     "Previous Target must be greyed with only one candidate")
 
+clock = clock + 2
 GetContainedShips = function() return { 98, 99 } end
 gcMenu.display()
 assert(povButton(75) and povButton(75).active == true,
@@ -1734,5 +1738,87 @@ end
 assert(#secondPassEvts == 0,
     "second endForMovement after session is already nil must emit zero notify events; "
     .. "the epoch/session guard is broken. Got " .. tostring(#secondPassEvts))
+
+-- ── 49. readTargetCandidates cache: two quick repaints share one sweep ─────────
+-- The cache must serve the second display() call from session.targetCandidates
+-- without calling GetContainedShips a second time. The browser/force path must
+-- always bypass the cache and call GetContainedShips.
+
+local shipScanCount49 = 0
+GetContainedShips = function() shipScanCount49 = shipScanCount49 + 1; return { 98 } end
+GetContainedStations = function() return {} end
+GetPlayerContextByClass = function() return 1 end
+C.GetContextByClass = function(comp, cls, self_) return comp end
+C.IsComponentOperational = function() return true end
+C.GetDistanceBetween = function() return 1000 end
+GetComponentData = function(component, ...)
+    local keys, vals = {...}, {}
+    for _, k in ipairs(keys) do
+        if k == "isenemy" then vals[#vals + 1] = true
+        elseif k == "ishostile" then vals[#vals + 1] = false
+        elseif k == "isfriend" then vals[#vals + 1] = false
+        elseif k == "isknown" then vals[#vals + 1] = true
+        elseif k == "isradarvisible" then vals[#vals + 1] = true
+        elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        else vals[#vals + 1] = nil
+        end
+    end
+    return unpack(vals)
+end
+
+gcMenu.onShowMenu()
+local sess49 = API.getSession()
+assert(sess49 ~= nil, "expected session for cache test (49)")
+
+-- Set up a direct/engaged session with two snapshots so the compact panel renders.
+local grp49 = { key = "grp49", kind = "group", contextID = 5, path = "p", group = "g",
+    componentID = 27, displayName = "G49", totalCount = 1, operationalCount = 1,
+    mode = "attack", armed = false, members = {
+        { componentID = 27, displayName = "T1", operational = true,
+          cameraSupported = true, componentKey = "27" }
+    } }
+sess49.groups = { grp49 }
+sess49.checkedGroupKeys = { ["grp49"] = true }
+sess49.phase = "engaged"
+sess49.controlMode = "direct"
+sess49.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+    shipID = sess49.shipID, mode = "attack", armed = false } }
+sess49.cameraMemberID = 27
+sess49.targetObjectID = 98
+sess49.aimTargetID = 98
+sess49.targetCandidates = {}   -- start empty so first call always sweeps
+
+-- Move the clock forward so the cache from any prior test is stale.
+clock = clock + 100
+getElapsedTime = function() return clock end
+
+-- First display(): must sweep (cache is empty / time-expired).
+shipScanCount49 = 0
+local ok49a, err49a = pcall(function() gcMenu.display() end)
+assert(ok49a, "display() raised on first call (test 49): " .. tostring(err49a))
+local sweepsAfterFirst = shipScanCount49
+assert(sweepsAfterFirst >= 1,
+    "first display() must call GetContainedShips at least once; got " .. tostring(sweepsAfterFirst))
+
+-- Second display() immediately (same clock): must reuse cache, no new sweep.
+shipScanCount49 = 0
+local ok49b, err49b = pcall(function() gcMenu.display() end)
+assert(ok49b, "display() raised on second call (test 49): " .. tostring(err49b))
+assert(shipScanCount49 == 0,
+    "second display() within the TTL must not rescan; GetContainedShips was called "
+    .. tostring(shipScanCount49) .. " time(s). Cache is not working.")
+
+-- Target-browser path (force=true): must always sweep even within the TTL.
+-- Simulate the browser by switching to target_select phase (what openTargetBrowser does).
+-- We reach the forced path by calling the browser display branch directly:
+-- set phase to target_select and call display().
+sess49.phase = "target_select"
+shipScanCount49 = 0
+local ok49c, err49c = pcall(function() gcMenu.display() end)
+assert(ok49c, "display() raised in browser phase (test 49): " .. tostring(err49c))
+assert(shipScanCount49 >= 1,
+    "target-browser display() must always sweep (force=true); GetContainedShips was called "
+    .. tostring(shipScanCount49) .. " time(s)")
 
 print("runtime smoke tests passed")

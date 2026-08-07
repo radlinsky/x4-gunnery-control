@@ -657,6 +657,17 @@ local function startAutoEngage(groups)
     return true
 end
 
+-- readTargetCandidates cache: a 1 s TTL is long enough that four 0.25 s repaints
+-- share a single sector sweep, but short enough that the target browser list
+-- feels live when the player is actively browsing it.  A force=true call (target
+-- browser display, cycleTarget) always bypasses the cache.
+-- Invalidated by updateAimTarget (which has its own 5 s throttle and must see
+-- fresh data when it decides to scan), by startTargetSelection and
+-- openTargetBrowser (which reset session.targetCandidates), and automatically
+-- whenever sessionEpoch changes (i.e. the session is discarded).
+local targetCandidatesTime = -math.huge
+local targetCandidatesEpoch = -1
+
 local function startTargetSelection(groups)
     -- Refuse when no checked group can be mutated.
     local anyMutable = false
@@ -677,6 +688,7 @@ local function startTargetSelection(groups)
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
     session.targetCandidates = {}
+    targetCandidatesTime = -math.huge   -- invalidate cache: fresh session context
     if not enterCamera(member) then session.phase = "console"; return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -689,6 +701,7 @@ local function openTargetBrowser()
     if not session or #(session.directSnapshots or {}) == 0 then return false end
     session.phase = "target_select"
     session.targetCandidates = {}
+    targetCandidatesTime = -math.huge   -- invalidate cache: target browser must scan fresh
     menu.display()
     return true
 end
@@ -770,7 +783,21 @@ isEligibleEngagementTarget = function(component)
     return State.isEngagementTargetAllowed(session and session.shipID, object), object
 end
 
-local function readTargetCandidates()
+local function readTargetCandidates(force)
+    local now = getElapsedTime()
+    if not force
+        and targetCandidatesEpoch == sessionEpoch
+        and now - targetCandidatesTime < 1
+        -- An empty result is cached too: a sector full of ineligible objects is
+        -- the most expensive sweep there is, and re-running it every repaint is
+        -- exactly the cost this cache exists to avoid. The explicit resets in
+        -- startTargetSelection/openTargetBrowser clear the timestamp, so a stale
+        -- empty list is never served across a phase change.
+        and session and session.targetCandidates then
+        return session.targetCandidates
+    end
+    targetCandidatesTime = now
+    targetCandidatesEpoch = sessionEpoch
     local candidates, seen = {}, {}
     local sector = GetPlayerContextByClass("sector")
     local radarRange = tonumber(componentData(session.shipID, "maxradarrange")) or 40000
@@ -817,7 +844,7 @@ end
 
 cycleTarget = function(delta)
     if not session or session.controlMode ~= "direct" then return false end
-    local entry = State.cycleEntry(readTargetCandidates(), session.targetObjectID, delta)
+    local entry = State.cycleEntry(readTargetCandidates(true), session.targetObjectID, delta)
     if not entry then return false end
     return engageTarget(entry.componentID)
 end
@@ -1117,6 +1144,7 @@ local function updateAimTarget()
         if now < nextAimScan then return end
     end
     nextAimScan = now + 5
+    targetCandidatesTime = -math.huge   -- force readTargetCandidates to rescan this tick
     -- Nothing on radar: keep the last aim point rather than dropping the view.
     local resolved = chooseAimTarget()
     if resolved == nil or sameID(resolved, prev) then return end
@@ -1409,7 +1437,7 @@ function menu.display()
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(3):createText(text(37)); header[4]:createText(text(38))
         header[5]:createText(text(49)); header[6]:createText(text(50)); header[7]:setColSpan(2):createText("")
-        local candidates = readTargetCandidates()
+        local candidates = readTargetCandidates(true)
         for _, candidate in ipairs(candidates) do
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(3):createText(candidate.name ~= "" and candidate.name or text(51))
