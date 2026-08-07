@@ -659,12 +659,11 @@ end
 
 -- readTargetCandidates cache: a 1 s TTL is long enough that four 0.25 s repaints
 -- share a single sector sweep, but short enough that the target browser list
--- feels live when the player is actively browsing it.  A force=true call (target
--- browser display, cycleTarget) always bypasses the cache.
--- Invalidated by updateAimTarget (which has its own 5 s throttle and must see
--- fresh data when it decides to scan), by startTargetSelection and
--- openTargetBrowser (which reset session.targetCandidates), and automatically
--- whenever sessionEpoch changes (i.e. the session is discarded).
+-- feels live when the player is actively browsing it.  Callers that must see
+-- live data pass bypassCache=true (target browser display, cycleTarget,
+-- chooseAimTarget), so there are no manual invalidation points.  The cache
+-- auto-invalidates whenever sessionEpoch changes (i.e. the session is
+-- discarded).
 local targetCandidatesTime = -math.huge
 local targetCandidatesEpoch = -1
 
@@ -688,7 +687,6 @@ local function startTargetSelection(groups)
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
     session.targetCandidates = {}
-    targetCandidatesTime = -math.huge   -- invalidate cache: fresh session context
     if not enterCamera(member) then session.phase = "console"; return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -701,7 +699,6 @@ local function openTargetBrowser()
     if not session or #(session.directSnapshots or {}) == 0 then return false end
     session.phase = "target_select"
     session.targetCandidates = {}
-    targetCandidatesTime = -math.huge   -- invalidate cache: target browser must scan fresh
     menu.display()
     return true
 end
@@ -783,16 +780,14 @@ isEligibleEngagementTarget = function(component)
     return State.isEngagementTargetAllowed(session and session.shipID, object), object
 end
 
-local function readTargetCandidates(force)
+local function readTargetCandidates(bypassCache)
     local now = getElapsedTime()
-    if not force
+    if not bypassCache
         and targetCandidatesEpoch == sessionEpoch
         and now - targetCandidatesTime < 1
         -- An empty result is cached too: a sector full of ineligible objects is
         -- the most expensive sweep there is, and re-running it every repaint is
-        -- exactly the cost this cache exists to avoid. The explicit resets in
-        -- startTargetSelection/openTargetBrowser clear the timestamp, so a stale
-        -- empty list is never served across a phase change.
+        -- exactly the cost this cache exists to avoid.
         and session and session.targetCandidates then
         return session.targetCandidates
     end
@@ -1089,7 +1084,10 @@ end
 -- is the best available target. Returns nil when nothing qualifies.
 local function chooseAimTarget()
     if not session then return nil end
-    local candidates = readTargetCandidates()
+    -- Always sweep fresh: updateAimTarget is already throttled to 5 s and
+    -- onDirectTargetLost is rare, so neither wants a cached list, and forcing
+    -- here means no caller has to remember to invalidate.
+    local candidates = readTargetCandidates(true)
     for _, c in ipairs(candidates) do
         if C.IsComponentOperational(id(c.componentID)) then
             return c.componentID
@@ -1144,7 +1142,6 @@ local function updateAimTarget()
         if now < nextAimScan then return end
     end
     nextAimScan = now + 5
-    targetCandidatesTime = -math.huge   -- force readTargetCandidates to rescan this tick
     -- Nothing on radar: keep the last aim point rather than dropping the view.
     local resolved = chooseAimTarget()
     if resolved == nil or sameID(resolved, prev) then return end
