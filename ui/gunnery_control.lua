@@ -1798,14 +1798,26 @@ local function init()
     local function onRestoreSession(_, payload)
         -- Do not resume a camera session after loading. Reconstruct only enough
         -- state to return the pre-Engage mode/armed settings, then clear MD state.
-        -- Diagnostic: the handler was observed producing no log at all on a live
-        -- load even though MD had raised the event with a populated table, which
-        -- means it returned at the type check below without leaving a trace.
-        -- Log what actually arrives before deciding anything.
+        --
+        -- KNOWN BROKEN, and everything below this point is currently
+        -- unreachable. raise_lua_event carries one scalar (a string, a number,
+        -- or a single component object); the snapshot LIST arrives here as nil.
+        -- Live-confirmed 2026-08-06: MD logged a fully populated State.$active
+        -- and this handler logged "payload type=nil" on the same tick. No
+        -- shipped 9.00 MD script passes a table through raise_lua_event either.
+        -- A second defect waits behind it: component IDs are reassigned on load
+        -- (the same ship was 441090 before a save and 2080707 after), so the
+        -- stored shipID/contextID would not match even once transport works.
+        -- The path/group names ARE stable and are what a fix should match on.
+        -- Kept, with the key handling below, because both are correct and will
+        -- be needed the moment transport is fixed. See the save/load restore
+        -- issue before touching this.
         log("RestoreSession event received; payload type=" .. type(payload)
             .. "; tostring=" .. tostring(payload))
         if type(payload) ~= "table" then
-            log("RestoreSession: payload is not a table; nothing restored")
+            log("RestoreSession: payload is not a table, so nothing was restored."
+                .. " Expected while save/load restore is broken; turret groups"
+                .. " stay as they were when the game was saved.")
             return
         end
 
