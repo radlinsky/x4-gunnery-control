@@ -1204,7 +1204,11 @@ function menu.display()
         Helper.clearFrame(menu, elementFrameLayer)
         menu.elementFrame = nil
     end
-    if session and session.phase == "engaged" then
+    -- Every call path into display() holds a live session: callers either guard
+    -- with `if session then` or return early when it is nil. Stated once here so
+    -- nothing below has to repeat the check.
+    if not session then return end
+    if session.phase == "engaged" then
         -- One compact upper-right panel for both controlModes (step 7).
         -- Frame properties match the old direct panel exactly so the contract
         -- test grep for viewFrame.properties.height still passes.
@@ -1370,12 +1374,6 @@ function menu.display()
         return
     end
 
-    -- Every call path that reaches here holds a live session: all callers guard
-    -- with `if session then` or return early when session is nil. The `session and`
-    -- checks in the engaged block above are belt-and-suspenders; this guard makes
-    -- the invariant explicit so the console section below can dereference session
-    -- freely without sprinkling `session and` throughout.
-    if not session then return end
     local targetBrowser = session.phase == "target_select"
     local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)

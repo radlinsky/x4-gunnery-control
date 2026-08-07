@@ -1758,19 +1758,12 @@ sess49.groups = { grp49 }
 sess49.checkedGroupKeys = { ["grp49"] = true }
 sess49.phase = "console"
 sess49.controlMode = nil
--- Drive startAutoEngage via the public button onClick path — call it through
--- TestAPI so we do not need a rendered frame. The button handler calls
--- startAutoEngage(State.checkedGroups(session)); replicate that here.
-local checkedGroups49 = X4GunneryState.checkedGroups(sess49)
--- startAutoEngage is module-local; drive it through the console display() path
--- by calling X4GunneryControlAPI.startAutoEngage if exposed, or by invoking the
--- TestAPI wrapper. It is internal, so we exercise it indirectly: set the session
--- state exactly as startAutoEngage would see it and call through the TestAPI.
--- TestAPI.startAutoEngage is the dedicated test hook.
-local ok49, err49 = pcall(function()
-    X4GunneryControlAPI.startAutoEngage(checkedGroups49)
-end)
-assert(ok49, "startAutoEngage raised: " .. tostring(err49))
+-- Same arguments the console Auto-Engage button passes. startAutoEngage is
+-- module-local; TestAPI exposes it, like TestAPI.endForMovement above.
+local engaged49 = API.startAutoEngage(X4GunneryState.checkedGroups(sess49))
+assert(engaged49 == false,
+    "startAutoEngage with no operational camera member must return false; got "
+    .. tostring(engaged49))
 -- After the failure, phase must be "console" and controlMode must be nil.
 assert(sess49.phase == "console",
     "startAutoEngage failure path must leave phase='console'; got '"
