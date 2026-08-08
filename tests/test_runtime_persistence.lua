@@ -259,4 +259,187 @@ do
     fix.ffiStub.new = savedNew
 end
 
+-- ── 61. POV and camera buttons persist the selection immediately ───────────
+-- X4 saves the MD-owned payload, not this Lua session table. A POV/turret
+-- click therefore has to commit its new values itself; opening Test Lab later
+-- must not be what makes the selection durable.
+local function povFixture61()
+    local localFix = dofile("tests/support/runtime_fixture.lua").load()
+    localFix.gcMenu.onShowMenu()
+    local localSession = localFix.API.getSession()
+    local group = {
+        key = "pov61", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 10, displayName = "Camera group", totalCount = 3,
+        operationalCount = 3, mode = "attack", armed = false, members = {
+            { componentID = 10, displayName = "T1", operational = true, cameraSupported = true },
+            { componentID = 11, displayName = "T2", operational = true, cameraSupported = true },
+            { componentID = 12, displayName = "T3", operational = true, cameraSupported = true },
+        },
+    }
+    localSession.phase, localSession.controlMode = "engaged", "auto"
+    localSession.groups, localSession.checkedGroupKeys = { group }, { pov61 = true }
+    localSession.directSnapshots = {}
+    localSession.cameraIndex, localSession.cameraMemberID = 2, 11
+    localSession.aimTargetID, localSession.targetObjectID = 99, 99
+    localFix.C.GetSofttarget2 = function()
+        return { softtargetID = 99, softtargetConnectionName = "" }
+    end
+    return localFix, localSession, group
+end
+
+local function persistedSelection61(localFix, localSession, group, label)
+    local payload
+    for index = #localFix.uiTriggeredEvents, 1, -1 do
+        local event = localFix.uiTriggeredEvents[index]
+        if event.control == "session_commit" then
+            payload = event.params and event.params.payload
+            break
+        end
+    end
+    assert(type(payload) == "string", label .. ": click must emit session_commit")
+    local restored = X4GunneryState.newSession(localSession.shipID, "gunnercontrol")
+    restored.shipName = localSession.shipName
+    assert(X4GunneryState.restoreState(restored, X4GunneryState.decode(payload), { group }),
+        label .. ": committed payload must decode and restore")
+    return restored
+end
+
+for _, case in ipairs({
+    { button = 63, anchor = "turret", mode = "manual", initialAnchor = "target", initialMode = "manual" },
+    { button = 64, anchor = "target", mode = "manual", initialAnchor = "turret", initialMode = "manual" },
+    { button = 65, anchor = "turret", mode = "cinematic", initialAnchor = "turret", initialMode = "manual" },
+    { button = 66, anchor = "target", mode = "cinematic", initialAnchor = "turret", initialMode = "manual" },
+}) do
+    local localFix, localSession, group = povFixture61()
+    localSession.povAnchor, localSession.povMode = case.initialAnchor, case.initialMode
+    localFix.gcMenu.display()
+    local button = localFix.buttonByText("text:20991:" .. tostring(case.button))
+    assert(button and button.active and type(button.handlers.onClick) == "function",
+        "POV " .. tostring(case.button) .. " must be a selectable real UI button")
+    localFix.resetUITriggeredEvents()
+    button.handlers.onClick()
+    local restored = persistedSelection61(localFix, localSession, group,
+        "POV " .. tostring(case.button))
+    assert(restored.povAnchor == case.anchor and restored.povMode == case.mode,
+        "POV " .. tostring(case.button) .. ": restored selection mismatch")
+    assert(restored.cameraMemberID == 11,
+        "POV " .. tostring(case.button) .. ": restore must retain the selected camera turret")
+end
+
+for _, case in ipairs({
+    { button = 71, cameraMemberID = 12, label = "Next Turret" },
+    { button = 72, cameraMemberID = 10, label = "Previous Turret" },
+}) do
+    local localFix, localSession, group = povFixture61()
+    localSession.povAnchor, localSession.povMode = "target", "cinematic"
+    localFix.gcMenu.display()
+    local button = localFix.buttonByText("text:20991:" .. tostring(case.button))
+    assert(button and button.active and type(button.handlers.onClick) == "function",
+        case.label .. " must be a selectable real UI button")
+    localFix.resetUITriggeredEvents()
+    button.handlers.onClick()
+    local restored = persistedSelection61(localFix, localSession, group, case.label)
+    assert(restored.cameraMemberID == case.cameraMemberID,
+        case.label .. ": committed payload must restore the newly selected turret")
+    assert(restored.povAnchor == "target" and restored.povMode == "cinematic",
+        case.label .. ": cycling the turret must retain the selected POV")
+end
+
+-- ── 62. Direct-control option buttons persist only settled state ────────
+local function directOptionFixture62()
+    local localFix, localSession, group = povFixture61()
+    localSession.controlMode = "direct"
+    localSession.directSnapshots = { {
+        kind = "group", shipID = localSession.shipID, contextID = group.contextID,
+        path = group.path, group = group.group, mode = "attack", armed = false,
+    } }
+    return localFix, localSession, group
+end
+
+local function eventCount62(localFix, control)
+    local count = 0
+    for _, event in ipairs(localFix.uiTriggeredEvents) do
+        if event.control == control then count = count + 1 end
+    end
+    return count
+end
+
+-- Auto-next is a synchronous local option, so both sides of the checkbox
+-- toggle must be in MD before the click handler returns.
+do
+    local localFix, localSession, group = directOptionFixture62()
+    localFix.gcMenu.display()
+    for _, expected in ipairs({ false, true }) do
+        local checkbox = localFix.getCreatedCheckBoxes()[1]
+        assert(checkbox and type(checkbox.handlers.onClick) == "function",
+            "Auto-next Target must expose the actual checkbox click handler")
+        localFix.resetUITriggeredEvents()
+        checkbox.handlers.onClick()
+        assert(localSession.autoNextTarget == expected,
+            "Auto-next Target click must update the live session immediately")
+        local restored = persistedSelection61(localFix, localSession, group, "Auto-next Target")
+        assert(restored.autoNextTarget == expected,
+            "Auto-next Target click must immediately persist " .. tostring(expected))
+    end
+end
+
+-- Prefer becomes durable only after its deferred MD apply is actually emitted.
+-- Release is immediate and persists false at the button boundary, without
+-- teaching teardown callers of clearPreferAllTurrets() to write transient state.
+do
+    local localFix, localSession, group = directOptionFixture62()
+    localFix.gcMenu.display()
+    local applyButton = localFix.buttonByText("text:20991:81")
+    assert(applyButton and applyButton.active and type(applyButton.handlers.onClick) == "function",
+        "Prefer My Target must be a selectable real UI button")
+    localFix.resetUITriggeredEvents()
+    local mark = localFix.callbackCheckpoint()
+    applyButton.handlers.onClick()
+    assert(eventCount62(localFix, "session_commit") == 0,
+        "Prefer My Target must not persist true before its deferred MD apply")
+    localFix.drainCallbacksSince(mark)
+    assert(eventCount62(localFix, "prefer_all_turrets") == 1,
+        "Prefer My Target must emit its deferred MD apply exactly once")
+    local restored = persistedSelection61(localFix, localSession, group, "Prefer My Target")
+    assert(restored.preferAllTurrets == true,
+        "Prefer My Target must persist true after its MD apply emits")
+
+    local releaseButton = localFix.buttonByText("text:20991:82")
+    assert(releaseButton and releaseButton.active and type(releaseButton.handlers.onClick) == "function",
+        "Release Other Turrets must be a selectable real UI button")
+    localFix.resetUITriggeredEvents()
+    releaseButton.handlers.onClick()
+    assert(eventCount62(localFix, "prefer_all_turrets_clear") == 1,
+        "Release Other Turrets must emit its clear immediately")
+    restored = persistedSelection61(localFix, localSession, group, "Release Other Turrets")
+    assert(restored.preferAllTurrets == false,
+        "Release Other Turrets must immediately persist false")
+end
+
+-- Apply followed by Release inside the deferral window is the dangerous race:
+-- the release commit must win, and the stale apply callback must emit neither
+-- the MD override nor a later commit that resurrects preferAllTurrets=true.
+do
+    local localFix, localSession, group = directOptionFixture62()
+    localFix.gcMenu.display()
+    local applyButton = localFix.buttonByText("text:20991:81")
+    localFix.resetUITriggeredEvents()
+    local mark = localFix.callbackCheckpoint()
+    applyButton.handlers.onClick()
+    local releaseButton = localFix.buttonByText("text:20991:82")
+    assert(releaseButton and releaseButton.active,
+        "Prefer click must expose the active Release button before the deferred apply")
+    releaseButton.handlers.onClick()
+    assert(eventCount62(localFix, "session_commit") == 1,
+        "Apply-then-Release must immediately commit false exactly once")
+    local restored = persistedSelection61(localFix, localSession, group, "Apply-then-Release")
+    assert(restored.preferAllTurrets == false,
+        "Apply-then-Release must persist the released state")
+    localFix.drainCallbacksSince(mark)
+    assert(eventCount62(localFix, "prefer_all_turrets") == 0,
+        "a released deferred apply must never reach MD")
+    assert(eventCount62(localFix, "session_commit") == 1,
+        "a released deferred apply must never re-persist true")
+end
+
 print("runtime persistence tests passed")

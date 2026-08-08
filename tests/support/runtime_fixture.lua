@@ -30,7 +30,7 @@
 -- fix.frameProps             — { [1]=props, ... } for the current refresh
 -- fix.allFrames              — { {props,background}, ... } — every frame ever
 -- fix.createdButtons         — { {active,text}, ... } since last clearDataForRefresh
--- fix.createdCheckBoxes      — { {checked}, ... }   since last clearDataForRefresh
+-- fix.createdCheckBoxes      — { {checked,handlers}, ... } since last clearDataForRefresh
 -- fix.clearedFrames          — layers passed to Helper.clearFrame since last reset
 -- fix.teardownTrace          — ordering trace: "clear<n>" | "close" entries
 -- fix.closeMenuCalls         — count of Helper.closeMenu invocations
@@ -298,7 +298,10 @@ function M.load()
                                         }
                                     end
                                     cell.createCheckBox = function(_, checked)
-                                        createdCheckBoxes[#createdCheckBoxes + 1] = { checked = checked }
+                                        createdCheckBoxes[#createdCheckBoxes + 1] = {
+                                            checked = checked,
+                                            handlers = cell.handlers,
+                                        }
                                     end
                                     cell.createDropDown = function() end
                                     rawset(t, column, cell)

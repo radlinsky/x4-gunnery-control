@@ -842,6 +842,10 @@ applyPreferAllTurrets = function()
             ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
             ["target"] = ConvertStringToLuaID(tostring(targetID)),
         })
+        -- The flag becomes durable only once the matching MD apply is emitted.
+        -- A release during this deferral clears the flag and makes the guard
+        -- above return, so a stale callback cannot re-persist the override.
+        persistSession()
     end, false, getElapsedTime() + 0.01)
     return true
 end
@@ -1436,39 +1440,39 @@ function menu.display()
         pRow1[1]:createButton({ active = not isCurrentPov("turret", "manual") }):setText(text(63))
         pRow1[1].handlers.onClick = function()
             session.povAnchor, session.povMode = "turret", "manual"
-            applyPov(); menu.display()
+            applyPov(); persistSession(); menu.display()
         end
         -- Target POV manual (id 64): inactive when no target
         pRow1[2]:createButton({ active = not isCurrentPov("target", "manual") and hasSoftTarget }):setText(text(64))
         pRow1[2].handlers.onClick = function()
             session.povAnchor, session.povMode = "target", "manual"
-            applyPov(); menu.display()
+            applyPov(); persistSession(); menu.display()
         end
         local pRow2 = controls:addRow("pov_cinematic", {})
         -- Turret POV cinematic (id 65)
         pRow2[1]:createButton({ active = not isCurrentPov("turret", "cinematic") }):setText(text(65))
         pRow2[1].handlers.onClick = function()
             session.povAnchor, session.povMode = "turret", "cinematic"
-            applyPov(); menu.display()
+            applyPov(); persistSession(); menu.display()
         end
         -- Target POV cinematic (id 66): inactive when no target
         pRow2[2]:createButton({ active = not isCurrentPov("target", "cinematic") and hasSoftTarget }):setText(text(66))
         pRow2[2].handlers.onClick = function()
             session.povAnchor, session.povMode = "target", "cinematic"
-            applyPov(); menu.display()
+            applyPov(); persistSession(); menu.display()
         end
         local pRow3 = controls:addRow("cycle_turret", {})
         -- Next Turret (id 71)
         pRow3[1]:createButton({ active = canCycle }):setText(text(71))
         pRow3[1].handlers.onClick = function()
             State.cycleCamera(session, 1)
-            enterCamera(cameraMember()); menu.display()
+            enterCamera(cameraMember()); persistSession(); menu.display()
         end
         -- Previous Turret (id 72)
         pRow3[2]:createButton({ active = canCycle }):setText(text(72))
         pRow3[2].handlers.onClick = function()
             State.cycleCamera(session, -1)
-            enterCamera(cameraMember()); menu.display()
+            enterCamera(cameraMember()); persistSession(); menu.display()
         end
         -- Direct-only: re-target, cease, and next/prev target buttons.
         if session.controlMode == "direct" then
@@ -1494,6 +1498,7 @@ function menu.display()
                 { width = Helper.standardTextHeight, height = Helper.standardTextHeight })
             autoNextRow[1].handlers.onClick = function()
                 session.autoNextTarget = (session.autoNextTarget == false)
+                persistSession()
                 menu.display()
             end
             autoNextRow[2]:createText(text(78))
@@ -1510,7 +1515,8 @@ function menu.display()
             -- Release Other Turrets (id 82)
             overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
             overrideRow[2].handlers.onClick = function()
-                clearPreferAllTurrets("release button", true); menu.display()
+                if clearPreferAllTurrets("release button", true) then persistSession() end
+                menu.display()
             end
         end
         if testLabCallbacks and testLabCallbacks.open then
