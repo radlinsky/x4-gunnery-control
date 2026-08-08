@@ -1100,9 +1100,12 @@ save using `pcall`.
 
   Measured in that second run and NOT part of this finding: `SetSofttarget` returned false
   for the recovered surface element immediately after the load, while the identical call on
-  the identical element had succeeded at engagement moments before. The engaged element was
-  out of range by the time the save was loaded, per the player. Range as the cause is the
-  player's report, not a measurement — no distance was logged on that run.
+  the identical element had succeeded at engagement moments before. Distance does not explain
+  the difference — the player reports the element was already out of range when they engaged
+  it, and the engagement path refuses to continue unless `SetSofttarget` returns true, which
+  it did. Both calls therefore ran at the same distance with opposite results. The cause is
+  unexplained; no distance was logged on that run, and the two calls differ in when they run
+  relative to the load.
 
   Not established by this test: what happens when the referenced component is destroyed
   while the game is closed. The MD side guards with `@` and does not raise in that case, but

@@ -2000,22 +2000,24 @@ local function init()
 
     -- The engine does not keep the soft target across a load or a reload, so the
     -- restored session has to re-point it or the turrets have nothing to shoot
-    -- at. It refused on the first live load (build 2026-08-08-target-restore-2,
-    -- "could not re-point the soft target"), and the reported cause is range:
-    -- the engaged surface element was far away by the time the save was loaded.
-    -- The identical call on the identical element had succeeded seconds earlier
-    -- at engagement range, so the call itself is fine.
+    -- at. It refused on the first live load (build 2026-08-08-target-restore-1,
+    -- "could not re-point the soft target").
     --
-    -- Deferred by one callback, which is not a guess: enterCamera (:658-667)
-    -- saves whatever soft target it finds and writes it back a tick later, so
-    -- an inline write here would simply be undone.
+    -- Not range. engageTarget bails out unless SetSofttarget returns true, and
+    -- it did not bail, so the engine accepted that same surface element at the
+    -- same distance while engaging: it was already out of range then. What
+    -- differs between the two calls is when they run, not how far away the
+    -- target is.
     --
-    -- ponytail: one attempt, not a retry loop. If range is the limit then
-    -- retrying inside a second changes nothing, and re-pointing later as the
-    -- player closes the distance would be a new feature, not a fix. The
-    -- distance is logged so the next failure either confirms range or rules it
-    -- out; the return value and the engine read-back are logged separately
-    -- because the call reporting success does not prove the engine took it.
+    -- Hence the deferral -- which stands on its own terms anyway: enterCamera
+    -- (:658-667) saves whatever soft target it finds and writes it back a tick
+    -- later, so an inline write here would be undone even had the engine taken
+    -- it.
+    --
+    -- ponytail: one attempt, not a retry loop, since nothing suggests a second
+    -- would differ. Distance is logged only to keep range ruled out; the return
+    -- value and the engine read-back are logged separately because the call
+    -- reporting success does not prove the engine took it.
     local function repointSoftTarget(targetID)
         local expectedSession, expectedEpoch = session, sessionEpoch
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
