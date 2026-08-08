@@ -1153,8 +1153,9 @@ save using `pcall`.
 - Status: shipped-source
 - Source: `ui/addons/ego_detailmonitorhelper/helper.lua`, `Helper.addDelayedOneTimeCallbackOnUpdate`
   and `onUpdate` (9.00 extracted UI catalog)
-- Live test: no — read from shipped source on 2026-08-08; the failure below was observed
-  live but its cause is not yet isolated
+- Live test: partial — mechanism read from shipped source 2026-08-08; the clock behaviour
+  across a UI reload and a savegame load was measured live 2026-08-08. The original
+  never-firing failure was observed live and its cause is still not isolated
 - Finding: the helper does not hold a timer. It pushes a closure onto a file-local
   one-time-callback list that `onUpdate` drains once per frame, and the closure compares
   `getElapsedTime()` against the `delaytime` argument. If the deadline has not arrived, the
@@ -1177,9 +1178,23 @@ save using `pcall`.
   for an MD-raised event at game load. Neither ever fired, with no error. A repeating
   watchdog using the identical API kept ticking throughout, which rules out the drain having
   stopped — it re-arms with a fresh reading every tick, so it would self-heal from a bad
-  deadline. Whether `getElapsedTime()` resets or jumps across a load, which would make the
-  captured deadline unreachable, is the current suspicion and is unmeasured.
+  deadline. The cause of those two failures remains unexplained.
+
+  Measured 2026-08-08 (live-tested, X4 9.00), disproving the clock hypothesis that stood
+  here: a canary armed with `getElapsedTime() + 0.3` from inside that same `RegisterEvent`
+  handler FIRED, both after a UI reload (due 0.867, fired at 0.873) and after loading a
+  savegame (due 44.051, fired at 44.082) — one frame late, not stalled. Across the load
+  `getElapsedTime()` rose monotonically through the restore, the next watchdog tick and the
+  callback (43.751 → 43.956 → 44.082). It does not reset or rewind at load, so a deadline
+  captured in that handler is reachable and scheduling from an MD-event handler works.
+
+  Incidental from the same runs: `getElapsedTime()` DOES restart near zero after a **UI
+  reload** (0.567 against a UI init in the same frame). It is UI-lifetime, not game-lifetime.
+  Harmless to this API, since `delaytime` is computed from a current reading either way.
+
+  Not established by this test: why the two original builds failed. The scheduling mechanism
+  is now excluded; the cause is elsewhere and was not isolated.
 
   `getElapsedTime` is engine-provided: it appears in the extracted 9.00 UI Lua only as a
-  caller, never as a definition, so its behaviour across a save/load cannot be read and must
-  be probed.
+  caller, never as a definition, so the readings above are the only evidence of its
+  behaviour across a load.
