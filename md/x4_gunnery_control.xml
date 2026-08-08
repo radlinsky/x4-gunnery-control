@@ -13,19 +13,23 @@
             <set_value name="State.$active" exact="event.param3"/>
           </actions>
         </cue>
-        <!-- PROBE 2026-08-08, remove or promote once read. The string payload
-             cannot carry the engaged target: a load reassigns every component
-             id, so the digits in the string point at some other object
-             afterwards and the target is dropped instead of restored.
+        <!-- The engaged target, held as a component rather than as digits in
+             State.$active. A load reassigns every component id, so an id
+             written into the string payload addresses some other object
+             afterwards; an MD variable holding a real component is the
+             engine's own persistent handle and is remapped instead.
 
-             An MD variable holding a real component is the engine's own
-             persistent handle, so the question is whether it survives a
-             save/load and comes back to Lua as a usable id. Ids arriving here
-             as datatype.component is already live-tested (see CutsceneAim
-             below); the rest is not, hence the idcode on both legs. The same
-             idcode at store and at restore means the same object came back.
-             Kept apart from BeginSession deliberately: if this fails it must
-             not take the working string payload down with it. -->
+             Live-tested 2026-08-08 across two save/loads: stored as idcode
+             SFL-948, came back as SFL-948 both times under a different numeric
+             id each time (2089492, then 34178848), and Lua found it
+             operational on arrival. The differing ids are the point: they
+             show the reference being remapped, not merely stored.
+
+             Kept as its own cue rather than folded into BeginSession so the
+             string payload, which was already working, does not depend on it.
+             The typeof guard mirrors CutsceneAim below: ids arrive as real
+             components via ConvertStringToLuaID, and the conversion is the
+             fallback for the only other form they could arrive in. -->
         <cue name="SetTarget" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'session_target'"/>
@@ -65,10 +69,12 @@
                  missing variable raises "Property lookup failed" into the log on
                  every load for every player. -->
             <do_if value="@State.$active">
-              <!-- PROBE 2026-08-08: raised BEFORE the session so Lua has the
-                   target stashed by the time the session lands. A component
-                   that did not survive the load reads as null here and simply
-                   is not raised, which is itself the answer. -->
+              <!-- Raised BEFORE the session so Lua has the target stashed by
+                   the time RestoreSession builds the session that consumes it.
+                   A target that died while the game was closed reads as null
+                   here and is simply not raised, which is the correct outcome:
+                   the session comes back with no target rather than with a
+                   dangling one. -->
               <do_if value="@State.$target">
                 <debug_text text="'[X4GC] RequestState: target typeof=' + (typeof State.$target)
                                   + ' idcode=' + (@State.$target.idcode)

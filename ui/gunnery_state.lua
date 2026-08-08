@@ -472,9 +472,12 @@ function State.saveState(session)
         shipName = tostring(session.shipName or ""),
         -- The engine does not hand the soft target back: probed 2026-08-08, it
         -- read 0 immediately after a reload taken while a target was engaged.
-        -- So the target travels in the payload instead of being re-read.
+        -- So the target travels in the payload instead of being re-read. Only
+        -- good across a reload; a load reassigns the id, and the restore takes
+        -- the target from MD's component reference instead. targetObjectID is
+        -- not carried at all -- it is always the root of aimTargetID, so the
+        -- restore derives it rather than keeping a second id in step.
         aimTargetID = tostring(session.aimTargetID or ""),
-        targetObjectID = tostring(session.targetObjectID or ""),
         -- Only usable across a reload; a load reassigns it. The three fields
         -- below say the same thing in terms that do survive a load -- which
         -- turret of which group -- so the POV comes back to the same barrel
@@ -549,7 +552,6 @@ function State.restoreState(session, records, liveGroups)
             session.preferAllTurrets = record.preferAllTurrets == "1"
             if idsHeld then
                 session.aimTargetID = (record.aimTargetID ~= "" and record.aimTargetID) or nil
-                session.targetObjectID = (record.targetObjectID ~= "" and record.targetObjectID) or nil
                 session.cameraMemberID = (record.cameraMemberID ~= "" and record.cameraMemberID) or nil
             end
             restored = true

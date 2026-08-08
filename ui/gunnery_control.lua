@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-target-probe-1"
+local runtimeBuild = "2026-08-08-target-restore-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -320,11 +320,12 @@ local function persistSession()
     -- Harmless if a UI reload happens before MD is initialized.
     AddUITriggeredEvent("X4GunneryControl", "session_begin",
         State.encode(State.saveState(session)))
-    -- PROBE 2026-08-08, remove or promote once read. The target cannot travel
-    -- in the string: a load reassigns every id, so those digits address some
-    -- other object afterwards and restoreState drops them. Sent separately as a
-    -- bare id, which MD converts to a real component (live-tested 2026-08-04),
-    -- to find out whether that reference survives a save/load.
+    -- The target cannot travel in the string: a load reassigns every id, so
+    -- those digits address some other object afterwards. Sent separately as a
+    -- bare id, which MD converts to a real component, because an MD variable
+    -- holding a component is the engine's own persistent handle and is remapped
+    -- across a load. Live-tested 2026-08-08 over two loads: same idcode both
+    -- times, new numeric id each time, operational on arrival.
     if session.aimTargetID then
         AddUITriggeredEvent("X4GunneryControl", "session_target", session.aimTargetID)
     end
@@ -1985,24 +1986,15 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
-    -- PROBE 2026-08-08, remove or promote once read. MD raises this just before
-    -- RestoreSession, carrying the engaged target as a component it has held
-    -- across the save. Log-and-stash only: what the string payload does today is
-    -- deliberately left alone until the log says this route actually works.
+    -- MD raises this just before RestoreSession, carrying the engaged target as
+    -- a component it held across the save. Stashed rather than applied here
+    -- because the session it belongs to does not exist until RestoreSession
+    -- builds it a tick later. MD drops the variable when the component dies, so
+    -- arriving at all means the target is still alive.
     local restoredTargetID = nil
     local function onRestoreTarget(_, payload)
         restoredTargetID = payload
-        -- pcall because a probe is throwaway code on a registered event: an FFI
-        -- slip in one took init() down mid-registration earlier in this work,
-        -- which silently removes the whole mod from the UI until a restart.
-        local ok, detail = pcall(function()
-            local resolved = payload ~= nil and id(payload) or 0
-            return "asID=" .. tostring(resolved) .. " operational="
-                .. tostring(resolved ~= 0 and C.IsComponentOperational(resolved))
-        end)
-        log("RestoreTarget PROBE: type=" .. type(payload)
-            .. " value=" .. tostring(payload) .. " " .. tostring(detail))
-        if not ok then log("RestoreTarget PROBE: resolution failed, see above") end
+        log("RestoreTarget: type=" .. type(payload) .. " value=" .. tostring(payload))
     end
     RegisterEvent("X4GunneryControl.RestoreTarget", onRestoreTarget)
 
@@ -2037,11 +2029,13 @@ local function init()
             .. " phase=" .. tostring(session.phase)
             .. " groups=" .. #session.groups
             .. " snapshots=" .. #(session.directSnapshots or {}))
-        -- PROBE 2026-08-08: the two routes side by side. On a reload they must
-        -- agree; on a load the payload side is nil by design and the probe side
-        -- is the whole question.
-        log("RestoreTarget PROBE comparison: fromPayload=" .. tostring(session.aimTargetID)
-            .. " fromMD=" .. tostring(restoredTargetID))
+        -- A load leaves restoreState with no target: the id it saved now belongs
+        -- to some other object. MD held the same target as a component and the
+        -- engine remapped it, so this is the one route that survives a load.
+        if not session.aimTargetID and restoredTargetID then
+            session.aimTargetID = tostring(restoredTargetID)
+            log("RestoreSession: target recovered from MD: " .. session.aimTargetID)
+        end
         restoredTargetID = nil
         if not ok then
             -- Turret group names are identical across every ship of a class, so
@@ -2063,6 +2057,10 @@ local function init()
         if target ~= 0 and not C.SetSofttarget(target, "") then
             log("RestoreSession: could not re-point the soft target " .. tostring(target))
         end
+        -- Derived rather than carried: targetObjectID is only ever the root of
+        -- aimTargetID, so persisting it separately would be a second id to keep
+        -- in step with the first for nothing.
+        session.targetObjectID = target ~= 0 and targetRoot(target) or nil
         -- firstOperationalMember hands back a (key, componentID) pair for
         -- selection bookkeeping, not a member table, so enterCamera saw no
         -- cameraSupported flag and this fallback failed every time it was

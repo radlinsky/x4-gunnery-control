@@ -1064,6 +1064,39 @@ save using `pcall`.
   different tag, and whether the engine retries a failed menu init. `initializing UI` was
   logged twice in succession, which was not explained.
 
+### An MD cue variable holding a component survives a save/load and returns to Lua remapped
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-target-probe-1`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — a target engaged, the game saved, then loaded twice, on 2026-08-08
+- Finding: a UI menu that must name a specific object again after a save/load cannot do it
+  with an id. Component ids are reassigned on load, so an id written into a string payload
+  addresses a different object afterwards. Parking the same object in an MD cue variable as
+  a component does work.
+
+  Lua sent the target's id to MD with `AddUITriggeredEvent`, MD stored `event.param3` into a
+  cue variable and logged `typeof=component idcode=SFL-948`. The game was saved, then loaded
+  twice. On both loads MD logged the same `idcode=SFL-948` and raised the variable back with
+  `raise_lua_event`; Lua received `type=number` and `IsComponentOperational` returned true.
+
+  The numeric id differed on each load — `2089492` on the first, `34178848` on the second,
+  against a pre-save id of `444138`. That difference is the result, not noise: the same
+  object arrived under a new id each time, so the engine is remapping the reference rather
+  than storing a number. The player's own ship was reassigned across the same loads
+  (`443747` → `2089092` → `34180899`), reproducing the recorded reassignment behaviour.
+
+  The string payload written on the same tick carried the pre-save target id and was
+  correctly refused by the restoring code, so both routes were observed side by side in one
+  run: `fromPayload=nil fromMD=2089492`.
+
+  Not established by this test: what happens when the referenced component is destroyed
+  while the game is closed. The MD side guards with `@` and does not raise in that case, but
+  that branch was never reached. Also not established: whether this holds for a surface
+  element rather than the whole object measured here — the target was a `XEN Defence Drone`,
+  a complete object, not a turret or shield on a larger hull. No limit on how many such
+  references can be held was probed; one was used.
+
 ### refreshmd re-reads MD from disk, keeps cue variables, and does not re-fire completed cues
 - X4: 9.00
 - Status: live-tested
