@@ -781,6 +781,15 @@ applyPreferAllTurrets = function()
     local shipID, targetID = session.shipID, session.aimTargetID
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not currentSession(expectedSession, expectedEpoch) then return end
+        -- Anything that happened inside the deferral window wins. A release
+        -- clears the flag synchronously, so emitting anyway would leave MD
+        -- applied with the flag already false -- no later teardown route could
+        -- clear it, and the player walks away with a silently altered ship.
+        -- A target change re-issues, so a stale target must not overwrite it.
+        if not session.preferAllTurrets or not sameID(session.aimTargetID, targetID) then
+            log("prefer_all_turrets apply dropped: released or retargeted first")
+            return
+        end
         AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
             ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
             ["target"] = ConvertStringToLuaID(tostring(targetID)),

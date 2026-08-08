@@ -10,6 +10,13 @@ All notable changes to this project are documented in this file.
   rest of the ship back while your checked groups stay on your target; ceasing
   or getting up releases everything.
 
+- Hitting **Release Other Turrets** immediately after **Prefer My Target** now
+  really releases. The apply is sent a tick late so the turret modes land first,
+  and a release in that gap used to arrive ahead of it: the panel said released,
+  the ship stayed overridden, and nothing afterwards could clear it because the
+  console already believed it was off. The pending apply is now dropped if you
+  released or picked a new target first.
+
 - The turret Mode column now updates when you cease an engagement. It used to
   keep showing `autoassist` afterwards even though the turrets had already gone
   back to their own mode, so the panel disagreed with the ship.

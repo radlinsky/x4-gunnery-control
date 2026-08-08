@@ -2045,12 +2045,47 @@ do
     assert(reissued54 == 1,
         "a target change must re-issue the override exactly once; got " .. tostring(reissued54))
 
+    -- A release inside the one-tick deferral window wins. Emitting anyway would
+    -- leave MD applied with the session flag already false, and every teardown
+    -- route short-circuits on that flag, so nothing could ever clear it again.
+    local countBefore54r = #evts54
+    local before53r = #pendingCallbacks
+    sess54.aimTargetID = 502
+    assert(API.applyPreferAllTurrets() == true, "re-issuing the override must succeed")
+    assert(API.clearPreferAllTurrets("released inside the deferral window") == true,
+        "release must report success while the deferred apply is still pending")
+    for i = before53r + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
+    for i = countBefore54r + 1, #evts54 do
+        assert(evts54[i].control ~= "prefer_all_turrets",
+            "a release inside the deferral window must cancel the pending apply; "
+            .. "otherwise MD stays applied and no teardown route can clear it")
+    end
+
+    -- Same window, but the player retargets instead of releasing. The stale
+    -- callback must not overwrite the newer target's override.
+    local before53s = #pendingCallbacks
+    sess54.aimTargetID = 503
+    assert(API.applyPreferAllTurrets() == true, "issuing the override must succeed")
+    sess54.aimTargetID = 504
+    assert(API.applyPreferAllTurrets() == true, "re-issuing for the new target must succeed")
+    local countBefore54s = #evts54
+    for i = before53s + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
+    local emitted54s = {}
+    for i = countBefore54s + 1, #evts54 do
+        if evts54[i].control == "prefer_all_turrets" then
+            emitted54s[#emitted54s + 1] = evts54[i]
+        end
+    end
+    assert(#emitted54s == 1,
+        "only the current target's override may be emitted; got " .. tostring(#emitted54s))
+
     -- Release hands the ship back, and is a no-op when nothing is held.
+    sess54.preferAllTurrets = true
     assert(API.clearPreferAllTurrets("test") == true, "release must report success when held")
     assert(sess54.preferAllTurrets == false, "release must clear the session flag")
     local cleared54 = 0
-    for _, e in ipairs(evts54) do
-        if e.control == "prefer_all_turrets_clear" then cleared54 = cleared54 + 1 end
+    for i = countBefore54s + 1, #evts54 do
+        if evts54[i].control == "prefer_all_turrets_clear" then cleared54 = cleared54 + 1 end
     end
     assert(cleared54 == 1, "release must raise prefer_all_turrets_clear exactly once")
     assert(API.clearPreferAllTurrets("test again") == false,
