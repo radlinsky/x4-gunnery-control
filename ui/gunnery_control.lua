@@ -40,7 +40,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-probes-removed"
+local runtimeBuild = "2026-08-08-pr-review"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -52,7 +52,6 @@ local testCameraFailures = {}
 -- final POV only after X4 has accepted the temporary turret placement.
 local applyPov
 local dockedHookRegistered, mapHookRegistered, hookAttempts = false, false, 0
-local lastObservedDockedControlGroup
 local resumePending, endingSession = false, false
 -- Defined next to leaveChair, but every teardown route needs it.
 local clearOwnShipSofttarget
@@ -60,14 +59,10 @@ local seatLeaving = false
 local sessionEpoch = 0
 local reopenSuspendedSession
 local activeExternalMenuName
-local lastWatchdogSignature
 local cameraMismatchLogged = false
--- Fires at most once per session when GetUpgradeGroups2 or GetUpgradeSlotGroup
--- returns a path or group id that carries whitespace padding, proving that the
--- engine does NOT trim before handing the value back to Lua. Silent when the
--- engine trims (the normal case). Reset in discardSession so each session gets
--- one log line at most, not one per repaint.
-local groupPaddingLogged = false
+local mapReopenFailureLogged = false
+local containedShipsFailureLogged, containedStationsFailureLogged = false, false
+local cutsceneNoTurretFailureLogged = false
 
 local function text(id) return ReadText(20991, id) end
 local function str(pointer) return pointer ~= nil and ffi.string(pointer) or "" end
@@ -176,11 +171,13 @@ local function logSession(event)
         .. "; extmenu=" .. (activeExternalMenuName and activeExternalMenuName() or "<none>"))
 end
 
-local function transitionLifecycle(nextLifecycle, reason)
+local function transitionLifecycle(nextLifecycle, reason, quiet)
     if not session then return end
     local previous = session.lifecycle or "none"
     State.setLifecycle(session, nextLifecycle)
-    logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
+    if not quiet then
+        logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
+    end
 end
 
 local function ownedByPlayer(ship)
@@ -201,13 +198,6 @@ local function readGroups(ship)
     count = tonumber(C.GetUpgradeGroups2(buffer, count, ship, ""))
     for i = 0, count - 1 do
         local path, group = str(buffer[i].path), str(buffer[i].group)
-        -- Self-diagnosing probe: log once per session if the engine hands back a
-        -- padded path or group id, confirming the runtime does NOT trim for us.
-        -- Silent (zero log lines) when the engine trims before returning the value.
-        if not groupPaddingLogged and (path ~= trim(path) or group ~= trim(group)) then
-            groupPaddingLogged = true
-            log('raw group id carries padding: "' .. path .. '" / "' .. group .. '"')
-        end
         if path ~= ".." or group ~= "" then
             local info = C.GetUpgradeGroupInfo2(ship, "", buffer[i].contextid, path, group, "turret")
             if tonumber(info.count) > 0 then
@@ -398,7 +388,6 @@ local function resumeDirectControl()
                 setMode(group, "autoassist"); setArmed(group, true)
             end
         end
-        log("resumed direct control after release")
         menu.display()
     end, false, getElapsedTime() + 0.02)
 end
@@ -412,7 +401,6 @@ local function clearPreferAllTurrets(reason, resume)
     AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets_clear", {
         ["ship"] = ConvertStringToLuaID(tostring(session.shipID)),
     })
-    log("prefer_all_turrets_clear emitted: " .. tostring(reason))
     if resume then resumeDirectControl() end
     return true
 end
@@ -465,7 +453,6 @@ local function restoreDirect(reason)
         end
         if session.phase ~= "console" then return end
         menu.display()
-        log("repainted console after restore: " .. reason)
     end, false, getElapsedTime() + 0.5)
 end
 
@@ -473,7 +460,6 @@ local function returnToConsole(reason)
     if not session then return end
     C.SetPlayerCameraCockpitView(true)
     State.returnToConsole(session)
-    log("returned to Gunnery Control: " .. reason)
     menu.display()
 end
 
@@ -482,8 +468,10 @@ end
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
     if not session then return end
-    groupPaddingLogged = false
     cameraMismatchLogged = false
+    mapReopenFailureLogged = false
+    containedShipsFailureLogged, containedStationsFailureLogged = false, false
+    cutsceneNoTurretFailureLogged = false
     -- Read directSnapshots BEFORE restoreDirect empties the list. The notify
     -- emission below (when seatLeaving is true) depends on whether this session
     -- actually held direct snapshots (Direct-control), not just on the reason code.
@@ -530,7 +518,6 @@ local function discardSession(reason)
     if seatLeaving then
         local notifyMsg = hadDirectSnapshots and text(79) or text(80)
         AddUITriggeredEvent("X4GunneryControl", "notify", { ["text"] = notifyMsg })
-        log("notify emitted: " .. notifyMsg)
     end
 end
 
@@ -570,7 +557,6 @@ function menu.cleanup()
         -- view replacement. The global watchdog confirms that ownership did
         -- not return before restoring the directed group.
         session.autoHideAt = GetCurRealTime()
-        logSession("automatic frame hide queued for orphan check")
     end
 end
 
@@ -599,7 +585,6 @@ clearOwnShipSofttarget = function()
     local root = C.GetContextByClass(id(current), "container", true)
     if sameID(root ~= 0 and root or id(current), session.shipID) then
         RemoveSofttarget()
-        log("cleared a soft target left on our own ship")
     end
 end
 
@@ -617,7 +602,6 @@ local function leaveChair(reason)
         if session then menu.display() end
         return false
     end
-    logSession("left chair: " .. reason)
     -- Close on a later tick, the way vanilla does: DockedMenu's Get Up button
     -- only calls GetUp() and closes from the playerGetUp event
     -- (menu_docked.lua:283,1442). Closing synchronously unregisters our
@@ -812,7 +796,6 @@ local function engageTarget(targetID)
     -- snapshot: the engine drops the soft target across a reload, so a payload
     -- written before this point would come back without a target.
     persistSession()
-    logSession("engagement transition started")
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch)
@@ -853,14 +836,12 @@ applyPreferAllTurrets = function()
         -- clear it, and the player walks away with a silently altered ship.
         -- A target change re-issues, so a stale target must not overwrite it.
         if not session.preferAllTurrets or not sameID(session.aimTargetID, targetID) then
-            log("prefer_all_turrets apply dropped: released or retargeted first")
             return
         end
         AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
             ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
             ["target"] = ConvertStringToLuaID(tostring(targetID)),
         })
-        log("prefer_all_turrets emitted target=" .. tostring(targetID))
     end, false, getElapsedTime() + 0.01)
     return true
 end
@@ -909,11 +890,21 @@ local function readTargetCandidates()
     if current.softtargetID ~= 0 then add(current.softtargetID, text(43), true) end
     if sector then
         local okShips, ships = pcall(GetContainedShips, sector, true)
-        if okShips then for _, ship in ipairs(ships or {}) do add(ship, text(44), false) end
-        else log("GetContainedShips failed: " .. tostring(ships)) end
+        if okShips then
+            containedShipsFailureLogged = false
+            for _, ship in ipairs(ships or {}) do add(ship, text(44), false) end
+        elseif not containedShipsFailureLogged then
+            containedShipsFailureLogged = true
+            log("GetContainedShips failed: " .. tostring(ships))
+        end
         local okStations, stations = pcall(GetContainedStations, sector, true, false)
-        if okStations then for _, station in ipairs(stations or {}) do add(station, text(45), false) end
-        else log("GetContainedStations failed: " .. tostring(stations)) end
+        if okStations then
+            containedStationsFailureLogged = false
+            for _, station in ipairs(stations or {}) do add(station, text(45), false) end
+        elseif not containedStationsFailureLogged then
+            containedStationsFailureLogged = true
+            log("GetContainedStations failed: " .. tostring(stations))
+        end
     end
     table.sort(candidates, function(a, b)
         if a.priority ~= b.priority then return a.priority < b.priority end
@@ -1072,7 +1063,6 @@ end
 -- cutscene aim experiment concludes.
 local function sendCutsceneAimStop()
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
-    log("cutscene_aim_stop emitted")
 end
 
 local function sendCutsceneAimStart(pov)
@@ -1080,7 +1070,6 @@ local function sendCutsceneAimStart(pov)
     -- between stop and start is never read as "the player left the cinematic".
     if session then session.cinematicSeen = nil end
     if not session or session.phase ~= "engaged" then
-        log("sendCutsceneAimStart: not in engaged phase; ignored")
         return
     end
     local turretID = session.cameraMemberID
@@ -1092,11 +1081,13 @@ local function sendCutsceneAimStart(pov)
         targetID = softtarget.softtargetID
     end
     if isNullID(turretID) then
-        log("sendCutsceneAimStart: no turret resolved; ignored")
+        if not cutsceneNoTurretFailureLogged then
+            cutsceneNoTurretFailureLogged = true
+            log("cutscene aim could not start: no turret resolved")
+        end
         return
     end
     if isNullID(targetID) then
-        log("sendCutsceneAimStart: no softtarget; ignored")
         return
     end
     local anchorID, tgtID
@@ -1121,8 +1112,7 @@ local function sendCutsceneAimStart(pov)
         ["target"] = ConvertStringToLuaID(tostring(tgtID)),
         ["pov"] = pov,
     })
-    log("cutscene_aim_start pov=" .. tostring(pov)
-        .. " anchor=" .. tostring(anchorID) .. " target=" .. tostring(tgtID))
+    cutsceneNoTurretFailureLogged = false
 end
 
 function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
@@ -1285,8 +1275,6 @@ local function updateAimTarget()
     if (session.povMode or "manual") == "cinematic" then
         -- A running cutscene cannot be re-aimed, so retargeting is a stop and a
         -- restart; the player sees a brief camera cut.
-        log("aimTarget changed; restarting cinematic (prev="
-            .. tostring(prev) .. " new=" .. tostring(resolved) .. ")")
         sendCutsceneAimStop()
         sendCutsceneAimStart(session.povAnchor or "turret")
     else
@@ -1340,14 +1328,13 @@ function menu.onShowMenu()
     resumePending = false
     if not session then
         session = newSession(ship)
-        logSession("session created from chair ingress")
         resuming = false
         -- The partner of the not-seated guard in onRestoreSession: if the restore
         -- raised at gameLoadingDone ever arrives with the player off the chair,
         -- this is what collects the payload afterwards. Cheap either way -- MD
         -- only keeps a payload for a session that did not end cleanly, so a
-        -- normal ingress gets "no saved session state" straight back, which is
-        -- what the 2026-08-08 runs logged every time.
+        -- normal ingress receives an empty state response, which is silent by
+        -- design because it is the common no-save path.
         if persistence then persistence.request() end
     elseif not sameID(session.shipID, ship) or (not resuming and not mapSuspendResume) then
         -- A fresh chair interaction must never inherit a hidden direct
@@ -1358,17 +1345,17 @@ function menu.onShowMenu()
         resuming = false
         mapSuspendResume = false
         session = newSession(ship)
-        logSession("session recreated from chair ingress")
     else
         transitionLifecycle(State.lifecycle.owned, "Map resume shown")
     end
-    if resuming then
-        -- The lifecycle transition above is intentionally before camera setup:
-        -- delayed camera work must see an owned session.
-        logSession("resuming previously suspended Map session")
-    elseif mapSuspendResume then
-        logSession("session resumed from map suspend")
-    else
+    -- A displayed menu proves this reopen episode succeeded. Only this genuine
+    -- handover (or a fresh session) clears the failure latch; retry attempts do
+    -- not, so a broken Map handoff cannot fill the log at watchdog cadence.
+    mapReopenFailureLogged = false
+    -- The lifecycle transition above is intentionally before camera setup:
+    -- delayed camera work must see an owned session. A map-suspend resume
+    -- already made that transition, so only a fresh ingress needs this one.
+    if not resuming and not mapSuspendResume then
         transitionLifecycle(State.lifecycle.owned, "fresh console shown")
     end
     refresh()
@@ -1781,7 +1768,6 @@ function menu.onUpdate()
                 session.povAnchor, session.povMode = "turret", "manual"
                 applyPov()
                 menu.display()
-                logSession("cutscene ended outside the panel; back to Turret POV")
             end
         end
         -- Only while the camera is meant to be ON the turret. Target POV points
@@ -1815,7 +1801,6 @@ activeExternalMenuName = function()
 end
 
 function menu.onCloseElement(dueToClose)
-    logSession("onCloseElement dueToClose=" .. tostring(dueToClose))
     local externalMenu = activeExternalMenuName()
     if session and externalMenu then
         if externalMenu == "MapMenu" then
@@ -1846,7 +1831,6 @@ function menu.onCloseElement(dueToClose)
             session.povAnchor, session.povMode = "turret", "manual"
             applyPov()
             menu.display()
-            logSession("Esc left the cinematic POV")
             return
         end
         local expectedSession, expectedEpoch = session, sessionEpoch
@@ -1881,12 +1865,6 @@ end
 local function redirectDockedMenu()
     local observedGroup = controlGroup()
     local ship = playerShip()
-    if observedGroup ~= lastObservedDockedControlGroup then
-        log("DockedMenu observed control group " .. (observedGroup ~= "" and observedGroup or "<none>")
-            .. "; occupied ship " .. tostring(C.GetPlayerOccupiedShipID())
-            .. "; resolved ship " .. tostring(ship))
-        lastObservedDockedControlGroup = observedGroup
-    end
     if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
     redirectPending = true
     -- Deferring avoids opening two menus in the same DockedMenu render pass.
@@ -1895,7 +1873,6 @@ local function redirectDockedMenu()
         if isInGunnerChair() then
             local docked = Helper.getMenu("DockedMenu")
             if docked then
-                log("redirecting DockedMenu from control group " .. controlGroup())
                 -- Open the replacement before closing DockedMenu and suppress
                 -- its automatic vanilla-menu fallback. Calling closeMenu()
                 -- directly races TopLevelMenu against this custom menu.
@@ -1930,7 +1907,6 @@ local function registerUIHooks()
         if docked and docked.registerCallback then
             docked.registerCallback("display_on_after_main_interactions", redirectDockedMenu, menu.uixID)
             dockedHookRegistered = true
-            log("registered DockedMenu redirect hook")
         end
     end
     if not mapHookRegistered then
@@ -1941,7 +1917,6 @@ local function registerUIHooks()
             map.registerCallback("on_menu_cleanup", function()
                 local expectedSession, expectedEpoch = session, sessionEpoch
                 if not expectedSession or expectedSession.lifecycle ~= State.lifecycle.suspendedMap then return end
-                logSession("MapMenu cleanup callback")
                 Helper.addDelayedOneTimeCallbackOnUpdate(function()
                     if sameSession(expectedSession, expectedEpoch) and session.lifecycle == State.lifecycle.suspendedMap then
                         reopenSuspendedSession("MapMenu callback")
@@ -1949,7 +1924,6 @@ local function registerUIHooks()
                 end, false, getElapsedTime() + 0.02)
             end, menu.uixID)
             mapHookRegistered = true
-            log("registered MapMenu cleanup hook")
         end
     end
     if not dockedHookRegistered or not mapHookRegistered then
@@ -1970,12 +1944,16 @@ reopenSuspendedSession = function(reason)
     end
     resumePending = true
     local expectedSession, expectedEpoch = session, sessionEpoch
-    transitionLifecycle(State.lifecycle.reopening, "Map cleanup: " .. reason)
+    transitionLifecycle(State.lifecycle.reopening, "Map cleanup: " .. reason, true)
     OpenMenu("X4GunneryMenu", { 0, 0 }, nil)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if sameSession(expectedSession, expectedEpoch) and resumePending and not menu.shown then
             resumePending = false
-            transitionLifecycle(State.lifecycle.suspendedMap, "Map reopen did not display; retrying")
+            transitionLifecycle(State.lifecycle.suspendedMap, "Map reopen did not display; retrying", true)
+            if not mapReopenFailureLogged then
+                mapReopenFailureLogged = true
+                log("Map reopen did not display; retrying")
+            end
         end
     end, false, getElapsedTime() + 0.50)
 end
@@ -2010,11 +1988,6 @@ local function sessionWatchdog()
             and not State.isMapSuspended(session) then
             attemptRepoint()
         end
-        local signature = table.concat({ session.lifecycle or "none", session.phase or "none", tostring(menu.shown and true or false), tostring(resumePending and true or false) }, ":")
-        if signature ~= lastWatchdogSignature then
-            lastWatchdogSignature = signature
-            logSession("watchdog state changed")
-        end
         if session.lifecycle == State.lifecycle.suspendedMap and not menu.shown and not activeExternalMenuName() then
             reopenSuspendedSession("MapMenu cleanup")
         elseif session.lifecycle == State.lifecycle.owned and not menu.shown
@@ -2039,7 +2012,6 @@ end
 TestAPI.runSessionWatchdog = sessionWatchdog
 
 local function init()
-    log("initializing UI; build=" .. runtimeBuild)
     Menus = Menus or {}; table.insert(Menus, menu)
     if Helper then Helper.registerMenu(menu) end
     registerUIHooks()
@@ -2084,7 +2056,6 @@ local function init()
     local function onRestoreEnvelope(envelope)
         local records = State.decode(envelope and envelope.payload)
         if #records == 0 then
-            log("restore response empty")
             return
         end
         -- Groups are addressed by contextID+path+group, and only a live ship can
@@ -2151,16 +2122,6 @@ local function init()
             return
         end
         if target ~= 0 then
-            -- Read before anything writes it. This settled whether the re-point
-            -- below is needed at all: it is. Measured 2026-08-08 as 0ULL against
-            -- a live restored target, so a load clears the engine soft target
-            -- and the turrets staying on target on an earlier run was not the
-            -- savegame preserving it. Kept as a permanent line because it is the
-            -- one reading that would say so if a patch ever changed that.
-            local read, before = pcall(function() return C.GetSofttarget2().softtargetID end)
-            log("restore engine soft target before write = "
-                .. (read and tostring(before) or "raised")
-                .. "; restored target = " .. tostring(target))
             -- Handed to the watchdog rather than to a delayed callback of its
             -- own. Two builds scheduled one from inside this event handler and
             -- neither ever fired -- "re-point scheduled" with no attempt after
@@ -2205,6 +2166,6 @@ local function init()
         persistence.request()
     end)
     sessionWatchdog()
-    log("UI initialized")
+    log("UI initialized; build=" .. runtimeBuild)
 end
 init()

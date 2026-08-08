@@ -38,9 +38,6 @@ assert(postResumeSess.phase == "target_select",
 assert(postResumeSess.lifecycle == X4GunneryState.lifecycle.owned,
     "BUG (same ship): lifecycle should be 'owned' after resume, got '"
     .. tostring(postResumeSess.lifecycle) .. "'")
-assert(fix.logContains("session resumed from map suspend"),
-    "expected 'session resumed from map suspend' in log after map-suspend resume")
-
 -- 11b: different ship — session must still be discarded and recreated.
 -- The ship-identity guard must not be weakened by the fix.
 local sess11b = API.getSession()

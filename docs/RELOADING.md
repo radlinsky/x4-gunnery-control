@@ -57,7 +57,7 @@ screen until they are in the right place. Give all four of these every time:
    all Lua state, so the session is rebuilt from the parked payload rather than
    continuing. Anything not in that payload is gone.
 4. **What confirms it worked:** the log line
-   `[X4GC] initializing UI; build=<runtimeBuild>` carrying the build id you just
+   `[X4GC] UI initialized; build=<runtimeBuild>` carrying the build id you just
    installed. Tell the owner the id to look for. If the id is the old one, the
    installer did not run and the reload re-ran the previous code.
 

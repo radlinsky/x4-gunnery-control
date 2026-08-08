@@ -152,12 +152,11 @@
                  dead-center. Known ceiling: with this between-objects asset,
                  perpendicular turret aim can still put the camera at/inside
                  the hull; a custom cutscene asset with turret-local offsets is
-                 a separate research track. All values logged for tuning. -->
+                 a separate research track. -->
             <set_value name="CutsceneAim.$Dist" exact="CutsceneAim.$Anchor.size + 50m"/>
             <do_if value="CutsceneAim.$Pov == 'turret'">
               <set_value name="CutsceneAim.$Dist" exact="[CutsceneAim.$Anchor.size, 3m].max"/>
             </do_if>
-            <debug_text text="'[X4GC] cutscene_aim_start raw=' + event.param3 + ' anchor=' + CutsceneAim.$Anchor + ' (' + typeof CutsceneAim.$Anchor + ') target=' + CutsceneAim.$Target + ' (' + typeof CutsceneAim.$Target + ') pov=' + CutsceneAim.$Pov + ' dist=' + CutsceneAim.$Dist + ' ax=' + (CutsceneAim.$Dist * 0.4) + ' ay=' + (CutsceneAim.$Dist * 0.2)" chance="100"/>
             <play_cutscene cinematicmode="true" result="CutsceneAim.$Handle" key="'Follow_A_Lookat_B'">
               <param name="duration" number="999999"/>
               <param name="anchor" object="CutsceneAim.$Anchor"/>
@@ -170,7 +169,6 @@
               <param name="target_y" number="0"/>
               <param name="target_z" number="0"/>
             </play_cutscene>
-            <debug_text text="'[X4GC] cutscene_aim handle=' + CutsceneAim.$Handle" chance="100"/>
           </actions>
         </cue>
 
@@ -183,7 +181,6 @@
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
-            <debug_text text="'[X4GC] cutscene_aim_stop'" chance="100"/>
           </actions>
         </cue>
 
@@ -243,8 +240,7 @@
          fight.attack.object.capital.xml:1756 states target acquisition for that
          mode is handled in code and a supplied list is ignored, so issuing it
          would be a silent no-op. The Lua side clears its own autoassist
-         override before raising this, and logs the count below so a live run
-         can still prove the mode writes landed first. -->
+         override before raising this. -->
     <cue name="PreferAllTurrets">
       <cues>
         <cue name="Apply" instantiate="true">
@@ -270,24 +266,13 @@
                   <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
                 </do_if>
               </do_all>
-              <set_value name="$applied" exact="0"/>
               <do_for_each name="$mode" in="$modes">
                 <!-- towing and mining turrets have a job that is not shooting;
                      autoassist would be a no-op, see the note above. -->
                 <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
                   <set_turret_targets object="$ship" preferredtarget="$target" weaponmode="$mode" stopshootingold="false"/>
-                  <set_value name="$applied" operation="add"/>
                 </do_if>
-                <do_elseif value="$mode == weaponmode.autoassist">
-                  <!-- Expected to be zero for groups the console took over. A
-                       non-zero count here means either the player set a group
-                       to autoassist themselves, or the Lua mode writes had not
-                       landed yet, which is the exact fault seen on
-                       2026-08-07. -->
-                  <debug_text text="'[X4GC] prefer_all_turrets skipped autoassist turrets on ' + $ship" chance="100"/>
-                </do_elseif>
               </do_for_each>
-              <debug_text text="'[X4GC] prefer_all_turrets ship=' + $ship + ' target=' + $target + ' modes=' + $applied" chance="100"/>
             </do_if>
             <do_else>
               <debug_text text="'[X4GC] prefer_all_turrets: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
@@ -312,7 +297,6 @@
                   <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
                 </do_if>
               </do_all>
-              <set_value name="$cleared" exact="0"/>
               <do_for_each name="$mode" in="$modes">
                 <!-- Same filter as Apply, and for the same reason: Apply never
                      set a preferred target on these modes, so there is nothing
@@ -321,10 +305,8 @@
                 <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
                   <!-- No preferredtarget: clearpreferred defaults to true. -->
                   <set_turret_targets object="$ship" weaponmode="$mode" stopshootingold="false"/>
-                  <set_value name="$cleared" operation="add"/>
                 </do_if>
               </do_for_each>
-              <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' modes=' + $cleared" chance="100"/>
             </do_if>
           </actions>
         </cue>

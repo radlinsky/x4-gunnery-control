@@ -29,7 +29,6 @@ if grep -Fq 'controlGroup() == "gunnertrigger"' "$main"; then
 fi
 grep -Fq 'C.GetContextByClass(C.GetPlayerID(), "container", false)' "$main"
 grep -Fq 'C.IsComponentClass(ship, "ship")' "$main"
-grep -Fq '; resolved ship ' "$main"
 # A frame that hides the HUD never gets it back: only the fullscreen console
 # (no playerControls) may do so, and it does that by being the non-targetBrowser
 # case of keepHUDVisible = targetBrowser.
@@ -68,7 +67,6 @@ fi
 grep -Fq 'local function sessionWatchdog()' "$main"
 grep -Fq 'reopenSuspendedSession("returned to " .. tostring(mode))' "$main"
 grep -Fq 'State.lifecycle.suspendedMap' "$main"
-grep -Fq 'MapMenu cleanup callback' "$main"
 grep -Fq 'map.registerCallback("on_menu_cleanup"' "$main"
 grep -Fq 'externalMenu == "MapMenu" and State.isOwned(session)' "$main"
 grep -Fq 'C.SetTrackedMenuFullscreen(menu.name, false)' "$main"
@@ -106,9 +104,22 @@ fi
 # Shape, not value: a dated build id must exist so a debug log identifies the
 # build. Pinning the literal only forced a test edit on every bump.
 grep -Eq 'local runtimeBuild = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[^"]+"' "$main"
-grep -Fq 'initializing UI; build=" .. runtimeBuild' "$main"
+grep -Fq 'UI initialized; build=" .. runtimeBuild' "$main"
 
-grep -Fq 'automatic frame hide queued for orphan check' "$main"
+for removed_log in \
+  'watchdog state changed' \
+  'raw group id carries padding' \
+  'restore engine soft target before write' \
+  'notify emitted:' \
+  'repainted console after restore:' \
+  'registered DockedMenu redirect hook' \
+  'registered MapMenu cleanup hook'; do
+  if grep -Fq "$removed_log" "$main"; then
+    echo "removed default telemetry remains: $removed_log" >&2
+    exit 1
+  fi
+done
+
 grep -Fq 'orphaned menu detected by watchdog' "$main"
 grep -Fq 'engagement transition confirmed by frame creation' "$main"
 grep -Fq 'standardButtons = { back = true, close = true }' "$main"
@@ -145,7 +156,6 @@ if grep -A20 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCame
   exit 1
 fi
 grep -Fq 'seatLeaving = true' "$main"
-grep -Fq 'logSession("left chair: "' "$main"
 
 grep -Fq 'cutscene_aim_start' "$main"
 grep -Fq 'cutscene_aim_stop' "$main"
