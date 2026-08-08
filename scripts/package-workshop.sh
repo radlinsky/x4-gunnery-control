@@ -59,7 +59,7 @@ if [[ -f "$id_file" ]]; then
     # only. The repo's content.xml is never touched. The /<content /  address is
     # load-bearing: without it sed also rewrites the id of every <dependency>,
     # which would make the Workshop build depend on itself and silently drop the
-    # hard kuertee UI Extensions requirement.
+    # kuertee UI Extensions dependency.
     sed -i "/<content /s/ id=\"[^\"]*\"/ id=\"$workshop_id\"/" "$staged_content"
   fi
 fi
@@ -68,8 +68,8 @@ fi
 # WorkshopTool refuses to publish an extension whose content.xml depends on
 # anything that is not itself a Workshop item:
 #   "ERROR: There are dependencies on non-Workshop extensions"
-# and it refuses even for optional="true" dependencies.  Our hard dependency
-# names kuertee's Nexus id, so the staged copy has to name the Workshop
+# and it refuses even for optional="true" dependencies.  Our dependency names
+# kuertee's Nexus id, so the staged copy has to name the Workshop
 # repackage of the same mod instead -- uploaded by Valador8869/UncommonDLL with
 # kuertee's permission, https://steamcommunity.com/workshop/filedetails/?id=3477279743
 #
@@ -82,7 +82,11 @@ fi
 # version integer, which is not ours to predict, and demanding a wrong one would
 # block loading for every subscriber.  version is optional on <dependency>;
 # kuertee's own mods ship dependency elements without it.
-sed -i '/<dependency id="kuerteeUIExtensionsAndHUD"/c\  <dependency id="ws_3477279743" optional="false" name="kuertee UI Extensions and HUD"/>' "$staged_content"
+#
+# optional="true" mirrors the repo content.xml: a subscriber who installed UI
+# Extensions from Nexus instead of the Workshop has the mod but not this id, and
+# a hard dependency would disable us for them.  kuertee's own recommendation.
+sed -i '/<dependency id="kuerteeUIExtensionsAndHUD"/c\  <dependency id="ws_3477279743" optional="true" name="kuertee UI Extensions and HUD"/>' "$staged_content"
 if grep -q 'kuerteeUIExtensionsAndHUD"' "$staged_content"; then
   echo "the kuertee dependency was not rewritten; WorkshopTool would reject this build" >&2
   exit 1

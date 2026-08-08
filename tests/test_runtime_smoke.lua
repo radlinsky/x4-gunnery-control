@@ -2215,4 +2215,23 @@ do
     AddUITriggeredEvent = savedAdd54
 end
 
+-- ── 55. missing kuertee UI Extensions is reported, not silent ────────────────
+-- UI Extensions is an optional dependency (its extension id differs between the
+-- Nexus and Workshop releases, so a hard one disables us for half of installs).
+-- Without it registerCallback is absent and the Map-reopen hook never lands; the
+-- only thing standing between the player and a mod that quietly half-works is
+-- this log line.
+do
+    local missing = API.hookTimeoutMessage({})
+    assert(missing:find("UI Extensions is not loaded", 1, true),
+        "a DockedMenu without registerCallback means UI Extensions is missing; got: " .. missing)
+    -- A menu that does have registerCallback timed out for some other reason;
+    -- blaming UI Extensions there would send players chasing the wrong fix.
+    local other = API.hookTimeoutMessage({ registerCallback = function() end })
+    assert(not other:find("UI Extensions", 1, true),
+        "a hooked DockedMenu must not be blamed on UI Extensions; got: " .. other)
+    assert(API.hookTimeoutMessage(nil):find("timed out", 1, true),
+        "no DockedMenu at all is still a plain timeout")
+end
+
 print("runtime smoke tests passed")

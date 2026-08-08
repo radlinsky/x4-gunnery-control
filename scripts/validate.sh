@@ -34,7 +34,9 @@ if [[ ! -s release/RELEASE_NOTES.md ]]; then
   exit 1
 fi
 grep -q 'id="x4_gunnery_control"' content.xml
-grep -q 'id="kuerteeUIExtensionsAndHUD"' content.xml
+# Must stay optional: UI Extensions has a different id on Nexus and on the
+# Workshop, so a hard dependency disables us for whoever installed the other one.
+grep -q 'id="kuerteeUIExtensionsAndHUD" version="900" optional="true"' content.xml
 xml_ver=$(content_xml_version)
 changelog_ver=$(grep -m1 '^## \[[0-9][^]]*\]' CHANGELOG.md | grep -o '\[[^]]*\]' | tr -d '[]')
 if [[ ! "$changelog_ver" =~ ^(0|[1-9][0-9]*)\.[0-9][0-9]$ ]]; then
