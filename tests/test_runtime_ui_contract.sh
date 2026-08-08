@@ -90,7 +90,9 @@ if grep -Fq 'session.phase == "direct"' "$main"; then
   echo 'residual session.phase == "direct" found in main file' >&2
   exit 1
 fi
-grep -Fq 'local runtimeBuild = "2026-08-06-notify-22"' "$main"
+# Shape, not value: a dated build id must exist so a debug log identifies the
+# build. Pinning the literal only forced a test edit on every bump.
+grep -Eq 'local runtimeBuild = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[^"]+"' "$main"
 grep -Fq 'initializing UI; build=" .. runtimeBuild' "$main"
 
 grep -Fq 'automatic frame hide queued for orphan check' "$main"
@@ -211,6 +213,16 @@ if grep -Eq 'C\.SetSofttarget\(savedTargetID' "$main"; then
   echo 'enterCamera restores the soft target directly again; route it through restoreSofttarget()' >&2
   exit 1
 fi
+# A UniverseID out of the FFI is boxed cdata: tostring() gives "0ULL", so
+# tostring(x) == "0" is false for a null id and the guard never fires in game.
+# No Lua test can catch this -- every harness stubs ids as plain numbers, where
+# tostring(0) really is "0" -- so this grep is the only guard. Use isNullID().
+for f in "$main" ui/gunnery_state.lua "$testlab"; do
+  if grep -nE 'tostring\([^()]*\)[[:space:]]*[=~]=[[:space:]]*"0"' "$f" | grep -vq '^[0-9]*:[[:space:]]*--'; then
+    echo "null-id check by tostring in $f; \"0ULL\" slips through -- use State.isNullID()" >&2
+    exit 1
+  fi
+done
 grep -Fq 'onDirectTargetLost' "$main"
 grep -Fq 'autoNextRow[1]:createCheckBox' "$main"
 grep -Fq 'autoNextRow[2]:createText(text(78))' "$main"
@@ -274,9 +286,16 @@ if grep -Fq 'target_detail' "$main"; then
   exit 1
 fi
 
-grep -Fq 'local lastPostExitProbe' "$main"
-grep -Fq 'IsEncryptedDirectInputModeActive' "$main"
-grep -Fq 'IsConversationActive' "$main"
 grep -Fq 'SetPlayerCameraCockpitView' "$main"
+
+# Apply skips towing, mining and autoassist, so Release has nothing of ours to
+# clear on those modes and must skip them too. An unfiltered clear reaches
+# turrets the console never touched -- on a mixed ship that is someone else's
+# mining or towing job. Both loops carry the same filter; assert two of them.
+# shellcheck disable=SC2016
+if [ "$(grep -c 'weaponmode.towing) and (\$mode != weaponmode.mining) and (\$mode != weaponmode.autoassist)' md/x4_gunnery_control.xml)" -ne 2 ]; then
+  echo "PreferAllTurrets Apply and Release must both filter towing/mining/autoassist" >&2
+  exit 1
+fi
 
 echo "runtime UI contract checks passed"

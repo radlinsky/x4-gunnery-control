@@ -20,7 +20,12 @@ end
 -- opaque group name is less useful than displaying its original value.
 function State.turretGroupLabel(identifier)
     if type(identifier) ~= "string" then return nil end
-    local name = string.lower(identifier)
+    -- Trim leading/trailing whitespace: vanilla XML pads group= attributes
+    -- inconsistently (e.g. "group_front_up_left " or "  group_front_down_mid ").
+    -- Only this entry point trims; engine-facing values stay byte-exact.
+    local trimmed = string.match(identifier, "^%s*(.-)%s*$")
+    if trimmed == nil or trimmed == "" then return nil end
+    local name = string.lower(trimmed)
     if not string.match(name, "^group_") then return nil end
 
     local directions = {
@@ -43,6 +48,9 @@ function State.turretGroupLabel(identifier)
     }
     local slots = {}
     for token in string.gmatch(name, "[^_]+") do
+        -- Trim each token so any residual whitespace from interior padding
+        -- cannot prevent the direction lookup from matching.
+        token = string.match(token, "^%s*(.-)%s*$") or token
         local word, suffix = string.match(token, "^(%a+)(%d*)$")
         local direction = word and directions[word]
         if direction and not slots[direction.slot] then
@@ -71,6 +79,12 @@ end
 -- Exported because the runtime's sameID() compares across the same boundary:
 -- targetRoot() hands back a raw FFI id, id() hands back a converted one.
 State.normID = normID
+
+-- Returns true when v represents "no component": nil, plain 0, or the
+-- LuaJIT cdata form "0ULL" / "0ull" that the FFI hands back for unset
+-- UniverseID fields. All three mean the same thing at runtime; guards that
+-- only test tostring(v) == "0" silently miss the cdata form.
+function State.isNullID(v) return v == nil or normID(v) == "0" end
 
 -- A surface element belongs to the ship/station returned by targetRoot(). The
 -- occupied ship and its own surfaces must never appear as engagement targets;
@@ -121,6 +135,12 @@ function State.newSession(shipID, controlGroup)
         -- Direct-control only: take the turrets to the next target when the
         -- engaged one dies. Off sends the player back to the target browser.
         autoNextTarget = true,
+        -- Direct-control only: the ship-wide "prefer my target" override. Off
+        -- until the player explicitly asks for it, and always cleared before
+        -- the session ends. It reaches every turret on the ship rather than
+        -- just the checked groups, which is why it is an explicit action with
+        -- its own button and not a default.
+        preferAllTurrets = false,
         directSnapshots = {},
         selectedGroupKey = nil, selectedMemberID = nil, cameraMemberID = nil,
         targetObjectID = nil, targetCandidates = {},
@@ -170,7 +190,7 @@ function State.retainSelection(session, groups)
         if group.key == session.selectedGroupKey then
             selectedGroup = group
             for _, member in ipairs(group.members) do
-                if member.componentID == session.selectedMemberID and member.operational then
+                if normID(member.componentID) == normID(session.selectedMemberID) and member.operational then
                     selectedMember = member
                     break
                 end
@@ -348,8 +368,11 @@ function State.snapshotsForSave(list)
     return result
 end
 
+-- Mode and armed commands address a group by contextID+path+group, which
+-- GetUpgradeGroups2 always reports exactly, so the only thing that can make a
+-- group unwritable is having no operational turret left in it.
 function State.canMutate(group)
-    return group and not group.ambiguous and (group.operationalCount or 0) > 0
+    return group and (group.operationalCount or 0) > 0
 end
 
 function State.statusLabel(group)

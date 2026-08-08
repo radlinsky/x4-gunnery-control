@@ -75,7 +75,12 @@ local snapshot = snaps[1]
 State.returnToConsole(session); eq(session.phase, "console", "camera return phase"); assert(session.cameraMemberID == nil, "camera return clears member")
 session.phase = "engaged"
 local released = State.releaseDirect(session); eq(released[1], snapshot, "release returns snapshot list entry"); eq(session.phase, "console", "release phase")
-assert(State.canMutate(group)); group.ambiguous = true; assert(not State.canMutate(group))
+-- Only a destroyed group (no operational turret) is unwritable. A duplicate
+-- group name never blocks mutation: commands address contextID+path+group.
+assert(State.canMutate(group))
+local savedOperational = group.operationalCount
+group.operationalCount = 0; assert(not State.canMutate(group))
+group.operationalCount = savedOperational
 local savedGroup = State.snapshotForSave(snapshot)
 eq(savedGroup.shipID, "99", "save payload converts ship ID")
 eq(savedGroup.contextID, "7", "save payload converts group context")
@@ -94,6 +99,9 @@ eq(s2.povMode, "manual", "newSession: povMode default manual")
 eq(s2.cameraIndex, 1, "newSession: cameraIndex default 1")
 eq(s2.aimTargetID, nil, "newSession: aimTargetID nil")
 eq(s2.autoNextTarget, true, "newSession: autoNextTarget defaults on")
+-- The override reaches every turret on the ship, not just the checked groups,
+-- so it is never on by default.
+eq(s2.preferAllTurrets, false, "newSession: preferAllTurrets defaults off")
 assert(s2.directSnapshots ~= nil, "newSession: directSnapshots exists")
 assert(type(s2.directSnapshots) == "table", "newSession: directSnapshots is table")
 assert(s2.directSnapshot == nil, "newSession: no legacy directSnapshot field")
@@ -343,5 +351,39 @@ assert(ce == nil, "cycleEntry: empty list returns nil")
 -- tostring comparison: string "20" matches numeric 20
 ce = State.cycleEntry(ceEntries, "20", 1)
 eq(ce.componentID, 30, "cycleEntry: string currentID matches numeric componentID")
+
+-- State.isNullID: guards that once tested tostring(v) == "0" missed the cdata
+-- form "0ULL" that FFI hands back for unset UniverseID fields. isNullID accepts
+-- all three null representations so they fire correctly in game.
+assert(State.isNullID(nil),    "isNullID: nil is null")
+assert(State.isNullID(0),      "isNullID: numeric 0 is null")
+assert(State.isNullID("0"),    "isNullID: string '0' is null")
+assert(State.isNullID("0ULL"), "isNullID: '0ULL' cdata form is null")
+assert(State.isNullID("0ull"), "isNullID: '0ull' lowercase cdata form is null")
+assert(not State.isNullID("463766"),    "isNullID: real id is not null")
+assert(not State.isNullID("463766ULL"), "isNullID: real id with ULL suffix is not null")
+
+-- turretGroupLabel: whitespace-tolerance for vanilla XML padding.
+-- The real ship XML pads group= values with spaces; assert that padded forms
+-- produce the same label as their unpadded counterparts, and that
+-- whitespace-only identifiers return nil.
+do
+    local unpaddedLeft = State.turretGroupLabel("group_front_up_left")
+    local unpaddedMid  = State.turretGroupLabel("group_front_up_middle")
+    -- trailing space (real: "group_front_up_left ")
+    eq(State.turretGroupLabel("group_front_up_left "), unpaddedLeft,
+        "trailing space must produce the same label as unpadded")
+    -- leading space (real: " group_front_up_mid " — mid and middle are synonyms)
+    eq(State.turretGroupLabel(" group_front_up_middle "), unpaddedMid,
+        "leading+trailing space must produce the same label as unpadded")
+    -- double leading space (real: "  group_front_down_mid ")
+    eq(State.turretGroupLabel("  group_front_down_mid "), State.turretGroupLabel("group_front_down_mid"),
+        "double leading space must produce the same label as unpadded")
+    -- whitespace-only must return nil
+    assert(State.turretGroupLabel("  ") == nil,
+        "two-space whitespace-only identifier must return nil")
+    assert(State.turretGroupLabel("   ") == nil,
+        "three-space whitespace-only identifier must return nil")
+end
 
 print("gunnery_state tests passed")

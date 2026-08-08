@@ -34,6 +34,16 @@ mark a specific surface element (e.g. turret, shield, engine).
   the next target yourself, which is closer to actually manning the gun.
 - **Next Target** / **Previous Target** step through the same candidate list
   without reopening the browser.
+- **All Turrets: Prefer My Target**: every turret on the ship shoots your target
+  when it can. A turret that has no shot at your target shoots something else in
+  range instead of waiting.
+
+  This affects every turret on the ship, not just the groups you checked, and
+  turrets are no longer held to their **Mode** while it is on: turrets set to
+  missile defence will fire on ships.
+- **Release Other Turrets**: gives the rest of the ship back to its own
+  settings. The groups you checked keep shooting your target, because you are
+  still directing them. Ceasing engagement or getting up releases everything.
 
 ## Four viewing modes
 
@@ -50,6 +60,10 @@ mark a specific surface element (e.g. turret, shield, engine).
 
 - **This is not manual aiming.** Direct-control tells the turrets
   *what* to hit, not *how*. The engine exposes no way to man a turret yourself.
+- **On small ships the camera watches the whole ship, not the turret.** X4
+  resolves a turret camera on S/M ships to the ship itself. Everything still
+  works — Direct-control, target selection, auto-engage — the view is just less
+  specific than it is on a capital ship.
 - **Turret POV cinematic often clips the camera into your own hull.** It looks
   rough. Target POV cinematic is the better-looking of the two.
 - The confirmation popup that appears when you stand up also works around an X4

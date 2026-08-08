@@ -613,6 +613,139 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   snapshot cached in `.x4-research-cache/exports/`. It cannot exclude a function
   that exists under a non-obvious name.
 
+## Turret upgrade groups — mapping a turret slot to its group
+
+### A turret slot cannot be attributed to a group, and on a ship it never needs to be
+
+- X4: 9.00
+- Status: live-tested (probe on a Boron L destroyer, 2026-08-07);
+  shipped-source (FFI declarations, vanilla callers, ship macros);
+  inference (the uniqueness argument)
+- Source: live probe logged as `[X4GC PROBE]` on
+  `ship_bor_l_destroyer_01_a_macro` (14 turret slots, 9 groups);
+  1924 unique FFI declarations across `ui-9.00`;
+  `ui/addons/ego_interactmenu/menu_interactmenu.lua` `areTurretsArmed()`;
+  `ui/addons/ego_detailmonitor/menu_docked.lua`;
+  `libraries/scriptproperties.xml` (extracted to
+  `.x4-research-cache/extracted/props-9.00`);
+  126 stock ship macros in `.x4-research-cache/extracted/ships-9.00`
+- Live test: yes — 2026-08-07, X4 9.00, Boron L destroyer
+- Finding: `GetUpgradeSlotGroup` returns `{path, group}` with **no context ID**,
+  and `GetUpgradeGroupInfo2` returns a single representative component rather
+  than a member list. There is no `GetUpgradeSlotGroup2`. So when two groups
+  share `path`+`group`, the turrets between them cannot be attributed. Four
+  candidate resolutions were tested live and all failed or were useless:
+  1. `GetComponentData(turret, "grouptag")` → `nil` on all 14 turrets. The
+     `grouptag` property exists on the `component` datatype in
+     `scriptproperties.xml` ("Parent group tag") but is not populated for
+     turrets.
+  2. `GetComponentData(turret, "parent")` and `"container"` → both return the
+     ship. `"defensible"` → `nil`.
+  3. `GetParentComponent(turret)` → returns the ship for every turret. The
+     function is declared in `menu_map.lua` but called by no shipped Lua file;
+     it works, it just cannot disambiguate.
+  4. `GetNumUpgradeSlots(contextID, ...)` → untested in effect, because every
+     context on the probed ship *was* the ship.
+- Consequence: the case does not arise on a ship. `GetUpgradeGroups2` keys
+  groups by `contextid`+`path`+`group`, so two entries sharing `path`+`group`
+  must differ in `contextid` — otherwise they are the same group. Every group on
+  the probed ship reported `contextid == ship`, and all 53 `<turrets>`
+  declarations across the 126 stock ship macros use `path=".."` with unique
+  group names. Vanilla's `entry.context == menu.object -- mainship` check in
+  `menu_ship_configuration.lua` implies contexts only diverge for stations with
+  modules. Treat `#candidates > 1` on a ship as unreachable defensive code.
+- Vanilla does not attempt this mapping at all: `areTurretsArmed()` and
+  `menu_docked.lua` walk turret slots **only** for ungrouped turrets
+  (`path == ".."` and empty group) and drive grouped turrets purely through
+  `contextid`+`path`+`group`. Any per-turret member list for a group is a
+  mod-only construct.
+- Upgrade path, if a modded ship ever produces duplicate group names: on the
+  probed ship the representative component was always the group's **first slot
+  in scan order** (`group_front_up_left` rep=445809 → slot 2 of 2,3;
+  `group_rear_down_mid` rep=445808 → slot 13 of 13,14; and so on for all 9
+  groups). Combined with `GetUpgradeGroupInfo2().total`, that partitions slots
+  exactly: on hitting a representative, claim the next `total` slots for it.
+  Ceiling: one ship of evidence for an undocumented ordering guarantee. Confirm
+  on several hulls before relying on it.
+
+### 15 shipped ships have two turret groups that humanize to the same label
+
+- X4: 9.00
+- Status: shipped-source (the group identifiers); inference (the labels, derived
+  by replaying this project's `State.turretGroupLabel()` over them)
+- Source: `assets/units/size_l/ship_*.xml` and `assets/units/size_xl/ship_*.xml`
+  across base game and all seven DLC catalogs, extracted to
+  `.x4-research-cache/extracted/ships-comp-base-9.00`,
+  `ships-comp-dlc-9.00`, `dlc-{terran,split,boron,pirate}-comp-xl-9.00`,
+  `dlc-timelines-comp-9.00`, `dlc-mini0{1,2}-comp-9.00`; 135 component files
+- Live test: partial — the label output is confirmed by an in-game screenshot
+  (`release/main_menu.png`, Boron hull, 2026-08-07); the collision list itself
+  is source-derived and untested in game as of 2026-08-07
+- Finding: distinct raw group identifiers on one hull can humanize to one
+  string, because the labeller drops information three ways: token order is
+  discarded (slots are emitted depth, center, vertical, lateral, radial
+  regardless of input order); a standalone numeric tail such as `_01` matches no
+  direction word and vanishes; and a repeated direction word is ignored once its
+  slot is filled. So `group_mid_up_rear` and `group_rear_up_mid` both give
+  "Rear Center Upper" (Phoenix E), and `group_mid_mid_top_01/_02/_03` all give
+  "Center Upper" (Raptor, a three-way collision).
+- Affected hulls: base game Phoenix E (`ship_tel_l_destroyer_02`), Obliterator,
+  Zeus Vanguard, Zeus E; Terran Syn, Osaka, Asgard; Split Rattlesnake, Wyvern
+  Mineral, Python, Raptor; Boron Walrus, Shark; Timelines Xenon Mothership
+  (`ship_xen_xl_mothership_01` and `_01_a`). Boron and Pirate L hulls and both
+  Compact DLC packs are clean. All seven DLCs were present in this installation
+  and checked.
+- Consequence: none for correctness, and this is **not** the `#candidates > 1`
+  ambiguity recorded above. Members are attributed by the raw `path`+`group`
+  string, which still differs, so each group keeps its own turrets; commands
+  address `contextID`+`path`+`group` and stay exact. Only the rendered name
+  collides, and a de-duplicating counter that appends ` · 2`, ` · 3` keeps the
+  console readable. Do not treat a shared label as a shared group.
+- Reproduce: `grep -ao 'group="[^"]*"'` over the component XMLs, strip the
+  padding (see the record below), then run each distinct identifier through
+  `State.turretGroupLabel()` and count collisions per hull.
+
+### Group identifiers in ship component XML carry surrounding whitespace
+
+- X4: 9.00
+- Status: shipped-source (the padding); inference (that the runtime strips it)
+- Source: `.x4-research-cache/extracted/ships-comp-dlc-9.00/assets/units/size_l/
+  ship_bor_l_destroyer_01.xml`, which contains `group="group_front_up_left "`,
+  `group=" group_front_up_mid "`, `group="  group_front_down_mid "` and even
+  `group="  "`; the same padding appears across the base-game hulls
+- Live test: partial — `release/main_menu.png` (2026-08-07) shows this project's
+  console rendering "Front Upper Left", "Center Lower Left" and "Front Center
+  Lower" on a Boron hull
+- Finding: the `group=` attribute on turret connections is not a clean token. It
+  frequently carries leading and trailing spaces, inconsistently between
+  connections that name the same group, and at least one connection carries a
+  whitespace-only value. The runtime evidently hands back a trimmed identifier:
+  this project never trims (`ffi.string` straight out of the
+  `GetUpgradeGroups2` buffer), and an untrimmed value would break the labeller
+  in two visible ways. A trailing space makes the final token fail the
+  `^(%a+)(%d*)$` match, dropping the last direction word ("Front Upper" instead
+  of "Front Upper Left"); a leading space makes the whole identifier fail the
+  `^group_` guard, falling back to the generic "Turret N" name. The screenshot
+  shows neither, on a hull whose XML has both kinds of padding.
+- Consequence: treat the runtime identifier as trimmed but never assume it of
+  the file. Any tool that reads the XML directly must strip the value first, or
+  it will count `group_x ` and ` group_x ` as two groups.
+- Do NOT trim at the `str()`/FFI boundary. The same string is handed straight
+  back to the engine (`SetTurretGroupMode2`, `SetTurretGroupArmed`,
+  `GetTurretGroupMode2`, `IsTurretGroupArmed`) and is persisted into the MD save
+  record. If the engine's own table is keyed by the padded form, a trimmed write
+  misses silently and the turrets never move. Trim only what stays internal:
+  this project trims in `State.turretGroupLabel()` (display) and when building
+  and looking up the turret-slot-to-group candidate key (which spans two
+  separate APIs, `GetUpgradeGroups2` and `GetUpgradeSlotGroup`, so inconsistent
+  padding between them would break attribution). Engine-facing and persisted
+  values stay byte-exact.
+- Open question, self-diagnosing: `readGroups()` logs
+  `raw group id carries padding: "..."` at most once per session when a returned
+  path or group differs from its trimmed form. Zero lines means the engine
+  trims and this record's inference is confirmed. Check a session log to settle
+  it.
+
 ## Engine bug: SetPlayerCameraTargetView leaves Esc dead after get-up
 
 ### Trigger and symptom

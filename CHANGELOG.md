@@ -2,6 +2,85 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+- New **All Turrets: Prefer My Target** during Direct-control: no more idle
+  turrets. Every turret on the ship shoots your target when it can, and shoots
+  something else in range when it cannot. **Release Other Turrets** hands the
+  rest of the ship back while your checked groups stay on your target; ceasing
+  or getting up releases everything. Mining and towing turrets are left alone
+  in both directions, so a mixed ship keeps doing its other jobs.
+
+- Hitting **Release Other Turrets** immediately after **Prefer My Target** now
+  really releases. The apply is sent a tick late so the turret modes land first,
+  and a release in that gap used to arrive ahead of it: the panel said released,
+  the ship stayed overridden, and nothing afterwards could clear it because the
+  console already believed it was off. The pending apply is now dropped if you
+  released or picked a new target first.
+
+- The turret Mode column now updates when you cease an engagement. It used to
+  keep showing `autoassist` afterwards even though the turrets had already gone
+  back to their own mode, so the panel disagreed with the ship.
+- Direct-control works on small ships again. On a Katana the target browser
+  appeared for a split second and then dumped the player back on the console.
+  `enterCamera()` asks the engine for a target view on one turret and then reads
+  the view back to confirm it took. On S/M ships the engine accepts the request
+  but resolves the view to the turret's *container* — the ship — so the readback
+  never matched the turret id, the gate declared failure, and it tore the session
+  down 100 ms after the browser painted. Capital ships resolve to the turret
+  component itself, which is why this was never seen there.
+
+  The container now counts as a match: the camera is where we pointed it, just
+  wider. Auto-engage ran through the same gate and is fixed with it. The wider
+  view is a real consequence and is noted under Limitations in the README.
+
+  Second change on the same path: a camera that genuinely cannot attach no longer
+  closes the target browser. It is logged and target selection carries on. Losing
+  the camera should never cost the player the ability to pick a target.
+
+- Turret groups are no longer locked to camera-only when two of them share a
+  name. `readGroups()` walks turret slots to build each group's member list, and
+  because the slot API reports no context ID it could not always tell same-named
+  groups apart. That uncertainty was wired into `canMutate()`, so an unresolved
+  group had its mode dropdown and armed button greyed and was dropped from
+  Auto-engage and Direct-control.
+
+  It was guarding nothing. Mode and armed commands address a group by
+  `contextID`+`path`+`group`, which `GetUpgradeGroups2` always reports exactly —
+  the slot walk never feeds the write path. Vanilla does the same thing: it
+  walks turret slots only for *ungrouped* turrets and drives grouped ones purely
+  through the context ID. `canMutate()` now asks only whether the group still
+  has an operational turret.
+
+  Known limitation, left as-is: if two groups really do share a name, turrets
+  other than each group's representative all get listed under the first of them,
+  so member rows can sit under the wrong group name and Direct-control may open
+  the camera on a sibling group's turret. Commands still reach the right group.
+  No X4 API resolves this, and no shipped ship macro produces the case — all 53
+  turret group declarations across the 126 stock 9.00 ship macros use path `..`
+  with unique names.
+
+- Fix every null-ID guard in the runtime. A `UniverseID` read out of an FFI
+  struct is boxed cdata, so `tostring()` on an unset one gives `"0ULL"`, not
+  `"0"`. Nine guards tested `tostring(x) == "0"` and therefore never fired in
+  game. `State.isNullID()` now owns the check (nil, `0`, `"0"`, `"0ULL"`) and
+  all nine route through it. Comparing a raw cdata id against the number `0`
+  was always safe — LuaJIT compares boxed uint64 numerically — so the sites
+  written that way were never affected.
+
+  This makes the soft-target restore in 0.20 real: `restoreSofttarget()` was
+  reaching `C.SetSofttarget(0, "")` rather than `RemoveSofttarget()` on every
+  session that started with no soft target, which is exactly the call that
+  release said it had stopped making. See the correction under 0.20 below.
+
+  No Lua test could have caught this — every harness stubs ids as plain
+  numbers, where `tostring(0)` really is `"0"` — so `test_runtime_ui_contract.sh`
+  now rejects the `tostring(x) == "0"` shape outright.
+
+- Remove the post-exit diagnostic sampler. It wrote `DebugError` lines for 90
+  seconds every time you left the gunnery seat; the bug it was hunting was
+  fixed in 0.20.
+
 ## [0.20] - 2026-08-06
 
 - Widen the console's turret group and turret name column so full names are
@@ -39,6 +118,13 @@ All notable changes to this project are documented in this file.
   as the belt. Candidate fix for Esc not opening the game menu after a session
   that moved the camera. The post-exit sampler logs `soft=<id>/root=<id>` so
   the next log confirms or kills it.
+
+  **Correction:** this did not ship working. The new guard read
+  `tostring(previousID) == "0"`, which is false for the `"0ULL"` that FFI
+  actually hands back, so `RemoveSofttarget()` was never reached and
+  `C.SetSofttarget(0, "")` went out exactly as before. Same for
+  `clearOwnShipSofttarget()`, whose early-out never fired either. Fixed under
+  Unreleased above.
 
 - Add an **Auto-next Target** checkbox to the compact Direct-control panel,
   checked by default (`session.autoNextTarget`). Checked, the death of the

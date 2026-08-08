@@ -29,10 +29,6 @@ const char* GetComponentName(UniverseID componentid); SofttargetDetails2 GetSoft
 bool IsPlayerCameraTargetViewPossible(UniverseID targetid, bool force); void SetPlayerCameraTargetView(UniverseID targetid, bool force);
 UniverseID GetExternalTargetViewComponent(void); void SetPlayerCameraCockpitView(bool force); bool GetUp(void);
 bool IsHUDActive(void); bool IsFullscreenCutsceneActive(void);
-bool IsExternalViewActive(void); bool IsExternalTargetMode(void);
-bool CanSetPlayerCameraCinematicView(void);
-bool IsConversationActive(void); bool IsConversationCancelling(void);
-bool IsEncryptedDirectInputModeActive(void);
 bool IsFullscreenMenuDisplayed(bool anymenu, const char* menuname);
 bool IsGamePaused(void); void SetTrackedMenuFullscreen(const char* menu, bool fullscreen);
 bool SetSofttarget(UniverseID componentid, const char*const connectionname);
@@ -43,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-06-notify-22"
+local runtimeBuild = "2026-08-07-prefer-target-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -60,11 +56,18 @@ local sessionEpoch = 0
 local reopenSuspendedSession
 local activeExternalMenuName
 local lastWatchdogSignature
-local postExitGeneration = 0
-local lastPostExitProbe
+-- Fires at most once per session when GetUpgradeGroups2 or GetUpgradeSlotGroup
+-- returns a path or group id that carries whitespace padding, proving that the
+-- engine does NOT trim before handing the value back to Lua. Silent when the
+-- engine trims (the normal case). Reset in discardSession so each session gets
+-- one log line at most, not one per repaint.
+local groupPaddingLogged = false
 
 local function text(id) return ReadText(20991, id) end
 local function str(pointer) return pointer ~= nil and ffi.string(pointer) or "" end
+-- Internal keys and log output only. Vanilla XML pads group attributes, but
+-- whatever the engine hands back has to go straight back to the engine.
+local function trim(value) return value:match("^%s*(.-)%s*$") or value end
 local function id(value) return ConvertStringTo64Bit(tostring(value)) end
 -- GetComponentData needs a ConvertStringTo64Bit'd id (vanilla passes
 -- `convertedComponent` / `object64` everywhere). A raw UniverseID silently
@@ -76,6 +79,14 @@ local function log(message) DebugError("[X4GC] " .. message) end
 -- Raw FFI ids stringify with a ULL suffix and id()-converted ones do not, so a
 -- bare tostring comparison judges the same component to be two different ones.
 local function sameID(a, b) return State.normID(a) == State.normID(b) end
+-- "0ULL" (the FFI form of an unset UniverseID) and "0" and nil all mean the
+-- same thing: no component. Guards that only test tostring(v) == "0" silently
+-- miss the cdata form and let zero ids through as if they were real targets.
+-- Comparing a raw cdata id against the number 0 (`softtargetID ~= 0`) is safe --
+-- LuaJIT compares boxed uint64 numerically -- and several sites below still do
+-- that. Only the tostring form breaks, so reach for isNullID() whenever the
+-- value may be nil or may have been through id()/normID().
+local isNullID = State.isNullID
 local function sameSession(expected, epoch)
     return session == expected and sessionEpoch == epoch
 end
@@ -175,6 +186,13 @@ local function readGroups(ship)
     count = tonumber(C.GetUpgradeGroups2(buffer, count, ship, ""))
     for i = 0, count - 1 do
         local path, group = str(buffer[i].path), str(buffer[i].group)
+        -- Self-diagnosing probe: log once per session if the engine hands back a
+        -- padded path or group id, confirming the runtime does NOT trim for us.
+        -- Silent (zero log lines) when the engine trims before returning the value.
+        if not groupPaddingLogged and (path ~= trim(path) or group ~= trim(group)) then
+            groupPaddingLogged = true
+            log('raw group id carries padding: "' .. path .. '" / "' .. group .. '"')
+        end
         if path ~= ".." or group ~= "" then
             local info = C.GetUpgradeGroupInfo2(ship, "", buffer[i].contextid, path, group, "turret")
             if tonumber(info.count) > 0 then
@@ -187,7 +205,12 @@ local function readGroups(ship)
                     armed = C.IsTurretGroupArmed(ship, buffer[i].contextid, path, group),
                 }
                 groups[#groups + 1] = entry
-                local candidateKey = path .. "\31" .. group
+                -- Candidate key is internal-only: trim path and group so that
+                -- inconsistent XML padding between GetUpgradeGroups2 and
+                -- GetUpgradeSlotGroup (two separate APIs) does not silently break
+                -- turret-to-group attribution. The entry's own path/group fields
+                -- and every engine call that follows stay byte-exact as received.
+                local candidateKey = trim(path) .. "\31" .. trim(group)
                 candidates[candidateKey] = candidates[candidateKey] or {}
                 candidates[candidateKey][#candidates[candidateKey] + 1] = entry
             end
@@ -199,19 +222,21 @@ local function readGroups(ship)
         if component ~= 0 then
             local slotGroup, path, name = C.GetUpgradeSlotGroup(ship, "", "turret", slot), "", ""
             path, name = str(slotGroup.path), str(slotGroup.group)
-            local possible = candidates[path .. "\31" .. name] or {}
-            local entry
-            if #possible == 1 then entry = possible[1]
-            elseif #possible > 1 then
-                -- The slot API has no context ID. A matching representative
-                -- component makes mapping safe; otherwise never mutate it.
+            local possible = candidates[trim(path) .. "\31" .. trim(name)] or {}
+            local entry = possible[1]
+            if #possible > 1 then
+                -- The slot API returns no context ID, so same-named groups on
+                -- different contexts cannot be told apart here. This only picks
+                -- which group a turret is listed under; group commands address
+                -- contextID+path+group and are always exact. Every shipped ship
+                -- macro uses path ".." with unique group names, so this branch
+                -- is defensive.
+                -- ponytail: representative-component match, first candidate
+                -- otherwise. Worst case is a member row under the wrong group
+                -- name, never a write to the wrong group.
                 for _, candidate in ipairs(possible) do
-                    if sameID(candidate.componentID, component) then
-                        if entry then entry.ambiguous = true else entry = candidate end
-                    end
+                    if sameID(candidate.componentID, component) then entry = candidate; break end
                 end
-                if not entry then entry = possible[1] end
-                entry.ambiguous = true
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
@@ -309,20 +334,109 @@ local function isDirectedGroup(group)
     return false
 end
 
+-- Ship-wide "prefer my target" override. Tells X4 to treat the engaged target
+-- as every turret's priority; a turret with no shot at it engages something
+-- else in range instead of tracking a target it can never hit (live-tested
+-- 2026-08-07, see md-ai.md). A turret's mode decides whether it receives the
+-- instruction, not what it shoots once it has it: in that trial, missiledefence
+-- turrets engaged ships. Do not describe the fallback as "its own mode".
+--
+-- Two details are load-bearing, both learned from the 2026-08-07 trial:
+--
+-- 1. Every group the console took over is put back into its own mode FIRST.
+--    X4 ignores supplied targets for autoassist turrets -- the shipped comment
+--    at aiscripts/fight.attack.object.capital.xml:1756 says target acquisition
+--    for that mode is handled in code. An override applied on top of the
+--    console's own autoassist silently does nothing and the turret keeps
+--    idling, which looks identical to success from the cockpit.
+-- 2. The event is raised a tick later, because MD reads the ship's turret
+--    modes back when it runs. In the trial three of five presses still saw
+--    autoassist in that read, so the mode writes above had not landed yet.
+--
+-- A group the player themselves left in autoassist stays there: that already
+-- means "shoot my target", so the override has nothing to add, and forcing it
+-- out would be the console rewriting a setting nobody asked it to touch.
+-- Defined after refresh(), which it calls; declared here because restoreDirect
+-- and engageTarget both sit above that definition.
+local applyPreferAllTurrets
+-- Same reason: restoreDirect's deferred repaint calls refresh(), which is
+-- defined below it.
+local refresh
+
+-- Puts the checked groups back under Direct-control after a release. The clear
+-- is ship-wide -- there is no per-group form of set_turret_targets -- so without
+-- this the groups the player is actually directing fall back to their own mode
+-- and stop shooting the engaged target, which is not what "release the others"
+-- means. Deferred a tick for the same reason the override is: MD reads the
+-- ship's turret modes back when it runs, and the release has to see each turret
+-- in its own mode rather than in autoassist.
+local function resumeDirectControl()
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        if session.phase ~= "engaged" or session.controlMode ~= "direct" then return end
+        for _, snapshot in ipairs(session.directSnapshots or {}) do
+            local group = findSnapshotGroup(snapshot)
+            if group and sameID(snapshot.shipID, session.shipID) then
+                setMode(group, "autoassist"); setArmed(group, true)
+            end
+        end
+        log("resumed direct control after release")
+        menu.display()
+    end, false, getElapsedTime() + 0.02)
+end
+
+-- Hands the rest of the ship back. Safe to call when the override was never
+-- applied. resume=true keeps the checked groups directed; teardown paths pass
+-- nothing, because restoreDirect writes their snapshots back straight after.
+local function clearPreferAllTurrets(reason, resume)
+    if not session or not session.preferAllTurrets then return false end
+    session.preferAllTurrets = false
+    AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets_clear", {
+        ["ship"] = ConvertStringToLuaID(tostring(session.shipID)),
+    })
+    log("prefer_all_turrets_clear emitted: " .. tostring(reason))
+    if resume then resumeDirectControl() end
+    return true
+end
+
 local function restoreDirect(reason)
     if not session then return end
+    -- Before the early return below: the override can outlive the snapshots,
+    -- and leaving the chair must never leave the ship altered.
+    clearPreferAllTurrets(reason)
     local snapshots = State.releaseDirect(session)
     if #snapshots == 0 then return end
     for _, snapshot in ipairs(snapshots) do
         local group = findSnapshotGroup(snapshot)
         if group and sameID(snapshot.shipID, session.shipID) then
             setMode(group, snapshot.mode); setArmed(group, snapshot.armed)
-            log("restored directed group: " .. reason)
+            log("restored directed group: " .. reason .. " id=" .. tostring(snapshot.group or snapshot.componentID) .. " mode=" .. tostring(snapshot.mode) .. " armed=" .. tostring(snapshot.armed))
         else
             -- One destroyed turret group must not prevent restoring the others.
             log("could not resolve directed group during restore: " .. reason)
         end
     end
+    -- snapshots is closed over rather than re-read off the session, because
+    -- releaseDirect has already emptied the session's own list.
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    -- Deferred rather than immediate: the engine's mode read-back lags the
+    -- write, so a same-frame refresh() would re-cache the pre-restore value.
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        refresh()
+        for _, snapshot in ipairs(snapshots) do
+            local found = findSnapshotGroup(snapshot)
+            local modeMismatch = found and found.mode ~= snapshot.mode
+            local armedMismatch = found and found.armed ~= snapshot.armed
+            if not found or modeMismatch or armedMismatch then
+                log("post-restore readback MISMATCH " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
+            end
+        end
+        if session.phase ~= "console" then return end
+        menu.display()
+        log("repainted console after restore: " .. reason)
+    end, false, getElapsedTime() + 0.5)
     clearSnapshot()
 end
 
@@ -339,6 +453,7 @@ end
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
     if not session then return end
+    groupPaddingLogged = false
     -- Read directSnapshots BEFORE restoreDirect empties the list. The notify
     -- emission below (when seatLeaving is true) depends on whether this session
     -- actually held direct snapshots (Direct-control), not just on the reason code.
@@ -429,115 +544,6 @@ function menu.cleanup()
     end
 end
 
--- Post-exit state-change recorder (Item 3c). Records state for up to 90 s
--- after the player leaves the chair, logging only when the probe payload
--- changes. The long window is deliberate: the Esc-after-get-up bug clears the
--- moment the player opens and closes any menu; comparing the sample before and
--- after that workaround identifies the stuck engine state directly instead of
--- by guesswork. The first callback always logs; subsequent identical payloads
--- are silently dropped. Never alters game state. Must not raise.
---
--- A module-level generation counter (postExitGeneration) ensures that if a
--- new exit supersedes a running sampler, the stale callbacks are silently
--- dropped: each callback captures its own generation at schedule time and
--- returns immediately when the counter has advanced. The counter is also
--- advanced by leaveChair/endForMovement so that re-seating followed by a
--- second exit still silences the first sampler.
---
--- Each callback also stops early when a live session exists: the player has
--- re-seated, and continuing to sample would be noise.
--- Elapsed time is the scheduled offset itself, so no start time is needed.
-local function startPostExitSampler()
-    postExitGeneration = postExitGeneration + 1
-    local myGeneration = postExitGeneration
-    lastPostExitProbe = nil
-    -- Fixed offsets in seconds. Build the list programmatically: four early
-    -- samples for immediate state, then every 2 s up to 90 s. This list is
-    -- fixed at schedule time; no callback ever re-schedules itself.
-    local offsets = { 0.5, 1.0, 2.0, 4.0 }
-    local t = 6.0
-    while t <= 90.0 do
-        offsets[#offsets + 1] = t
-        t = t + 2.0
-    end
-    for _, offset in ipairs(offsets) do
-        local capturedOffset = offset
-        Helper.addDelayedOneTimeCallbackOnUpdate(function()
-            -- Overlap guard: a newer exit has started, stay silent.
-            if postExitGeneration ~= myGeneration then return end
-            -- Re-entry guard: a new session means the player is reseated.
-            if session ~= nil then return end
-            -- Defensive: log returns nothing and cannot raise. All C calls are
-            -- individually guarded so a nil or bad return never propagates.
-            local elapsed = capturedOffset
-            local ok, err = pcall(function()
-                local camera = tostring(C.GetExternalTargetViewComponent())
-                local cg = tostring(controlGroup())
-                local occupied = tostring(C.GetPlayerOccupiedShipID())
-                local shown = tostring(menu.shown and true or false)
-                local extmenu = (activeExternalMenuName and activeExternalMenuName()) or "<none>"
-                -- The global selection and the object it belongs to. A soft
-                -- target still sitting on a component of the ship we just left
-                -- means enterCamera's borrow was never put back, which is the
-                -- current Esc suspect.
-                local soft = C.GetSofttarget2().softtargetID
-                local softInfo = tostring(soft) .. "/root="
-                    .. tostring(soft ~= 0 and C.GetContextByClass(id(soft), "container", true) or 0)
-                -- hud= tells a missing-HUD report apart: false means the engine
-                -- still has the HUD switched off (a view or camera state we left
-                -- behind), true means it is on and merely not being redrawn.
-                local hud = tostring(C.IsHUDActive())
-                    .. "/cutscene=" .. tostring(C.IsFullscreenCutsceneActive())
-                    .. "/extview=" .. tostring(C.IsExternalViewActive())
-                    .. "/exttarget=" .. tostring(C.IsExternalTargetMode())
-                    -- Proxy for the CutsceneManager's cinematic mode: the only
-                    -- readable state near it, and the cinematic run is the one
-                    -- thing trial 1 did that trial 2 (Esc worked) did not.
-                    .. "/cancinematic=" .. tostring(C.CanSetPlayerCameraCinematicView())
-                -- Conversation: active and cancelling state. A conversation
-                -- opened and closed via Esc workaround would appear here.
-                -- Signatures from ego_detailmonitorhelper/helper.lua:400-401.
-                local conv = tostring(C.IsConversationActive())
-                    .. "/" .. tostring(C.IsConversationCancelling())
-                -- Direct-input mode suppresses normal keyboard routing; any
-                -- edit box left open by our teardown would show here.
-                local dirinput = tostring(C.IsEncryptedDirectInputModeActive())
-                -- Player-control aggregate from ego_viewhelper/viewhelper.lua:314.
-                -- False means at least one registered view has playerControls=false,
-                -- which blocks Esc from reaching the native game menu.
-                local pctrl = View and tostring(View.hasPlayerControls()) or "<n/a>"
-                -- Tracked-menu topology (ego_detailmonitorhelper/helper.lua).
-                local helpermenus = tostring(Helper.dockedMenu ~= nil)
-                    .. "/" .. tostring(Helper.topLevelMenu ~= nil)
-                    .. "/" .. tostring(Helper.minimizedMenu ~= nil)
-                -- Build comparison payload WITHOUT the timestamp (the timestamp
-                -- changes every tick; including it would defeat suppression).
-                local payload = "camera=" .. camera
-                    .. "; control=" .. (cg ~= "" and cg or "<none>")
-                    .. "; occupied=" .. occupied
-                    .. "; shown=" .. shown
-                    .. "; extmenu=" .. tostring(extmenu)
-                    .. "; views=" .. viewSummary()
-                    .. "; fsmenu=" .. trackedMenuSummary()
-                    .. "; soft=" .. softInfo
-                    .. "; hud=" .. hud
-                    .. "; conv=" .. conv
-                    .. "; dirinput=" .. dirinput
-                    .. "; pctrl=" .. pctrl
-                    .. "; helpermenus=" .. helpermenus
-                if payload == lastPostExitProbe then return end
-                lastPostExitProbe = payload
-                log("post-exit sample"
-                    .. "; t=+" .. string.format("%.1f", elapsed) .. "s"
-                    .. "; " .. payload)
-            end)
-            if not ok then
-                log("post-exit sample error at t=+" .. string.format("%.1f", elapsed) .. "s: " .. tostring(err))
-            end
-        end, false, getElapsedTime() + offset)
-    end
-end
-
 -- The soft target is X4's global selection, not ours: enterCamera borrows it to
 -- force the camera onto a turret and puts it back a tick later. No vanilla call
 -- ever passes 0 to SetSofttarget -- RemoveSofttarget() is the engine's clear
@@ -546,7 +552,7 @@ end
 -- is a state vanilla never produces: buttonExternal refuses to target-view the
 -- player's own ship at all (menu_interactmenu.lua:2231).
 local function restoreSofttarget(previousID, previousConnection)
-    if not previousID or tostring(previousID) == "0" then
+    if isNullID(previousID) then
         RemoveSofttarget()
     else
         C.SetSofttarget(previousID, previousConnection)
@@ -559,7 +565,7 @@ end
 clearOwnShipSofttarget = function()
     if not session then return end
     local current = C.GetSofttarget2().softtargetID
-    if not current or tostring(current) == "0" then return end
+    if isNullID(current) then return end
     local root = C.GetContextByClass(id(current), "container", true)
     if sameID(root ~= 0 and root or id(current), session.shipID) then
         RemoveSofttarget()
@@ -593,7 +599,6 @@ local function leaveChair(reason)
     -- discardSession emits the notify (seatLeaving=true) covering both this
     -- path and the playerGetUp/playerUndock route (endForMovement).
     discardSession(reason)
-    startPostExitSampler()
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         -- Not endSession(): the session is already gone, and its
         -- "nothing to do" guard would skip the frame teardown entirely.
@@ -602,6 +607,18 @@ local function leaveChair(reason)
         seatLeaving = false
     end, false, getElapsedTime() + 0.05)
     return true
+end
+
+local targetRoot, isEligibleEngagementTarget, cycleTarget
+
+-- X4 resolves an own-turret target view to the turret's container on small
+-- ships (verified on a Katana, an M corvette): the readback is the ship, not the
+-- turret we asked for. The camera is still where we pointed it, so treat the
+-- container as a match. Capital ships resolve to the turret component itself.
+local function cameraFocusMatches(componentID)
+    local focus = C.GetExternalTargetViewComponent()
+    return focus ~= 0
+        and (sameID(focus, componentID) or sameID(focus, targetRoot(componentID)))
 end
 
 local function enterCamera(member, options)
@@ -618,13 +635,13 @@ local function enterCamera(member, options)
     local savedTargetID, savedConnection = savedTarget.softtargetID, str(savedTarget.softtargetConnectionName)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not stillCurrent() then return end
-        if sameID(C.GetExternalTargetViewComponent(), member.componentID) then return end
+        if cameraFocusMatches(member.componentID) then return end
         C.SetSofttarget(member.componentID, "")
         C.SetPlayerCameraTargetView(member.componentID, true)
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) then return end
             restoreSofttarget(savedTargetID, savedConnection)
-            if not sameID(C.GetExternalTargetViewComponent(), member.componentID) then
+            if not cameraFocusMatches(member.componentID) then
                 log("camera gate failed for turret " .. tostring(member.componentID))
                 if options and options.onFailure then
                     options.onFailure(member)
@@ -642,8 +659,8 @@ local function startAutoEngage(groups)
     restoreDirect("auto-engage")
     State.beginEngaged(session, groups, "auto")
     local member = cameraMember()
-    if not member then session.phase = "console"; return false end
-    if not enterCamera(member) then session.phase = "console"; return false end
+    if not member then State.returnToConsole(session); return false end
+    if not enterCamera(member) then State.returnToConsole(session); return false end
     -- Finish the button callback before replacing the blurred console frame.
     -- Rebuilding a view during the click dispatch can leave the old frame
     -- visible until a second click on some X4/UI Extensions combinations.
@@ -676,8 +693,10 @@ local function startTargetSelection(groups)
     if not member then return false end
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
-    session.targetCandidates = {}
-    if not enterCamera(member) then session.phase = "console"; return false end
+    -- Losing the camera must not cost the player target selection: log it and
+    -- keep the browser open instead of bouncing back to the console.
+    local cameraOptions = { onFailure = function() log("target selection continues without a camera") end }
+    if not enterCamera(member, cameraOptions) then State.returnToConsole(session); return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch) and session.phase == "target_select" then menu.display() end
@@ -688,12 +707,9 @@ end
 local function openTargetBrowser()
     if not session or #(session.directSnapshots or {}) == 0 then return false end
     session.phase = "target_select"
-    session.targetCandidates = {}
     menu.display()
     return true
 end
-
-local targetRoot, isEligibleEngagementTarget, cycleTarget
 
 local function engageTarget(targetID)
     if targetID == nil then return false end
@@ -716,13 +732,14 @@ local function engageTarget(targetID)
     else
         -- First engagement: snapshot and arm every checked group we may touch.
         -- Only mutable groups are snapshotted, because restoreDirect writes back
-        -- every snapshot it holds and an ambiguous group must never be written
+        -- every snapshot it holds and a destroyed group must never be written
         -- at all -- not even back to the value it already has.
         local orderable = {}
         for _, group in ipairs(State.checkedGroups(session)) do
             if State.canMutate(group) then orderable[#orderable + 1] = group end
         end
         local snaps = State.beginEngaged(session, orderable, "direct")
+        for _, s in ipairs(snaps) do log("snapshot took " .. tostring(s.group or s.componentID) .. " mode=" .. tostring(s.mode) .. " armed=" .. tostring(s.armed)) end
         persistSnapshot(snaps)
         for _, group in ipairs(orderable) do setMode(group, "autoassist"); setArmed(group, true) end
     end
@@ -731,6 +748,11 @@ local function engageTarget(targetID)
     -- cycleTarget and the element panel can identify the engaged object.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    -- The override names one specific target, so it dies with that target.
+    -- Every direct-mode target change funnels through here (auto-next, Next /
+    -- Previous Target, and picking a surface element), so re-issuing here is
+    -- what stops the turrets falling silent the moment a target is destroyed.
+    if session.preferAllTurrets then applyPreferAllTurrets() end
     -- A target click and the replacement compact frame occur on separate UI
     -- ticks. Keep this explicit so an auto-hide or failed frame creation can
     -- restore the snapshot rather than leaving autoassist armed invisibly.
@@ -747,9 +769,46 @@ local function engageTarget(targetID)
     return true
 end
 
-local function refresh()
+-- Forward-declared above restoreDirect; see the contract comment there.
+refresh = function()
     if not session then return end
     State.retainSelection(session, readGroups(session.shipID))
+end
+
+-- Forward-declared above restoreDirect; see the contract comment there.
+applyPreferAllTurrets = function()
+    if not session or session.phase ~= "engaged" then return false end
+    if isNullID(session.aimTargetID) then return false end
+    for _, snapshot in ipairs(session.directSnapshots or {}) do
+        local group = findSnapshotGroup(snapshot)
+        if group and sameID(snapshot.shipID, session.shipID) then
+            -- Mode only. The group stays armed, or it could not act on the
+            -- override at all.
+            setMode(group, snapshot.mode)
+        end
+    end
+    refresh()
+    session.preferAllTurrets = true
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    local shipID, targetID = session.shipID, session.aimTargetID
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        -- Anything that happened inside the deferral window wins. A release
+        -- clears the flag synchronously, so emitting anyway would leave MD
+        -- applied with the flag already false -- no later teardown route could
+        -- clear it, and the player walks away with a silently altered ship.
+        -- A target change re-issues, so a stale target must not overwrite it.
+        if not session.preferAllTurrets or not sameID(session.aimTargetID, targetID) then
+            log("prefer_all_turrets apply dropped: released or retargeted first")
+            return
+        end
+        AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
+            ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
+            ["target"] = ConvertStringToLuaID(tostring(targetID)),
+        })
+        log("prefer_all_turrets emitted target=" .. tostring(targetID))
+    end, false, getElapsedTime() + 0.01)
+    return true
 end
 
 local function relationLabel(component)
@@ -811,8 +870,28 @@ local function readTargetCandidates()
         end
         return a.name < b.name
     end)
-    session.targetCandidates = candidates
     return candidates
+end
+
+-- Is there anything to cycle to? The only reader of a memoised sweep, and the
+-- reason readTargetCandidates() itself stays always-fresh: every other caller
+-- (browser, cycleTarget, chooseAimTarget) wants live data. A 1 s TTL lets the
+-- four 0.25 s repaints that draw the cycle-target buttons share one sector
+-- sweep. An empty result is memoised too: a sector full of ineligible objects
+-- is the most expensive sweep there is, and repeating it per repaint is exactly
+-- the cost this exists to avoid. Auto-invalidates when sessionEpoch changes.
+local targetCandidatesTime = -math.huge
+local targetCandidatesEpoch = -1
+local targetCandidatesCount = 0
+local function hasMultipleTargets()
+    local now = getElapsedTime()
+    if targetCandidatesEpoch == sessionEpoch and now - targetCandidatesTime < 1 then
+        return targetCandidatesCount > 1
+    end
+    targetCandidatesTime = now
+    targetCandidatesEpoch = sessionEpoch
+    targetCandidatesCount = #readTargetCandidates()
+    return targetCandidatesCount > 1
 end
 
 cycleTarget = function(delta)
@@ -949,15 +1028,15 @@ local function sendCutsceneAimStart(pov)
     -- Prefer session.aimTargetID (set by updateAimTarget / engageTarget) so
     -- step 8 auto-retarget works correctly; fall back to the current soft target.
     local targetID = session.aimTargetID
-    if not targetID or tostring(targetID) == "0" then
+    if isNullID(targetID) then
         local softtarget = C.GetSofttarget2()
         targetID = softtarget.softtargetID
     end
-    if not turretID or tostring(turretID) == "0" then
+    if isNullID(turretID) then
         log("sendCutsceneAimStart: no turret resolved; ignored")
         return
     end
-    if not targetID or tostring(targetID) == "0" then
+    if isNullID(targetID) then
         log("sendCutsceneAimStart: no softtarget; ignored")
         return
     end
@@ -987,6 +1066,9 @@ local function sendCutsceneAimStart(pov)
         .. " anchor=" .. tostring(anchorID) .. " target=" .. tostring(tgtID))
 end
 
+function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
+function TestAPI.clearPreferAllTurrets(reason, resume) return clearPreferAllTurrets(reason, resume) end
+
 function TestAPI.sendCutsceneAimStart(pov) sendCutsceneAimStart(pov) end
 function TestAPI.sendCutsceneAimStop() sendCutsceneAimStop() end
 
@@ -1013,7 +1095,7 @@ applyPov = function()
     else
         componentID = session.cameraMemberID
     end
-    if not componentID or tostring(componentID) == "0" then return false end
+    if isNullID(componentID) then return false end
     local ok, err = pcall(function() C.SetPlayerCameraTargetView(componentID, true) end)
     if ok and anchor == "turret" then session.cameraMemberID = id(componentID) end
     logSession("applyPov anchor=" .. anchor .. " mode=" .. mode
@@ -1026,7 +1108,7 @@ function TestAPI.verifyTestGroup(groupKey)
     if not session or not isInGunnerChair() then return { pass = false, reason = "not seated in gunnery control" } end
     refresh()
     local group = currentGroup(groupKey)
-    if not State.canMutate(group) then return { pass = false, reason = "group unavailable or ambiguous" } end
+    if not State.canMutate(group) then return { pass = false, reason = "group unavailable" } end
     local snapshot = { mode = group.mode, armed = group.armed }
     local target = C.GetSofttarget2()
     local targetID, targetConnection = target.softtargetID, str(target.softtargetConnectionName)
@@ -1104,11 +1186,11 @@ local function updateAimTarget()
     if not session or session.phase ~= "engaged" then return end
     local prev = session.aimTargetID
     local now = getElapsedTime()
-    local hadTarget = prev and tostring(prev) ~= "0"
+    local hadTarget = not isNullID(prev)
     if hadTarget and not C.IsComponentOperational(id(prev)) and session.controlMode == "direct" then
         return onDirectTargetLost()
     end
-    if prev and tostring(prev) ~= "0" and C.IsComponentOperational(id(prev)) then
+    if not isNullID(prev) and C.IsComponentOperational(id(prev)) then
         -- Direct-control keeps the ordered target even when it drifts out of
         -- range. Auto-engage may switch to something better, but each scan is a
         -- whole-sector sweep (readTargetCandidates enumerates every ship and
@@ -1139,6 +1221,7 @@ end
 
 function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
+function TestAPI.readGroups(ship) return readGroups(ship) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
@@ -1204,7 +1287,11 @@ function menu.display()
         Helper.clearFrame(menu, elementFrameLayer)
         menu.elementFrame = nil
     end
-    if session and session.phase == "engaged" then
+    -- Every call path into display() holds a live session: callers either guard
+    -- with `if session then` or return early when it is nil. Stated once here so
+    -- nothing below has to repeat the check.
+    if not session then return end
+    if session.phase == "engaged" then
         -- One compact upper-right panel for both controlModes (step 7).
         -- Frame properties match the old direct panel exactly so the contract
         -- test grep for viewFrame.properties.height still passes.
@@ -1240,7 +1327,7 @@ function menu.display()
         headerRow[1]:setColSpan(2):createText(headerText, { halign = "center" })
         -- Six buttons in three rows of two (step 7).
         local hasSoftTarget = (C.GetSofttarget2().softtargetID ~= 0)
-            or (session.aimTargetID and tostring(session.aimTargetID) ~= "0")
+            or not isNullID(session.aimTargetID)
         local roster = State.cameraRoster(session)
         local canCycle = #roster > 1
         -- Grey out the button for the view currently on screen. Defaults match
@@ -1298,7 +1385,7 @@ function menu.display()
                 restoreDirect("compact cease button")
                 returnToConsole("engagement ceased")
             end
-            local canCycleTarget = #readTargetCandidates() > 1
+            local canCycleTarget = hasMultipleTargets()
             local pRow4 = controls:addRow("cycle_target", {})
             -- Next Target (id 75)
             pRow4[1]:createButton({ active = canCycleTarget }):setText(text(75))
@@ -1315,6 +1402,21 @@ function menu.display()
                 menu.display()
             end
             autoNextRow[2]:createText(text(78))
+            -- Ship-wide override. Lives here rather than on the console because
+            -- it needs an engaged target to prefer, and Direct-control's target
+            -- browser is the only way to choose one. Release stays greyed until
+            -- there is something to release.
+            local overrideRow = controls:addRow("prefer_all_turrets", {})
+            -- All Turrets: Prefer My Target (id 81)
+            overrideRow[1]:createButton({ active = not session.preferAllTurrets }):setText(text(81))
+            overrideRow[1].handlers.onClick = function()
+                applyPreferAllTurrets(); menu.display()
+            end
+            -- Release Other Turrets (id 82)
+            overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
+            overrideRow[2].handlers.onClick = function()
+                clearPreferAllTurrets("release button", true); menu.display()
+            end
         end
         -- Auto-size frame height like the old direct panel (contract grep).
         viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
@@ -1370,7 +1472,7 @@ function menu.display()
         return
     end
 
-    local targetBrowser = session and session.phase == "target_select"
+    local targetBrowser = session.phase == "target_select"
     local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)
     local frame = Helper.createFrameHandle(menu, {
@@ -1387,13 +1489,12 @@ function menu.display()
     -- A solid semi-transparent frame background keeps every cell's text legible
     -- over the live view (vanilla pattern, e.g. menu_docked.lua:341).
     frame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-    menu.frame = frame
     -- Inset the table so column 1 (the checkboxes) is not flush with the screen
     -- edge; the console frame starts at x = 0.
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
 
-    if session and session.phase == "target_select" then
+    if session.phase == "target_select" then
         local tableView = frame:addTable(8, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
         title[1]:setColSpan(8):createText(text(33), Helper.headerRowCenteredProperties)
@@ -1424,7 +1525,7 @@ function menu.display()
         end
         local actions = tableView:addRow("actions", {})
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
-        actions[1].handlers.onClick = function() session.targetCandidates = {}; menu.display() end
+        actions[1].handlers.onClick = function() menu.display() end
         actions[6]:setColSpan(3):createButton({}):setText(text(54))
         actions[6].handlers.onClick = function() returnToConsole("target browser back button") end
         frame:display()
@@ -1566,10 +1667,11 @@ function menu.onUpdate()
             end
         end
         if session.phase == "engaged" and session.cameraMemberID ~= nil then
-            local focus = C.GetExternalTargetViewComponent()
             -- Once per refresh, not per frame: this used to emit ~60 lines/s and
-            -- bury everything else in the log.
-            if focus ~= 0 and not sameID(focus, session.cameraMemberID) then
+            -- bury everything else in the log. focus==0 is "no camera attached
+            -- yet", not a mismatch, so it stays quiet.
+            if C.GetExternalTargetViewComponent() ~= 0
+                and not cameraFocusMatches(session.cameraMemberID) then
                 log("camera focus differs from selected turret; runtime camera gate failed")
             end
         end
@@ -1774,11 +1876,16 @@ local function init()
         seatLeaving = true
         endSession("global movement event")
         seatLeaving = false
-        startPostExitSampler()
     end
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.
     TestAPI.endForMovement = endForMovement
+    -- Exposed for unit tests only: lets tests drive the startAutoEngage failure
+    -- path to verify State.returnToConsole is used (controlMode must be nil after).
+    TestAPI.startAutoEngage = startAutoEngage
+    -- Exposed for unit tests only: lets tests drive the camera gate that
+    -- Direct-control goes through (issue #11).
+    TestAPI.startTargetSelection = startTargetSelection
     RegisterEvent("playerGetUp", endForMovement)
     RegisterEvent("playerUndock", endForMovement)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
@@ -1795,30 +1902,93 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
-    RegisterEvent("X4GunneryControl.RestoreSession", function(_, payload)
+    local function onRestoreSession(_, payload)
         -- Do not resume a camera session after loading. Reconstruct only enough
         -- state to return the pre-Engage mode/armed settings, then clear MD state.
-        if type(payload) ~= "table" then return end
-        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID,
-        -- no [1]). Wrap the legacy form so restoreDirect always sees a list.
-        local snapshots
+        --
+        -- KNOWN BROKEN, and everything below this point is currently
+        -- unreachable. raise_lua_event carries one scalar (a string, a number,
+        -- or a single component object); the snapshot LIST arrives here as nil.
+        -- Live-confirmed 2026-08-06: MD logged a fully populated State.$active
+        -- and this handler logged "payload type=nil" on the same tick. No
+        -- shipped 9.00 MD script passes a table through raise_lua_event either.
+        -- A second defect waits behind it: component IDs are reassigned on load
+        -- (the same ship was 441090 before a save and 2080707 after), so the
+        -- stored shipID/contextID would not match even once transport works.
+        -- The path/group names ARE stable and are what a fix should match on.
+        -- Kept, with the key handling below, because both are correct and will
+        -- be needed the moment transport is fixed. See the save/load restore
+        -- issue before touching this.
+        log("RestoreSession event received; payload type=" .. type(payload)
+            .. "; tostring=" .. tostring(payload))
+        if type(payload) ~= "table" then
+            log("RestoreSession: payload is not a table, so nothing was restored."
+                .. " Expected while save/load restore is broken; turret groups"
+                .. " stay as they were when the game was saved.")
+            return
+        end
+
+        -- MD->Lua key-prefix diagnostic: the engine PREPENDS $ to every Lua
+        -- string key during Lua->MD conversion (live-tested 2026-08-04). When
+        -- State.$active is returned via raise_lua_event the keys may therefore
+        -- arrive as "$shipID", "$kind", etc. This helper reads either form so the
+        -- handler works regardless of whether the $ survives the round-trip.
+        local function field(t, name)
+            if t[name] ~= nil then return t[name] end
+            return t["$" .. name]
+        end
+
+        -- Normalise one snapshot table (plain or $-prefixed keys) into a plain-
+        -- keyed copy that the rest of the Lua code can use without further guards.
+        local function normaliseSnap(s)
+            return {
+                shipID      = field(s, "shipID"),
+                kind        = field(s, "kind"),
+                mode        = field(s, "mode"),
+                armed       = field(s, "armed"),
+                componentID = field(s, "componentID"),
+                contextID   = field(s, "contextID"),
+                path        = field(s, "path"),
+                group       = field(s, "group"),
+            }
+        end
+
+        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID
+        -- or .$shipID, no [1]). Wrap the legacy form so restoreDirect sees a list.
+        local raw
         if payload[1] ~= nil then
-            snapshots = payload
-        elseif payload.shipID ~= nil then
-            snapshots = { payload }
+            raw = payload
+        elseif field(payload, "shipID") ~= nil then
+            raw = { payload }
         else
+            log("RestoreSession: payload has no snapshots; skipping restore")
             return  -- empty or unrecognised table
         end
+        local snapshots = {}
+        for _, s in ipairs(raw) do snapshots[#snapshots + 1] = normaliseSnap(s) end
         if #snapshots == 0 then return end
+
+        -- Diagnostic: report parse result and which key form was present. The
+        -- legacy single snapshot is wrapped into raw[1] above, so this one test
+        -- covers both arrival shapes.
+        local prefixed = raw[1]["$shipID"] ~= nil
+        log("RestoreSession: " .. tostring(#snapshots)
+            .. " snapshot(s) parsed; keys were "
+            .. (prefixed and "$-prefixed (MD->Lua adds $)" or "plain"))
+
         sessionEpoch = sessionEpoch + 1
         session = State.newSession(id(snapshots[1].shipID), "")
         refresh()
-        -- Assign the list so restoreDirect can loop over every group.
+        -- Assign the normalised list so restoreDirect can loop over every group.
         session.directSnapshots = snapshots
         restoreDirect("savegame recovery")
         session = nil
         sessionEpoch = sessionEpoch + 1
-    end)
+    end
+    -- Exposed for unit tests only: lets tests drive the RestoreSession path with
+    -- arbitrary payload shapes (plain-key and $-prefixed) without a live event.
+    TestAPI.onRestoreSession = onRestoreSession
+    RegisterEvent("X4GunneryControl.RestoreSession", onRestoreSession)
     AddUITriggeredEvent("X4GunneryControl", "state_request")
     registerForEvent("gameLoadingDone", getElement("Scene.UIContract"), function()
         registerUIHooks()
