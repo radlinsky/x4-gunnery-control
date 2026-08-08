@@ -1147,3 +1147,39 @@ save using `pcall`.
 
   Not established by this test: the effect on cues mid-execution, on `instantiate="true"`
   instances in flight, or on newly ADDED cues rather than edited ones.
+
+### Helper.addDelayedOneTimeCallbackOnUpdate fails silently when its deadline is never reached
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui/addons/ego_detailmonitorhelper/helper.lua`, `Helper.addDelayedOneTimeCallbackOnUpdate`
+  and `onUpdate` (9.00 extracted UI catalog)
+- Live test: no — read from shipped source on 2026-08-08; the failure below was observed
+  live but its cause is not yet isolated
+- Finding: the helper does not hold a timer. It pushes a closure onto a file-local
+  one-time-callback list that `onUpdate` drains once per frame, and the closure compares
+  `getElapsedTime()` against the `delaytime` argument. If the deadline has not arrived, the
+  closure re-queues itself and returns. There is no attempt counter, no ceiling and no
+  diagnostic, so a `delaytime` that the clock never reaches produces a callback that spins
+  every frame forever and reports nothing at all.
+
+  The practical consequence for a caller: `delaytime` is an absolute value on the
+  `getElapsedTime()` scale, not a duration, and it is captured at scheduling time. Any caller
+  that computes it from a reading taken in a context where that clock differs from the one
+  `onUpdate` later compares against will never fire, and will look exactly like a callback
+  that was never registered.
+
+  `onUpdate` swaps the list to a local and replaces the shared one with a fresh table before
+  iterating, so a callback that schedules another during the drain lands in the next frame's
+  list rather than the one being walked. That part is safe.
+
+  Observed live and NOT explained by the source alone: two builds of `x4_gunnery_control`
+  scheduled a callback with `getElapsedTime() + 0.3` from inside a `RegisterEvent` handler
+  for an MD-raised event at game load. Neither ever fired, with no error. A repeating
+  watchdog using the identical API kept ticking throughout, which rules out the drain having
+  stopped — it re-arms with a fresh reading every tick, so it would self-heal from a bad
+  deadline. Whether `getElapsedTime()` resets or jumps across a load, which would make the
+  captured deadline unreachable, is the current suspicion and is unmeasured.
+
+  `getElapsedTime` is engine-provided: it appears in the extracted 9.00 UI Lua only as a
+  caller, never as a definition, so its behaviour across a save/load cannot be read and must
+  be probed.
