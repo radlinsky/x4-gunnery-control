@@ -890,3 +890,73 @@ among the 609 undeclared engine exports (see "The engine exports far more than
 vanilla Lua declares" above), it could replace this workaround entirely and
 would not depend on hint settings. Any candidate must be tested in a disposable
 save using `pcall`.
+
+## Reloading UI Lua without restarting X4 (live-tested 2026-08-08)
+
+### ScheduleReloadUI exists in the menus environment and re-reads loose files from disk
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extensions `x4_gunnery_control` and
+  `x4_gunnery_control_testlab`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — four reloads triggered from a Test Lab button during one session on
+  2026-08-08, each confirmed against the log
+- Finding: `ScheduleReloadUI` was present as a global in the menus environment
+  (logged `fn_present=true`) and calling it with no arguments reloaded the extension's
+  UI Lua without restarting the game.
+
+  Timing observed: the reload log line and the extension's own init line were 0.01 in-game
+  seconds apart.
+
+  It re-reads loose files from disk. A build-marker string was edited in the repository and
+  copied into the game's `extensions/` directory while X4 was running; the next reload
+  logged the new marker. No restart, no save reload.
+
+  The player was seated in a gunnery chair for every reload. Behaviour when not seated, and
+  the effect on `md/`, `t/`, `ui.xml`, or `content.xml`, were not tested.
+
+### A UI reload does not preserve Lua globals
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — a counter global incremented at init and logged across two consecutive
+  reloads on 2026-08-08
+- Finding: a global set to `(X or 0) + 1` at init logged `1` on every reload, never `2` or
+  `3`. The global did not carry across.
+
+  Measured alongside it: `#Menus` was 35 after each reload, not growing. The vanilla menu
+  table is rebuilt rather than appended to, and the extension's own entry did not accumulate
+  a duplicate.
+
+  Also observed across four inits in the session: each init logged exactly one of each of
+  the extension's two hook registrations, four in total, with no doubling.
+
+  Consequence measured in this extension: its session table is a file-local, and after each
+  reload it logged `session created from chair ingress` — a new session, not a resumed one.
+  Any in-memory UI state is therefore lost on reload.
+
+  Not established by this test: whether any category of global is exempt. Vanilla stores
+  cross-menu UI state in globals named `__CORE_*` (for example
+  `__CORE_DETAILMONITOR_MAPFILTER_SAVE`), and no engine registration or persistence hook for
+  that prefix was found in `ui/core`. Whether those survive a reload was not measured.
+
+### Vanilla carries a delimited string through raise_lua_event and parses it in Lua
+- X4: 9.00
+- Status: shipped-source
+- Source: `scripts-9.00/md/scenario_advanced.xml:414` raises
+  `<raise_lua_event name="'mapfilter'" param="'layer_trade;false'"/>`;
+  `ui-9.00/ui/addons/ego_detailmonitor/menu_map.lua:1942` registers the handler and
+  `:4031-4032` parses it with `string.match(params, "(.+);(.+)")`
+- Live test: no — read from shipped source on 2026-08-08, not exercised
+- Finding: the MD-to-Lua direction carries a string, and vanilla packs two values into one
+  by delimiting them and splitting the result in Lua.
+
+  This bounds an existing note in this repository at
+  `ui/gunnery_control.lua:1927-1938`, which records that a table sent through
+  `raise_lua_event` arrives as `nil`. That live-tested result is about tables. It does not
+  establish that the channel is unusable, and the shipped delimited-string pattern above is
+  the vanilla way to move more than one value through it.
+
+  Whether a serialised string round-trips this extension's session snapshot is untested. The
+  separate defect recorded at the same code location — that component IDs are reassigned on
+  save/load — is unaffected by transport and would still apply.
