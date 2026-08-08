@@ -6,6 +6,28 @@ release/RELEASE_NOTES.md by hand; the two audiences read the same text.[/i]
 I never liked the vanilla gunnery control chair - you sit down and get the same
 boring menu. This mod replaces it with a real turret console.
 
+[h2]New in this release[/h2]
+
+[list]
+[*][b]New (Direct-control) engagement panel buttons[/b]:
+[*][b]All Turrets: Prefer My Target[/b] Normally, only the turret group(s) you
+selected to control will try and fire at your target. If your target goes out
+of range from any of your selected turrets, those turrets will sit idle. This
+button tells [b]every[/b] turret that can hit your chosen target to do so
+(including the turrets outside your selected group). Turrets that cannot find a
+firing solution for your target instead find the next best enemy target
+in-range.
+[*][b]Release Other Turrets[/b] Turns off the ship-wide "Prefer my target"
+mode.
+[*][b]Bug fix[/b]
+[*]Direct-control now works on M ships lacking a turret camera.
+[*]If the camera cannot attach for a target-view request, target selection
+stays open so you can continue playing instead of being kicked out.
+[*]Turret groups with duplicate names are now still controllable.
+[*]The group [b]Mode[/b] column now refreshes correctly after [b]Cease
+Engagement[/b].
+[/list]
+
 [h2]What you can do[/h2]
 
 [b]Pick your turret groups.[/b] Every physical turret group gets a row with a
@@ -61,6 +83,11 @@ when to fire, and whether a target is legal to attack. You say [i]what[/i], not
 [i]how[/i].
 [*][b]Turret POV cinematic often clips into your own hull[/b] and looks rough.
 Target POV cinematic is the prettier of the two.
+[*]On some S/M ships, a turret-target camera request can resolve to a wider
+ship-level view instead of a tight turret component view.
+[*]If two turret groups share the same name, member rows can appear under the
+wrong name and Direct-control can open the camera on a sibling group's
+representative turret. Commands still apply to the correct group.
 [*]Cinematic views hide the entire UI, including this mod's panel.
 [/list]
 

@@ -7,6 +7,24 @@ The technical record is CHANGELOG.md; this is what a player reads.
 I never liked the vanilla gunnery control chair — you sit down and get the same
 boring menu. This mod replaces it with a real turret console.
 
+## New in this release
+
+- **New (Direct-control) engagement panel buttons**:
+- **All Turrets: Prefer My Target** Normally, only the turret group(s)
+  you selected to control will try and fire at your target. If your target 
+  goes out of range from any of your selected turrets, those turrets will sit idle.
+  This button tells **every** turret that can hit your chosen target to do so (including 
+  the turrets outside your selected group). Turrets that cannot find a firing 
+  solution for your target instead find the next best enemy target in-range.
+- **Release Other Turrets** Turns off the ship-wide "Prefer my target" mode.
+
+- **Bug fix**
+- Direct-control now works on M ships lacking a turret camera.
+- If the camera cannot attach for a target-view request, target selection stays
+  open so you can continue playing instead of being kicked out.
+- Turret groups with duplicate names are now still controllable.
+- The group **Mode** column now refreshes correctly after **Cease Engagement**.
+
 ## What you can do
 
 **Pick your turret groups.** Every physical turret group gets a row with a
@@ -60,6 +78,11 @@ it.
 - **The camera's aim point is a good guess.** X4 offers no way to ask a turret
   what it is shooting at, so the mod picks the most likely target the same way
   the game would. Usually right, occasionally not.
+- On some S/M ships, a turret-target camera request can resolve to a wider
+  ship-level view instead of a tight turret component view.
+- If two turret groups share the same name, member rows can appear under the
+  wrong name and Direct-control can open the camera on a sibling group's
+  representative turret. Commands still apply to the correct group.
 - Cinematic views hide the entire UI, including this mod's panel.
 
 ## Requirements
