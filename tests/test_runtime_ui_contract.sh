@@ -288,4 +288,14 @@ fi
 
 grep -Fq 'SetPlayerCameraCockpitView' "$main"
 
+# Apply skips towing, mining and autoassist, so Release has nothing of ours to
+# clear on those modes and must skip them too. An unfiltered clear reaches
+# turrets the console never touched -- on a mixed ship that is someone else's
+# mining or towing job. Both loops carry the same filter; assert two of them.
+# shellcheck disable=SC2016
+if [ "$(grep -c 'weaponmode.towing) and (\$mode != weaponmode.mining) and (\$mode != weaponmode.autoassist)' md/x4_gunnery_control.xml)" -ne 2 ]; then
+  echo "PreferAllTurrets Apply and Release must both filter towing/mining/autoassist" >&2
+  exit 1
+fi
+
 echo "runtime UI contract checks passed"

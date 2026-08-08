@@ -261,9 +261,15 @@
                 </do_if>
               </do_all>
               <do_for_each name="$mode" in="$modes">
-                <!-- No preferredtarget: clearpreferred defaults to true. -->
-                <set_turret_targets object="$ship" weaponmode="$mode" stopshootingold="false"/>
-                <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' mode=' + $mode" chance="100"/>
+                <!-- Same filter as Apply, and for the same reason: Apply never
+                     set a preferred target on these modes, so there is nothing
+                     of ours to clear. Clearing anyway would reach turrets doing
+                     someone else's job on a mixed ship. -->
+                <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
+                  <!-- No preferredtarget: clearpreferred defaults to true. -->
+                  <set_turret_targets object="$ship" weaponmode="$mode" stopshootingold="false"/>
+                  <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' mode=' + $mode" chance="100"/>
+                </do_if>
               </do_for_each>
             </do_if>
           </actions>

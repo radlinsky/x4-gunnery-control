@@ -8,7 +8,8 @@ All notable changes to this project are documented in this file.
   turrets. Every turret on the ship shoots your target when it can, and shoots
   something else in range when it cannot. **Release Other Turrets** hands the
   rest of the ship back while your checked groups stay on your target; ceasing
-  or getting up releases everything.
+  or getting up releases everything. Mining and towing turrets are left alone
+  in both directions, so a mixed ship keeps doing its other jobs.
 
 - Hitting **Release Other Turrets** immediately after **Prefer My Target** now
   really releases. The apply is sent a tick late so the turret modes land first,
