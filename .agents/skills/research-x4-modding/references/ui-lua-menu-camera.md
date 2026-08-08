@@ -1040,6 +1040,12 @@ save using `pcall`.
   reported the turret component from `GetExternalTargetViewComponent()` after the reload
   while Lua state was gone, so the camera and the soft target did not behave the same way.
 
+  A save/load does the same, measured separately on 2026-08-08 (build `2026-08-08-audit-2`):
+  with a surface element engaged and the turrets firing at it, the game saved and loaded, the
+  restore read `GetSofttarget2().softtargetID` as `0ULL` before writing anything, while the
+  target itself came back alive through an MD component reference. So neither route hands the
+  soft target back and a restoring UI must re-issue `SetSofttarget` itself.
+
 ### A Lua error during a menu file's init removes the mod from the UI until restart
 - X4: 9.00
 - Status: live-tested
@@ -1103,9 +1109,15 @@ save using `pcall`.
   the identical element had succeeded at engagement moments before. Distance does not explain
   the difference — the player reports the element was already out of range when they engaged
   it, and the engagement path refuses to continue unless `SetSofttarget` returns true, which
-  it did. Both calls therefore ran at the same distance with opposite results. The cause is
-  unexplained; no distance was logged on that run, and the two calls differ in when they run
-  relative to the load.
+  it did. Both calls therefore ran at the same distance with opposite results.
+
+  A third run on 2026-08-08 (build `2026-08-08-audit-2`) recovered a `XEN M Shield Generator
+  Mk1` the same way and `SetSofttarget` returned **true**, with `GetSofttarget2()` reading
+  the same id straight back and `GetDistanceBetween` reporting `7851`. The one difference
+  from the failing call is when it ran: this one was issued from a periodic
+  `setInterval` watchdog roughly 0.4s after the restore, the failing one from inside the
+  `RestoreSession` event handler itself. That the delay is what changed the result is an
+  inference and was not isolated — only one call site was tried per run.
 
   Not established by this test: what happens when the referenced component is destroyed
   while the game is closed. The MD side guards with `@` and does not raise in that case, but

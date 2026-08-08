@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-audit-2"
+local runtimeBuild = "2026-08-08-repoint-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1944,30 +1944,32 @@ reopenSuspendedSession = function(reason)
     end, false, getElapsedTime() + 0.50)
 end
 
--- Re-points the engine soft target at a restored target. Every engine call gets
--- its own pcall: an earlier version put GetDistanceBetween inside the argument
--- list of the single log call, so when it raised, the failure went unlogged and
--- the retry was never scheduled -- the probe deleted its own evidence.
+-- Re-points the engine soft target at a restored target. A load does clear it:
+-- measured 2026-08-08, the restore read the engine back as 0ULL while the
+-- restored target was alive and operational. So this is doing real work, not
+-- papering over something the savegame already handled.
 --
--- ponytail: retries for five minutes because whether distance matters is still
--- unmeasured, and one attempt at one distance cannot settle it. Collapse this to
--- a single attempt, or delete it outright, once the log says which.
+-- One attempt, because that same run succeeded on the first one at 7851m. The
+-- five minutes of retries that stood here existed only because it was unmeasured
+-- whether range could refuse the call. Distance is still read and logged: it
+-- costs one call per load and is the only number that would diagnose a refusal
+-- if ok=false ever appears.
+--
+-- Each engine call keeps its own pcall. An earlier version put GetDistanceBetween
+-- inside the argument list of the single log call, so when it raised the failure
+-- went unlogged -- the probe deleted its own evidence.
 local function attemptRepoint()
     local targetID = session.repointTargetID
-    local attempt = (session.repointAttempts or 0) + 1
-    session.repointAttempts, session.repointNextAt = attempt, GetCurRealTime() + 5
+    session.repointTargetID = nil
     local ok = select(2, pcall(function() return C.SetSofttarget(targetID, "") end))
     local gotEngine, engine = pcall(function() return C.GetSofttarget2().softtargetID end)
     local gotDistance, distance = pcall(function()
         return C.GetDistanceBetween(session.shipID, targetID)
     end)
-    log("re-point attempt " .. attempt .. " target=" .. tostring(targetID)
+    log("re-point target=" .. tostring(targetID)
         .. " ok=" .. tostring(ok)
         .. " engine=" .. (gotEngine and tostring(engine) or "raised")
         .. " distance=" .. (gotDistance and tostring(distance) or "raised"))
-    if ok == true or attempt >= 60 then
-        session.repointTargetID, session.repointAttempts, session.repointNextAt = nil, nil, nil
-    end
 end
 
 local function sessionWatchdog()
@@ -1976,8 +1978,7 @@ local function sessionWatchdog()
         -- the soft target under the player while they are picking things on it
         -- would fight them for their own selection.
         if session.repointTargetID and session.phase == "engaged"
-            and not State.isMapSuspended(session)
-            and GetCurRealTime() >= (session.repointNextAt or 0) then
+            and not State.isMapSuspended(session) then
             attemptRepoint()
         end
         local signature = table.concat({ session.lifecycle or "none", session.phase or "none", tostring(menu.shown and true or false), tostring(resumePending and true or false) }, ":")
@@ -2137,13 +2138,12 @@ local function init()
         end
         applyPov()
         if target ~= 0 then
-            -- Measured before anything writes it, because the answer decides
-            -- whether the re-point below is needed at all: on the run that
-            -- finally worked, the re-point never executed and the turrets were
-            -- on target anyway, which points at the savegame having kept the
-            -- soft target. That was never checked, only assumed absent from the
-            -- UI-reload result. If this reads back as the target already, the
-            -- whole re-point mechanism can be deleted.
+            -- Read before anything writes it. This settled whether the re-point
+            -- below is needed at all: it is. Measured 2026-08-08 as 0ULL against
+            -- a live restored target, so a load clears the engine soft target
+            -- and the turrets staying on target on an earlier run was not the
+            -- savegame preserving it. Kept as a permanent line because it is the
+            -- one reading that would say so if a patch ever changed that.
             local read, before = pcall(function() return C.GetSofttarget2().softtargetID end)
             log("RestoreSession: engine soft target before any write = "
                 .. (read and tostring(before) or "raised")
