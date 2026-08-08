@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-audit-1"
+local runtimeBuild = "2026-08-08-audit-2"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1749,7 +1749,15 @@ function menu.onUpdate()
                 logSession("cutscene ended outside the panel; back to Turret POV")
             end
         end
-        if session.phase == "engaged" and session.cameraMemberID ~= nil then
+        -- Only while the camera is meant to be ON the turret. Target POV points
+        -- it at the target and cinematic hands it to a cutscene, so in either of
+        -- those the focus differing from the turret is the intended state, not a
+        -- gate failure. Target POV was broken by a type error until now, which is
+        -- the only reason this never showed: with it fixed, the check fired every
+        -- refresh and put ~1900 lines into one log.
+        if session.phase == "engaged" and session.cameraMemberID ~= nil
+            and (session.povAnchor or "turret") == "turret"
+            and (session.povMode or "manual") == "manual" then
             -- Once per refresh, not per frame: this used to emit ~60 lines/s and
             -- bury everything else in the log. focus==0 is "no camera attached
             -- yet", not a mismatch, so it stays quiet.
