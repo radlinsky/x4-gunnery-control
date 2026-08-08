@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-session-persist-2"
+local runtimeBuild = "2026-08-08-session-persist-3"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -108,6 +108,15 @@ local function playerShip()
         if ship == 0 or not C.IsComponentClass(ship, "ship") then return 0 end
     end
     return id(ship)
+end
+
+-- State.newSession is pure Lua and cannot read the ship's name. It is recorded
+-- because it is the only identifier of the ship that survives a save/load: every
+-- id is reassigned, so a restore has nothing else to check the payload against.
+local function newSession(ship)
+    local session = State.newSession(ship, "gunnercontrol")
+    session.shipName = str(C.GetComponentName(ship))
+    return session
 end
 
 local function isInGunnerChair()
@@ -1269,9 +1278,15 @@ function menu.onShowMenu()
         and State.isMapSuspended(session)
     resumePending = false
     if not session then
-        session = State.newSession(ship, "gunnercontrol")
+        session = newSession(ship)
         logSession("session created from chair ingress")
         resuming = false
+        -- A load leaves the player walking the deck, where nothing can be
+        -- resolved, so the restore raised at gameLoadingDone had to be dropped.
+        -- Ask again now that there is a live ship to resolve against. MD kept
+        -- the payload, and only ever keeps one for a session that did not end
+        -- cleanly, so a normal ingress gets "no saved session state" back.
+        AddUITriggeredEvent("X4GunneryControl", "state_request")
     elseif not sameID(session.shipID, ship) or (not resuming and not mapSuspendResume) then
         -- A fresh chair interaction must never inherit a hidden direct
         -- snapshot. Only the explicit Map callback below may resume a session,
@@ -1280,7 +1295,7 @@ function menu.onShowMenu()
         discardSession("stale session at chair ingress")
         resuming = false
         mapSuspendResume = false
-        session = State.newSession(ship, "gunnercontrol")
+        session = newSession(ship)
         logSession("session recreated from chair ingress")
     else
         transitionLifecycle(State.lifecycle.owned, "Map resume shown")
@@ -1974,21 +1989,33 @@ local function init()
         end
         -- Groups are addressed by contextID+path+group, and only a live ship
         -- can supply a current contextID. Seated is therefore the one state in
-        -- which anything can be resolved at all.
+        -- which anything can be resolved at all. A load normally lands here --
+        -- the player wakes up walking the deck, not sitting at the console.
+        -- Nothing is lost by waiting: MD still holds the payload, and chair
+        -- ingress asks for it again, so the restore happens on sitting down.
         if not isInGunnerChair() then
-            log("RestoreSession: " .. #records .. " record(s) received, but the player"
-                .. " is not in a gunner chair, so no live group list exists to"
-                .. " re-resolve contextIDs against. Turret modes stay as saved.")
+            log("RestoreSession: " .. #records .. " record(s) held; the player is not in"
+                .. " a gunner chair, so there is no live group list to re-resolve"
+                .. " against. Deferred to the next chair ingress.")
             return
         end
         sessionEpoch = sessionEpoch + 1
-        session = State.newSession(playerShip(), "gunnercontrol")
+        session = newSession(playerShip())
         refresh()  -- populates session.groups with LIVE contextIDs
         local ok = State.restoreState(session, records, session.groups)
         log("RestoreSession: restored=" .. tostring(ok)
+            .. " ship=" .. tostring(session.shipName)
             .. " phase=" .. tostring(session.phase)
             .. " groups=" .. #session.groups
             .. " snapshots=" .. #(session.directSnapshots or {}))
+        if not ok then
+            -- Turret group names are identical across every ship of a class, so
+            -- a payload from another ship would match and write its saved modes
+            -- onto this one's turrets.
+            log("RestoreSession: payload is not for this ship; leaving it alone")
+            State.returnToConsole(session)
+            return
+        end
         if session.phase ~= "engaged" then
             -- Nothing was overridden, or the payload predates engagement.
             -- Leave the player on the console with the same groups checked.
@@ -2009,14 +2036,21 @@ local function init()
             return
         end
         applyPov()
-        -- The menu is not shown yet: the DockedMenu redirect opens it a tick
-        -- later, and onShowMenu discards any session it did not create itself
-        -- ("stale session at chair ingress"). Hand it over through the same
-        -- resume route the Map and Test Lab paths use, or the restore is
-        -- undone milliseconds after it succeeds.
-        transitionLifecycle(State.lifecycle.reopening, "restored session awaiting its menu")
-        resumePending = true
-        if menu.shown then menu.display() end
+        if menu.shown then
+            -- The chair-ingress request route: the menu is already up and owns
+            -- this session, so there is no handover to arrange. Setting
+            -- resumePending here would leave it set with nothing to consume it.
+            transitionLifecycle(State.lifecycle.owned, "restored into the open menu")
+            menu.display()
+        else
+            -- The load/reload route: the DockedMenu redirect opens the menu a
+            -- tick later, and onShowMenu discards any session it did not create
+            -- itself ("stale session at chair ingress"). Hand it over through
+            -- the same resume route the Map and Test Lab paths use, or the
+            -- restore is undone milliseconds after it succeeds.
+            transitionLifecycle(State.lifecycle.reopening, "restored session awaiting its menu")
+            resumePending = true
+        end
     end
     -- Exposed for unit tests only: lets tests drive the RestoreSession path with
     -- arbitrary payload shapes (plain-key and $-prefixed) without a live event.

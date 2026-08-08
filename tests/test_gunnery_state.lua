@@ -456,4 +456,49 @@ do
     eq(legacyBack.directSnapshots[1].armed, false, "legacy armed=false must survive")
 end
 
+-- The save/load half: a load reassigns every id, so the same payload has to be
+-- read differently from a UI reload. Group names still match; nothing addressed
+-- by a bare componentID does.
+do
+    local saved = State.newSession("441090", "gunnercontrol")
+    saved.shipName = "Behemoth"
+    saved.phase, saved.controlMode = "engaged", "direct"
+    saved.aimTargetID, saved.cameraMemberID = "700", "701"
+    saved.groups = { { key = "group:OLD:../:aft", contextID = "OLD", path = "../", group = "aft" } }
+    saved.checkedGroupKeys[saved.groups[1].key] = true
+    saved.directSnapshots = {
+        { kind = "group", shipID = "441090", contextID = "OLD", path = "../",
+          group = "aft", mode = "attackenemies", armed = true },
+        { kind = "single", shipID = "441090", componentID = "800",
+          mode = "defend", armed = true },
+    }
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:2080707:../:aft", contextID = "2080707",
+        path = "../", group = "aft" } }
+
+    -- Same ship, new ids: the group snapshot survives, the componentID-addressed
+    -- values do not, because those ids now belong to arbitrary components.
+    local loaded = State.newSession("2080707", "gunnercontrol")
+    loaded.shipName = "Behemoth"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "a payload for this ship must restore after a load")
+    eq(loaded.phase, "engaged", "phase must survive a load")
+    eq(loaded.aimTargetID, nil, "a reassigned target id must be dropped, not re-pointed")
+    eq(loaded.cameraMemberID, nil, "a reassigned camera member id must be dropped")
+    eq(#loaded.directSnapshots, 1, "only the name-addressed snapshot survives a load")
+    eq(loaded.directSnapshots[1].contextID, "2080707", "the snapshot takes the live contextID")
+    -- restoreDirect refuses any snapshot whose shipID differs from the session's,
+    -- so carrying the saved shipID through would silently restore nothing.
+    eq(loaded.directSnapshots[1].shipID, "2080707", "the snapshot takes the live shipID")
+
+    -- A different ship with the same group names must not be touched: this is
+    -- the whole reason the name is in the payload.
+    local other = State.newSession("2080707", "gunnercontrol")
+    other.shipName = "Odysseus"
+    eq(State.restoreState(other, State.decode(payload), liveGroups), false,
+        "a payload from another ship must be refused")
+    eq(#other.directSnapshots, 0, "a refused payload must write no snapshots")
+    eq(next(other.checkedGroupKeys), nil, "a refused payload must check no groups")
+end
+
 print("gunnery_state tests passed")

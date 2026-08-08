@@ -443,6 +443,9 @@ function State.saveState(session)
         autoNextTarget = flag(session.autoNextTarget ~= false),
         preferAllTurrets = flag(session.preferAllTurrets),
         shipID = tostring(session.shipID),
+        -- Which ship this payload belongs to. shipID cannot answer that after a
+        -- load, because a load reassigns it; the name survives.
+        shipName = tostring(session.shipName or ""),
         -- The engine does not hand the soft target back: probed 2026-08-08, it
         -- read 0 immediately after a reload taken while a target was engaged.
         -- So the target travels in the payload instead of being re-read.
@@ -479,9 +482,28 @@ end
 -- Rebuilds `session` from decode()'s output. liveGroups is the freshly read
 -- group list: every group is located by path+group and takes its contextID and
 -- key from the live entry, never from the payload. Returns true when a session
--- record was present.
+-- record was present and belongs to this ship.
 function State.restoreState(session, records, liveGroups)
     if not session or not records then return false end
+    local head
+    for _, record in ipairs(records) do
+        if record.t == "session" then head = record; break end
+    end
+    if not head then return false end
+    -- Groups are matched by name, and turret group names are the same on every
+    -- ship of a class. Without a ship check, a payload left over from ship A
+    -- would write A's saved modes onto whichever ship the player loads into.
+    -- ponytail: two identically named ships would fool this. Nothing cheaper is
+    -- stable across a load; reach for the idcode if it ever matters.
+    local ourName = tostring(session.shipName or "")
+    if head.shipName and head.shipName ~= "" and ourName ~= "" and head.shipName ~= ourName then
+        return false
+    end
+    -- A UI reload keeps every id; a save/load reassigns them all. Same shipID
+    -- means the same session, so componentIDs still address what they addressed
+    -- when the payload was written. Different means every bare componentID in
+    -- here now points at something arbitrary and must be dropped, not used.
+    local idsHeld = head.shipID == tostring(session.shipID)
     local byName = {}
     for _, group in ipairs(liveGroups or {}) do
         byName[nameKey(group.path, group.group)] = group
@@ -497,29 +519,36 @@ function State.restoreState(session, records, liveGroups)
             session.povMode = record.povMode or "manual"
             session.autoNextTarget = record.autoNextTarget ~= "0"
             session.preferAllTurrets = record.preferAllTurrets == "1"
-            session.aimTargetID = (record.aimTargetID ~= "" and record.aimTargetID) or nil
-            session.targetObjectID = (record.targetObjectID ~= "" and record.targetObjectID) or nil
-            session.cameraMemberID = (record.cameraMemberID ~= "" and record.cameraMemberID) or nil
+            if idsHeld then
+                session.aimTargetID = (record.aimTargetID ~= "" and record.aimTargetID) or nil
+                session.targetObjectID = (record.targetObjectID ~= "" and record.targetObjectID) or nil
+                session.cameraMemberID = (record.cameraMemberID ~= "" and record.cameraMemberID) or nil
+            end
             restored = true
         elseif record.t == "checked" then
             local live = byName[nameKey(record.path, record.group)]
             if live then session.checkedGroupKeys[live.key] = true end
         elseif record.t == "snapshot" then
             if record.kind == "single" then
-                -- ponytail: a single-turret snapshot is addressed only by
-                -- componentID, which a load reassigns just like contextID. It
-                -- is carried through unchanged so a reload still restores it;
-                -- across a save/load it will simply not match, same as today.
-                snapshots[#snapshots + 1] = {
-                    kind = "single", shipID = record.shipID,
-                    componentID = record.componentID,
-                    mode = record.mode, armed = record.armed == "1",
-                }
+                -- A single-turret snapshot is addressed only by componentID, so
+                -- it is restorable across a reload and meaningless across a
+                -- load. Dropping it loses one turret's original mode; keeping it
+                -- would write that mode onto whatever inherited the id.
+                if idsHeld then
+                    snapshots[#snapshots + 1] = {
+                        kind = "single", shipID = tostring(session.shipID),
+                        componentID = record.componentID,
+                        mode = record.mode, armed = record.armed == "1",
+                    }
+                end
             else
                 local live = byName[nameKey(record.path, record.group)]
                 if live then
+                    -- The live shipID, not the payload's: a load reassigns it,
+                    -- and restoreDirect refuses to write back any snapshot whose
+                    -- shipID does not match the session's.
                     snapshots[#snapshots + 1] = {
-                        kind = record.kind, shipID = record.shipID,
+                        kind = record.kind, shipID = tostring(session.shipID),
                         contextID = live.contextID, path = live.path,
                         group = live.group,
                         mode = record.mode, armed = record.armed == "1",
