@@ -594,6 +594,24 @@ rg '\[X4GC TEST\]' "/path/to/debug.log"
 rg -i 'error|exception|ffi|x4_gunnery' "/path/to/debug.log"
 ```
 
+To watch the log while you play instead of reading it afterwards, set
+`X4GC_TAIL_LOG=1` before running `launch-x4-dev.bat`. It opens a second window
+running `scripts/tail-gunnery-log.sh`, which finds the log itself and prints
+matching lines as they arrive. Two details in it are deliberate:
+
+- It starts *before* X4 and skips whatever is already in the file, announcing
+  `--- skipping N bytes from the previous run ---`. The file on disk at that
+  moment is the previous run; printing it replays a finished session as if it
+  were live, which has already cost one debugging session. When X4 truncates,
+  the new run is shown from its first line.
+- It tracks a byte offset rather than consulting the file size. Size and mtime
+  go stale while X4 holds the handle open, which is why `tail -f` does not work
+  here.
+
+Run it by hand with a path argument (`./scripts/tail-gunnery-log.sh /path/to/debug.log`)
+from WSL or Linux. It only ever shows lines written after it started; use
+`filter-gunnery-log.sh` to read a log that is already finished.
+
 Use `[X4GC]` for main-extension diagnostics and `[X4GC TEST]` for structured
 Test Lab records. Lifecycle diagnostics record the transition reason, ownership
 state, visual phase, chair/ship context, camera focus, and pause state when the

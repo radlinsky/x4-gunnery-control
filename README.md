@@ -45,6 +45,9 @@ mark a specific surface element (e.g. turret, shield, engine).
   settings. The groups you checked keep shooting your target, because you are
   still directing them. Ceasing engagement or getting up releases everything.
 
+**Saving and loading keeps your seat.** Save while engaged and the load puts you
+back at the same turret, watching the same target, with the same groups checked.
+
 ## Four viewing modes
 
 - **Turret POV manual** / **Target POV manual** — camera on the turret, or on

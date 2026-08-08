@@ -105,6 +105,30 @@ three groups collapse to "Center Upper".
   "15 shipped ships have two turret groups that humanize to the same label" is
   wrong about the consequence.
 
+### 6. Loading a save while NOT seated at the console (added 2026-08-08)
+
+Save/load restore is live-proven for Direct control and Auto-engage, but both
+runs loaded with the player still seated. A load taken away from the chair takes
+a different route: the restore raised at `gameLoadingDone` cannot resolve a
+context and is dropped, so chair ingress has to ask for the payload again. That
+re-request is the reason `state_request` is raised three times and it has never
+been exercised.
+
+1. Sit, check two or three groups, Direct-control a target.
+2. Save. Get up and walk away from the console.
+3. Load that save, walk back, and sit down.
+
+- **Pass:** the console reopens engaged with the same groups checked, and Cease
+  afterwards returns every group to its original mode.
+- **Fail (payload lost):** `RequestState: no saved session state` on the
+  ingress. MD did not keep it across the load.
+- **Fail (re-request not landing):** the load-time request is refused and no
+  further `RequestState` follows when you sit down.
+- **Fail (snapshots dropped):** restored, but Cease leaves groups on armed
+  `autoassist`; look for `could not resolve directed group`.
+- **Fail (ship gate too strict):** `payload is not for this ship`, which prints
+  the name it read.
+
 ## Build and install
 
 Build both archives from the repository root:
@@ -254,7 +278,7 @@ camera and clears the in-memory sweep.
 | Motion | stationary, player ship turning, NPC captain moving the ship |
 | Checkbox gate | Auto-engage and Direct-control greyed with no checked groups; activated once at least one mutable group is checked |
 | Auto-engage | Mode and armed state of every checked group unchanged after entering and exiting; Next/Prev cycles and wraps when two or more groups are checked; Next/Prev greyed when only one operational turret qualifies |
-| Direct-control | Clicking a target in the browser engages its hull immediately with no intermediate picker; every checked mutable group set to armed `autoassist`; upper-left element panel lists Hull (greyed) plus surface elements; clicking a non-active element re-points all groups; Next/Previous Target cycles in browser order and is greyed when ≤1 candidate; Cease Engagement restores all groups. **Save/load does NOT restore turret settings — known broken, see the save/load restore issue. Saving during Direct-control and reloading leaves every group on armed `autoassist`. Do not record this as a pass or a regression until that issue is fixed.** |
+| Direct-control | Clicking a target in the browser engages its hull immediately with no intermediate picker; every checked mutable group set to armed `autoassist`; upper-left element panel lists Hull (greyed) plus surface elements; clicking a non-active element re-points all groups; Next/Previous Target cycles in browser order and is greyed when ≤1 candidate; Cease Engagement restores all groups. Save/load restores the session as of 2026-08-08: the console reopens engaged, same groups checked, same turret POV, same target, and Cease afterwards still returns every group to its original mode. |
 | Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
 | Lifecycle | Cease Engagement, close console/Get Up, undock, teleport/ship change, save/load, retry, skip |
 | Menu lifecycle | From console and live panel: open/close Map and verify documented resume/fallback; try Player Information and another hotkey and verify safe teardown, not assumed resume |

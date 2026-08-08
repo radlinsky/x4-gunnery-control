@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+- **Your gunnery session now survives saving and loading.** Save while engaged,
+  load, and the console comes back with the same turret groups checked, in the
+  same phase, at the same turret, still shooting the same target. Previously a
+  load dropped you back at the console with everything forgotten — and worse,
+  with your turrets still overridden and the record needed to undo that thrown
+  away, so **Cease** could no longer give them back.
+
+  A load reassigns every object id in the game, so nothing that identifies a
+  turret, a group or a target by id can be written into a save. Groups and the
+  camera come back by name and position instead, and the engaged target is
+  parked in a Mission Director variable, which the engine remaps across the
+  load. The ship's own name travels with it, so a leftover session cannot be
+  applied to a different ship of the same class.
+
+  A load also clears the engine's target lock, so the mod re-issues it once the
+  session is back.
+
+- **Auto-engage sessions are kept too.** They were never saved at all, so a load
+  or a UI reload during Auto-engage put you back at the console. Its record is
+  now also cleared when you stand up; a stale one could reopen a session you had
+  already walked away from.
+
+- **Target POV works after a restore.** It silently did nothing: a restored
+  target arrives as text or as a plain number and the camera call accepts
+  neither. The turret kept pointing at nothing until you switched to another
+  surface element and back.
+
+- **Development**: `scripts/launch-x4-dev.bat` can open a live log window
+  (`X4GC_TAIL_LOG=1`), and the console has in-game UI reload buttons.
+
 ## [0.30] - 2026-08-07
 
 - New **All Turrets: Prefer My Target** during Direct-control: no more idle
