@@ -106,4 +106,80 @@ assert(API.getSession() == seatedSession49 and API.getSessionEpoch() == seatedEp
 fix.C.GetPlayerCurrentControlGroup = oldControl49
 fix.C.SetPlayerCameraTargetView = originalCamera49
 
+-- ── 59. restored engagement without a usable camera tears down safely ──────
+-- The saved Direct snapshot is still writable even though its only live turret
+-- can no longer be used as a camera. Direct must restore it; Auto must
+-- not issue any turret writes. Both paths clear the MD record and land at the
+-- console instead of leaving an invisible engaged session behind.
+do
+    local C, State = fix.C, X4GunneryState
+    local savedNumGroups, savedGroups2 = C.GetNumUpgradeGroups, C.GetUpgradeGroups2
+    local savedInfo, savedSlots = C.GetUpgradeGroupInfo2, C.GetNumUpgradeSlots
+    local savedSlotComponent, savedSlotGroup = C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup
+    local savedOperational, savedCamera = C.IsComponentOperational, C.IsPlayerCameraTargetViewPossible
+    local savedMode, savedArmed = C.SetTurretGroupMode2, C.SetTurretGroupArmed
+    local savedNew = fix.ffiStub.new
+    local groupBuffer = { [0] = { path = "p", group = "g", contextid = 5 } }
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2 = function() return 1 end, function() return 1 end
+    C.GetUpgradeGroupInfo2 = function()
+        return { count = 1, currentcomponent = 27, currentmacro = "", slotsize = "",
+            total = 1, operational = 1 }
+    end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 27 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+    C.IsComponentOperational = function() return true end
+    C.IsPlayerCameraTargetViewPossible = function() return false end
+    fix.ffiStub.new = function() return groupBuffer end
+
+    local function payload59(controlMode)
+        local source = State.newSession(42, "gunnercontrol")
+        source.shipName, source.phase, source.controlMode = "0", "engaged", controlMode
+        source.groups = { {
+            key = State.groupKey(5, "p", "g"), kind = "group", contextID = 5,
+            path = "p", group = "g", componentID = 27, mode = "attack", armed = false,
+            operationalCount = 1, totalCount = 1,
+            members = { { componentID = 27, operational = true, cameraSupported = true } },
+        } }
+        source.checkedGroupKeys = { [source.groups[1].key] = true }
+        source.cameraMemberID = 27
+        source.directSnapshots = controlMode == "direct" and { {
+            shipID = 42, kind = "group", contextID = 5, path = "p", group = "g",
+            mode = "attack", armed = false,
+        } } or {}
+        return State.encode(State.saveState(source))
+    end
+
+    local modeWrites59, armedWrites59 = 0, 0
+    C.SetTurretGroupMode2 = function() modeWrites59 = modeWrites59 + 1 end
+    C.SetTurretGroupArmed = function() armedWrites59 = armedWrites59 + 1 end
+    fix.resetUITriggeredEvents()
+    API.onRestoreEnvelope({ generation = 59, target = 0, payload = payload59("direct") })
+    local direct59 = API.getSession()
+    assert(direct59.phase == "console" and direct59.controlMode == nil,
+        "59 Direct: no usable restored camera must return to the console")
+    assert(modeWrites59 == 1 and armedWrites59 == 1,
+        "59 Direct: saved snapshot must be restored exactly once")
+    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+        "59 Direct: failed restored engagement must clear MD persistence")
+
+    modeWrites59, armedWrites59 = 0, 0
+    fix.resetUITriggeredEvents()
+    API.onRestoreEnvelope({ generation = 60, target = 0, payload = payload59("auto") })
+    local auto59 = API.getSession()
+    assert(auto59.phase == "console" and auto59.controlMode == nil,
+        "59 Auto: no usable restored camera must return to the console")
+    assert(modeWrites59 == 0 and armedWrites59 == 0,
+        "59 Auto: no-camera restore must not write a turret setting")
+    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+        "59 Auto: failed restored engagement must clear MD persistence")
+
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2 = savedNumGroups, savedGroups2
+    C.GetUpgradeGroupInfo2, C.GetNumUpgradeSlots = savedInfo, savedSlots
+    C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup = savedSlotComponent, savedSlotGroup
+    C.IsComponentOperational, C.IsPlayerCameraTargetViewPossible = savedOperational, savedCamera
+    C.SetTurretGroupMode2, C.SetTurretGroupArmed = savedMode, savedArmed
+    fix.ffiStub.new = savedNew
+end
+
 print("runtime persistence tests passed")

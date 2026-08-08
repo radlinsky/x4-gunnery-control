@@ -48,6 +48,9 @@ local session, redirectPending, nextRefresh = nil, false, 0
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
+-- Declared before enterCamera: a successful turret gate applies the caller's
+-- final POV only after X4 has accepted the temporary turret placement.
+local applyPov
 local dockedHookRegistered, mapHookRegistered, hookAttempts = false, false, 0
 local lastObservedDockedControlGroup
 local resumePending, endingSession = false, false
@@ -58,6 +61,7 @@ local sessionEpoch = 0
 local reopenSuspendedSession
 local activeExternalMenuName
 local lastWatchdogSignature
+local cameraMismatchLogged = false
 -- Fires at most once per session when GetUpgradeGroups2 or GetUpgradeSlotGroup
 -- returns a path or group id that carries whitespace padding, proving that the
 -- engine does NOT trim before handing the value back to Lua. Silent when the
@@ -426,16 +430,19 @@ local function restoreDirect(reason)
     clearSnapshot()
     local snapshots = State.releaseDirect(session)
     if #snapshots == 0 then return end
+    local restored, missing = 0, 0
     for _, snapshot in ipairs(snapshots) do
         local group = findSnapshotGroup(snapshot)
         if group and sameID(snapshot.shipID, session.shipID) then
             setMode(group, snapshot.mode); setArmed(group, snapshot.armed)
-            log("restored directed group: " .. reason .. " id=" .. tostring(snapshot.group or snapshot.componentID) .. " mode=" .. tostring(snapshot.mode) .. " armed=" .. tostring(snapshot.armed))
+            restored = restored + 1
         else
             -- One destroyed turret group must not prevent restoring the others.
-            log("could not resolve directed group during restore: " .. reason)
+            missing = missing + 1
         end
     end
+    if restored > 0 then log("restored directed settings for " .. tostring(restored) .. " group(s): " .. reason) end
+    if missing > 0 then log("could not resolve " .. tostring(missing) .. " directed group(s) during restore: " .. reason) end
     -- snapshots is closed over rather than re-read off the session, because
     -- releaseDirect has already emptied the session's own list.
     local expectedSession, expectedEpoch = session, sessionEpoch
@@ -444,13 +451,17 @@ local function restoreDirect(reason)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not currentSession(expectedSession, expectedEpoch) then return end
         refresh()
+        local mismatches = 0
         for _, snapshot in ipairs(snapshots) do
             local found = findSnapshotGroup(snapshot)
             local modeMismatch = found and found.mode ~= snapshot.mode
             local armedMismatch = found and found.armed ~= snapshot.armed
             if not found or modeMismatch or armedMismatch then
-                log("post-restore readback MISMATCH " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
+                mismatches = mismatches + 1
             end
+        end
+        if mismatches > 0 then
+            log("post-restore readback mismatch for " .. tostring(mismatches) .. " group(s): " .. reason)
         end
         if session.phase ~= "console" then return end
         menu.display()
@@ -472,6 +483,7 @@ end
 local function discardSession(reason)
     if not session then return end
     groupPaddingLogged = false
+    cameraMismatchLogged = false
     -- Read directSnapshots BEFORE restoreDirect empties the list. The notify
     -- emission below (when seatLeaving is true) depends on whether this session
     -- actually held direct snapshots (Direct-control), not just on the reason code.
@@ -640,11 +652,22 @@ local function cameraFocusMatches(componentID)
 end
 
 local function enterCamera(member, options)
-    if not member or not member.cameraSupported then return false end
+    if not member or member.operational == false or not member.cameraSupported then return false end
     local expectedSession, expectedEpoch = session, sessionEpoch
     local function stillCurrent()
         return currentSession(expectedSession, expectedEpoch)
             and session.cameraMemberID ~= nil and sameID(session.cameraMemberID, member.componentID)
+    end
+    local function finish()
+        if not stillCurrent() then return end
+        if options and options.onReady then
+            options.onReady(member)
+        elseif session.phase == "engaged" then
+            -- Validate temporary turret focus before applying Target POV or a
+            -- cinematic. Doing it in the opposite order lets the delayed gate
+            -- overwrite the caller's intended final view.
+            applyPov()
+        end
     end
     C.SetPlayerCameraTargetView(member.componentID, true)
     -- X4 resolves this asynchronously. Some bridges only accept a selected
@@ -653,7 +676,10 @@ local function enterCamera(member, options)
     local savedTargetID, savedConnection = savedTarget.softtargetID, str(savedTarget.softtargetConnectionName)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not stillCurrent() then return end
-        if cameraFocusMatches(member.componentID) then return end
+        if cameraFocusMatches(member.componentID) then
+            finish()
+            return
+        end
         C.SetSofttarget(member.componentID, "")
         C.SetPlayerCameraTargetView(member.componentID, true)
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -667,7 +693,9 @@ local function enterCamera(member, options)
                 end
                 restoreDirect("camera gate failure")
                 if isInGunnerChair() then returnToConsole("camera gate failure") end
+                return
             end
+            finish()
         end, false, getElapsedTime() + 0.05)
     end, false, getElapsedTime() + 0.05)
     return true
@@ -762,8 +790,7 @@ local function engageTarget(targetID)
         for _, group in ipairs(State.checkedGroups(session)) do
             if State.canMutate(group) then orderable[#orderable + 1] = group end
         end
-        local snaps = State.beginEngaged(session, orderable, "direct")
-        for _, s in ipairs(snaps) do log("snapshot took " .. tostring(s.group or s.componentID) .. " mode=" .. tostring(s.mode) .. " armed=" .. tostring(s.armed)) end
+        State.beginEngaged(session, orderable, "direct")
         for _, group in ipairs(orderable) do setMode(group, "autoassist"); setArmed(group, true) end
     end
     -- Record the chosen element and its root object. aimTargetID may be a
@@ -1017,8 +1044,9 @@ function TestAPI.focusTestTurret(memberID)
     return enterCamera({ componentID = component, cameraSupported = true }, { onFailure = function(member) testCameraFailures[tostring(member.componentID)] = true end })
 end
 
--- Forward reference: defined after sendCutsceneAimStart/Stop (which it calls).
-local applyPov
+-- Test-only entry point for asserting that the delayed gate completes before
+-- the requested session POV is applied.
+function TestAPI.enterCamera(member) return enterCamera(member) end
 
 function TestAPI.getCameraFocus()
     return tostring(C.GetExternalTargetViewComponent())
@@ -1135,9 +1163,7 @@ applyPov = function()
     componentID = id(componentID)
     local ok, err = pcall(function() C.SetPlayerCameraTargetView(componentID, true) end)
     if ok and anchor == "turret" then session.cameraMemberID = componentID end
-    logSession("applyPov anchor=" .. anchor .. " mode=" .. mode
-        .. "; component=" .. tostring(componentID)
-        .. "; ok=" .. tostring(ok) .. "; err=" .. tostring(err))
+    if not ok then log("could not apply " .. anchor .. " POV: " .. tostring(err)) end
     return ok
 end
 
@@ -1448,13 +1474,13 @@ function menu.display()
         pRow3[1]:createButton({ active = canCycle }):setText(text(71))
         pRow3[1].handlers.onClick = function()
             State.cycleCamera(session, 1)
-            enterCamera(cameraMember()); applyPov(); menu.display()
+            enterCamera(cameraMember()); menu.display()
         end
         -- Previous Turret (id 72)
         pRow3[2]:createButton({ active = canCycle }):setText(text(72))
         pRow3[2].handlers.onClick = function()
             State.cycleCamera(session, -1)
-            enterCamera(cameraMember()); applyPov(); menu.display()
+            enterCamera(cameraMember()); menu.display()
         end
         -- Direct-only: re-target, cease, and next/prev target buttons.
         if session.controlMode == "direct" then
@@ -1766,11 +1792,12 @@ function menu.onUpdate()
         if session.phase == "engaged" and session.cameraMemberID ~= nil
             and (session.povAnchor or "turret") == "turret"
             and (session.povMode or "manual") == "manual" then
-            -- Once per refresh, not per frame: this used to emit ~60 lines/s and
-            -- bury everything else in the log. focus==0 is "no camera attached
-            -- yet", not a mismatch, so it stays quiet.
+            -- A mismatch is one failure per session, not a 4 Hz telemetry
+            -- stream. focus==0 is "no camera attached yet", not a mismatch.
             if C.GetExternalTargetViewComponent() ~= 0
-                and not cameraFocusMatches(session.cameraMemberID) then
+                and not cameraFocusMatches(session.cameraMemberID)
+                and not cameraMismatchLogged then
+                cameraMismatchLogged = true
                 log("camera focus differs from selected turret; runtime camera gate failed")
             end
         end
@@ -1952,33 +1979,26 @@ reopenSuspendedSession = function(reason)
     end, false, getElapsedTime() + 0.50)
 end
 
--- Re-points the engine soft target at a restored target. A load does clear it:
--- measured 2026-08-08, the restore read the engine back as 0ULL while the
--- restored target was alive and operational. So this is doing real work, not
--- papering over something the savegame already handled.
---
--- One attempt, because that same run succeeded on the first one at 7851m. The
--- five minutes of retries that stood here existed only because it was unmeasured
--- whether range could refuse the call. Distance is still read and logged: it
--- costs one call per load and is the only number that would diagnose a refusal
--- if ok=false ever appears.
---
--- Each engine call keeps its own pcall. An earlier version put GetDistanceBetween
--- inside the argument list of the single log call, so when it raised the failure
--- went unlogged -- the probe deleted its own evidence.
+-- Re-points the engine soft target at a restored target. A normal success is
+-- intentionally silent. A false return is a refusal and must not be retried;
+-- an exception gets one retry because reload-time FFI calls can be transient.
 local function attemptRepoint()
     local targetID = session.repointTargetID
     session.repointTargetID = nil
-    local ok = select(2, pcall(function() return C.SetSofttarget(targetID, "") end))
-    local gotEngine, engine = pcall(function() return C.GetSofttarget2().softtargetID end)
-    local gotDistance, distance = pcall(function()
-        return C.GetDistanceBetween(session.shipID, targetID)
-    end)
-    log("re-point target=" .. tostring(targetID)
-        .. " ok=" .. tostring(ok)
-        .. " engine=" .. (gotEngine and tostring(engine) or "raised")
-        .. " distance=" .. (gotDistance and tostring(distance) or "raised"))
+    local callOK, setOK = pcall(function() return C.SetSofttarget(targetID, "") end)
+    if callOK then
+        if not setOK then log("re-point target refused; abandoning") end
+        return
+    end
+    local retryCallOK, retrySetOK = pcall(function() return C.SetSofttarget(targetID, "") end)
+    if not retryCallOK then
+        log("re-point target raised twice; abandoning")
+    elseif not retrySetOK then
+        log("re-point retry refused; abandoning")
+    end
 end
+
+TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
     if session then
@@ -2014,6 +2034,8 @@ local function sessionWatchdog()
     end
     Helper.addDelayedOneTimeCallbackOnUpdate(sessionWatchdog, false, getElapsedTime() + 0.20)
 end
+
+TestAPI.runSessionWatchdog = sessionWatchdog
 
 local function init()
     log("initializing UI; build=" .. runtimeBuild)
@@ -2114,14 +2136,19 @@ local function init()
         -- selection bookkeeping, not a member table, so enterCamera saw no
         -- cameraSupported flag and this fallback failed every time it was
         -- reached -- which is precisely the load case.
-        local member = cameraMember() or State.firstCameraMember(State.checkedGroups(session))
+        local member = cameraMember()
+        if not member or member.operational == false or not member.cameraSupported then
+            member = State.firstCameraMember(State.checkedGroups(session))
+        end
         if member then session.cameraMemberID = member.componentID end
         if not member or not enterCamera(member) then
             log("restore has no camera member; returning to console")
-            State.returnToConsole(session)
+            -- Direct restores own snapshots; Auto has none, so this makes no
+            -- turret writes there while clearing MD state in both modes.
+            restoreDirect("restore has no camera member")
+            returnToConsole("restore has no camera member")
             return
         end
-        applyPov()
         if target ~= 0 then
             -- Read before anything writes it. This settled whether the re-point
             -- below is needed at all: it is. Measured 2026-08-08 as 0ULL against

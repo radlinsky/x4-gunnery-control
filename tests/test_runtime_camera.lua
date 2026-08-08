@@ -204,4 +204,118 @@ do
     C.IsComponentOperational         = savedOperational53
 end
 
+-- ── 56. gate first, then apply every final POV ──────────────────────────────
+-- The first camera call always points at the turret so the asynchronous gate
+-- can validate it. Once that callback has settled, the requested final POV
+-- must win; applying it before the gate let the retry overwrite Target and
+-- cinematic views with Turret POV.
+do
+    gcMenu.onShowMenu()
+    local sess = API.getSession()
+    sess.groups = { grp27 }
+    sess.checkedGroupKeys = { grp27 = true }
+    sess.phase, sess.controlMode = "engaged", "auto"
+    sess.cameraMemberID, sess.aimTargetID = 27, 99
+    C.GetExternalTargetViewComponent = function() return 27 end
+    C.GetSofttarget2 = function() return { softtargetID = 99, softtargetConnectionName = "" } end
+
+    local originalSet56, originalEmit56 = C.SetPlayerCameraTargetView, AddUITriggeredEvent
+    local trace56 = {}
+    C.SetPlayerCameraTargetView = function(component)
+        trace56[#trace56 + 1] = "camera:" .. tostring(component)
+        return true
+    end
+    AddUITriggeredEvent = function(screen, control, params)
+        trace56[#trace56 + 1] = "event:" .. tostring(control)
+        originalEmit56(screen, control, params)
+    end
+
+    local cases = {
+        { anchor = "turret", mode = "manual", final = "camera:27" },
+        { anchor = "target", mode = "manual", final = "camera:99" },
+        { anchor = "turret", mode = "cinematic", final = "event:cutscene_aim_start" },
+        { anchor = "target", mode = "cinematic", final = "event:cutscene_aim_start" },
+    }
+    for _, case in ipairs(cases) do
+        for i = #trace56, 1, -1 do trace56[i] = nil end
+        sess.povAnchor, sess.povMode = case.anchor, case.mode
+        local mark = fix.callbackCheckpoint()
+        assert(API.enterCamera({ componentID = 27, cameraSupported = true }),
+            "56: camera entry must start for " .. case.mode .. "/" .. case.anchor)
+        fix.drainCallbacksSince(mark)
+        assert(trace56[1] == "camera:27",
+            "56: gate must first request turret focus for " .. case.mode .. "/" .. case.anchor)
+        assert(trace56[#trace56] == case.final,
+            "56: final POV after fully drained gate was " .. tostring(trace56[#trace56])
+            .. ", expected " .. case.final .. " for " .. case.mode .. "/" .. case.anchor)
+    end
+    C.SetPlayerCameraTargetView, AddUITriggeredEvent = originalSet56, originalEmit56
+end
+
+-- ── 57. re-point retries exceptions once, never refusals ───────────────────
+do
+    local sess = API.getSession()
+    sess.phase, sess.controlMode = "engaged", "auto"
+    local originalSet57 = C.SetSofttarget
+    local attempts57 = 0
+
+    sess.repointTargetID = 99
+    C.SetSofttarget = function() attempts57 = attempts57 + 1; return true end
+    local successLogs57 = #fix.getCapturedLog()
+    API.attemptRepoint()
+    assert(attempts57 == 1, "57: a successful SetSofttarget call must run once")
+    assert(#fix.getCapturedLog() == successLogs57,
+        "57: a successful re-point must not add a default log line")
+
+    attempts57 = 0
+    sess.repointTargetID = 99
+    C.SetSofttarget = function() attempts57 = attempts57 + 1; return false end
+    API.attemptRepoint()
+    assert(attempts57 == 1, "57: a returned false must abandon without retry")
+
+    sess.repointTargetID, attempts57 = 99, 0
+    C.SetSofttarget = function()
+        attempts57 = attempts57 + 1
+        if attempts57 == 1 then error("transient") end
+        return true
+    end
+    API.attemptRepoint()
+    assert(attempts57 == 2, "57: a thrown SetSofttarget call gets exactly one retry")
+
+    sess.repointTargetID, attempts57 = 99, 0
+    C.SetSofttarget = function() attempts57 = attempts57 + 1; error("persistent") end
+    API.attemptRepoint()
+    assert(attempts57 == 2, "57: a second thrown SetSofttarget call must abandon")
+    C.SetSofttarget = originalSet57
+end
+
+-- ── 58. steady watchdog ticks are log-silent ────────────────────────────────
+do
+    local sess = API.getSession()
+    sess.repointTargetID = nil
+    sess.phase, sess.controlMode = "engaged", "auto"
+    API.runSessionWatchdog() -- settle the one state-signature transition
+    local count58 = #fix.getCapturedLog()
+    for _ = 1, 8 do API.runSessionWatchdog() end
+    assert(#fix.getCapturedLog() == count58,
+        "58: stable watchdog ticks must not add default log lines")
+
+    -- A persistent focus mismatch used to add one line per 0.25 s refresh.
+    -- After the first failure, idle update ticks must stay equally quiet.
+    local oldElapsed58, tick58 = getElapsedTime, 100000
+    getElapsedTime = function() return tick58 end
+    sess.aimTargetID, sess.cameraMemberID = nil, 27
+    sess.povAnchor, sess.povMode = "turret", "manual"
+    C.GetExternalTargetViewComponent = function() return 12345 end
+    gcMenu.onUpdate()
+    local mismatchCount58 = #fix.getCapturedLog()
+    for _ = 1, 8 do
+        tick58 = tick58 + 1
+        gcMenu.onUpdate()
+    end
+    assert(#fix.getCapturedLog() == mismatchCount58,
+        "58: repeated camera-focus mismatch must log once, not on every update tick")
+    getElapsedTime = oldElapsed58
+end
+
 print("runtime camera tests passed")
