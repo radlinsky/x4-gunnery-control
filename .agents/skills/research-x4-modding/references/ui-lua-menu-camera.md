@@ -668,6 +668,71 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   Ceiling: one ship of evidence for an undocumented ordering guarantee. Confirm
   on several hulls before relying on it.
 
+### 15 shipped ships have two turret groups that humanize to the same label
+
+- X4: 9.00
+- Status: shipped-source (the group identifiers); inference (the labels, derived
+  by replaying this project's `State.turretGroupLabel()` over them)
+- Source: `assets/units/size_l/ship_*.xml` and `assets/units/size_xl/ship_*.xml`
+  across base game and all seven DLC catalogs, extracted to
+  `.x4-research-cache/extracted/ships-comp-base-9.00`,
+  `ships-comp-dlc-9.00`, `dlc-{terran,split,boron,pirate}-comp-xl-9.00`,
+  `dlc-timelines-comp-9.00`, `dlc-mini0{1,2}-comp-9.00`; 135 component files
+- Live test: partial — the label output is confirmed by an in-game screenshot
+  (`release/main_menu.png`, Boron hull, 2026-08-07); the collision list itself
+  is source-derived and untested in game as of 2026-08-07
+- Finding: distinct raw group identifiers on one hull can humanize to one
+  string, because the labeller drops information three ways: token order is
+  discarded (slots are emitted depth, center, vertical, lateral, radial
+  regardless of input order); a standalone numeric tail such as `_01` matches no
+  direction word and vanishes; and a repeated direction word is ignored once its
+  slot is filled. So `group_mid_up_rear` and `group_rear_up_mid` both give
+  "Rear Center Upper" (Phoenix E), and `group_mid_mid_top_01/_02/_03` all give
+  "Center Upper" (Raptor, a three-way collision).
+- Affected hulls: base game Phoenix E (`ship_tel_l_destroyer_02`), Obliterator,
+  Zeus Vanguard, Zeus E; Terran Syn, Osaka, Asgard; Split Rattlesnake, Wyvern
+  Mineral, Python, Raptor; Boron Walrus, Shark; Timelines Xenon Mothership
+  (`ship_xen_xl_mothership_01` and `_01_a`). Boron and Pirate L hulls and both
+  Compact DLC packs are clean. All seven DLCs were present in this installation
+  and checked.
+- Consequence: none for correctness, and this is **not** the `#candidates > 1`
+  ambiguity recorded above. Members are attributed by the raw `path`+`group`
+  string, which still differs, so each group keeps its own turrets; commands
+  address `contextID`+`path`+`group` and stay exact. Only the rendered name
+  collides, and a de-duplicating counter that appends ` · 2`, ` · 3` keeps the
+  console readable. Do not treat a shared label as a shared group.
+- Reproduce: `grep -ao 'group="[^"]*"'` over the component XMLs, strip the
+  padding (see the record below), then run each distinct identifier through
+  `State.turretGroupLabel()` and count collisions per hull.
+
+### Group identifiers in ship component XML carry surrounding whitespace
+
+- X4: 9.00
+- Status: shipped-source (the padding); inference (that the runtime strips it)
+- Source: `.x4-research-cache/extracted/ships-comp-dlc-9.00/assets/units/size_l/
+  ship_bor_l_destroyer_01.xml`, which contains `group="group_front_up_left "`,
+  `group=" group_front_up_mid "`, `group="  group_front_down_mid "` and even
+  `group="  "`; the same padding appears across the base-game hulls
+- Live test: partial — `release/main_menu.png` (2026-08-07) shows this project's
+  console rendering "Front Upper Left", "Center Lower Left" and "Front Center
+  Lower" on a Boron hull
+- Finding: the `group=` attribute on turret connections is not a clean token. It
+  frequently carries leading and trailing spaces, inconsistently between
+  connections that name the same group, and at least one connection carries a
+  whitespace-only value. The runtime evidently hands back a trimmed identifier:
+  this project never trims (`ffi.string` straight out of the
+  `GetUpgradeGroups2` buffer), and an untrimmed value would break the labeller
+  in two visible ways. A trailing space makes the final token fail the
+  `^(%a+)(%d*)$` match, dropping the last direction word ("Front Upper" instead
+  of "Front Upper Left"); a leading space makes the whole identifier fail the
+  `^group_` guard, falling back to the generic "Turret N" name. The screenshot
+  shows neither, on a hull whose XML has both kinds of padding.
+- Consequence: treat the runtime identifier as trimmed but never assume it of
+  the file. Any tool that reads the XML directly must strip the value first, or
+  it will count `group_x ` and ` group_x ` as two groups. If console labels ever
+  regress to "Turret N" or lose their last direction word, this is the first
+  thing to re-check, and the fix is a trim at the `str()` boundary.
+
 ## Engine bug: SetPlayerCameraTargetView leaves Esc dead after get-up
 
 ### Trigger and symptom
