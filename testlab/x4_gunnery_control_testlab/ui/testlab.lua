@@ -119,12 +119,15 @@ function menu.display()
         reloadRow[index]:createButton({}):setText(label)
         reloadRow[index].handlers.onClick = function()
             if kind == "ui" then
-                -- ScheduleReloadUI existence is unverified in menus env
+                -- Both functions were present and worked when this was live-tested
+                -- on 2026-08-08; fn_present is still logged because a future patch
+                -- removing one would otherwise look like a button that does nothing.
                 log("reload", { kind = kind, fn_present = tostring(ScheduleReloadUI ~= nil) })
                 if ScheduleReloadUI then ScheduleReloadUI() end
             else
-                -- ExecuteDebugCommand existence is unverified in menus env
-                -- Second arg MUST be 0 (not nil) — nil segfaults the game
+                -- Second arg MUST be 0, not nil: nil segfaults the game.
+                -- refreshmd is live-tested; refreshai is not, and the AI button is
+                -- here only because it costs one table entry to offer it.
                 log("reload", { kind = kind, fn_present = tostring(ExecuteDebugCommand ~= nil) })
                 if ExecuteDebugCommand then ExecuteDebugCommand("refresh" .. kind, 0) end
             end
