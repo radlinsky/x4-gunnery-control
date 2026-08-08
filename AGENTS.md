@@ -1,28 +1,19 @@
 # Asking the owner to reload or restart X4
 
-The owner drives the game; you cannot. Every time you ask them to pick a change
-up in game, say **which** reset, with authority. Read
-[docs/RELOADING.md](docs/RELOADING.md) and apply its table to the files you
-actually changed. Never offer "reload or restart" as a choice for them to make.
+The owner drives the game; you cannot. A PostToolUse hook
+(`scripts/reload-advice.sh`) states the reset for each file you edit — follow it.
+Three things it cannot know, because it sees one file at a time:
 
-Say it in this shape: what changed, whether the installer needs to run, and
-exactly one of **Reload UI** / **Reload MD** / **Reload AI** / **full restart via
-the launcher**. When a change spans categories the strictest wins: any new or
-deleted file, or any `t/`, `ui.xml` or `content.xml` edit, means a restart even
-if `ui/*.lua` also changed.
+- **The strictest category wins across the whole change.** A new or deleted file,
+  or any `t/`, `ui.xml` or `content.xml` edit, means a restart even when
+  `ui/*.lua` also changed and the hook said Reload UI.
+- **If the change could break the gunnery menu, ask for a restart.** Test Lab is
+  reachable only through that menu, so a broken menu leaves no button to click.
+- **Say it once, at the end, with authority**, naming what changed and exactly
+  one reset. Never offer reload-or-restart as a choice.
 
-Run `scripts/install-dev.sh "<game path>"` yourself before asking for a reload.
-A reload reads loose files from disk, so an uninstalled change looks exactly
-like a broken reload. A full restart through `scripts/launch-x4-dev.bat`
-installs on its own; do not run the installer first in that case.
-
-If the change could break the gunnery menu, ask for the restart: Test Lab is
-reachable only through that menu, so a broken menu leaves no button to click.
-
-A PostToolUse hook (`.claude/settings.json` → `scripts/reload-advice.sh`) prints
-the right instruction whenever an agent edits a file X4 loads, so this rule does
-not depend on remembering it. The mapping is tested in
-`tests/test_reload_advice.sh`; change it there and in docs/RELOADING.md together.
+[docs/RELOADING.md](docs/RELOADING.md) is the table; `tests/test_reload_advice.sh`
+is the test. Change all three together.
 
 # X4 research
 
