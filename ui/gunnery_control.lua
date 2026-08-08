@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-repoint-1"
+local runtimeBuild = "2026-08-08-clock-probe-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1975,6 +1975,16 @@ end
 
 local function sessionWatchdog()
     if session then
+        -- PROBE, delete with the one in onRestoreSession. The watchdog is the
+        -- thing that demonstrably keeps ticking, so its clock is the reference
+        -- the restore's reading is compared against. Once only, then cleared.
+        if session.probeElapsed then
+            log("PROBE clock at first watchdog tick: elapsed=" .. tostring(getElapsedTime())
+                .. " real=" .. tostring(GetCurRealTime())
+                .. "; at restore: elapsed=" .. tostring(session.probeElapsed)
+                .. " real=" .. tostring(session.probeReal))
+            session.probeElapsed, session.probeReal = nil, nil
+        end
         -- Giving a pilot a fly-there order means opening the Map, and writing
         -- the soft target under the player while they are picking things on it
         -- would fight them for their own selection.
@@ -2157,6 +2167,23 @@ local function init()
             -- demonstrably keeps running, so use it instead of finding out why
             -- the other did not.
             session.repointTargetID = target
+            -- PROBE, delete once the log answers. Vanilla
+            -- Helper.addDelayedOneTimeCallbackOnUpdate re-queues itself while
+            -- getElapsedTime() <= delaytime and reports nothing when it does, so a
+            -- delaytime built from a stale clock spins silently -- which is what
+            -- two builds that scheduled the re-point from here looked like.
+            -- Suspicion is that the clock resets or jumps at load. Both readings
+            -- are logged here and again on the watchdog's first tick after; a
+            -- canary is armed the same way the dead callback was, so one run says
+            -- whether it fires and what the clock did in between.
+            session.probeElapsed, session.probeReal = getElapsedTime(), GetCurRealTime()
+            log("PROBE clock at restore: elapsed=" .. tostring(session.probeElapsed)
+                .. " real=" .. tostring(session.probeReal))
+            local canaryDue = getElapsedTime() + 0.3
+            Helper.addDelayedOneTimeCallbackOnUpdate(function()
+                log("PROBE canary fired: due=" .. tostring(canaryDue)
+                    .. " elapsed=" .. tostring(getElapsedTime()))
+            end, false, canaryDue)
         end
         if menu.shown then
             -- The chair-ingress request route: the menu is already up and owns
