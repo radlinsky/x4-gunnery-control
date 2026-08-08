@@ -135,6 +135,21 @@ echo X4 truncates debug.log on every launch; the previous run's log is lost.
 start "" /D "%X4GC_GAME_ROOT%" "%X4GC_EXE%" -prefersinglefiles -debug all -logfile debug.log
 if errorlevel 1 goto failed
 
+rem If X4GC_TAIL_LOG is set, open a second console window running tail-gunnery-log.sh
+rem so the developer sees [X4GC] lines live without starting a second terminal by hand.
+rem X4GC_DISTRO and X4GC_REPO_REL are only available when we parsed a \\wsl.localhost\ path
+rem above; if that was skipped (skipinstall branch) we cannot build the WSL script path.
+rem X4GC_TAIL_LOG is consumed here in Windows — it does not need to cross into WSL, so
+rem it intentionally does NOT appear in WSLENV.
+if not defined X4GC_TAIL_LOG goto notail
+if not defined X4GC_DISTRO (
+  echo Note: X4GC_TAIL_LOG set but launcher is not on a \\wsl.localhost path; tail not started.
+  goto notail
+)
+set "X4GC_TAILER=/%X4GC_REPO_REL%tail-gunnery-log.sh"
+start "X4 Gunnery Log" wsl.exe -d %X4GC_DISTRO% -- "%X4GC_TAILER%"
+:notail
+
 set "X4GC_EXIT_CODE=0"
 goto finish
 

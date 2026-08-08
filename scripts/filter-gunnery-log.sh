@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Single source of truth for what counts as a mod log line. tail-gunnery-log.sh
+# sources this file to reuse it; sourcing stops here and defines nothing else.
+X4GC_LOG_PATTERN='\[X4GC( TEST)?\]|[Ee]rror.*(X4GC|x4_gunnery)|[Ee]xception.*(X4GC|x4_gunnery)'
+[[ "${BASH_SOURCE[0]}" != "${0}" ]] && return 0
+
 if [[ $# -ne 1 ]]; then
   echo "Usage: $0 /path/to/x4-gunnery-control-debug.log" >&2
   exit 2
@@ -12,4 +17,4 @@ if [[ ! -f "$log_file" ]]; then
   exit 2
 fi
 
-grep -E '\[X4GC( TEST)?\]|[Ee]rror.*(X4GC|x4_gunnery)|[Ee]xception.*(X4GC|x4_gunnery)' "$log_file" || true
+grep -E "$X4GC_LOG_PATTERN" "$log_file" || true

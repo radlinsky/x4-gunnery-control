@@ -113,6 +113,23 @@ function menu.display()
     local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(880) })
     local title = tableView:addRow(false, { bgColor = Color["row_background_header"] })
     title[1]:setColSpan(4):createText(text(1), Helper.headerRowCenteredProperties)
+    local reloadRow = tableView:addRow("reload", {})
+    for index, spec in ipairs({ { text(22), "ui" }, { text(23), "md" }, { text(24), "ai" } }) do
+        local label, kind = spec[1], spec[2]
+        reloadRow[index]:createButton({}):setText(label)
+        reloadRow[index].handlers.onClick = function()
+            if kind == "ui" then
+                -- ScheduleReloadUI existence is unverified in menus env
+                log("reload", { kind = kind, fn_present = tostring(ScheduleReloadUI ~= nil) })
+                if ScheduleReloadUI then ScheduleReloadUI() end
+            else
+                -- ExecuteDebugCommand existence is unverified in menus env
+                -- Second arg MUST be 0 (not nil) — nil segfaults the game
+                log("reload", { kind = kind, fn_present = tostring(ExecuteDebugCommand ~= nil) })
+                if ExecuteDebugCommand then ExecuteDebugCommand("refresh" .. kind, 0) end
+            end
+        end
+    end
     if not sweep then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(4):createText(text(12))
         local start = tableView:addRow("start", {}); start[1]:setColSpan(4):createButton({}):setText(text(2)); start[1].handlers.onClick = function() startSweep(); menu.display() end
