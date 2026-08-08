@@ -17,25 +17,17 @@ Every check assumes a filtered log:
 ./scripts/filter-gunnery-log.sh /path/to/x4-gunnery-control-debug.log
 ```
 
-### 1. Does the engine hand back padded turret group ids? (added 2026-08-07)
+### Deferred research lookup: padded turret group ids
 
 Vanilla ship XML pads `group=` with spaces, inconsistently between connections
 naming the same group. Whether `GetUpgradeGroups2` strips that before Lua sees
-it is unproven; the code tolerates both, so this only confirms an inference.
+it remains an inference; the code tolerates both. The shipped padding probe was
+removed to keep ordinary logs concise, so silence in a normal run is not
+evidence that the engine trims. Settle this only in an explicitly instrumented
+research run before changing the classification of the research KB record
+"Group identifiers in ship component XML carry surrounding whitespace".
 
-1. Sit in any gunnery chair on any ship and open the console once.
-2. Filter the log for `carries padding`.
-
-- **Pass (engine trims):** no such line. Record the result in the research KB
-  record "Group identifiers in ship component XML carry surrounding whitespace"
-  and delete this entry.
-- **Fail (engine does not trim):** one line quoting the raw value, e.g.
-  `raw group id carries padding: ".." / "group_front_up_left "`. Nothing is
-  broken (labels and attribution already trim), but the inference in that KB
-  record is wrong and must be corrected. Do **not** react by trimming at the
-  `str()` boundary: the untrimmed value is what goes back to the engine.
-
-### 2. Release immediately after Prefer My Target (added 2026-08-07)
+### 1. Release immediately after Prefer My Target (added 2026-08-07)
 
 Covers the deferred-apply race fixed in `5531dda`. The apply is sent one tick
 late; a release inside that window used to reach MD first and strand the
@@ -44,17 +36,15 @@ override with no way to clear it.
 1. Direct-control on a ship with turrets not in your checked groups.
 2. Engage a target, click **All Turrets: Prefer My Target**, then click
    **Release Other Turrets** as fast as possible, within the same second.
-3. Watch the unchecked turrets, and filter the log for `prefer_all_turrets`.
+3. Watch the unchecked turrets after the release.
 
-- **Pass:** the unchecked turrets stop preferring your target. Either the log
-  shows `prefer_all_turrets apply dropped: released or retargeted first`, or the
-  apply and clear both emitted in order.
+- **Pass:** the unchecked turrets stop preferring your target after the release.
 - **Fail:** unchecked turrets keep firing on your target after the release, and
   the panel shows **Prefer My Target** available again. That is the stranded
-  state; capture the whole `[X4GC]` block, because no later cease or get-up can
-  clear it.
+  state; capture the filtered log and the visible turret behaviour, because no
+  later cease or get-up can clear it.
 
-### 3. Prefer/Release on a ship with mining or towing turrets (added 2026-08-07)
+### 2. Prefer/Release on a ship with mining or towing turrets (added 2026-08-07)
 
 Covers the Release filter added in `bd61680`. Apply deliberately skips towing,
 mining and autoassist turrets; Release now skips them too.
@@ -63,30 +53,28 @@ mining and autoassist turrets; Release now skips them too.
    turrets (a Wyvern Mineral or any mixed L hull with a mining turret fitted).
 2. Note what the mining turret is doing, then Direct-control, engage a target,
    **Prefer My Target**, then **Release Other Turrets**.
-3. Filter the log for `prefer_all_turrets` and check the `modes=` counts.
+3. Watch the mining or towing turret through both clicks.
 
-- **Pass:** the mining turret's behaviour is unchanged throughout, and the
-  `modes=` count excludes the mining/towing modes.
+- **Pass:** the mining or towing turret's behaviour is unchanged throughout.
 - **Fail:** the mining turret stops mining, retargets, or goes idle after either
   click. Record which click caused it; the Apply filter and the Release filter
   are separate code paths.
 
-### 4. Is the 2026-08-07 mode-write race dead? (added 2026-08-07)
+### 3. Is the 2026-08-07 mode-write race dead? (added 2026-08-07)
 
 The per-write diagnostics were removed in `0b48b90`; the post-restore readback
 now logs only on disagreement, so silence is the pass condition.
 
 1. Over a normal play session, cease at least five engagements and get up from
    the chair at least three times, on more than one ship if convenient.
-2. Filter the log for `MISMATCH`.
+2. Filter the log for `post-restore readback mismatch`.
 
-- **Pass:** no lines. After two or three clean sessions, the remaining MD
-  `debug_text` diagnostics in the Apply and Release cues can go too.
-- **Fail:** `post-restore readback MISMATCH <group> wrote=<mode>/<armed>
-  engine=<mode>/<armed>`. The engine did not take a restore write. Keep the log
-  and the ship/group; this is the original race resurfacing.
+- **Pass:** no lines.
+- **Fail:** `post-restore readback mismatch for N group(s): REASON`. The engine
+  did not take one or more restore writes. Keep the log and the ship/groups;
+  this is the original race resurfacing.
 
-### 5. Duplicate turret group labels on the known hulls (added 2026-08-07)
+### 4. Duplicate turret group labels on the known hulls (added 2026-08-07)
 
 Fifteen shipped hulls have two groups that humanize to one label. Addressing is
 by key, so this should be cosmetic only. Worst case is the Split Raptor, where
@@ -306,15 +294,14 @@ game menu immediately after standing up.
 
 **Failure mode to watch for:** if the popup appears but `Esc` is still dead,
 the `show_help` MD action ran but did not reach `View.createView/DisplayView`.
-Inspect the filtered log for any MD or Lua error during the `Notify` cue.
-If the popup does not appear at all, confirm help texts are enabled and look for
-a `[X4GC] notify emitted:` line in the debug log; its absence means
-`discardSession` did not emit the event.
+If the popup does not appear at all, confirm help texts are enabled and inspect
+the filtered log for any MD or Lua error during the `Notify` cue. The normal
+notification-emission diagnostic is intentionally silent.
 
 ## Deterministic lifecycle reproduction
 
 Use a disposable save and completely restart X4 after reinstalling loose files.
-Run one sequence without improvising so transition logs can be compared:
+Run one sequence without improvising so visible transitions can be compared:
 
 1. Sit in an empty gunnery chair and wait for Gunnery Control.
 2. Check one mutable group. Press **Auto-engage**, press `Esc` once and confirm
