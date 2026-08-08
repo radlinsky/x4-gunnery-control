@@ -4,7 +4,8 @@ description: >
   Guides a full release of X4 Gunnery Control: reviews unreleased changes,
   proposes a version number, bumps CHANGELOG.md and content.xml, runs
   validation, commits, tags, and provides the exact terminal commands to
-  publish on Nexus (via GitHub CI) and Steam Workshop.
+  publish via GitHub Releases, upload on Nexus manually, and publish to Steam
+  Workshop.
 ---
 
 # Release Agent
@@ -157,7 +158,45 @@ Provide the direct link pattern:
 
 ---
 
-## Step 9 — Steam Workshop release
+## Step 9 — Nexus release (manual)
+
+The Nexus upload remains manual. Do this after the GitHub tag build completes
+and the release zip is available.
+
+Use this flow on the Nexus website:
+
+1. Open your mod page and go to **Manage** (or **My Mods** -> your mod), then
+   open **Files**.
+2. Find the current main file entry (for example `0.20`) and click its
+   **Update** button.
+3. Upload the new GitHub release zip (`x4_gunnery_control-v0.21.zip`,
+   substitute your release version).
+4. Provide the one-line change summary Nexus asks for.
+5. Confirm the updated file now shows the new version as latest.
+
+Description update (required):
+
+6. Update the Nexus mod-page description text for this release when features or
+   behaviour changed. Keep it aligned with `release/RELEASE_NOTES.md`.
+
+Verification before moving on:
+
+- The new file appears in the Files tab with the expected version.
+- The page's primary download points at the new file.
+- Description/requirements still match `README.md` and release notes.
+
+Notes from Nexus docs and current site rollout:
+
+- Nexus confirms submitted files can be edited/archived/removed from the
+  author's management area.
+- Nexus recommends clear versioning and marking the current file clearly for
+  users.
+- Nexus's new Upload Form is in open beta, so labels/placement can differ from
+  legacy screens.
+
+---
+
+## Step 10 — Steam Workshop release
 
 The Workshop release requires:
 - Running on Windows with Steam open and logged in.
@@ -176,13 +215,13 @@ Remind the user:
 - Replace the changenote with a short plain-English summary of this release.
 - The script aborts if WorkshopTool is not found; set `X4GC_WORKSHOPTOOL` to
   override the path, or `X4GC_DRY_RUN=1` to print the command without publishing.
-- `WorkshopTool` does **not** update the title or long description; edit those
-  on the Workshop website if needed. Keep `release/workshop-description.bbcode`
-  in step as the paste-ready copy.
+- `WorkshopTool` does **not** update the title or long description. After
+  publishing, update the Workshop page description text on the website and keep
+  `release/workshop-description.bbcode` in step as the paste-ready copy.
 
 ---
 
-## Step 10 — Post-release checklist
+## Step 11 — Post-release checklist
 
 After both platforms are live:
 

@@ -9,16 +9,16 @@ boring menu. This mod replaces it with a real turret console.
 
 ## New in this release
 
-- **New (Direct-control) engagement panel buttons**:
+- **New features**
 - **All Turrets: Prefer My Target** Normally, only the turret group(s)
-  you selected to control will try and fire at your target. If your target 
+  you selected to control will try and fire at your target. If your target
   goes out of range from any of your selected turrets, those turrets will sit idle.
-  This button tells **every** turret that can hit your chosen target to do so (including 
-  the turrets outside your selected group). Turrets that cannot find a firing 
+  This button tells **every** turret that can hit your chosen target to do so (including
+  the turrets outside your selected group). Turrets that cannot find a firing
   solution for your target instead find the next best enemy target in-range.
 - **Release Other Turrets** Turns off the ship-wide "Prefer my target" mode.
 
-- **Bug fix**
+- **Bug fixes**
 - Direct-control now works on M ships lacking a turret camera.
 - If the camera cannot attach for a target-view request, target selection stays
   open so you can continue playing instead of being kicked out.
