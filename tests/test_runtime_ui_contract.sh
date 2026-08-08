@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 main=ui/gunnery_control.lua
+persist=ui/gunnery_persistence.lua
 testlab=testlab/x4_gunnery_control_testlab/ui/testlab.lua
 
 if grep -q 'releaseFrameHandle' "$main" "$testlab"; then
@@ -79,17 +80,18 @@ grep -Fq 'session.controlMode' "$main"
 grep -Fq 'State.beginEngaged' "$main"
 # Snapshot list; single session.directSnapshot is now session.directSnapshots.
 grep -Fq 'directSnapshots' "$main"
-# MD passthrough for save: ONE STRING, not a table. raise_lua_event carries a
-# single scalar on the way back, so a table payload arrives as nil and nothing
-# is ever restored. snapshotsForSave still runs, but inside State.saveState.
-grep -Fq 'State.encode(State.saveState(session))' "$main"
-grep -Fq 'State.decode(payload)' "$main"
+# The adapter commits one atomic table. Its session half remains an encoded
+# string because raise_lua_event returns only one scalar; the paired component
+# target travels separately and is buffered before control receives an envelope.
+grep -Fq 'State.encode(deps.State.saveState(session))' "$persist"
+grep -Fq 'deps.emit("session_commit", payload)' "$persist"
+grep -Fq 'State.decode(envelope and envelope.payload)' "$main"
 # The restore resolves group contextIDs, which needs a seated player. A save
 # taken while engaged reloads into the chair, so the gameLoadingDone raise is
 # what normally does the work; the chair-ingress raise is the fallback that
 # collects the payload if it ever lands with the player off the console.
-if [ "$(grep -Fc '"state_request"' "$main")" -lt 3 ]; then
-  echo 'state_request must be raised at init, at gameLoadingDone, and at chair ingress' >&2
+if [ "$(grep -Fc 'persistence.request()' "$main")" -lt 3 ]; then
+  echo 'persistence request must be raised at init, at gameLoadingDone, and at chair ingress' >&2
   exit 1
 fi
 # Ensure the old single-phase strings are gone — any hit is a residual bug.

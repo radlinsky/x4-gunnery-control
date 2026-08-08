@@ -38,7 +38,7 @@ assert(fix.logContains("[X4GC] UI initialized"),
     "expected '[X4GC] UI initialized' in captured log; got:\n"
     .. table.concat(fix.getCapturedLog(), "\n"))
 assert(type(fix.registeredEvents.playerGetUp) == "table"
-    and type(fix.registeredEvents["X4GunneryControl.RestoreSession"]) == "table",
+    and type(fix.registeredEvents["X4GunneryControl.RestoreGrant"]) == "table",
     "fixture must expose RegisterEvent captures by event name")
 assert(#fix.uiTriggeredEvents >= 1
     and fix.uiTriggeredEvents[1].screen == "X4GunneryControl"

@@ -3,6 +3,7 @@
 local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
+local Persistence = X4GunneryPersistence
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
@@ -44,6 +45,7 @@ local runtimeBuild = "2026-08-08-probes-removed"
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
+local persistence
 local testLabCallbacks
 local testCameraFailures = {}
 local dockedHookRegistered, mapHookRegistered, hookAttempts = false, false, 0
@@ -310,28 +312,15 @@ local function setArmed(group, armed)
     else C.SetWeaponArmed(group.componentID, armed) end
 end
 
--- Parks the whole session in MD as ONE STRING. It has to be a string: MD holds
--- the value fine either way, but the return leg (raise_lua_event) carries a
--- single scalar and a table arrives as nil, which is why restore never worked.
--- MD stores event.param3 verbatim and raises it back untouched, so the format
--- is entirely this file's business and the MD script needs no knowledge of it.
+-- The adapter parks one atomic MD table: an encoded session string and an
+-- explicit target-presence flag/component. The string remains scalar because
+-- raise_lua_event cannot return a Lua table, while the component survives ID
+-- remapping across save/load.
 local function persistSession()
-    if not session then return end
-    -- Harmless if a UI reload happens before MD is initialized.
-    AddUITriggeredEvent("X4GunneryControl", "session_begin",
-        State.encode(State.saveState(session)))
-    -- The target cannot travel in the string: a load reassigns every id, so
-    -- those digits address some other object afterwards. Sent separately as a
-    -- bare id, which MD converts to a real component, because an MD variable
-    -- holding a component is the engine's own persistent handle and is remapped
-    -- across a load. Live-tested 2026-08-08 over two loads: same idcode both
-    -- times, new numeric id each time, operational on arrival.
-    if session.aimTargetID then
-        AddUITriggeredEvent("X4GunneryControl", "session_target", session.aimTargetID)
-    end
+    if session and persistence then persistence.commit(session) end
 end
 local function clearSnapshot()
-    AddUITriggeredEvent("X4GunneryControl", "session_end", {})
+    if persistence then persistence.clear() end
 end
 
 local function findSnapshotGroup(snapshot)
@@ -993,6 +982,9 @@ end
 function TestAPI.getSession()
     return session
 end
+function TestAPI.getSessionEpoch()
+    return sessionEpoch
+end
 
 function TestAPI.getCurrentShipSweep()
     if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
@@ -1218,9 +1210,11 @@ local function onDirectTargetLost()
     end
     -- applyPov() only acts while the phase is still "engaged", so reset the view
     -- before openTargetBrowser() moves the phase on.
+    session.aimTargetID, session.targetObjectID = nil, nil
     session.povAnchor, session.povMode = "turret", "manual"
     applyPov()
     openTargetBrowser()
+    persistSession()
     logSession("engaged target lost; back to target selection")
 end
 
@@ -1244,10 +1238,23 @@ local function updateAimTarget()
         if now < nextAimScan then return end
     end
     nextAimScan = now + 5
-    -- Nothing on radar: keep the last aim point rather than dropping the view.
     local resolved = chooseAimTarget()
-    if resolved == nil or sameID(resolved, prev) then return end
+    if resolved == nil then
+        if session.controlMode == "auto" and not isNullID(prev) then
+            -- Auto mode remains engaged and continues scanning.  Persist the
+            -- explicit no-target state so an old MD component cannot revive.
+            session.aimTargetID, session.targetObjectID = nil, nil
+            session.povAnchor, session.povMode = "turret", "manual"
+            applyPov()
+            persistSession()
+            log("auto target lost; scanning without a target")
+        end
+        return
+    end
+    if sameID(resolved, prev) then return end
     session.aimTargetID = resolved
+    session.targetObjectID = targetRoot(resolved)
+    if session.controlMode == "auto" then persistSession() end
     if (session.povMode or "manual") == "cinematic" then
         -- A running cutscene cannot be re-aimed, so retargeting is a stop and a
         -- restart; the player sees a brief camera cut.
@@ -1314,7 +1321,7 @@ function menu.onShowMenu()
         -- only keeps a payload for a session that did not end cleanly, so a
         -- normal ingress gets "no saved session state" straight back, which is
         -- what the 2026-08-08 runs logged every time.
-        AddUITriggeredEvent("X4GunneryControl", "state_request")
+        if persistence then persistence.request() end
     elseif not sameID(session.shipID, ship) or (not resuming and not mapSuspendResume) then
         -- A fresh chair interaction must never inherit a hidden direct
         -- snapshot. Only the explicit Map callback below may resume a session,
@@ -2048,26 +2055,13 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
-    -- MD raises this just before RestoreSession, carrying the engaged target as
-    -- a component it held across the save. Stashed rather than applied here
-    -- because the session it belongs to does not exist until RestoreSession
-    -- builds it a tick later. MD drops the variable when the component dies, so
-    -- arriving at all means the target is still alive.
-    local restoredTargetID = nil
-    local function onRestoreTarget(_, payload)
-        restoredTargetID = payload
-        log("RestoreTarget: type=" .. type(payload) .. " value=" .. tostring(payload))
-    end
-    RegisterEvent("X4GunneryControl.RestoreTarget", onRestoreTarget)
-
-    -- One handler for both a save/load and a UI hot-reload. The payload carries
-    -- only stable identifiers (path + group names), so the reload case never
-    -- notices the contextID re-resolution that the load case depends on.
-    local function onRestoreSession(_, payload)
-        log("RestoreSession event received; payload type=" .. type(payload))
-        local records = State.decode(payload)
+    -- The adapter releases only a matching target/session pair. Build a
+    -- candidate first: a refused, malformed or not-seated payload must leave
+    -- every part of the live session (including delayed callbacks) untouched.
+    local function onRestoreEnvelope(envelope)
+        local records = State.decode(envelope and envelope.payload)
         if #records == 0 then
-            log("RestoreSession: empty payload; nothing to restore")
+            log("restore response empty")
             return
         end
         -- Groups are addressed by contextID+path+group, and only a live ship can
@@ -2078,44 +2072,33 @@ local function init()
         -- lost if it ever does -- MD still holds the payload and chair ingress
         -- asks again -- but do not treat the deferral as a tested route.
         if not isInGunnerChair() then
-            log("RestoreSession: " .. #records .. " record(s) held; the player is not in"
-                .. " a gunner chair, so there is no live group list to re-resolve"
-                .. " against. Deferred to the next chair ingress.")
+            log("restore deferred; player is not in a gunner chair")
             return
         end
-        sessionEpoch = sessionEpoch + 1
-        session = newSession(playerShip())
-        refresh()  -- populates session.groups with LIVE contextIDs
-        local ok = State.restoreState(session, records, session.groups)
-        log("RestoreSession: restored=" .. tostring(ok)
-            .. " ship=" .. tostring(session.shipName)
-            .. " phase=" .. tostring(session.phase)
-            .. " groups=" .. #session.groups
-            .. " snapshots=" .. #(session.directSnapshots or {}))
+        local candidate = newSession(playerShip())
+        candidate.groups = readGroups(candidate.shipID)
+        local ok = State.restoreState(candidate, records, candidate.groups)
+        if not ok then
+            log("restore refused; payload is not for this ship")
+            return
+        end
         -- A load leaves restoreState with no target: the id it saved now belongs
         -- to some other object. MD held the same target as a component and the
         -- engine remapped it, so this is the one route that survives a load.
-        if not session.aimTargetID and restoredTargetID then
-            session.aimTargetID = restoredTargetID
-            log("RestoreSession: target recovered from MD: " .. tostring(restoredTargetID))
-        end
-        restoredTargetID = nil
         -- Everything above arrives as text or as a plain number: the payload is
         -- a string and MD hands the target back as a Lua number. The FFI calls
         -- take neither and raise "bad argument #1" -- which is what made Target
         -- POV do nothing after a load. Converted here, at the one place a
         -- session is built from foreign data, rather than at each of the eight
         -- consumers that would each have to remember.
-        session.aimTargetID = session.aimTargetID and id(session.aimTargetID) or nil
-        session.cameraMemberID = session.cameraMemberID and id(session.cameraMemberID) or nil
-        if not ok then
-            -- Turret group names are identical across every ship of a class, so
-            -- a payload from another ship would match and write its saved modes
-            -- onto this one's turrets.
-            log("RestoreSession: payload is not for this ship; leaving it alone")
-            State.returnToConsole(session)
-            return
-        end
+        if not State.isNullID(envelope.target) then candidate.aimTargetID = envelope.target end
+        candidate.aimTargetID = candidate.aimTargetID and id(candidate.aimTargetID) or nil
+        candidate.cameraMemberID = candidate.cameraMemberID and id(candidate.cameraMemberID) or nil
+        -- Validation is complete. From here this is the existing successful
+        -- restore continuation, now operating on the accepted live candidate.
+        sessionEpoch = sessionEpoch + 1
+        session = candidate
+        log("restore accepted; phase=" .. tostring(session.phase))
         if session.phase ~= "engaged" then
             -- Nothing was overridden, or the payload predates engagement.
             -- Leave the player on the console with the same groups checked.
@@ -2134,7 +2117,7 @@ local function init()
         local member = cameraMember() or State.firstCameraMember(State.checkedGroups(session))
         if member then session.cameraMemberID = member.componentID end
         if not member or not enterCamera(member) then
-            log("RestoreSession: no camera member available; returning to console")
+            log("restore has no camera member; returning to console")
             State.returnToConsole(session)
             return
         end
@@ -2147,7 +2130,7 @@ local function init()
             -- savegame preserving it. Kept as a permanent line because it is the
             -- one reading that would say so if a patch ever changed that.
             local read, before = pcall(function() return C.GetSofttarget2().softtargetID end)
-            log("RestoreSession: engine soft target before any write = "
+            log("restore engine soft target before write = "
                 .. (read and tostring(before) or "raised")
                 .. "; restored target = " .. tostring(target))
             -- Handed to the watchdog rather than to a delayed callback of its
@@ -2178,14 +2161,20 @@ local function init()
             resumePending = true
         end
     end
-    -- Exposed for unit tests only: lets tests drive the RestoreSession path with
-    -- arbitrary payload shapes (plain-key and $-prefixed) without a live event.
-    TestAPI.onRestoreSession = onRestoreSession
-    RegisterEvent("X4GunneryControl.RestoreSession", onRestoreSession)
-    AddUITriggeredEvent("X4GunneryControl", "state_request")
+    persistence = Persistence.new({
+        State = State,
+        emit = function(control, payload) AddUITriggeredEvent("X4GunneryControl", control, payload) end,
+        register = RegisterEvent,
+        toLuaID = ConvertStringToLuaID,
+        log = log,
+        onEnvelope = onRestoreEnvelope,
+    })
+    TestAPI.onRestoreEnvelope = onRestoreEnvelope
+    TestAPI.persistence = function() return persistence end
+    persistence.request()
     registerForEvent("gameLoadingDone", getElement("Scene.UIContract"), function()
         registerUIHooks()
-        AddUITriggeredEvent("X4GunneryControl", "state_request")
+        persistence.request()
     end)
     sessionWatchdog()
     log("UI initialized")

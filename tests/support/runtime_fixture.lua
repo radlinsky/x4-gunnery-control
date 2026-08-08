@@ -351,6 +351,7 @@ function M.load()
         }
     end
     ConvertStringTo64Bit   = function(v) return tonumber(v) or 0 end
+    ConvertStringToLuaID   = function(v) return tonumber(v) or 0 end
     GetCurRealTime         = function() return 0 end
     getElapsedTime         = function() return 0 end
     Color                  = setmetatable({}, { __index = function() return {} end })
@@ -367,6 +368,7 @@ function M.load()
     -- X4GunneryState must be set before gunnery_control.lua loads
     -- (line 5: local State = X4GunneryState).
     X4GunneryState = dofile("ui/gunnery_state.lua")
+    X4GunneryPersistence = dofile("ui/gunnery_persistence.lua")
 
     -- ── 8. load the module ───────────────────────────────────────────────────
     -- init() is called at the bottom of the file, so this exercises the full

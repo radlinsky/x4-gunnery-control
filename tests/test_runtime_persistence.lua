@@ -63,44 +63,47 @@ assert(postDiscardSess.lifecycle == X4GunneryState.lifecycle.owned,
     "BUG (different ship): recreated session lifecycle should be 'owned', got '"
     .. tostring(postDiscardSess.lifecycle) .. "'")
 
--- ── 49. RestoreSession handler accepts the string transport ──────────────────
--- raise_lua_event carries ONE SCALAR. A table arrives as nil, live-confirmed
--- twice (2026-08-06 and again 2026-08-08, where MD logged a fully populated
--- State.$active on the same tick this handler logged "payload type=nil"). So
--- the payload is an encoded string, and the old $-prefixed table handling this
--- block used to test was code for a contract the engine never delivers.
---
--- What the payload MEANS -- path+group matching, contextID re-resolution,
--- dropping groups that no longer exist -- is covered in test_gunnery_state.lua
--- against the pure functions. This block only proves the handler is wired to
--- the decoder and cannot be crashed by what MD hands it.
-
-assert(type(X4GunneryControlAPI.onRestoreSession) == "function",
-    "X4GunneryControlAPI.onRestoreSession must be exposed; add TestAPI.onRestoreSession in gunnery_control.lua")
-
--- 49a: a well-formed encoded payload is decoded and reported, not rejected.
+-- ── 49. Atomic restore rejects foreign/malformed payloads ──────────────────
+assert(type(API.onRestoreEnvelope) == "function")
+local live49, epoch49 = API.getSession(), API.getSessionEpoch()
+local callbacks49, events49 = #fix.pendingCallbacks, #fix.uiTriggeredEvents
+local cameraCalls49 = 0
+local originalCamera49 = fix.C.SetPlayerCameraTargetView
+fix.C.SetPlayerCameraTargetView = function(...) cameraCalls49 = cameraCalls49 + 1; return true end
 local payload49 = X4GunneryState.encode(X4GunneryState.saveState({
-    shipID = 42, phase = "console", povAnchor = "turret", povMode = "manual",
-    checkedGroupKeys = {}, groups = {}, directSnapshots = {
-        { kind = "group", shipID = 42, contextID = 1, path = "p49",
-          group = "A", mode = "defend", armed = false },
-    },
+    shipID = 42, shipName = "another ship", phase = "engaged", controlMode = "auto",
+    povAnchor = "turret", povMode = "manual", checkedGroupKeys = {}, groups = {}, directSnapshots = {},
 }))
-assert(type(payload49) == "string" and payload49 ~= "",
-    "saveState/encode must produce a non-empty string; got " .. tostring(payload49))
-X4GunneryControlAPI.onRestoreSession(nil, payload49)
-assert(fix.logContains("RestoreSession: restored=true"),
-    "RestoreSession must decode a well-formed string payload and report restored=true")
-
--- 49b: the shapes MD can actually hand back must not throw. nil is what a table
--- payload degrades to, and is the exact value that used to reach this handler.
-for _, bad in ipairs({ "", "garbage", "=;,=", "t=session" }) do
-    local ok49 = pcall(X4GunneryControlAPI.onRestoreSession, nil, bad)
-    assert(ok49, "RestoreSession must not throw on payload " .. string.format("%q", bad))
+API.onRestoreEnvelope({ generation = 1, target = 0, payload = payload49 })
+assert(API.getSession() == live49 and API.getSessionEpoch() == epoch49,
+    "foreign restore must preserve the exact live session and epoch")
+assert(cameraCalls49 == 0, "foreign restore must not enter a camera")
+assert(#fix.pendingCallbacks == callbacks49 and #fix.uiTriggeredEvents == events49,
+    "foreign restore must not schedule callbacks or rewrite MD state")
+for _, bad in ipairs({ "", "garbage" }) do
+    assert(pcall(API.onRestoreEnvelope, { generation = 2, target = 0, payload = bad }),
+        "malformed envelope must not throw")
+    assert(API.getSession() == live49 and API.getSessionEpoch() == epoch49,
+        "malformed restore must not replace the session")
 end
-assert(pcall(X4GunneryControlAPI.onRestoreSession, nil, nil),
-    "RestoreSession must not throw on a nil payload")
-assert(pcall(X4GunneryControlAPI.onRestoreSession, nil, { "a table" }),
-    "RestoreSession must not throw if a table somehow arrives")
+assert(pcall(API.onRestoreEnvelope, { generation = 2, target = 0, payload = nil }),
+    "nil restore payload must not throw")
+assert(pcall(API.onRestoreEnvelope, { generation = 2, target = 0, payload = {} }),
+    "table restore payload must not throw")
+assert(API.getSession() == live49 and API.getSessionEpoch() == epoch49,
+    "nil/table restore payloads must not replace the session")
+
+local oldControl49 = fix.C.GetPlayerCurrentControlGroup
+fix.C.GetPlayerCurrentControlGroup = function() return "" end
+local seatedSession49, seatedEpoch49 = API.getSession(), API.getSessionEpoch()
+local seatedCallbacks49, seatedEvents49 = #fix.pendingCallbacks, #fix.uiTriggeredEvents
+assert(pcall(API.onRestoreEnvelope, { generation = 3, target = 0, payload = payload49 }),
+    "not-seated restore must not throw")
+assert(API.getSession() == seatedSession49 and API.getSessionEpoch() == seatedEpoch49
+    and cameraCalls49 == 0 and #fix.pendingCallbacks == seatedCallbacks49
+    and #fix.uiTriggeredEvents == seatedEvents49,
+    "not-seated restore must leave session, epoch, camera, callbacks, and MD events unchanged")
+fix.C.GetPlayerCurrentControlGroup = oldControl49
+fix.C.SetPlayerCameraTargetView = originalCamera49
 
 print("runtime persistence tests passed")
