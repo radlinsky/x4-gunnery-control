@@ -80,10 +80,12 @@ Live-tested on 2026-08-08 against X4 9.00; recorded in the research KB under
 
 ## Two consequences worth knowing
 
-**A UI reload wipes Lua state.** Every global and file-local is gone, so a live
-gunnery session is lost and the console rebuilds from chair ingress. An MD cue
-variable is the only storage measured to survive it — which is why session
-persistence is built on one.
+**A UI reload wipes in-memory Lua state.** Every global and file-local is gone.
+Before opening Test Lab, Gunnery Control parks the current session in an MD cue
+variable; a successful persistence handshake rebuilds that parked phase after
+the reload. Without a valid parked payload, the safe fallback is a fresh console
+at chair ingress. The MD cue is the only storage measured to survive a UI reload,
+which is why session persistence is built on one.
 
 **`refreshmd` keeps existing cue variables and does not re-run cues that already
 completed.** A marker in a conditionless root cue therefore cannot tell you

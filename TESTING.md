@@ -11,6 +11,11 @@ an entry once it has a dated result; move anything durable into the research
 knowledge base. The coverage matrix further down is what to test on every
 build; this section is what is currently unanswered.
 
+For PR #16, use `PR16_LIVE_TEST_CHECKLIST.md` as the canonical procedure and do
+not repeat this queue separately: item 1 maps to M10/O7, item 2 to D5, item 3 to
+M12, and item 4 to D6. Record results in the checklist, then use them to retire
+or update these durable open questions.
+
 Every check assumes a filtered log:
 
 ```bash
@@ -27,15 +32,16 @@ evidence that the engine trims. Settle this only in an explicitly instrumented
 research run before changing the classification of the research KB record
 "Group identifiers in ship component XML carry surrounding whitespace".
 
-### 1. Release immediately after Prefer My Target (added 2026-08-07)
+### 1. Rapid operator Release after Prefer My Target (added 2026-08-07)
 
-Covers the deferred-apply race fixed in `5531dda`. The apply is sent one tick
-late; a release inside that window used to reach MD first and strand the
-override with no way to clear it.
+The exact apply/release race fixed in `5531dda` exists inside a 0.01-second
+deferred callback and is deterministic-test-only: a human click cannot reliably
+land before the Apply handler repaints the panel. This live check covers rapid
+ordinary operator behavior after that repaint, not the sub-frame race itself.
 
 1. Direct-control on a ship with turrets not in your checked groups.
 2. Engage a target, click **All Turrets: Prefer My Target**, then click
-   **Release Other Turrets** as fast as possible, within the same second.
+   **Release Other Turrets** as soon as the repainted panel enables it.
 3. Watch the unchecked turrets after the release.
 
 - **Pass:** the unchecked turrets stop preferring your target after the release.
@@ -84,9 +90,10 @@ three groups collapse to "Center Upper".
    (`ship_tel_l_destroyer_02`), and open the console.
 2. Look at the group list, then check one group at a time and Direct-control it.
 
-- **Pass:** the colliding entries appear as `Center Upper`, `Center Upper · 2`,
-  `Center Upper · 3`, each with its own non-zero turret count, and commanding
-  one of them changes only that group.
+- **Pass:** identical full labels appear as `Center Upper: <equipment>`,
+  `Center Upper: <equipment> · 2`, and where applicable `... · 3`, each with its
+  own non-zero turret count, and commanding one changes only that group.
+  Different equipment names already distinguish rows and need no suffix.
 - **Fail:** entries with a zero or `0 / 0` count, entries named `Turret 1` style
   fallbacks, or a mode change on one entry visibly moving another group's
   turrets. Any of those means attribution collapsed and the KB record
@@ -114,7 +121,7 @@ Extensions menu. From a repository checkout on Windows, start the session by
 double-clicking the launcher in Windows Explorer:
 
 ```text
-\\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-dev.bat
+\\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-test-lab-dev.bat
 ```
 
 The launcher reinstalls the main mod automatically before starting X4; no
@@ -124,8 +131,12 @@ expected and harmless. Use a Command Prompt instead when a custom installation
 folder is required:
 
 ```bat
-scripts\launch-x4-dev.bat "C:\Program Files (x86)\Steam\steamapps\common\X4 Foundations"
+"\\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-test-lab-dev.bat" "C:\Program Files (x86)\Steam\steamapps\common\X4 Foundations"
 ```
+
+Keep the launcher path on `\\wsl.localhost\...` even when passing a custom game
+folder. A launcher copied to a normal Windows path can start X4, but it cannot
+find the WSL checkout to reinstall loose files or start the filtered log tail.
 
 If the launcher is unavailable, or when testing on Linux, start X4 with
 `-prefersinglefiles -debug all -logfile debug.log`. Leave the `-logfile` value
