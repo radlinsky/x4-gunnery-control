@@ -840,9 +840,14 @@ disagree — by design. The bump order that makes it go green:
 1. Add `## [MAJOR.MINOR] - DATE` as the new top heading in `CHANGELOG.md` with
    the release notes beneath it.
 2. Update `content.xml`'s `version` integer and `date` to match.
+3. Review `release/RELEASE_NOTES.md` and `release/workshop-description.bbcode`.
+   Both are player-facing and intentionally versionless; update them when the
+   release adds features or changes the user-visible behaviour. The Workshop
+   description is edited on the website and survives every tool run; keep the
+   in-repo copy in step.
 
-Do them together in one commit. Pushing either change alone leaves the repo
-red.
+Do steps 1–2 together in one commit. Pushing either change alone leaves the
+repo red. Step 3 can be the same commit or a preceding one.
 
 ### Tag and GitHub release
 
