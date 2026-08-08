@@ -29,22 +29,7 @@ For example `version="20"` → `0.20`.
 
 ---
 
-## Step 2 — Confirm pre-flight
-
-Before touching any file, ask the user to confirm all of the following:
-
-- `./scripts/validate.sh` passes clean on the current branch.
-- The in-game **camera release gate** from `TESTING.md` has passed for the
-  supported bridge matrix on this build.
-- The branch to be released is merged to `main` (or the release commit is
-  already on `main`).
-
-Do not proceed until the user confirms. If they haven't run the gate, remind
-them that a tag pushed without it cannot be undone cleanly.
-
----
-
-## Step 3 — Propose the version number
+## Step 2 — Propose the version number
 
 Based on the `[Unreleased]` changes, suggest a version:
 
@@ -59,7 +44,72 @@ Version format rules: `MAJOR.MINOR` where MINOR is always two digits (`0.21`,
 just a counter.
 
 Show your reasoning and ask the user to confirm or override the version before
-editing anything.
+continuing. The confirmed version is required for the remote tag check below;
+never check a placeholder tag.
+
+---
+
+## Step 3 — Confirm pre-flight
+
+Before touching any file, run the following checks in order and stop if any
+fail. Do not ask the user to confirm these — verify them yourself.
+
+**1. Clean working tree.**
+
+```bash
+git status --porcelain
+```
+
+The output must be empty. If it is not, tell the user what is uncommitted and
+stop. Do not stash silently.
+
+**2. Fetch latest refs and tags.**
+
+```bash
+git fetch --tags origin
+```
+
+**3. Check out `main` and fast-forward.**
+
+```bash
+git checkout main
+git merge --ff-only origin/main
+```
+
+If the fast-forward fails, the local `main` has diverged from the remote; tell
+the user and stop.
+
+**4. Verify HEAD matches `origin/main`.**
+
+```bash
+git rev-parse HEAD
+git rev-parse origin/main
+```
+
+Both must be identical. If they differ, stop and report.
+
+**5. Verify the confirmed tag does not already exist.**
+
+Use the version confirmed in Step 2, then run:
+
+```bash
+git tag --list "v<VERSION>"
+git ls-remote --tags origin "refs/tags/v<VERSION>"
+```
+
+Both must return nothing. If either returns output, the tag already exists —
+stop and tell the user.
+
+---
+
+Ask the user to confirm the following before proceeding:
+
+- `./scripts/validate.sh` passes clean on `main`.
+- The in-game **camera release gate** from `TESTING.md` has passed for the
+  supported bridge matrix on this build.
+
+Do not proceed until the user confirms. If they haven't run the gate, remind
+them that a tag pushed without it cannot be undone cleanly.
 
 ---
 
@@ -68,10 +118,10 @@ editing anything.
 Once the version (e.g. `0.21`) and today's date are confirmed, make these edits
 **in a single operation**:
 
-1. **`CHANGELOG.md`** — rename the top heading from  
-   `## [Unreleased]`  
-   to  
-   `## [0.21] - 2026-08-07`  
+1. **`CHANGELOG.md`** — rename the top heading from
+   `## [Unreleased]`
+   to
+   `## [0.21] - 2026-08-07`
    (substitute the confirmed version and today's ISO date).
 
 2. **`content.xml`** — update the `version` integer and `date` attribute:
@@ -89,14 +139,15 @@ it — a second copy is what silently breaks CI one commit later.
 
 ## Step 5 — Review release notes
 
-Read `release/RELEASE_NOTES.md` and ask the user:
+Read `release/RELEASE_NOTES.md` and `release/nexus_description.txt` and ask
+the user:
 
 > Does this release add features or change user-visible behaviour that aren't
-> reflected here?
+> reflected in `RELEASE_NOTES.md` or `nexus_description.txt`?
 
-If yes, open the file so the user can edit it, then remind them to keep
-`release/workshop-description.bbcode` in step (the Workshop description is
-the same text in BBCode format; it's edited on the Workshop website, with the
+If yes, open the relevant file(s) so the user can edit them, then remind them
+to keep `release/workshop-description.bbcode` in step (the Workshop description
+is the same text in BBCode format; it's edited on the Workshop website, with the
 in-repo file as the paste-ready copy).
 
 If no changes are needed, move on.
@@ -129,7 +180,8 @@ if it was updated):
 
 ```bash
 git add CHANGELOG.md content.xml
-# add release/RELEASE_NOTES.md and release/workshop-description.bbcode if changed
+# add release/RELEASE_NOTES.md, release/nexus_description.txt and
+# release/workshop-description.bbcode if changed
 git diff --cached
 git commit -m "Release v0.21"
 ```
@@ -165,8 +217,10 @@ Provide the direct link pattern:
 
 ## Step 9 — Nexus release (manual)
 
-The Nexus upload remains manual. Do this after the GitHub tag build completes
-and the release zip is available.
+The Nexus upload remains manual. Do this after the GitHub tag build completes.
+Download the GitHub release ZIP (`x4_gunnery_control-v0.21.zip`, substituting
+the confirmed version) first; that exact built artifact is what is staged for
+the Nexus upload.
 
 Use this flow on the Nexus website:
 
@@ -211,9 +265,12 @@ The Workshop release requires:
 
 Provide the single command that stages and publishes in one step:
 
-```bat
-REM Run this from a Windows terminal (CMD or PowerShell) — Steam must be running
-.\scripts\release-workshop.sh 0.21 "Describe what changed in this release"
+```bash
+# Run from WSL with Steam open on Windows — release-workshop.sh is a bash script
+# and requires wslpath; it cannot be run directly from CMD or PowerShell.
+# Use wsl.exe if invoking from a Windows terminal:
+#   wsl.exe bash scripts/release-workshop.sh 0.21 "Describe what changed in this release"
+scripts/release-workshop.sh 0.21 "Describe what changed in this release"
 ```
 
 Remind the user:

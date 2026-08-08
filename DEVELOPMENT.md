@@ -362,6 +362,7 @@ live-fire tests.
 | `scripts/validate.sh` | Full static and unit validation entry point |
 | `scripts/install-dev.sh` | Loose-file installation of the main extension |
 | `scripts/launch-x4-dev.bat` | Windows launcher with development logging arguments |
+| `scripts/validate-windows.ps1` | Windows checkout and launcher command-contract checks used by CI |
 | `scripts/filter-gunnery-log.sh` | Filters main lifecycle, Test Lab, and relevant error records |
 | `scripts/package.sh` | Main Nexus ZIP builder |
 | `scripts/package-testlab.sh` | Developer Test Lab ZIP builder |
@@ -404,6 +405,9 @@ A complete run performs all of the following:
 5. Runs the shell tests, including Test Lab log parsing.
 6. Rejects tracked catalog, Vortex-management, and debug-log artifacts.
 7. Checks the main extension and required UI dependency IDs.
+8. Checks whitespace in the committed branch diff and any staged/unstaged
+   tracked changes. Pull-request CI uses the PR base SHA for the full review
+   diff.
 
 The last line should be:
 
@@ -525,6 +529,11 @@ scripts\launch-x4-dev.bat
 
 The launcher exits `0` on success, `2` when `X4.exe` was not found, `3` when
 Windows failed to start X4, and `4` when the install step failed.
+
+CI runs the batch launchers only through their deterministic missing-`X4.exe`
+path, from a directory containing spaces. It proves quoting and error handling,
+not a real WSL installation or an X4 launch. Installing WSL, locating the game,
+and running the in-game matrix remain an owner-tested Windows task.
 
 The launcher validates `X4.exe`, sets the game directory as the working
 directory, and adds these parameters (with the resolved log directory printed

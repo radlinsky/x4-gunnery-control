@@ -7,11 +7,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - run: sudo apt-get update && sudo apt-get install -y lua5.1 libxml2-utils shellcheck zip ripgrep
       - run: ./scripts/validate.sh
+        env:
+          X4GC_DIFF_BASE: ${{ github.event.pull_request.base.sha }}
       - run: ./scripts/package.sh
       - run: ./scripts/package-testlab.sh
       - uses: actions/upload-artifact@v4
         with:
           name: x4-gunnery-control
           path: dist/*.zip
+  windows-contract:
+    runs-on: windows-latest
+    steps:
+      # Git materialises unsupported symlinks as ordinary files on Windows.
+      # The release prompt must still be complete and usable in that checkout.
+      - run: git config --global core.symlinks false
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: ./scripts/validate-windows.ps1

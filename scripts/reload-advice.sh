@@ -10,11 +10,21 @@ set -euo pipefail
 # failure is silent: telling the owner to reload when the change needed a restart
 # wastes a run and looks like the change did not work.
 
+REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
+
 advice_for() {
-  # Match on the repo-relative path. Hook payloads carry absolute paths, so strip
-  # anything up to the repo root first; a path outside the repo simply will not
-  # match any pattern below and produces no advice.
-  local path=${1#"$PWD"/}
+  # Match on the repo-relative path. Hook payloads carry absolute paths; a
+  # relative path is resolved against the repo root so that callers from any
+  # working directory produce the same result.
+  local input=$1
+  local path
+  if [[ "$input" == /* ]]; then
+    # Absolute path: strip the repo root prefix if present.
+    path=${input#"$REPO_ROOT"/}
+  else
+    # Relative path: treat it as repo-relative already.
+    path=$input
+  fi
   case "$path" in
     ui.xml|content.xml|t/*.xml)
       echo "RELOAD: **full restart**. Exit X4 and run scripts/launch-x4-dev.bat (it installs on its own). No reload command re-reads ${path}." ;;

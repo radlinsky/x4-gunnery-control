@@ -48,12 +48,19 @@ def main() -> int:
                 match = re.match(r"^- ([A-Za-z][A-Za-z0-9 ]*):\s*(.*)$", line)
                 if match:
                     fields[match.group(1)] = (number, match.group(2))
+            if not fields:
+                # No field lines at all: prose sub-section, not a record.
+                continue
             if "Status" not in fields:
+                errors.append(f"{path}:{heading_line}: {heading!r} has no '- Status:' field")
                 continue
             checked += 1
             for field in REQUIRED:
                 if field not in fields:
                     errors.append(f"{path}:{heading_line}: {heading!r} lacks '- {field}:'")
+                elif not fields[field][1]:
+                    field_line = fields[field][0]
+                    errors.append(f"{path}:{field_line}: {heading!r} has empty '- {field}:'")
             status_line, status = fields["Status"]
             if status not in STATUSES:
                 errors.append(

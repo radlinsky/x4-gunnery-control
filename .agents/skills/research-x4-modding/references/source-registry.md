@@ -28,4 +28,3 @@ them.
    or authors that can be checked against higher-ranked evidence.
 5. In the answer, list searched channels, unavailable channels, query/date, and
    the corroboration used for every community-derived conclusion.
-

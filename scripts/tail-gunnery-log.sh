@@ -29,12 +29,14 @@ find_log_file() {
 
   for dir in "${candidates[@]}"; do
     [[ -d "$dir" ]] || continue
-    # Pick the newest all-digit subdirectory (sort reverse to get newest first).
+    # Pick the most recently modified all-digit subdirectory (newest by mtime,
+    # not by numeric id — the largest account id is not necessarily the active one).
     local found
-    found=$(find "$dir" -maxdepth 1 -mindepth 1 -type d -name '[0-9]*' -printf '%f\n' \
-      | grep -E '^[0-9]+$' \
+    found=$(find "$dir" -maxdepth 1 -mindepth 1 -type d -name '[0-9]*' -printf '%T@ %f\n' \
+      | grep -E '^[0-9.]+ [0-9]+$' \
       | sort -rn \
-      | head -1)
+      | head -1 \
+      | awk '{print $2}')
     if [[ -n "$found" ]]; then
       echo "$dir/$found/debug.log"
       return 0

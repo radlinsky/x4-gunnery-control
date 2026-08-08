@@ -40,6 +40,36 @@ for script in discover-x4-roots.sh search-x4.sh index-lua-ffi.sh prepare-xsd-cac
 done
 python3 "$scripts/check-kb.py" "$skill" >/dev/null
 
+# --- KB validator negative fixtures ---
+# Each fixture must exit nonzero; the valid fixture must exit zero.
+check_kb() { python3 "$scripts/check-kb.py" "tests/fixtures/$1" >/dev/null 2>&1; }
+
+if ! check_kb kb-valid; then
+  echo 'KB validator rejected a well-formed fixture' >&2; exit 1
+fi
+for fixture in \
+  kb-missing-x4 \
+  kb-missing-source \
+  kb-missing-livetest \
+  kb-missing-status \
+  kb-missing-finding \
+  kb-empty-x4 \
+  kb-empty-status \
+  kb-empty-source \
+  kb-empty-livetest \
+  kb-bad-status \
+  kb-bad-heading \
+  kb-zero-records; do
+  if check_kb "$fixture"; then
+    echo "KB validator accepted bad fixture: $fixture" >&2; exit 1
+  fi
+done
+# Explicit coverage of the bug: a section with fields but no Status field was
+# previously silently skipped rather than rejected.
+if check_kb kb-missing-status; then
+  echo 'KB validator silently ignored a record with fields but no Status (bug regression)' >&2; exit 1
+fi
+
 mkdir -p "$tmp/game/extensions/example" "$tmp/extracted/ui" "$tmp/extensions/example" "$tmp/schema/md" "$tmp/schema/libraries"
 : >"$tmp/game/08.cat"
 printf 'ffi.cdef[[\nbool ExampleAPI(int value);\n]]\n' >"$tmp/extracted/ui/example.lua"

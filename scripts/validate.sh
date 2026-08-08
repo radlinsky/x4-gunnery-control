@@ -4,6 +4,25 @@ cd "$(dirname "$0")/.."
 # shellcheck source=scripts/lib-release.sh
 source scripts/lib-release.sh
 
+# Check the effective tracked tree against the review base, including committed,
+# staged, and unstaged work. In CI, the PR base SHA is supplied by the workflow
+# so this is the full PR diff rather than a shallow-checkout guess.
+if [[ -n "${X4GC_DIFF_BASE:-}" ]]; then
+  whitespace_base=$X4GC_DIFF_BASE
+elif git rev-parse --verify -q develop >/dev/null; then
+  whitespace_base=$(git merge-base develop HEAD)
+elif git rev-parse --verify -q origin/develop >/dev/null; then
+  whitespace_base=$(git merge-base origin/develop HEAD)
+else
+  whitespace_base=""
+  echo "warning: cannot find develop; checking staged and unstaged whitespace only" >&2
+fi
+if [[ -n "$whitespace_base" ]]; then
+  git diff --check "$whitespace_base"
+fi
+git diff --cached --check
+git diff --check
+
 xmllint --noout content.xml ui.xml t/*.xml md/*.xml testlab/x4_gunnery_control_testlab/content.xml testlab/x4_gunnery_control_testlab/ui.xml testlab/x4_gunnery_control_testlab/t/*.xml
 if command -v luac5.1 >/dev/null; then
   for file in ui/*.lua testlab/x4_gunnery_control_testlab/ui/*.lua tests/*.lua; do luac5.1 -p "$file"; done
@@ -21,6 +40,18 @@ for file in tests/*.sh; do "$file"; done
 # validation on a fresh clone (it only worked where a local chmod +x was left).
 if git ls-files -s '*.sh' | grep -v '^100755'; then
   echo "the shell scripts above are not executable; git update-index --chmod=+x them" >&2
+  exit 1
+fi
+# .github/prompts/release.prompt.md must be a real file (not a symlink) that
+# matches .agents/release.agent.md exactly. On Windows checkouts without symlink
+# support Git would materialise a symlink as a text file containing the path,
+# so VS Code would see no prompt content. Keeping them in sync is enforced here.
+if [[ -L .github/prompts/release.prompt.md ]]; then
+  echo ".github/prompts/release.prompt.md is a symlink; replace it with a real copy of .agents/release.agent.md" >&2
+  exit 1
+fi
+if ! diff -q .agents/release.agent.md .github/prompts/release.prompt.md >/dev/null 2>&1; then
+  echo ".github/prompts/release.prompt.md has drifted from .agents/release.agent.md; copy the source to the prompt file" >&2
   exit 1
 fi
 if git ls-files | grep -Eq '(^|/)(__folder_managed_by_vortex|.*\.(cat|dat)|debug\.log|x4-gunnery-control-debug\.log)$'; then

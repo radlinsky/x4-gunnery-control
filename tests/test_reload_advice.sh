@@ -66,4 +66,31 @@ grep -Fq 'Reload UI' <<< "$hook_out" || fail "hook output missing the advice"
 [[ -z "$(printf 'not json' | scripts/reload-advice.sh)" ]] \
   || fail "malformed JSON must produce no output"
 
+# Invoked from a repo subdirectory: the script must still match correctly
+# regardless of what $PWD is when it is called.
+(
+  cd scripts
+  out=$(../scripts/reload-advice.sh "ui/gunnery_control.lua")
+  grep -Fq "Reload UI" <<< "$out" || fail "subdirectory caller: ui/gunnery_control.lua did not advise Reload UI; got: ${out:-<nothing>}"
+)
+(
+  cd scripts
+  out=$(../scripts/reload-advice.sh "md/x4_gunnery_control.xml")
+  grep -Fq "Reload MD" <<< "$out" || fail "subdirectory caller: md/x4_gunnery_control.xml did not advise Reload MD; got: ${out:-<nothing>}"
+)
+
+# Path containing a space: the repo root itself may be in a directory with a
+# space in its name, and the advice must still work via the hook's absolute path.
+space_root=$(mktemp -d "/tmp/repo with spaces XXXXXX")
+trap 'rm -rf "$space_root"' EXIT
+mkdir -p "$space_root/scripts"
+cp scripts/reload-advice.sh "$space_root/scripts/reload-advice.sh"
+out=$("$space_root/scripts/reload-advice.sh" "ui/gunnery_control.lua")
+grep -Fq "Reload UI" <<< "$out" \
+  || fail "space in script path: ui/gunnery_control.lua did not advise Reload UI; got: ${out:-<nothing>}"
+# Absolute path under the spaced root must also strip correctly.
+out=$("$space_root/scripts/reload-advice.sh" "$space_root/ui/gunnery_control.lua")
+grep -Fq "Reload UI" <<< "$out" \
+  || fail "space in repo root (absolute): ui/gunnery_control.lua did not advise Reload UI; got: ${out:-<nothing>}"
+
 echo "reload advice checks passed"

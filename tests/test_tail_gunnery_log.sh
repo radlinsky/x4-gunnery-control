@@ -173,4 +173,105 @@ if ! grep -Fq '[X4GC] appeared after wait' <<< "$output4"; then
 fi
 
 echo "wait-for-file test passed"
+
+# --- tests: no-argument auto-discovery via find_log_file ---
+# These tests stub cmd.exe and wslpath via PATH injection so the script
+# can run on Linux CI without a real Windows environment.
+#
+# We cannot source tail-gunnery-log.sh directly (it would start the tailer
+# loop), so each test drives a small subshell that defines only find_log_file
+# using the same body the main script uses, then calls it.
+
+stub_dir=$(mktemp -d)
+trap 'rm -rf "$stub_dir" "$fixture" "$output_file" "$output_file2" "$output_file3" "$output_file4" "$wait_log"' EXIT
+
+# Helper: write a stub script that prints a fixed value and make it executable.
+write_stub() {
+  local name=$1 body=$2
+  printf '#!/usr/bin/env bash\n%s\n' "$body" > "$stub_dir/$name"
+  chmod +x "$stub_dir/$name"
+}
+
+# Helper: call find_log_file from the real script in a short-lived subshell.
+# Extracts and evals only the function definition so the tailer loop never runs.
+run_find_log_file() {
+  local fn_body
+  fn_body=$(awk '/^find_log_file\(\)/,/^\}/' scripts/tail-gunnery-log.sh)
+  PATH="$stub_dir:$PATH" bash -c "
+    set -euo pipefail
+    $fn_body
+    find_log_file
+  " 2>/dev/null || true
+}
+
+# --- discovery test 1: USERPROFILE path ---
+x4_base_up=$(mktemp -d)
+trap 'rm -rf "$stub_dir" "$x4_base_up" "$fixture" "$output_file" "$output_file2" "$output_file3" "$output_file4" "$wait_log"' EXIT
+
+mkdir -p "$x4_base_up/Documents/Egosoft/X4/123456"
+printf '%s\n' '[X4GC] discovery_up event' > "$x4_base_up/Documents/Egosoft/X4/123456/debug.log"
+
+write_stub "cmd.exe" "printf '%s\r\n' 'C:/FakeUser'"
+write_stub "wslpath" "echo \"$x4_base_up\""
+
+discovered=$(run_find_log_file)
+
+if [[ "$discovered" != "$x4_base_up/Documents/Egosoft/X4/123456/debug.log" ]]; then
+  echo "FAIL: USERPROFILE discovery: expected $x4_base_up/Documents/Egosoft/X4/123456/debug.log, got: ${discovered:-<nothing>}" >&2
+  exit 1
+fi
+echo "discovery USERPROFILE test passed"
+
+# --- discovery test 2: OneDrive fallback path ---
+x4_base_od=$(mktemp -d)
+trap 'rm -rf "$stub_dir" "$x4_base_up" "$x4_base_od" "$fixture" "$output_file" "$output_file2" "$output_file3" "$output_file4" "$wait_log"' EXIT
+
+mkdir -p "$x4_base_od/Documents/Egosoft/X4/789012"
+printf '%s\n' '[X4GC] discovery_od event' > "$x4_base_od/Documents/Egosoft/X4/789012/debug.log"
+
+# cmd.exe stub: distinguish USERPROFILE vs OneDrive by argument content.
+write_stub "cmd.exe" "
+case \"\$*\" in
+  *USERPROFILE*) printf '%s\r\n' 'C:/NoSuchUser' ;;
+  *OneDrive*)    printf '%s\r\n' 'C:/FakeOneDrive' ;;
+esac"
+write_stub "wslpath" "
+case \"\$1\" in
+  C:/NoSuchUser)   echo /no/such/user ;;
+  C:/FakeOneDrive) echo \"$x4_base_od\" ;;
+  *) echo \"\$1\" ;;
+esac"
+
+discovered=$(run_find_log_file)
+
+if [[ "$discovered" != "$x4_base_od/Documents/Egosoft/X4/789012/debug.log" ]]; then
+  echo "FAIL: OneDrive discovery: expected $x4_base_od/Documents/Egosoft/X4/789012/debug.log, got: ${discovered:-<nothing>}" >&2
+  exit 1
+fi
+echo "discovery OneDrive fallback test passed"
+
+# --- discovery test 3: multiple numeric dirs; newest by mtime, NOT largest id ---
+# Account 9999 has a higher id but older mtime.  Account 1001 has the newest
+# mtime and must win; choosing by sort -rn (largest id) would pick 9999 instead.
+x4_base_mtime=$(mktemp -d)
+trap 'rm -rf "$stub_dir" "$x4_base_up" "$x4_base_od" "$x4_base_mtime" "$fixture" "$output_file" "$output_file2" "$output_file3" "$output_file4" "$wait_log"' EXIT
+
+mkdir -p "$x4_base_mtime/Documents/Egosoft/X4/9999" "$x4_base_mtime/Documents/Egosoft/X4/1001"
+printf '%s\n' '[X4GC] old account' > "$x4_base_mtime/Documents/Egosoft/X4/9999/debug.log"
+touch -t 200001010000 "$x4_base_mtime/Documents/Egosoft/X4/9999"
+touch -t 203001010000 "$x4_base_mtime/Documents/Egosoft/X4/1001"
+printf '%s\n' '[X4GC] new account' > "$x4_base_mtime/Documents/Egosoft/X4/1001/debug.log"
+
+write_stub "cmd.exe" "printf '%s\r\n' 'C:/FakeUser2'"
+write_stub "wslpath" "echo \"$x4_base_mtime\""
+
+discovered=$(run_find_log_file)
+
+if [[ "$discovered" != "$x4_base_mtime/Documents/Egosoft/X4/1001/debug.log" ]]; then
+  echo "FAIL: mtime discovery: expected $x4_base_mtime/Documents/Egosoft/X4/1001/debug.log (newest mtime), got: ${discovered:-<nothing>}" >&2
+  echo "  (If this picked 9999 it is the sort -rn regression: largest id, not newest mtime)" >&2
+  exit 1
+fi
+echo "discovery newest-by-mtime test passed"
+
 echo "tail gunnery log checks passed"
