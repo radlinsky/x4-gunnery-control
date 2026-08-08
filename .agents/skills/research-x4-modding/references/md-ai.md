@@ -104,9 +104,8 @@ whole-object, engine, shield, turret, and station-module surface tests.
   The events are dropped silently. Nothing in the log distinguishes "MD was not listening"
   from "MD ignored it"; only the ordering does.
 
-  This is why an extension that needs MD state at startup cannot rely on a send from init
-  alone. This extension also re-sends on `gameLoadingDone`
-  (`ui/gunnery_control.lua`), which is the send that is actually received.
+  This extension also re-sends on `gameLoadingDone` (`ui/gunnery_control.lua`). In the runs
+  measured here that later send was received and the init send was not.
 
   Not established by this test: the exact point at which MD begins accepting these events, or
   whether a retry or delay from Lua would be received earlier than the `gameLoadingDone` hook.
