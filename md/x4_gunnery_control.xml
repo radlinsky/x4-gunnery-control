@@ -44,6 +44,9 @@
             <remove_value name="State.$active"/>
             <remove_value name="State.$target"/>
             <remove_value name="State.$hasTarget"/>
+            <remove_value name="State.$requestNonce"/>
+            <remove_value name="State.$acceptedNonce"/>
+            <remove_value name="State.$acceptedGeneration"/>
             <!-- Invalidate a grant that has not yet been accepted. -->
             <do_if value="@State.$generation">
               <set_value name="State.$generation" exact="State.$generation + 1"/>
@@ -58,13 +61,25 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'state_request'"/>
           </conditions>
           <actions>
-            <do_if value="@State.$generation">
-              <set_value name="State.$generation" exact="State.$generation + 1"/>
+            <!-- The grant has one scalar parameter, so echo the Lua request
+                 nonce alongside the MD-owned generation as
+                 x4gc1:&lt;nonce&gt;:&lt;generation&gt;.  Lua rejects a delayed grant
+                 whose nonce belongs to a cleared request even if that lease
+                 number was never accepted locally. -->
+            <set_value name="State.$requestNonce" exact="@event.param3.$nonce"/>
+            <do_if value="not State.$requestNonce">
+              <set_value name="State.$requestNonce" exact="@event.param3.{'nonce'}"/>
             </do_if>
-            <do_else>
-              <set_value name="State.$generation" exact="1"/>
-            </do_else>
-            <raise_lua_event name="'X4GunneryControl.RestoreGrant'" param="State.$generation"/>
+            <do_if value="State.$requestNonce">
+              <do_if value="@State.$generation">
+                <set_value name="State.$generation" exact="State.$generation + 1"/>
+              </do_if>
+              <do_else>
+                <set_value name="State.$generation" exact="1"/>
+              </do_else>
+              <!-- Shipped MD sources use + to compose string expressions. -->
+              <raise_lua_event name="'X4GunneryControl.RestoreGrant'" param="'x4gc1:' + State.$requestNonce + ':' + State.$generation"/>
+            </do_if>
           </actions>
         </cue>
         <!-- `raise_lua_event` names are expressions in the XSD. This dynamic
@@ -79,7 +94,11 @@
             <do_if value="not State.$acceptedGeneration">
               <set_value name="State.$acceptedGeneration" exact="@event.param3.{'generation'}"/>
             </do_if>
-            <do_if value="State.$acceptedGeneration == State.$generation">
+            <set_value name="State.$acceptedNonce" exact="@event.param3.$nonce"/>
+            <do_if value="not State.$acceptedNonce">
+              <set_value name="State.$acceptedNonce" exact="@event.param3.{'nonce'}"/>
+            </do_if>
+            <do_if value="State.$acceptedGeneration == State.$generation and State.$acceptedNonce == State.$requestNonce">
               <do_if value="@State.$target">
                 <raise_lua_event name="'X4GunneryControl.RestoreTarget.' + State.$generation" param="State.$target"/>
               </do_if>

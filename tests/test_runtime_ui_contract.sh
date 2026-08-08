@@ -83,6 +83,11 @@ grep -Fq 'directSnapshots' "$main"
 # target travels separately and is buffered before control receives an envelope.
 grep -Fq 'State.encode(deps.State.saveState(session))' "$persist"
 grep -Fq 'deps.emit("session_commit", payload)' "$persist"
+grep -Fq 'x4gc1:&lt;nonce&gt;:&lt;generation&gt;' md/x4_gunnery_control.xml
+grep -Fq "param=\"'x4gc1:' + State.\$requestNonce + ':' + State.\$generation\"" md/x4_gunnery_control.xml
+grep -Fq "State.\$acceptedNonce == State.\$requestNonce" md/x4_gunnery_control.xml
+grep -Fq 'deps.emit("state_request", { nonce = nonce })' "$persist"
+grep -Fq 'deps.emit("state_accept", { nonce = grantedRequestNonce, generation = grantedGeneration })' "$persist"
 grep -Fq 'State.decode(envelope and envelope.payload)' "$main"
 # The restore resolves group contextIDs, which needs a seated player. A save
 # taken while engaged reloads into the chair, so the gameLoadingDone raise is

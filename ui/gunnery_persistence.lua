@@ -7,13 +7,35 @@ function Persistence.new(deps)
     assert(deps and deps.State and deps.emit and deps.register and deps.toLuaID,
         "X4GunneryPersistence.new requires State, emit, register and toLuaID")
 
-    local outstanding, generation, targetSeen, sessionSeen = false, nil, false, false
+    local outstanding, nonce, generation, targetSeen, sessionSeen = false, nil, nil, false, false
     local lastGeneration = 0
     local targetValue, sessionValue = nil, nil
 
     local function reset()
-        outstanding, generation, targetSeen, sessionSeen = false, nil, false, false
+        outstanding, nonce, generation, targetSeen, sessionSeen = false, nil, nil, false, false
         targetValue, sessionValue = nil, nil
+    end
+
+    -- A grant has only one scalar slot.  `x4gc1:<nonce>:<generation>` keeps
+    -- the client request identity and MD-owned lease separate without relying
+    -- on a Lua table surviving the MD -> Lua event boundary.  Nonces are
+    -- decimal and module-scoped so a UI reload that preserves this global does
+    -- not immediately reuse a request identity.
+    local function allocateNonce()
+        local nextNonce = (Persistence._nextClientNonce or 0) + 1
+        if nextNonce > 2147483647 then nextNonce = 1 end
+        Persistence._nextClientNonce = nextNonce
+        return tostring(nextNonce)
+    end
+
+    local function parseGrant(value)
+        if type(value) ~= "string" then return nil end
+        local grantedNonce, grantedGeneration = string.match(value, "^x4gc1:([1-9][0-9]*):([1-9][0-9]*)$")
+        if not grantedNonce or not grantedGeneration then return nil end
+        local numericGeneration = tonumber(grantedGeneration)
+        if not numericGeneration or numericGeneration ~= math.floor(numericGeneration)
+            or numericGeneration > 2147483647 then return nil end
+        return grantedNonce, numericGeneration
     end
 
     local function complete()
@@ -23,8 +45,8 @@ function Persistence.new(deps)
         deps.onEnvelope(envelope)
     end
 
-    local function receiveTarget(expected, _, value)
-        if not outstanding or generation ~= expected or targetSeen then return end
+    local function receiveTarget(expectedNonce, expectedGeneration, _, value)
+        if not outstanding or nonce ~= expectedNonce or generation ~= expectedGeneration or targetSeen then return end
         targetSeen = true
         -- MD deliberately sends 0 when no component survived, rather than
         -- omitting this half of the protocol.
@@ -32,8 +54,8 @@ function Persistence.new(deps)
         complete()
     end
 
-    local function receiveSession(expected, _, value)
-        if not outstanding or generation ~= expected or sessionSeen then return end
+    local function receiveSession(expectedNonce, expectedGeneration, _, value)
+        if not outstanding or nonce ~= expectedNonce or generation ~= expectedGeneration or sessionSeen then return end
         sessionSeen = true
         sessionValue = type(value) == "string" and value or ""
         complete()
@@ -62,33 +84,34 @@ function Persistence.new(deps)
     function api.request()
         if outstanding then return false end
         outstanding = true
-        generation, targetSeen, sessionSeen = nil, false, false
+        nonce, generation, targetSeen, sessionSeen = allocateNonce(), nil, false, false
         targetValue, sessionValue = nil, nil
-        deps.emit("state_request", {})
+        deps.emit("state_request", { nonce = nonce })
         return true
     end
 
     deps.register("X4GunneryControl.RestoreGrant", function(_, value)
         if not outstanding or generation ~= nil then return end
-        local nextGeneration = tonumber(value)
-        if not nextGeneration or nextGeneration <= 0 or nextGeneration ~= math.floor(nextGeneration) then
-            reset()
-            return
-        end
-        -- A dynamic event from a cleared/superseded request can arrive after a
-        -- newer request has begun. Keep waiting for the newer grant; do not let
-        -- an old lease install handlers for its replies.
+        local grantedNonce, nextGeneration = parseGrant(value)
+        -- Malformed or unrelated static events must not cancel the legitimate
+        -- request still waiting for its own grant.
+        if not grantedNonce then return end
+        -- A delayed grant for a cleared request can carry a generation that
+        -- this client has never accepted.  The nonce, rather than generation
+        -- ordering, is what prevents it from claiming the newer request.
+        if grantedNonce ~= nonce then return end
         if nextGeneration <= lastGeneration then return end
         generation = nextGeneration
         lastGeneration = nextGeneration
         local grantedGeneration = nextGeneration
+        local grantedRequestNonce = grantedNonce
         -- These handlers must exist before state_accept: MD can raise both
         -- replies immediately, and raise_lua_event carries one scalar only.
         deps.register("X4GunneryControl.RestoreTarget." .. tostring(grantedGeneration),
-            function(name, value) receiveTarget(grantedGeneration, name, value) end)
+            function(name, value) receiveTarget(grantedRequestNonce, grantedGeneration, name, value) end)
         deps.register("X4GunneryControl.RestoreSession." .. tostring(grantedGeneration),
-            function(name, value) receiveSession(grantedGeneration, name, value) end)
-        deps.emit("state_accept", { generation = grantedGeneration })
+            function(name, value) receiveSession(grantedRequestNonce, grantedGeneration, name, value) end)
+        deps.emit("state_accept", { nonce = grantedRequestNonce, generation = grantedGeneration })
     end)
 
     return api
