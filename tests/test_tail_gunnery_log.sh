@@ -45,16 +45,21 @@ wait "$tail_pid" 2>/dev/null || true
 
 output=$(<"$output_file")
 
-grep -Fq '[X4GC] first event' <<< "$output"
-grep -Fq '[X4GC TEST] turret_result ship=1' <<< "$output"
+# What was already in the file belongs to the previous X4 run: the log is
+# truncated on launch and this window opens around that moment. Replaying it
+# presents a finished session as if it were live, which sent a developer chasing
+# an error that had already been fixed. Only what arrives after startup is live.
+if grep -Fq '[X4GC] first event' <<< "$output"; then
+  echo "FAIL: pre-existing content was replayed instead of skipped" >&2
+  exit 1
+fi
+if grep -Fq '[X4GC TEST] turret_result ship=1' <<< "$output"; then
+  echo "FAIL: pre-existing content was replayed instead of skipped" >&2
+  exit 1
+fi
 grep -Fq '[X4GC] second event' <<< "$output"
 
 # No duplicates: each matching line should appear exactly once.
-first_count=$(grep -Fc '[X4GC] first event' <<< "$output")
-if (( first_count != 1 )); then
-  echo "FAIL: '[X4GC] first event' appeared $first_count times (expected 1)" >&2
-  exit 1
-fi
 second_count=$(grep -Fc '[X4GC] second event' <<< "$output")
 if (( second_count != 1 )); then
   echo "FAIL: '[X4GC] second event' appeared $second_count times (expected 1)" >&2
@@ -92,7 +97,14 @@ wait "$tail_pid2" 2>/dev/null || true
 
 output2=$(<"$output_file2")
 
-grep -Fq '[X4GC] before truncation' <<< "$output2"
+# This is the real launch sequence: the tailer starts while the previous run's
+# log is still on disk, skips it, and X4 then truncates. Everything from the new
+# run must appear, starting at its first line -- skipping history must not turn
+# into skipping the run being launched.
+if grep -Fq '[X4GC] before truncation' <<< "$output2"; then
+  echo "FAIL: content from before the truncation was replayed" >&2
+  exit 1
+fi
 grep -Fq '[X4GC] after truncation' <<< "$output2"
 
 echo "truncation reset test passed"

@@ -57,6 +57,11 @@ fi
 # Poll until the file appears, then start tailing. 120 s is enough for any
 # normal X4 startup; if it never appears that is a typo or a real problem.
 WAIT_TIMEOUT=${TAIL_GUNNERY_WAIT_TIMEOUT:-120}
+# Whether anything was on disk before we started deciding what counts as history.
+# A file we had to wait for was created by the run we are here to watch, so it
+# has no previous run in it and none of it may be skipped.
+existed_at_start=0
+[[ -f "$log_file" ]] && existed_at_start=1
 if [[ ! -f "$log_file" ]]; then
   echo "Waiting for $log_file ..." >&2
   deadline=$(( SECONDS + WAIT_TIMEOUT ))
@@ -77,6 +82,13 @@ echo "Tailing $log_file (Ctrl-C to stop)" >&2
 # because it never consults size or mtime to decide whether there is new data.
 offset=0
 first_line=""
+# The log on disk right now belongs to the PREVIOUS run: X4 truncates on launch,
+# and this window opens before that has happened. Printing it replayed the whole
+# last session as if it were live -- an easy way to chase an error that was
+# already fixed. Skip whatever is there at startup and print only what arrives
+# afterwards. The truncation check below resets the offset the moment X4 writes
+# its new header, so the run being launched is still shown from its first line.
+priming=$existed_at_start
 
 chunk=$(mktemp)
 trap 'rm -f "$chunk"' EXIT
@@ -108,9 +120,14 @@ while true; do
   fi
 
   if (( read_bytes > hold )); then
-    head -c "$((read_bytes - hold))" "$chunk" | grep -E "$X4GC_LOG_PATTERN" || true
+    if (( priming )); then
+      echo "--- skipping $((read_bytes - hold)) bytes from the previous run ---" >&2
+    else
+      head -c "$((read_bytes - hold))" "$chunk" | grep -E "$X4GC_LOG_PATTERN" || true
+    fi
     offset=$((offset + read_bytes - hold))
   fi
+  priming=0
 
   sleep "$POLL_INTERVAL"
 done

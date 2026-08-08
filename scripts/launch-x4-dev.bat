@@ -132,11 +132,14 @@ echo   ^<X4 userdata folder^>\debug.log   (could not auto-detect; look under Doc
 echo X4 truncates debug.log on every launch; the previous run's log is lost.
 
 :launch
-start "" /D "%X4GC_GAME_ROOT%" "%X4GC_EXE%" -prefersinglefiles -debug all -logfile debug.log
-if errorlevel 1 goto failed
-
 rem If X4GC_TAIL_LOG is set, open a second console window running tail-gunnery-log.sh
 rem so the developer sees [X4GC] lines live without starting a second terminal by hand.
+rem
+rem Started BEFORE X4, deliberately. The tailer skips whatever the previous run
+rem left in the log and prints only what arrives after, so it has to be watching
+rem before X4 truncates. Launched the other way round it can prime itself on the
+rem new, already-truncated log and silently swallow the initializing lines.
+rem
 rem X4GC_DISTRO and X4GC_REPO_REL are only available when we parsed a \\wsl.localhost\ path
 rem above; if that was skipped (skipinstall branch) we cannot build the WSL script path.
 rem X4GC_TAIL_LOG is consumed here in Windows — it does not need to cross into WSL, so
@@ -149,6 +152,9 @@ if not defined X4GC_DISTRO (
 set "X4GC_TAILER=/%X4GC_REPO_REL%tail-gunnery-log.sh"
 start "X4 Gunnery Log" wsl.exe -d %X4GC_DISTRO% -- "%X4GC_TAILER%"
 :notail
+
+start "" /D "%X4GC_GAME_ROOT%" "%X4GC_EXE%" -prefersinglefiles -debug all -logfile debug.log
+if errorlevel 1 goto failed
 
 set "X4GC_EXIT_CODE=0"
 goto finish
