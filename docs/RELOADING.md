@@ -29,6 +29,41 @@ The reload buttons are in the **Test Lab** extension, reachable from the gunnery
 console. Test Lab is developer-only and is installed only when
 `X4GC_INSTALL_TESTLAB` is set, which `launch-x4-test-lab-dev.bat` does.
 
+## How to reach the buttons, exactly
+
+The owner cannot act on "click Reload UI" alone — there is no such button on
+screen until they are in the right place. Give all four of these every time:
+
+1. **Where to be: seated at a gunnery console.** The buttons live in Test Lab,
+   Test Lab is opened from a button on the console panel, and the console only
+   exists while seated. Standing on the deck there is nothing to click.
+2. **Which Test Lab button.** There are three, all opening the same menu, and
+   naming "the Test Lab button" is not enough:
+
+   | Screen | Where |
+   |---|---|
+   | Console (turret group list) | bottom action row, beside Refresh and Get Up |
+   | Target browser (Direct-control picker) | action row, between Refresh and Back |
+   | Engaged panel (upper-right, while engaged) | its own row at the bottom, under Prefer/Release |
+
+   Pick by the phase the change has to be tested in, because opening Test Lab
+   parks the session **as it is at that moment** and the reload restores from
+   that. A fix that only shows while engaged must be reloaded from the engaged
+   panel; reloading from the console restores a console session and the change
+   never gets exercised.
+
+   Then: **Reload UI** / **Reload MD** / **Reload AI** inside Test Lab.
+3. **What it costs.** Opening Test Lab parks the session and a UI reload wipes
+   all Lua state, so the session is rebuilt from the parked payload rather than
+   continuing. Anything not in that payload is gone.
+4. **What confirms it worked:** the log line
+   `[X4GC] initializing UI; build=<runtimeBuild>` carrying the build id you just
+   installed. Tell the owner the id to look for. If the id is the old one, the
+   installer did not run and the reload re-ran the previous code.
+
+State the phase to be in when the change only shows in one — engaged, on the
+console, in target selection — rather than leaving them to guess.
+
 ## Why the split
 
 Live-tested on 2026-08-08 against X4 9.00; recorded in the research KB under

@@ -21,9 +21,9 @@ advice_for() {
     testlab/*)
       echo "RELOAD: **full restart** with scripts/launch-x4-test-lab-dev.bat. Test Lab's own files are not re-read by a reload, and it only installs when X4GC_INSTALL_TESTLAB is set." ;;
     ui/*.lua)
-      echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then ask for **Reload UI**. It wipes Lua state, so a live gunnery session ends. If you ADDED or DELETED a file, say full restart instead." ;;
+      echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> Test Lab -> **Reload UI**, and confirm the log shows the runtimeBuild id you just installed. Say the id. THREE Test Lab buttons exist (console action row / target browser action row / engaged panel) -- name the one matching the phase your change needs, because opening Test Lab parks the session as it is and the reload restores that. A reload wipes Lua state. If you ADDED or DELETED a file, say full restart instead." ;;
     md/*.xml)
-      echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then ask for **Reload MD**, then say which cue to trigger again. refreshmd keeps existing cue variables and will not re-run a completed cue. If you ADDED or DELETED a file, say full restart instead." ;;
+      echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> Test Lab -> **Reload MD**, then name the cue to trigger again. THREE Test Lab buttons exist (console action row / target browser action row / engaged panel) -- name the one matching the phase your change needs. refreshmd keeps existing cue variables and will not re-run a completed cue. If you ADDED or DELETED a file, say full restart instead." ;;
     *)
       return 0 ;;
   esac

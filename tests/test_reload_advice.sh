@@ -23,6 +23,21 @@ expect_contains "ui.xml" "full restart"
 expect_contains "content.xml" "full restart"
 expect_contains "testlab/x4_gunnery_control_testlab/ui/testlab.lua" "launch-x4-test-lab-dev.bat"
 
+# "Click Reload UI" is not actionable on its own: the button lives in Test Lab,
+# which is opened from the gunnery console, which only exists while seated. The
+# owner asked for these steps by name after being told just the button.
+expect_contains "ui/gunnery_control.lua" "sit at a gunnery console"
+expect_contains "ui/gunnery_control.lua" "Test Lab"
+expect_contains "ui/gunnery_control.lua" "runtimeBuild"
+expect_contains "md/x4_gunnery_control.xml" "sit at a gunnery console"
+
+# And "the Test Lab button" is still ambiguous: there are three, on the console
+# action row, the target browser action row and the engaged panel. Which one is
+# clicked decides what session gets parked and therefore what the reload
+# restores, so the advice has to say there is a choice to make.
+expect_contains "ui/gunnery_control.lua" "THREE Test Lab buttons"
+expect_contains "md/x4_gunnery_control.xml" "THREE Test Lab buttons"
+
 # t/ and testlab/ must NOT be advised as a reload: those are the two cases where
 # the strict answer is a restart and the tempting answer is a button.
 for path in t/0001.xml testlab/x4_gunnery_control_testlab/ui/testlab.lua; do
