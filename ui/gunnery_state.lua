@@ -368,6 +368,170 @@ function State.snapshotsForSave(list)
     return result
 end
 
+-- === Session persistence ===
+--
+-- Two paths lose the Lua session and must rebuild it from a value parked in an
+-- MD cue variable: a save/load, and a UI hot-reload. Two engine facts set the
+-- format, both live-confirmed 2026-08-08:
+--
+--   * MD -> Lua via raise_lua_event delivers ONE scalar. A table arrives as
+--     nil, which is why restore has never worked. The payload is one string.
+--   * contextID is reassigned on load (the same ship read 441090 before a save
+--     and 2080707 after), so nothing addressed by contextID survives. path and
+--     group names are stable and are what restore matches on.
+--
+-- A reload is the easy half of the same problem -- contextID is stable within a
+-- session -- so serialising only the stable identifiers serves both, and just
+-- the save/load case notices the re-resolution.
+
+-- Vanilla turret group ids carry surrounding whitespace and positional words,
+-- so there is no delimiter an arbitrary group id provably cannot contain.
+-- Escape the four structural characters rather than betting on one.
+local function escape(value)
+    return (tostring(value):gsub("[%%;,=]", function(c)
+        return string.format("%%%02X", string.byte(c))
+    end))
+end
+
+local function unescape(value)
+    return (value:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
+end
+
+-- records: a list of flat maps. Records join with ";", fields with ",", and
+-- key to value with "=". Not a general serialiser: flat string maps only.
+function State.encode(records)
+    local out = {}
+    for _, record in ipairs(records or {}) do
+        local fields = {}
+        for key, value in pairs(record) do
+            fields[#fields + 1] = escape(key) .. "=" .. escape(value)
+        end
+        -- pairs() order is undefined; sort so one table always encodes to one
+        -- string and the round-trip test can assert on it.
+        table.sort(fields)
+        out[#out + 1] = table.concat(fields, ",")
+    end
+    return table.concat(out, ";")
+end
+
+function State.decode(encoded)
+    local records = {}
+    if type(encoded) ~= "string" or encoded == "" then return records end
+    for chunk in (encoded .. ";"):gmatch("(.-);") do
+        local record = {}
+        for field in (chunk .. ","):gmatch("(.-),") do
+            local key, value = field:match("^(.-)=(.*)$")
+            if key then record[unescape(key)] = unescape(value) end
+        end
+        records[#records + 1] = record
+    end
+    return records
+end
+
+local function flag(value) return value and "1" or "0" end
+
+-- Everything needed to put the player back where they were. Values are all
+-- strings: this round-trips through MD, which has no Lua types.
+function State.saveState(session)
+    if not session then return {} end
+    local records = { {
+        t = "session",
+        phase = session.phase or "console",
+        controlMode = session.controlMode or "",
+        povAnchor = session.povAnchor or "turret",
+        povMode = session.povMode or "manual",
+        autoNextTarget = flag(session.autoNextTarget ~= false),
+        preferAllTurrets = flag(session.preferAllTurrets),
+        shipID = tostring(session.shipID),
+        -- The engine does not hand the soft target back: probed 2026-08-08, it
+        -- read 0 immediately after a reload taken while a target was engaged.
+        -- So the target travels in the payload instead of being re-read.
+        aimTargetID = tostring(session.aimTargetID or ""),
+        targetObjectID = tostring(session.targetObjectID or ""),
+        -- ponytail: a componentID, so it resolves across a reload but not
+        -- across a load. restoreState's caller falls back to the first
+        -- operational member when it does not match anything live.
+        cameraMemberID = tostring(session.cameraMemberID or ""),
+    } }
+    for _, snap in ipairs(State.snapshotsForSave(session.directSnapshots)) do
+        local record = { t = "snapshot" }
+        for key, value in pairs(snap) do
+            record[key] = (type(value) == "boolean") and flag(value) or tostring(value)
+        end
+        records[#records + 1] = record
+    end
+    -- Checked groups travel as path+group only. group.key embeds contextID,
+    -- which is precisely the value that does not survive a load.
+    for _, group in ipairs(State.checkedGroups(session)) do
+        records[#records + 1] = {
+            t = "checked", path = group.path or "", group = group.group or "",
+        }
+    end
+    return records
+end
+
+local function nameKey(path, group)
+    -- "\0" cannot appear in an engine-supplied identifier, and this key never
+    -- leaves this file, so it needs no escaping.
+    return (path or "") .. "\0" .. (group or "")
+end
+
+-- Rebuilds `session` from decode()'s output. liveGroups is the freshly read
+-- group list: every group is located by path+group and takes its contextID and
+-- key from the live entry, never from the payload. Returns true when a session
+-- record was present.
+function State.restoreState(session, records, liveGroups)
+    if not session or not records then return false end
+    local byName = {}
+    for _, group in ipairs(liveGroups or {}) do
+        byName[nameKey(group.path, group.group)] = group
+    end
+    local restored = false
+    session.checkedGroupKeys = session.checkedGroupKeys or {}
+    local snapshots = {}
+    for _, record in ipairs(records) do
+        if record.t == "session" then
+            session.phase = record.phase or "console"
+            session.controlMode = (record.controlMode ~= "" and record.controlMode) or nil
+            session.povAnchor = record.povAnchor or "turret"
+            session.povMode = record.povMode or "manual"
+            session.autoNextTarget = record.autoNextTarget ~= "0"
+            session.preferAllTurrets = record.preferAllTurrets == "1"
+            session.aimTargetID = (record.aimTargetID ~= "" and record.aimTargetID) or nil
+            session.targetObjectID = (record.targetObjectID ~= "" and record.targetObjectID) or nil
+            session.cameraMemberID = (record.cameraMemberID ~= "" and record.cameraMemberID) or nil
+            restored = true
+        elseif record.t == "checked" then
+            local live = byName[nameKey(record.path, record.group)]
+            if live then session.checkedGroupKeys[live.key] = true end
+        elseif record.t == "snapshot" then
+            if record.kind == "single" then
+                -- ponytail: a single-turret snapshot is addressed only by
+                -- componentID, which a load reassigns just like contextID. It
+                -- is carried through unchanged so a reload still restores it;
+                -- across a save/load it will simply not match, same as today.
+                snapshots[#snapshots + 1] = {
+                    kind = "single", shipID = record.shipID,
+                    componentID = record.componentID,
+                    mode = record.mode, armed = record.armed == "1",
+                }
+            else
+                local live = byName[nameKey(record.path, record.group)]
+                if live then
+                    snapshots[#snapshots + 1] = {
+                        kind = record.kind, shipID = record.shipID,
+                        contextID = live.contextID, path = live.path,
+                        group = live.group,
+                        mode = record.mode, armed = record.armed == "1",
+                    }
+                end
+            end
+        end
+    end
+    session.directSnapshots = snapshots
+    return restored
+end
+
 -- Mode and armed commands address a group by contextID+path+group, which
 -- GetUpgradeGroups2 always reports exactly, so the only thing that can make a
 -- group unwritable is having no operational turret left in it.

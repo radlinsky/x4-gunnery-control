@@ -951,9 +951,10 @@ save using `pcall`.
 - Finding: the MD-to-Lua direction carries a string, and vanilla packs two values into one
   by delimiting them and splitting the result in Lua.
 
-  This bounds an existing note in this repository at
-  `ui/gunnery_control.lua:1927-1938`, which records that a table sent through
-  `raise_lua_event` arrives as `nil`. That live-tested result is about tables. It does not
+  This bounds the repository's earlier note that a table sent through
+  `raise_lua_event` arrives as `nil`. That note lived at `ui/gunnery_control.lua:1927-1938`
+  until the string transport replaced it; the surviving summary is now the comment on
+  `persistSession()`. That live-tested result is about tables. It does not
   establish that the channel is unusable, and the shipped delimited-string pattern above is
   the vanilla way to move more than one value through it.
 
@@ -989,6 +990,79 @@ save using `pcall`.
 
   Not established by this test: any length limit on the payload, and whether the same value
   survives save/load rather than only a reload.
+
+### A whole UI session round-trips through MD as one delimited string
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-session-persist-2`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — an engaged turret session reloaded and resumed, on 2026-08-08
+- Finding: the single-string transport scales past a marker to a real payload. A session of
+  11 scalar fields plus 4 turret-group snapshots plus 4 checked-group entries was encoded as
+  one delimited string, stored in an MD cue variable, raised back after `ScheduleReloadUI`,
+  and decoded into a working session. Lua logged `payload type=string` and
+  `restored=true phase=engaged groups=8 snapshots=4`, and the player kept the turret camera,
+  the checked groups and the engaged target across the reload.
+
+  The same run reproduced the table failure it replaces. On the immediately preceding build
+  MD logged a fully populated `State.$active` while Lua logged `payload type=nil` on the same
+  tick, which is the third such reproduction after 2026-08-06 and earlier on 2026-08-08.
+
+  MD needed no knowledge of the format. The cue stores `event.param3` and raises it back
+  verbatim, so encoding stayed entirely on the Lua side.
+
+  Per-group values survived intact, including a non-default `mining` mode on one group, so
+  the round trip is not flattening values to a default.
+
+  Not established by this test: any length limit. This payload was roughly 700 characters and
+  no truncation was observed, but no boundary was probed. Also not established: whether the
+  string survives an actual save/load as opposed to the UI reload measured here. The
+  separately recorded defect that component IDs are reassigned on load was not exercised.
+
+### The engine soft target reads 0 after a UI reload
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-testlab-anyphase-probe-2`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — a probe logging `GetSofttarget2()` at menu-file init, on 2026-08-08
+- Finding: with a target engaged, the mod having called `SetSofttarget` on it and the turrets
+  firing at it, a `ScheduleReloadUI` was taken. The reloaded file logged
+  `PROBE softtarget id=0ULL connection= name=<none>` at init. The soft target was not
+  readable after the reload, so a UI that needs its target back must carry it in its own
+  payload rather than re-reading it from the engine.
+
+  Not established by this test: which action cleared it. Reaching the reload button required
+  opening another menu, and the player was in that menu for several seconds before clicking,
+  so the reload, the intervening menu, and the closing of the mod's own menu are not
+  separated. Only the end state was measured.
+
+  Measured alongside: the external target view camera was NOT cleared. The engine still
+  reported the turret component from `GetExternalTargetViewComponent()` after the reload
+  while Lua state was gone, so the camera and the soft target did not behave the same way.
+
+### A Lua error during a menu file's init removes the mod from the UI until restart
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-testlab-anyphase-probe-1`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — an accidental FFI field-name typo, on 2026-08-08
+- Finding: a menu file's top-level `init()` read a struct field that did not exist on the
+  cdef'd type, `connectionname` instead of `softtargetConnectionName` on
+  `SofttargetDetails2`. The error aborted `init()` after its first log line. Everything after
+  that point never ran: the `Menus` insertion, `Helper.registerMenu`, the DockedMenu redirect
+  hook, and the event registrations.
+
+  The observable result was total. The mod's menu did not appear, and interacting with the
+  chair opened the vanilla menu instead. Because this extension's reload button lives inside
+  its now-unreachable menu, there was no in-game route back and the game had to be restarted.
+
+  The failure was silent in the way that mattered: the log showed `initializing UI` and then
+  stopped, with no Lua traceback among the extension-tagged lines. Diagnosis came from
+  noticing which init log lines were missing, not from an error message.
+
+  Not established by this test: whether a traceback appeared elsewhere in the log under a
+  different tag, and whether the engine retries a failed menu init. `initializing UI` was
+  logged twice in succession, which was not explained.
 
 ### refreshmd re-reads MD from disk, keeps cue variables, and does not re-fire completed cues
 - X4: 9.00

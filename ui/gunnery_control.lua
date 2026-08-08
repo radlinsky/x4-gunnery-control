@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-07-prefer-target-1"
+local runtimeBuild = "2026-08-08-session-persist-2"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -301,10 +301,16 @@ local function setArmed(group, armed)
     else C.SetWeaponArmed(group.componentID, armed) end
 end
 
-local function persistSnapshot(snapshots)
-    -- MD bridge keeps its own savegame-safe record. This event is harmless if a
-    -- UI reload occurs before MD is initialized.
-    AddUITriggeredEvent("X4GunneryControl", "session_begin", State.snapshotsForSave(snapshots))
+-- Parks the whole session in MD as ONE STRING. It has to be a string: MD holds
+-- the value fine either way, but the return leg (raise_lua_event) carries a
+-- single scalar and a table arrives as nil, which is why restore never worked.
+-- MD stores event.param3 verbatim and raises it back untouched, so the format
+-- is entirely this file's business and the MD script needs no knowledge of it.
+local function persistSession()
+    if not session then return end
+    -- Harmless if a UI reload happens before MD is initialized.
+    AddUITriggeredEvent("X4GunneryControl", "session_begin",
+        State.encode(State.saveState(session)))
 end
 local function clearSnapshot()
     AddUITriggeredEvent("X4GunneryControl", "session_end", {})
@@ -740,7 +746,6 @@ local function engageTarget(targetID)
         end
         local snaps = State.beginEngaged(session, orderable, "direct")
         for _, s in ipairs(snaps) do log("snapshot took " .. tostring(s.group or s.componentID) .. " mode=" .. tostring(s.mode) .. " armed=" .. tostring(s.armed)) end
-        persistSnapshot(snaps)
         for _, group in ipairs(orderable) do setMode(group, "autoassist"); setArmed(group, true) end
     end
     -- Record the chosen element and its root object. aimTargetID may be a
@@ -758,6 +763,10 @@ local function engageTarget(targetID)
     -- restore the snapshot rather than leaving autoassist armed invisibly.
     session.engagePending = true
     session.engagePendingSince = GetCurRealTime()
+    -- Persist AFTER aimTargetID/targetObjectID are set, not alongside the
+    -- snapshot: the engine drops the soft target across a reload, so a payload
+    -- written before this point would come back without a target.
+    persistSession()
     logSession("engagement transition started")
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -1219,6 +1228,28 @@ local function updateAimTarget()
     end
 end
 
+-- Opening the Test Lab closes this menu, and menu.cleanup() treats an unplanned
+-- close as an orphaned session: it queues autoHideAt, the watchdog restores the
+-- directed group, and the reopen discards the session at chair ingress. That
+-- destroys an engaged session the moment the player reaches for a reload button.
+-- Reuse the Map suspend/resume route instead — it is the one path already proven
+-- to hand a live session across an external menu, and its `resuming` branch in
+-- onShowMenu is also what re-enters the turret camera on the way back.
+-- ponytail: dev-only, and it leaks resumePending if the Test Lab never reopens
+-- this menu. Give it the watchdog treatment if the Test Lab ever grows an exit
+-- that does not come back here.
+local function openTestLab()
+    if session then
+        -- The reload buttons live behind this menu, and a reload wipes all Lua
+        -- state. Park the session now so there is something to come back to,
+        -- whatever phase the player reloads from.
+        persistSession()
+        transitionLifecycle(State.lifecycle.reopening, "Test Lab opened")
+        resumePending = true
+    end
+    testLabCallbacks.open()
+end
+
 function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
@@ -1418,6 +1449,11 @@ function menu.display()
                 clearPreferAllTurrets("release button", true); menu.display()
             end
         end
+        if testLabCallbacks and testLabCallbacks.open then
+            local testLabRow = controls:addRow("testlab", {})
+            testLabRow[1]:setColSpan(2):createButton({}):setText(text(32))
+            testLabRow[1].handlers.onClick = openTestLab
+        end
         -- Auto-size frame height like the old direct panel (contract grep).
         viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
         viewFrame:display()
@@ -1526,6 +1562,11 @@ function menu.display()
         local actions = tableView:addRow("actions", {})
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
         actions[1].handlers.onClick = function() menu.display() end
+        -- Columns 4-5 are the only free pair in this 8-column row.
+        if testLabCallbacks and testLabCallbacks.open then
+            actions[4]:setColSpan(2):createButton({}):setText(text(32))
+            actions[4].handlers.onClick = openTestLab
+        end
         actions[6]:setColSpan(3):createButton({}):setText(text(54))
         actions[6].handlers.onClick = function() returnToConsole("target browser back button") end
         frame:display()
@@ -1611,7 +1652,7 @@ function menu.display()
         actions[5]:setColSpan(2):createButton({}):setText(text(15))
         actions[5].handlers.onClick = function() refresh(); menu.display() end
         actions[7]:createButton({}):setText(text(32))
-        actions[7].handlers.onClick = function() testLabCallbacks.open() end
+        actions[7].handlers.onClick = openTestLab
         actions[8]:createButton({}):setText(text(14)); actions[8].handlers.onClick = function() leaveChair("get up button") end
     else
         -- 8 cols: [1-2] Auto-engage [3-4] Direct-control [5-6] Refresh [7-8] GetUp
@@ -1921,88 +1962,61 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
+    -- One handler for both a save/load and a UI hot-reload. The payload carries
+    -- only stable identifiers (path + group names), so the reload case never
+    -- notices the contextID re-resolution that the load case depends on.
     local function onRestoreSession(_, payload)
-        -- Do not resume a camera session after loading. Reconstruct only enough
-        -- state to return the pre-Engage mode/armed settings, then clear MD state.
-        --
-        -- KNOWN BROKEN, and everything below this point is currently
-        -- unreachable. raise_lua_event carries one scalar (a string, a number,
-        -- or a single component object); the snapshot LIST arrives here as nil.
-        -- Live-confirmed 2026-08-06: MD logged a fully populated State.$active
-        -- and this handler logged "payload type=nil" on the same tick. No
-        -- shipped 9.00 MD script passes a table through raise_lua_event either.
-        -- A second defect waits behind it: component IDs are reassigned on load
-        -- (the same ship was 441090 before a save and 2080707 after), so the
-        -- stored shipID/contextID would not match even once transport works.
-        -- The path/group names ARE stable and are what a fix should match on.
-        -- Kept, with the key handling below, because both are correct and will
-        -- be needed the moment transport is fixed. See the save/load restore
-        -- issue before touching this.
-        log("RestoreSession event received; payload type=" .. type(payload)
-            .. "; tostring=" .. tostring(payload))
-        if type(payload) ~= "table" then
-            log("RestoreSession: payload is not a table, so nothing was restored."
-                .. " Expected while save/load restore is broken; turret groups"
-                .. " stay as they were when the game was saved.")
+        log("RestoreSession event received; payload type=" .. type(payload))
+        local records = State.decode(payload)
+        if #records == 0 then
+            log("RestoreSession: empty payload; nothing to restore")
             return
         end
-
-        -- MD->Lua key-prefix diagnostic: the engine PREPENDS $ to every Lua
-        -- string key during Lua->MD conversion (live-tested 2026-08-04). When
-        -- State.$active is returned via raise_lua_event the keys may therefore
-        -- arrive as "$shipID", "$kind", etc. This helper reads either form so the
-        -- handler works regardless of whether the $ survives the round-trip.
-        local function field(t, name)
-            if t[name] ~= nil then return t[name] end
-            return t["$" .. name]
+        -- Groups are addressed by contextID+path+group, and only a live ship
+        -- can supply a current contextID. Seated is therefore the one state in
+        -- which anything can be resolved at all.
+        if not isInGunnerChair() then
+            log("RestoreSession: " .. #records .. " record(s) received, but the player"
+                .. " is not in a gunner chair, so no live group list exists to"
+                .. " re-resolve contextIDs against. Turret modes stay as saved.")
+            return
         end
-
-        -- Normalise one snapshot table (plain or $-prefixed keys) into a plain-
-        -- keyed copy that the rest of the Lua code can use without further guards.
-        local function normaliseSnap(s)
-            return {
-                shipID      = field(s, "shipID"),
-                kind        = field(s, "kind"),
-                mode        = field(s, "mode"),
-                armed       = field(s, "armed"),
-                componentID = field(s, "componentID"),
-                contextID   = field(s, "contextID"),
-                path        = field(s, "path"),
-                group       = field(s, "group"),
-            }
-        end
-
-        -- Accept both a list ([1] present) and a legacy single snapshot (.shipID
-        -- or .$shipID, no [1]). Wrap the legacy form so restoreDirect sees a list.
-        local raw
-        if payload[1] ~= nil then
-            raw = payload
-        elseif field(payload, "shipID") ~= nil then
-            raw = { payload }
-        else
-            log("RestoreSession: payload has no snapshots; skipping restore")
-            return  -- empty or unrecognised table
-        end
-        local snapshots = {}
-        for _, s in ipairs(raw) do snapshots[#snapshots + 1] = normaliseSnap(s) end
-        if #snapshots == 0 then return end
-
-        -- Diagnostic: report parse result and which key form was present. The
-        -- legacy single snapshot is wrapped into raw[1] above, so this one test
-        -- covers both arrival shapes.
-        local prefixed = raw[1]["$shipID"] ~= nil
-        log("RestoreSession: " .. tostring(#snapshots)
-            .. " snapshot(s) parsed; keys were "
-            .. (prefixed and "$-prefixed (MD->Lua adds $)" or "plain"))
-
         sessionEpoch = sessionEpoch + 1
-        session = State.newSession(id(snapshots[1].shipID), "")
-        refresh()
-        -- Assign the normalised list so restoreDirect can loop over every group.
-        session.directSnapshots = snapshots
-        restoreDirect("savegame recovery")
-        session = nil
-        sessionEpoch = sessionEpoch + 1
+        session = State.newSession(playerShip(), "gunnercontrol")
+        refresh()  -- populates session.groups with LIVE contextIDs
+        local ok = State.restoreState(session, records, session.groups)
+        log("RestoreSession: restored=" .. tostring(ok)
+            .. " phase=" .. tostring(session.phase)
+            .. " groups=" .. #session.groups
+            .. " snapshots=" .. #(session.directSnapshots or {}))
+        if session.phase ~= "engaged" then
+            -- Nothing was overridden, or the payload predates engagement.
+            -- Leave the player on the console with the same groups checked.
+            State.returnToConsole(session)
+            return
+        end
+        -- Re-point the soft target: the engine does not keep it (probed
+        -- 2026-08-08). Without this the turrets have nothing to shoot at.
+        local target = id(session.aimTargetID)
+        if target ~= 0 and not C.SetSofttarget(target, "") then
+            log("RestoreSession: could not re-point the soft target " .. tostring(target))
+        end
+        local member = cameraMember() or State.firstOperationalMember(State.checkedGroups(session))
+        if member then session.cameraMemberID = member.componentID end
+        if not member or not enterCamera(member) then
+            log("RestoreSession: no camera member available; returning to console")
+            State.returnToConsole(session)
+            return
+        end
+        applyPov()
+        -- The menu is not shown yet: the DockedMenu redirect opens it a tick
+        -- later, and onShowMenu discards any session it did not create itself
+        -- ("stale session at chair ingress"). Hand it over through the same
+        -- resume route the Map and Test Lab paths use, or the restore is
+        -- undone milliseconds after it succeeds.
+        transitionLifecycle(State.lifecycle.reopening, "restored session awaiting its menu")
+        resumePending = true
+        if menu.shown then menu.display() end
     end
     -- Exposed for unit tests only: lets tests drive the RestoreSession path with
     -- arbitrary payload shapes (plain-key and $-prefixed) without a live event.

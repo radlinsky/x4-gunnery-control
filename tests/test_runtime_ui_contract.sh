@@ -79,8 +79,11 @@ grep -Fq 'session.controlMode' "$main"
 grep -Fq 'State.beginEngaged' "$main"
 # Snapshot list; single session.directSnapshot is now session.directSnapshots.
 grep -Fq 'directSnapshots' "$main"
-# MD passthrough for save: list form.
-grep -Fq 'State.snapshotsForSave' "$main"
+# MD passthrough for save: ONE STRING, not a table. raise_lua_event carries a
+# single scalar on the way back, so a table payload arrives as nil and nothing
+# is ever restored. snapshotsForSave still runs, but inside State.saveState.
+grep -Fq 'State.encode(State.saveState(session))' "$main"
+grep -Fq 'State.decode(payload)' "$main"
 # Ensure the old single-phase strings are gone — any hit is a residual bug.
 if grep -Fq 'session.phase == "watch"' "$main"; then
   echo 'residual session.phase == "watch" found in main file' >&2

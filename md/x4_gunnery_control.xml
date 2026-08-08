@@ -26,9 +26,12 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'state_request'"/>
           </conditions>
           <actions>
-            <!-- Diagnostic: log the raw MD table so a live run reveals whether
-                 keys are plain or $-prefixed on the MD side. This settles the
-                 MD->Lua $ question once a save/load is performed in-game.
+            <!-- State.$active is ONE STRING encoded by the Lua side, not a
+                 table. raise_lua_event carries a single scalar, so a table
+                 arrives in Lua as nil and nothing is ever restored. That was
+                 the save/load bug. It is stored and raised verbatim, so the
+                 format stays the Lua side's business and this cue needs no
+                 knowledge of it. Live-confirmed working 2026-08-08.
                  The @ and the do_if are both required: State.$active does not
                  exist until a Direct-control session has run, and referencing a
                  missing variable raises "Property lookup failed" into the log on

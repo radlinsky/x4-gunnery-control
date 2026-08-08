@@ -386,4 +386,74 @@ do
         "three-space whitespace-only identifier must return nil")
 end
 
+-- Session persistence: encode/decode/saveState/restoreState.
+--
+-- The hostile group id below is deliberate. Vanilla pads group attributes with
+-- whitespace, and the payload's own structural characters (; , = %) must not be
+-- able to escape their field, or one odd group id silently corrupts the whole
+-- restore.
+do
+    local nasty = "  group_front_up_left ;weird,=key%stuff "
+
+    -- Round trip through the string transport, hostile id included.
+    local encoded = State.encode({
+        { t = "session", phase = "engaged" },
+        { t = "checked", path = "../", group = nasty },
+    })
+    assert(not encoded:find("[;,=]%s*weird"), "raw delimiters must not survive escaping")
+    local decoded = State.decode(encoded)
+    eq(#decoded, 2, "round trip must return both records")
+    eq(decoded[1].phase, "engaged", "session field must survive the round trip")
+    eq(decoded[2].group, nasty, "a group id containing ; , = and % must survive byte-exact")
+    eq(#State.decode(""), 0, "an empty payload decodes to no records")
+    eq(#State.decode(nil), 0, "a nil payload decodes to no records")
+
+    -- restoreState must match on path+group and take contextID from the live
+    -- group list, because a load reassigns every contextID.
+    local session = State.newSession("443760", "gunnercontrol")
+    session.groups = {
+        { key = "group:NEW:../:" .. nasty, contextID = "NEW", path = "../", group = nasty },
+        { key = "group:NEW:../:other", contextID = "NEW", path = "../", group = "other" },
+    }
+    session.checkedGroupKeys[session.groups[1].key] = true
+    session.directSnapshots = {
+        { kind = "group", shipID = "443760", contextID = "OLD", path = "../",
+          group = nasty, mode = "attackenemies", armed = true },
+    }
+    session.phase, session.controlMode = "engaged", "direct"
+    session.aimTargetID, session.preferAllTurrets = "999", true
+
+    local reloaded = State.newSession("443760", "gunnercontrol")
+    local ok = State.restoreState(reloaded, State.decode(State.encode(State.saveState(session))),
+        session.groups)
+    assert(ok, "restoreState must report that a session record was found")
+    eq(reloaded.phase, "engaged", "phase must be restored")
+    eq(reloaded.controlMode, "direct", "controlMode must be restored")
+    eq(reloaded.aimTargetID, "999", "the target must be restored, since the engine drops it")
+    eq(reloaded.preferAllTurrets, true, "preferAllTurrets must be restored")
+    eq(reloaded.checkedGroupKeys["group:NEW:../:" .. nasty], true,
+        "a checked group must be re-keyed onto the live contextID")
+    eq(#reloaded.directSnapshots, 1, "the snapshot must be restored")
+    eq(reloaded.directSnapshots[1].contextID, "NEW",
+        "the snapshot must take the LIVE contextID, never the saved one")
+    eq(reloaded.directSnapshots[1].mode, "attackenemies", "snapshot mode must survive")
+    eq(reloaded.directSnapshots[1].armed, true, "snapshot armed must survive as a boolean")
+
+    -- A group that no longer exists must be dropped, not written back.
+    local orphaned = State.newSession("443760", "gunnercontrol")
+    State.restoreState(orphaned, State.decode(State.encode(State.saveState(session))), {})
+    eq(#orphaned.directSnapshots, 0, "a snapshot with no live group must be dropped")
+    eq(next(orphaned.checkedGroupKeys), nil, "a checked group with no live group must be dropped")
+
+    -- The legacy single-snapshot fallback in snapshotsForSave still works.
+    local legacy = State.newSession("443760", "gunnercontrol")
+    legacy.directSnapshots = { kind = "single", shipID = "443760",
+        componentID = "555", mode = "defend", armed = false }
+    local legacyBack = State.newSession("443760", "gunnercontrol")
+    State.restoreState(legacyBack, State.decode(State.encode(State.saveState(legacy))), {})
+    eq(#legacyBack.directSnapshots, 1, "a legacy single snapshot must still round trip")
+    eq(legacyBack.directSnapshots[1].componentID, "555", "the legacy componentID must survive")
+    eq(legacyBack.directSnapshots[1].armed, false, "legacy armed=false must survive")
+end
+
 print("gunnery_state tests passed")
