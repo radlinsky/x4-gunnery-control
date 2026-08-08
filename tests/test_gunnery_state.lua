@@ -501,4 +501,49 @@ do
     eq(next(other.checkedGroupKeys), nil, "a refused payload must check no groups")
 end
 
+-- The POV turret. cameraMemberID is a componentID, so a load reassigns it; the
+-- turret's group name and its position in that group do not change.
+do
+    local function shipWithTurrets(shipID, contextID, turretIDs)
+        local session = State.newSession(shipID, "gunnercontrol")
+        session.shipName = "Behemoth"
+        local members = {}
+        for _, componentID in ipairs(turretIDs) do
+            members[#members + 1] = { componentID = componentID, operational = true,
+                cameraSupported = true }
+        end
+        session.groups = { { key = "group:" .. contextID .. ":../:aft", contextID = contextID,
+            path = "../", group = "aft", members = members } }
+        session.checkedGroupKeys[session.groups[1].key] = true
+        session.phase, session.controlMode = "engaged", "direct"
+        return session
+    end
+
+    local saved = shipWithTurrets("441090", "OLD", { "801", "802", "803" })
+    saved.cameraMemberID = "802"  -- the middle turret, not the first
+    local payload = State.encode(State.saveState(saved))
+
+    -- A reload keeps the ids; the same barrel must come back either way.
+    local reloaded = shipWithTurrets("441090", "OLD", { "801", "802", "803" })
+    State.restoreState(reloaded, State.decode(payload), saved.groups)
+    eq(reloaded.cameraMemberID, "802", "a reload must return to the same turret")
+
+    -- A load reassigns every turret id. Position within the group is what
+    -- carries over, so the POV must land on the second turret again and not on
+    -- whichever one happens to be listed first.
+    local loaded = shipWithTurrets("2080707", "NEW", { "901", "902", "903" })
+    State.restoreState(loaded, State.decode(payload), loaded.groups)
+    eq(loaded.cameraMemberID, "902", "a load must return to the same turret position")
+
+    -- firstCameraMember must hand back the member table, not the (key, id) pair
+    -- firstOperationalMember returns: enterCamera reads cameraSupported off it.
+    local member = State.firstCameraMember(loaded.groups)
+    eq(type(member), "table", "firstCameraMember must return a member table")
+    eq(member.componentID, "901", "firstCameraMember must return the first usable turret")
+    eq(State.firstCameraMember({ { members = {
+        { componentID = "1", operational = true, cameraSupported = false },
+        { componentID = "2", operational = false, cameraSupported = true },
+    } } }), nil, "a turret that cannot host the camera is not a candidate")
+end
+
 print("gunnery_state tests passed")

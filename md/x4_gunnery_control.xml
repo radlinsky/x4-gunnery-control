@@ -13,12 +13,40 @@
             <set_value name="State.$active" exact="event.param3"/>
           </actions>
         </cue>
+        <!-- PROBE 2026-08-08, remove or promote once read. The string payload
+             cannot carry the engaged target: a load reassigns every component
+             id, so the digits in the string point at some other object
+             afterwards and the target is dropped instead of restored.
+
+             An MD variable holding a real component is the engine's own
+             persistent handle, so the question is whether it survives a
+             save/load and comes back to Lua as a usable id. Ids arriving here
+             as datatype.component is already live-tested (see CutsceneAim
+             below); the rest is not, hence the idcode on both legs. The same
+             idcode at store and at restore means the same object came back.
+             Kept apart from BeginSession deliberately: if this fails it must
+             not take the working string payload down with it. -->
+        <cue name="SetTarget" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'session_target'"/>
+          </conditions>
+          <actions>
+            <set_value name="State.$target" exact="event.param3"/>
+            <do_if value="typeof State.$target != datatype.component and State.$target">
+              <set_value name="State.$target" exact="component.{State.$target}"/>
+            </do_if>
+            <debug_text text="'[X4GC] SetTarget: typeof=' + (typeof State.$target)
+                              + ' idcode=' + (@State.$target.idcode)
+                              + ' name=' + (@State.$target.knownname)" chance="100"/>
+          </actions>
+        </cue>
         <cue name="EndSession" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'session_end'"/>
           </conditions>
           <actions>
             <remove_value name="State.$active"/>
+            <remove_value name="State.$target"/>
           </actions>
         </cue>
         <cue name="RequestState" instantiate="true">
@@ -37,6 +65,19 @@
                  missing variable raises "Property lookup failed" into the log on
                  every load for every player. -->
             <do_if value="@State.$active">
+              <!-- PROBE 2026-08-08: raised BEFORE the session so Lua has the
+                   target stashed by the time the session lands. A component
+                   that did not survive the load reads as null here and simply
+                   is not raised, which is itself the answer. -->
+              <do_if value="@State.$target">
+                <debug_text text="'[X4GC] RequestState: target typeof=' + (typeof State.$target)
+                                  + ' idcode=' + (@State.$target.idcode)
+                                  + ' name=' + (@State.$target.knownname)" chance="100"/>
+                <raise_lua_event name="'X4GunneryControl.RestoreTarget'" param="State.$target"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC] RequestState: no surviving target component'" chance="100"/>
+              </do_else>
               <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
               <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
             </do_if>

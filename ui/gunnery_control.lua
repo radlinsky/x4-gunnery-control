@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-session-persist-3"
+local runtimeBuild = "2026-08-08-target-probe-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -320,6 +320,14 @@ local function persistSession()
     -- Harmless if a UI reload happens before MD is initialized.
     AddUITriggeredEvent("X4GunneryControl", "session_begin",
         State.encode(State.saveState(session)))
+    -- PROBE 2026-08-08, remove or promote once read. The target cannot travel
+    -- in the string: a load reassigns every id, so those digits address some
+    -- other object afterwards and restoreState drops them. Sent separately as a
+    -- bare id, which MD converts to a real component (live-tested 2026-08-04),
+    -- to find out whether that reference survives a save/load.
+    if session.aimTargetID then
+        AddUITriggeredEvent("X4GunneryControl", "session_target", session.aimTargetID)
+    end
 end
 local function clearSnapshot()
     AddUITriggeredEvent("X4GunneryControl", "session_end", {})
@@ -1977,6 +1985,27 @@ local function init()
             end, false, getElapsedTime() + 0.05)
         end
     end)
+    -- PROBE 2026-08-08, remove or promote once read. MD raises this just before
+    -- RestoreSession, carrying the engaged target as a component it has held
+    -- across the save. Log-and-stash only: what the string payload does today is
+    -- deliberately left alone until the log says this route actually works.
+    local restoredTargetID = nil
+    local function onRestoreTarget(_, payload)
+        restoredTargetID = payload
+        -- pcall because a probe is throwaway code on a registered event: an FFI
+        -- slip in one took init() down mid-registration earlier in this work,
+        -- which silently removes the whole mod from the UI until a restart.
+        local ok, detail = pcall(function()
+            local resolved = payload ~= nil and id(payload) or 0
+            return "asID=" .. tostring(resolved) .. " operational="
+                .. tostring(resolved ~= 0 and C.IsComponentOperational(resolved))
+        end)
+        log("RestoreTarget PROBE: type=" .. type(payload)
+            .. " value=" .. tostring(payload) .. " " .. tostring(detail))
+        if not ok then log("RestoreTarget PROBE: resolution failed, see above") end
+    end
+    RegisterEvent("X4GunneryControl.RestoreTarget", onRestoreTarget)
+
     -- One handler for both a save/load and a UI hot-reload. The payload carries
     -- only stable identifiers (path + group names), so the reload case never
     -- notices the contextID re-resolution that the load case depends on.
@@ -2008,6 +2037,12 @@ local function init()
             .. " phase=" .. tostring(session.phase)
             .. " groups=" .. #session.groups
             .. " snapshots=" .. #(session.directSnapshots or {}))
+        -- PROBE 2026-08-08: the two routes side by side. On a reload they must
+        -- agree; on a load the payload side is nil by design and the probe side
+        -- is the whole question.
+        log("RestoreTarget PROBE comparison: fromPayload=" .. tostring(session.aimTargetID)
+            .. " fromMD=" .. tostring(restoredTargetID))
+        restoredTargetID = nil
         if not ok then
             -- Turret group names are identical across every ship of a class, so
             -- a payload from another ship would match and write its saved modes
@@ -2028,7 +2063,11 @@ local function init()
         if target ~= 0 and not C.SetSofttarget(target, "") then
             log("RestoreSession: could not re-point the soft target " .. tostring(target))
         end
-        local member = cameraMember() or State.firstOperationalMember(State.checkedGroups(session))
+        -- firstOperationalMember hands back a (key, componentID) pair for
+        -- selection bookkeeping, not a member table, so enterCamera saw no
+        -- cameraSupported flag and this fallback failed every time it was
+        -- reached -- which is precisely the load case.
+        local member = cameraMember() or State.firstCameraMember(State.checkedGroups(session))
         if member then session.cameraMemberID = member.componentID end
         if not member or not enterCamera(member) then
             log("RestoreSession: no camera member available; returning to console")

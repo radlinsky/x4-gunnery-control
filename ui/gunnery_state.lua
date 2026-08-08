@@ -177,6 +177,29 @@ function State.firstOperationalMember(groups)
     end
 end
 
+-- The member table itself, not the (key, componentID) pair above. Camera entry
+-- reads the entry's own cameraSupported flag, so it needs the table.
+function State.firstCameraMember(groups)
+    for _, group in ipairs(groups or {}) do
+        for _, member in ipairs(group.members or {}) do
+            if member.operational and member.cameraSupported then return member end
+        end
+    end
+end
+
+-- Where a turret sits, as group name plus position within that group. Both
+-- survive a save/load; the componentID that normally addresses it does not.
+function State.findMemberLocation(session, componentID)
+    if not componentID then return nil end
+    for _, group in ipairs(session and session.groups or {}) do
+        for index, member in ipairs(group.members or {}) do
+            if State.normID(member.componentID) == State.normID(componentID) then
+                return group, index
+            end
+        end
+    end
+end
+
 function State.retainSelection(session, groups)
     session.groups = groups or {}
     -- Prune checked keys whose group no longer exists (turrets can be destroyed).
@@ -434,6 +457,7 @@ local function flag(value) return value and "1" or "0" end
 -- strings: this round-trips through MD, which has no Lua types.
 function State.saveState(session)
     if not session then return {} end
+    local camGroup, camIndex = State.findMemberLocation(session, session.cameraMemberID)
     local records = { {
         t = "session",
         phase = session.phase or "console",
@@ -451,10 +475,14 @@ function State.saveState(session)
         -- So the target travels in the payload instead of being re-read.
         aimTargetID = tostring(session.aimTargetID or ""),
         targetObjectID = tostring(session.targetObjectID or ""),
-        -- ponytail: a componentID, so it resolves across a reload but not
-        -- across a load. restoreState's caller falls back to the first
-        -- operational member when it does not match anything live.
+        -- Only usable across a reload; a load reassigns it. The three fields
+        -- below say the same thing in terms that do survive a load -- which
+        -- turret of which group -- so the POV comes back to the same barrel
+        -- rather than to whichever turret happens to be listed first.
         cameraMemberID = tostring(session.cameraMemberID or ""),
+        camPath = camGroup and camGroup.path or "",
+        camGroup = camGroup and camGroup.group or "",
+        camIndex = tostring(camIndex or ""),
     } }
     for _, snap in ipairs(State.snapshotsForSave(session.directSnapshots)) do
         local record = { t = "snapshot" }
@@ -557,6 +585,12 @@ function State.restoreState(session, records, liveGroups)
             end
         end
     end
+    -- Last, so it wins over the componentID read in the loop: group name plus
+    -- position is the only form of "which turret" that outlives a load.
+    local camLive = byName[nameKey(head.camPath, head.camGroup)]
+    local camIndex = tonumber(head.camIndex or "")
+    local camMember = camLive and camIndex and (camLive.members or {})[camIndex]
+    if camMember then session.cameraMemberID = camMember.componentID end
     session.directSnapshots = snapshots
     return restored
 end
