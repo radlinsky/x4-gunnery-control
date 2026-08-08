@@ -274,12 +274,10 @@ end
 local function setMode(group, mode)
     if group.kind == "group" then C.SetTurretGroupMode2(session.shipID, group.contextID, group.path, group.group, mode)
     else C.SetWeaponMode(group.componentID, mode) end
-    log("setMode wrote " .. tostring(group.group or group.componentID) .. " -> " .. tostring(mode))
 end
 local function setArmed(group, armed)
     if group.kind == "group" then C.SetTurretGroupArmed(session.shipID, group.contextID, group.path, group.group, armed)
     else C.SetWeaponArmed(group.componentID, armed) end
-    log("setArmed wrote " .. tostring(group.group or group.componentID) .. " -> " .. tostring(armed))
 end
 
 local function persistSnapshot(snapshots)
@@ -408,7 +406,11 @@ local function restoreDirect(reason)
         refresh()
         for _, snapshot in ipairs(snapshots) do
             local found = findSnapshotGroup(snapshot)
-            log("post-restore readback " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
+            local modeMismatch = found and found.mode ~= snapshot.mode
+            local armedMismatch = found and found.armed ~= snapshot.armed
+            if not found or modeMismatch or armedMismatch then
+                log("post-restore readback MISMATCH " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
+            end
         end
         if session.phase ~= "console" then return end
         menu.display()
@@ -650,16 +652,6 @@ local function startAutoEngage(groups)
     return true
 end
 
--- readTargetCandidates cache: a 1 s TTL is long enough that four 0.25 s repaints
--- share a single sector sweep, but short enough that the target browser list
--- feels live when the player is actively browsing it.  Callers that must see
--- live data pass bypassCache=true (target browser display, cycleTarget,
--- chooseAimTarget), so there are no manual invalidation points.  The cache
--- auto-invalidates whenever sessionEpoch changes (i.e. the session is
--- discarded).
-local targetCandidatesTime = -math.huge
-local targetCandidatesEpoch = -1
-
 local function startTargetSelection(groups)
     -- Refuse when no checked group can be mutated.
     local anyMutable = false
@@ -679,7 +671,6 @@ local function startTargetSelection(groups)
     if not member then return false end
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
-    session.targetCandidates = {}
     -- Losing the camera must not cost the player target selection: log it and
     -- keep the browser open instead of bouncing back to the console.
     local cameraOptions = { onFailure = function() log("target selection continues without a camera") end }
@@ -694,7 +685,6 @@ end
 local function openTargetBrowser()
     if not session or #(session.directSnapshots or {}) == 0 then return false end
     session.phase = "target_select"
-    session.targetCandidates = {}
     menu.display()
     return true
 end
@@ -817,19 +807,7 @@ isEligibleEngagementTarget = function(component)
     return State.isEngagementTargetAllowed(session and session.shipID, object), object
 end
 
-local function readTargetCandidates(bypassCache)
-    local now = getElapsedTime()
-    if not bypassCache
-        and targetCandidatesEpoch == sessionEpoch
-        and now - targetCandidatesTime < 1
-        -- An empty result is cached too: a sector full of ineligible objects is
-        -- the most expensive sweep there is, and re-running it every repaint is
-        -- exactly the cost this cache exists to avoid.
-        and session and session.targetCandidates then
-        return session.targetCandidates
-    end
-    targetCandidatesTime = now
-    targetCandidatesEpoch = sessionEpoch
+local function readTargetCandidates()
     local candidates, seen = {}, {}
     local sector = GetPlayerContextByClass("sector")
     local radarRange = tonumber(componentData(session.shipID, "maxradarrange")) or 40000
@@ -870,13 +848,33 @@ local function readTargetCandidates(bypassCache)
         end
         return a.name < b.name
     end)
-    session.targetCandidates = candidates
     return candidates
+end
+
+-- Is there anything to cycle to? The only reader of a memoised sweep, and the
+-- reason readTargetCandidates() itself stays always-fresh: every other caller
+-- (browser, cycleTarget, chooseAimTarget) wants live data. A 1 s TTL lets the
+-- four 0.25 s repaints that draw the cycle-target buttons share one sector
+-- sweep. An empty result is memoised too: a sector full of ineligible objects
+-- is the most expensive sweep there is, and repeating it per repaint is exactly
+-- the cost this exists to avoid. Auto-invalidates when sessionEpoch changes.
+local targetCandidatesTime = -math.huge
+local targetCandidatesEpoch = -1
+local targetCandidatesCount = 0
+local function hasMultipleTargets()
+    local now = getElapsedTime()
+    if targetCandidatesEpoch == sessionEpoch and now - targetCandidatesTime < 1 then
+        return targetCandidatesCount > 1
+    end
+    targetCandidatesTime = now
+    targetCandidatesEpoch = sessionEpoch
+    targetCandidatesCount = #readTargetCandidates()
+    return targetCandidatesCount > 1
 end
 
 cycleTarget = function(delta)
     if not session or session.controlMode ~= "direct" then return false end
-    local entry = State.cycleEntry(readTargetCandidates(true), session.targetObjectID, delta)
+    local entry = State.cycleEntry(readTargetCandidates(), session.targetObjectID, delta)
     if not entry then return false end
     return engageTarget(entry.componentID)
 end
@@ -1124,10 +1122,7 @@ end
 -- is the best available target. Returns nil when nothing qualifies.
 local function chooseAimTarget()
     if not session then return nil end
-    -- Always sweep fresh: updateAimTarget is already throttled to 5 s and
-    -- onDirectTargetLost is rare, so neither wants a cached list, and forcing
-    -- here means no caller has to remember to invalidate.
-    local candidates = readTargetCandidates(true)
+    local candidates = readTargetCandidates()
     for _, c in ipairs(candidates) do
         if C.IsComponentOperational(id(c.componentID)) then
             return c.componentID
@@ -1368,7 +1363,7 @@ function menu.display()
                 restoreDirect("compact cease button")
                 returnToConsole("engagement ceased")
             end
-            local canCycleTarget = #readTargetCandidates() > 1
+            local canCycleTarget = hasMultipleTargets()
             local pRow4 = controls:addRow("cycle_target", {})
             -- Next Target (id 75)
             pRow4[1]:createButton({ active = canCycleTarget }):setText(text(75))
@@ -1395,7 +1390,7 @@ function menu.display()
             overrideRow[1].handlers.onClick = function()
                 applyPreferAllTurrets(); menu.display()
             end
-            -- Release All Turrets (id 82)
+            -- Release Other Turrets (id 82)
             overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
             overrideRow[2].handlers.onClick = function()
                 clearPreferAllTurrets("release button", true); menu.display()
@@ -1493,7 +1488,7 @@ function menu.display()
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(3):createText(text(37)); header[4]:createText(text(38))
         header[5]:createText(text(49)); header[6]:createText(text(50)); header[7]:setColSpan(2):createText("")
-        local candidates = readTargetCandidates(true)
+        local candidates = readTargetCandidates()
         for _, candidate in ipairs(candidates) do
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(3):createText(candidate.name ~= "" and candidate.name or text(51))
@@ -1508,7 +1503,7 @@ function menu.display()
         end
         local actions = tableView:addRow("actions", {})
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
-        actions[1].handlers.onClick = function() session.targetCandidates = {}; menu.display() end
+        actions[1].handlers.onClick = function() menu.display() end
         actions[6]:setColSpan(3):createButton({}):setText(text(54))
         actions[6].handlers.onClick = function() returnToConsole("target browser back button") end
         frame:display()

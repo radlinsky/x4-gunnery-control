@@ -1030,7 +1030,6 @@ sess29.cameraMemberID = 27
 -- Candidate 98 is nearer (100m) so it will be first sorted; start at 98.
 sess29.targetObjectID = 98
 sess29.aimTargetID = 98
-sess29.targetCandidates = {}
 -- cycleTarget(1) should move to the second candidate (99).
 X4GunneryControlAPI.cycleTarget(1)
 local newTarget = API.getSession().targetObjectID
@@ -1085,8 +1084,8 @@ assert(povButton(58) and povButton(58).active == true,
 -- ── 32. Next/Previous Target grey out with nothing to cycle to ───────────────
 -- Cycling is pointless with a single candidate, and there is no candidate list
 -- at all outside direct mode. The stubs from test 29 still supply 98 and 99.
--- Advance the clock so the readTargetCandidates() 1 s TTL cache (added with the
--- target-candidate-cache fix) expires between this display() and the one above.
+-- Advance the clock so the hasMultipleTargets() 1 s TTL memo expires between
+-- this display() and the one above.
 clock = clock + 2
 GetContainedShips = function() return { 98 } end
 gcMenu.display()
@@ -1714,10 +1713,13 @@ assert(sess50.controlMode == nil,
     .. tostring(sess50.controlMode)
     .. "'; State.returnToConsole must be used instead of raw phase assignment")
 
--- ── 51. readTargetCandidates cache: two quick repaints share one sweep ─────────
--- The cache must serve the second display() call from session.targetCandidates
--- without calling GetContainedShips a second time. The browser/force path must
--- always bypass the cache and call GetContainedShips.
+-- ── 51. hasMultipleTargets memo: two quick repaints share one sweep ─────────
+-- readTargetCandidates() is always fresh (no full-list cache).  Only the
+-- target-count boolean used by the cycle-target buttons is memoised via
+-- hasMultipleTargets(), which keeps a 1 s TTL.  Two back-to-back engaged-mode
+-- display() calls within that TTL must only sweep once.  The target-browser
+-- path (target_select phase) calls readTargetCandidates() directly and must
+-- always sweep.  Delete the memo in hasMultipleTargets() to make this fail.
 
 local shipScanCount51 = 0
 GetContainedShips = function() shipScanCount51 = shipScanCount51 + 1; return { 98 } end
@@ -1762,13 +1764,12 @@ sess51.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = 
 sess51.cameraMemberID = 27
 sess51.targetObjectID = 98
 sess51.aimTargetID = 98
-sess51.targetCandidates = {}   -- start empty so first call always sweeps
 
--- Move the clock forward so the cache from any prior test is stale.
+-- Move the clock forward so the hasMultipleTargets memo from any prior test is stale.
 clock = clock + 100
 getElapsedTime = function() return clock end
 
--- First display(): must sweep (cache is empty / time-expired).
+-- First display() (engaged/direct): hasMultipleTargets memo is stale, must sweep.
 shipScanCount51 = 0
 local ok51a, err51a = pcall(function() gcMenu.display() end)
 assert(ok51a, "display() raised on first call (test 51): " .. tostring(err51a))
@@ -1776,24 +1777,24 @@ local sweepsAfterFirst = shipScanCount51
 assert(sweepsAfterFirst >= 1,
     "first display() must call GetContainedShips at least once; got " .. tostring(sweepsAfterFirst))
 
--- Second display() immediately (same clock): must reuse cache, no new sweep.
+-- Second display() immediately (same clock): hasMultipleTargets memo is live, must not re-sweep.
+-- readTargetCandidates() is always fresh but is NOT called in engaged/direct mode
+-- (only hasMultipleTargets() is, for the cycle-button active state).
 shipScanCount51 = 0
 local ok51b, err51b = pcall(function() gcMenu.display() end)
 assert(ok51b, "display() raised on second call (test 51): " .. tostring(err51b))
 assert(shipScanCount51 == 0,
     "second display() within the TTL must not rescan; GetContainedShips was called "
-    .. tostring(shipScanCount51) .. " time(s). Cache is not working.")
+    .. tostring(shipScanCount51) .. " time(s). hasMultipleTargets memo is not working.")
 
--- Target-browser path (force=true): must always sweep even within the TTL.
--- Simulate the browser by switching to target_select phase (what openTargetBrowser does).
--- We reach the forced path by calling the browser display branch directly:
--- set phase to target_select and call display().
+-- Target-browser path (target_select): readTargetCandidates() is always fresh,
+-- must always sweep even within the TTL.
 sess51.phase = "target_select"
 shipScanCount51 = 0
 local ok51c, err51c = pcall(function() gcMenu.display() end)
 assert(ok51c, "display() raised in browser phase (test 51): " .. tostring(err51c))
 assert(shipScanCount51 >= 1,
-    "target-browser display() must always sweep (force=true); GetContainedShips was called "
+    "target-browser display() must always sweep; GetContainedShips was called "
     .. tostring(shipScanCount51) .. " time(s)")
 
 -- ── 52. readGroups: duplicate path+group names must stay controllable ─────

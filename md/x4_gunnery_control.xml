@@ -220,12 +220,13 @@
                   <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
                 </do_if>
               </do_all>
+              <set_value name="$applied" exact="0"/>
               <do_for_each name="$mode" in="$modes">
                 <!-- towing and mining turrets have a job that is not shooting;
                      autoassist would be a no-op, see the note above. -->
                 <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
                   <set_turret_targets object="$ship" preferredtarget="$target" weaponmode="$mode" stopshootingold="false"/>
-                  <debug_text text="'[X4GC] prefer_all_turrets ship=' + $ship + ' target=' + $target + ' mode=' + $mode" chance="100"/>
+                  <set_value name="$applied" operation="add"/>
                 </do_if>
                 <do_elseif value="$mode == weaponmode.autoassist">
                   <!-- Expected to be zero for groups the console took over. A
@@ -236,6 +237,7 @@
                   <debug_text text="'[X4GC] prefer_all_turrets skipped autoassist turrets on ' + $ship" chance="100"/>
                 </do_elseif>
               </do_for_each>
+              <debug_text text="'[X4GC] prefer_all_turrets ship=' + $ship + ' target=' + $target + ' modes=' + $applied" chance="100"/>
             </do_if>
             <do_else>
               <debug_text text="'[X4GC] prefer_all_turrets: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
@@ -260,6 +262,7 @@
                   <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
                 </do_if>
               </do_all>
+              <set_value name="$cleared" exact="0"/>
               <do_for_each name="$mode" in="$modes">
                 <!-- Same filter as Apply, and for the same reason: Apply never
                      set a preferred target on these modes, so there is nothing
@@ -268,9 +271,10 @@
                 <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
                   <!-- No preferredtarget: clearpreferred defaults to true. -->
                   <set_turret_targets object="$ship" weaponmode="$mode" stopshootingold="false"/>
-                  <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' mode=' + $mode" chance="100"/>
+                  <set_value name="$cleared" operation="add"/>
                 </do_if>
               </do_for_each>
+              <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' modes=' + $cleared" chance="100"/>
             </do_if>
           </actions>
         </cue>
