@@ -1090,12 +1090,24 @@ save using `pcall`.
   correctly refused by the restoring code, so both routes were observed side by side in one
   run: `fromPayload=nil fromMD=2089492`.
 
+  A second run on 2026-08-08 (build `2026-08-08-target-restore-1`) repeated this with a
+  **surface element** rather than a whole object: a `XEN L Shield Generator Mk1` on a Xenon
+  defence platform. MD logged `typeof=component idcode=null` when storing it and
+  `typeof=component idcode=null name=XEN L Shield Generator Mk1` after the load, and Lua
+  received a usable id. So surface elements ride this route too. Note the weaker evidence
+  there: surface elements report `idcode=null`, so the same-object claim rests on the name
+  and on the reference being raised at all, not on a unique id as in the SFL-948 case above.
+
+  Measured in that second run and NOT part of this finding: `SetSofttarget` returned false
+  for the recovered surface element immediately after the load, while the identical call on
+  the identical element had succeeded at engagement moments before. The engaged element was
+  out of range by the time the save was loaded, per the player. Range as the cause is the
+  player's report, not a measurement — no distance was logged on that run.
+
   Not established by this test: what happens when the referenced component is destroyed
   while the game is closed. The MD side guards with `@` and does not raise in that case, but
-  that branch was never reached. Also not established: whether this holds for a surface
-  element rather than the whole object measured here — the target was a `XEN Defence Drone`,
-  a complete object, not a turret or shield on a larger hull. No limit on how many such
-  references can be held was probed; one was used.
+  that branch was never reached. No limit on how many such references can be held was
+  probed; one was used.
 
 ### refreshmd re-reads MD from disk, keeps cue variables, and does not re-fire completed cues
 - X4: 9.00

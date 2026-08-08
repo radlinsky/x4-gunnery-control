@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-target-restore-1"
+local runtimeBuild = "2026-08-08-target-restore-2"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1998,6 +1998,37 @@ local function init()
     end
     RegisterEvent("X4GunneryControl.RestoreTarget", onRestoreTarget)
 
+    -- The engine does not keep the soft target across a load or a reload, so the
+    -- restored session has to re-point it or the turrets have nothing to shoot
+    -- at. It refused on the first live load (build 2026-08-08-target-restore-2,
+    -- "could not re-point the soft target"), and the reported cause is range:
+    -- the engaged surface element was far away by the time the save was loaded.
+    -- The identical call on the identical element had succeeded seconds earlier
+    -- at engagement range, so the call itself is fine.
+    --
+    -- Deferred by one callback, which is not a guess: enterCamera (:658-667)
+    -- saves whatever soft target it finds and writes it back a tick later, so
+    -- an inline write here would simply be undone.
+    --
+    -- ponytail: one attempt, not a retry loop. If range is the limit then
+    -- retrying inside a second changes nothing, and re-pointing later as the
+    -- player closes the distance would be a new feature, not a fix. The
+    -- distance is logged so the next failure either confirms range or rules it
+    -- out; the return value and the engine read-back are logged separately
+    -- because the call reporting success does not prove the engine took it.
+    local function repointSoftTarget(targetID)
+        local expectedSession, expectedEpoch = session, sessionEpoch
+        Helper.addDelayedOneTimeCallbackOnUpdate(function()
+            if not currentSession(expectedSession, expectedEpoch) then return end
+            if session.phase ~= "engaged" then return end
+            local ok = C.SetSofttarget(targetID, "")
+            log("re-point soft target=" .. tostring(targetID)
+                .. " ok=" .. tostring(ok)
+                .. " engine=" .. tostring(C.GetSofttarget2().softtargetID)
+                .. " distance=" .. tostring(C.GetDistanceBetween(session.shipID, targetID)))
+        end, false, getElapsedTime() + 0.3)
+    end
+
     -- One handler for both a save/load and a UI hot-reload. The payload carries
     -- only stable identifiers (path + group names), so the reload case never
     -- notices the contextID re-resolution that the load case depends on.
@@ -2051,12 +2082,7 @@ local function init()
             State.returnToConsole(session)
             return
         end
-        -- Re-point the soft target: the engine does not keep it (probed
-        -- 2026-08-08). Without this the turrets have nothing to shoot at.
         local target = id(session.aimTargetID)
-        if target ~= 0 and not C.SetSofttarget(target, "") then
-            log("RestoreSession: could not re-point the soft target " .. tostring(target))
-        end
         -- Derived rather than carried: targetObjectID is only ever the root of
         -- aimTargetID, so persisting it separately would be a second id to keep
         -- in step with the first for nothing.
@@ -2073,6 +2099,7 @@ local function init()
             return
         end
         applyPov()
+        if target ~= 0 then repointSoftTarget(target) end
         if menu.shown then
             -- The chair-ingress request route: the menu is already up and owns
             -- this session, so there is no handover to arrange. Setting
