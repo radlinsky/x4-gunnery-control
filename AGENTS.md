@@ -19,6 +19,11 @@ installs on its own; do not run the installer first in that case.
 If the change could break the gunnery menu, ask for the restart: Test Lab is
 reachable only through that menu, so a broken menu leaves no button to click.
 
+A PostToolUse hook (`.claude/settings.json` → `scripts/reload-advice.sh`) prints
+the right instruction whenever an agent edits a file X4 loads, so this rule does
+not depend on remembering it. The mapping is tested in
+`tests/test_reload_advice.sh`; change it there and in docs/RELOADING.md together.
+
 # X4 research
 
 Route X4 modding API, feasibility, unpacked Lua/MD/AI/XSD, and evidence-KB work

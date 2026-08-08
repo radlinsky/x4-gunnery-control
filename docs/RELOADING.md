@@ -57,3 +57,17 @@ new text.
 **If the change broke the gunnery menu, you have no button to click.** Test Lab
 is reachable only through that menu. Recovery is UI Extensions' `/rui` chat
 command, or a restart.
+
+## The hook
+
+`.claude/settings.json` registers a PostToolUse hook running
+`scripts/reload-advice.sh`. Whenever an agent edits a file X4 actually loads, the
+hook injects the instruction for that file's category, so the rule in AGENTS.md
+does not rest on the agent remembering to look here.
+
+Files X4 never loads produce nothing, so ordinary repository work stays quiet.
+
+The script is also a plain CLI — `scripts/reload-advice.sh ui/gunnery_control.lua`
+prints the same line. The mapping is covered by `tests/test_reload_advice.sh`,
+which runs under `scripts/validate.sh`; keep the two files in step with this
+table.
