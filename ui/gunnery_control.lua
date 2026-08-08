@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-range-probe-1"
+local runtimeBuild = "2026-08-08-range-probe-2"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -2019,27 +2019,39 @@ local function init()
     -- value and the engine read-back are logged separately because the call
     -- reporting success does not prove the engine took it.
     --
-    -- PROBE 2026-08-08, remove or promote once read. The single attempt above is
-    -- the real behaviour; everything after a failure is the experiment. Retrying
-    -- every few seconds for a minute turns the player flying toward the target
-    -- into a distance-versus-success reading, which is the only way to settle
-    -- range either way -- one attempt at one distance cannot. A later success is
-    -- not a wasted write: it re-points the target, which is what was wanted. If
-    -- the log shows success arriving as the distance falls, this becomes a real
-    -- "re-acquire when back in range" feature rather than a probe.
+    -- PROBE 2026-08-08, remove or promote once read. The first attempt is the
+    -- real behaviour; everything after a failure is the experiment. Retrying
+    -- turns the player flying toward the target into a distance-versus-success
+    -- reading, which is the only way to settle range either way -- one attempt
+    -- at one distance cannot. A later success is not a wasted write: it
+    -- re-points the target, which is what was wanted. If the log shows success
+    -- arriving as the distance falls, this becomes a real "re-acquire when back
+    -- in range" feature rather than a probe.
+    --
+    -- Five minutes of it, because ordering a pilot to fly somewhere takes far
+    -- longer than the minute a first guess allowed, and a probe that expires
+    -- before the player arrives measures nothing.
     local repointSoftTarget
     repointSoftTarget = function(targetID, attempt)
         local expectedSession, expectedEpoch = session, sessionEpoch
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) then return end
             if session.phase ~= "engaged" then return end
+            -- Giving the pilot the order means opening the Map, and writing the
+            -- soft target under the player while they are picking things on it
+            -- would fight them for their own selection. Wait it out without
+            -- spending an attempt.
+            if State.isMapSuspended(session) then
+                repointSoftTarget(targetID, attempt)
+                return
+            end
             local ok = C.SetSofttarget(targetID, "")
             log("re-point attempt " .. attempt .. " target=" .. tostring(targetID)
                 .. " ok=" .. tostring(ok)
                 .. " engine=" .. tostring(C.GetSofttarget2().softtargetID)
                 .. " distance=" .. tostring(C.GetDistanceBetween(session.shipID, targetID)))
-            if not ok and attempt < 20 then repointSoftTarget(targetID, attempt + 1) end
-        end, false, getElapsedTime() + (attempt == 1 and 0.3 or 3.0))
+            if not ok and attempt < 60 then repointSoftTarget(targetID, attempt + 1) end
+        end, false, getElapsedTime() + (attempt == 1 and 0.3 or 5.0))
     end
 
     -- One handler for both a save/load and a UI hot-reload. The payload carries
