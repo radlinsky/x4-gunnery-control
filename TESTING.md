@@ -105,30 +105,6 @@ three groups collapse to "Center Upper".
   "15 shipped ships have two turret groups that humanize to the same label" is
   wrong about the consequence.
 
-### 6. Loading a save while NOT seated at the console (added 2026-08-08)
-
-Save/load restore is live-proven for Direct control and Auto-engage, but both
-runs loaded with the player still seated. A load taken away from the chair takes
-a different route: the restore raised at `gameLoadingDone` cannot resolve a
-context and is dropped, so chair ingress has to ask for the payload again. That
-re-request is the reason `state_request` is raised three times and it has never
-been exercised.
-
-1. Sit, check two or three groups, Direct-control a target.
-2. Save. Get up and walk away from the console.
-3. Load that save, walk back, and sit down.
-
-- **Pass:** the console reopens engaged with the same groups checked, and Cease
-  afterwards returns every group to its original mode.
-- **Fail (payload lost):** `RequestState: no saved session state` on the
-  ingress. MD did not keep it across the load.
-- **Fail (re-request not landing):** the load-time request is refused and no
-  further `RequestState` follows when you sit down.
-- **Fail (snapshots dropped):** restored, but Cease leaves groups on armed
-  `autoassist`; look for `could not resolve directed group`.
-- **Fail (ship gate too strict):** `payload is not for this ship`, which prints
-  the name it read.
-
 ## Build and install
 
 Build both archives from the repository root:

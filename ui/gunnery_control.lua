@@ -1308,11 +1308,12 @@ function menu.onShowMenu()
         session = newSession(ship)
         logSession("session created from chair ingress")
         resuming = false
-        -- A load leaves the player walking the deck, where nothing can be
-        -- resolved, so the restore raised at gameLoadingDone had to be dropped.
-        -- Ask again now that there is a live ship to resolve against. MD kept
-        -- the payload, and only ever keeps one for a session that did not end
-        -- cleanly, so a normal ingress gets "no saved session state" back.
+        -- The partner of the not-seated guard in onRestoreSession: if the restore
+        -- raised at gameLoadingDone ever arrives with the player off the chair,
+        -- this is what collects the payload afterwards. Cheap either way -- MD
+        -- only keeps a payload for a session that did not end cleanly, so a
+        -- normal ingress gets "no saved session state" straight back, which is
+        -- what the 2026-08-08 runs logged every time.
         AddUITriggeredEvent("X4GunneryControl", "state_request")
     elseif not sameID(session.shipID, ship) or (not resuming and not mapSuspendResume) then
         -- A fresh chair interaction must never inherit a hidden direct
@@ -2069,12 +2070,13 @@ local function init()
             log("RestoreSession: empty payload; nothing to restore")
             return
         end
-        -- Groups are addressed by contextID+path+group, and only a live ship
-        -- can supply a current contextID. Seated is therefore the one state in
-        -- which anything can be resolved at all. A load normally lands here --
-        -- the player wakes up walking the deck, not sitting at the console.
-        -- Nothing is lost by waiting: MD still holds the payload, and chair
-        -- ingress asks for it again, so the restore happens on sitting down.
+        -- Groups are addressed by contextID+path+group, and only a live ship can
+        -- supply a current contextID, so seated is the one state in which any of
+        -- this resolves. A guard, not a path: a save taken while engaged records
+        -- the player seated, so the load puts them back in the chair and this
+        -- has never been observed to fire across the 2026-08-08 runs. Nothing is
+        -- lost if it ever does -- MD still holds the payload and chair ingress
+        -- asks again -- but do not treat the deferral as a tested route.
         if not isInGunnerChair() then
             log("RestoreSession: " .. #records .. " record(s) held; the player is not in"
                 .. " a gunner chair, so there is no live group list to re-resolve"

@@ -84,9 +84,10 @@ grep -Fq 'directSnapshots' "$main"
 # is ever restored. snapshotsForSave still runs, but inside State.saveState.
 grep -Fq 'State.encode(State.saveState(session))' "$main"
 grep -Fq 'State.decode(payload)' "$main"
-# A load lands with the player off the console, where no contextID can be
-# resolved, so the restore raised at gameLoadingDone has to be dropped. Chair
-# ingress must ask again or a save/load never restores at all.
+# The restore resolves group contextIDs, which needs a seated player. A save
+# taken while engaged reloads into the chair, so the gameLoadingDone raise is
+# what normally does the work; the chair-ingress raise is the fallback that
+# collects the payload if it ever lands with the player off the console.
 if [ "$(grep -Fc '"state_request"' "$main")" -lt 3 ]; then
   echo 'state_request must be raised at init, at gameLoadingDone, and at chair ingress' >&2
   exit 1
