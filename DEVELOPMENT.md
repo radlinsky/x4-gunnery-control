@@ -455,33 +455,13 @@ the current loose XML/Lua/text files. Wiping first ensures files deleted from
 the repository do not linger in the installed copy. It does not install
 Test Lab.
 
-Re-run the installer after every source change that must be tested in X4. Both
-reload commands read the loose files from disk, so the installer has to run
-first; without it a reload simply re-runs the copy the game already has.
+Re-run the installer after every source change that must be tested in X4. You do
+not need to restart X4 for Lua or MD changes; the Test Lab has Reload UI /
+Reload MD / Reload AI buttons.
 
-You do not need to restart X4 for Lua or MD changes. The Test Lab extension has
-Reload UI / Reload MD / Reload AI buttons, all live-tested on 2026-08-08 against
-X4 9.00:
-
-| Changed | To see it |
-|---|---|
-| `ui/*.lua` | installer, then **Reload UI** |
-| `md/*.xml` | installer, then **Reload MD**, then trigger the cue |
-| `t/*.xml`, `ui.xml`, `content.xml` | untested; assume a restart |
-
-Reload UI does not re-read MD, and Reload MD does not re-read UI Lua; they were
-verified independently with the other held fixed.
-
-Two consequences worth knowing before you lean on this. A UI reload discards
-every Lua global and every file-local, so live session state is lost and the
-console rebuilds from chair ingress — an MD cue variable is the only storage
-measured to survive it. And the Test Lab is reachable only through the gunnery
-menu, so an edit that breaks that menu leaves no button to click: that case
-needs UI Extensions' `/rui` chat command, or a restart.
-
-`refreshmd` keeps existing cue variables and does not re-run cues that already
-completed, so a marker in a conditionless root cue cannot tell you whether a
-refresh happened. Edit a cue that fires on demand and watch for its new text.
+**[docs/RELOADING.md](docs/RELOADING.md) is the authoritative answer to "reload
+or restart?"** — which button for which file, what needs a full restart, and why.
+Do not restate that table here; it exists in one place so it cannot drift.
 
 On Windows, the launcher (`launch-x4-dev.bat`) runs `install-dev.sh`
 automatically before starting X4, so you do not need to run it by hand first
