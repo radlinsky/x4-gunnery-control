@@ -510,16 +510,135 @@ local function nameKey(path, group)
     return (path or "") .. "\0" .. (group or "")
 end
 
+local function isString(value)
+    return type(value) == "string"
+end
+
+local function hasStringFields(record, fields)
+    for _, field in ipairs(fields) do
+        if not isString(record[field]) then return false end
+    end
+    return true
+end
+
+local function validFlag(value)
+    return value == "0" or value == "1"
+end
+
+local function validCameraLocation(record)
+    local fields = { "camPath", "camGroup", "camIndex" }
+    local present = 0
+    for _, field in ipairs(fields) do
+        if record[field] ~= nil then present = present + 1 end
+    end
+    -- The first persistence format pre-dated the stable camera location. It
+    -- omitted the whole triplet, so retain that known compatibility shape; a
+    -- partly-present triplet is corruption, not a legacy payload.
+    if present == 0 then return true end
+    if present ~= #fields or not hasStringFields(record, fields) then return false end
+    if record.camIndex == "" then
+        return record.camPath == "" and record.camGroup == ""
+    end
+    return record.camPath ~= "" and record.camGroup ~= ""
+        and record.camIndex:match("^[1-9][0-9]*$") ~= nil
+end
+
+local function validSessionRecord(record)
+    local required = {
+        "phase", "controlMode", "povAnchor", "povMode", "autoNextTarget",
+        "preferAllTurrets", "shipID", "aimTargetID", "cameraMemberID",
+    }
+    if record.t ~= "session" or not hasStringFields(record, required)
+        or record.shipID == "" then
+        return false
+    end
+    if record.phase ~= "console" and record.phase ~= "target_select"
+        and record.phase ~= "engaged" then
+        return false
+    end
+    if record.phase == "engaged" then
+        if record.controlMode ~= "auto" and record.controlMode ~= "direct" then return false end
+    elseif record.phase == "target_select" then
+        -- A Direct session keeps its snapshots while the target browser is
+        -- open, so it can return to the same override or release it on close.
+        -- This is a current saveState shape, not a permissive legacy default.
+        if record.controlMode ~= "" and record.controlMode ~= "direct" then return false end
+    elseif record.controlMode ~= "" then
+        return false
+    end
+    if record.povAnchor ~= "turret" and record.povAnchor ~= "target" then return false end
+    if record.povMode ~= "manual" and record.povMode ~= "cinematic" then return false end
+    if not validFlag(record.autoNextTarget) or not validFlag(record.preferAllTurrets) then return false end
+    if record.shipName ~= nil and not isString(record.shipName) then return false end
+    -- targetObjectID was emitted by the first two persistence revisions. It is
+    -- intentionally ignored now (the target root is derived), but remains a
+    -- valid optional legacy field rather than making an old save unrestorable.
+    if record.targetObjectID ~= nil and not isString(record.targetObjectID) then return false end
+    return validCameraLocation(record)
+end
+
+local function validSnapshotRecord(record, sessionRecord)
+    if record.t ~= "snapshot" or (record.kind ~= "group" and record.kind ~= "single")
+        or not hasStringFields(record, { "shipID", "mode", "armed" })
+        or record.shipID == "" or record.shipID ~= sessionRecord.shipID
+        or not validFlag(record.armed) then
+        return false
+    end
+    if record.kind == "single" then
+        return isString(record.componentID) and record.componentID ~= ""
+    end
+    return hasStringFields(record, { "contextID", "path", "group" })
+end
+
+local function validCheckedRecord(record)
+    return record.t == "checked" and hasStringFields(record, { "path", "group" })
+end
+
+-- Validate the entire decoded transport before restoreState changes even a
+-- throwaway candidate. `decode` is deliberately permissive so it can carry
+-- escaped vanilla identifiers; restore is not. A parseable truncation such as
+-- `t=session` must never replace a live Direct session and strand its
+-- snapshots. Multiple complete records are tolerated; the first session record
+-- is authoritative, matching the identity check that has always used it.
+local function validatedSessionRecord(records)
+    if type(records) ~= "table" then return nil end
+    local head
+    for _, record in ipairs(records) do
+        if type(record) ~= "table" then return nil end
+        if record.t == "session" then
+            if not validSessionRecord(record) then return nil end
+            if not head then head = record end
+        elseif record.t == "snapshot" then
+            -- Its session identity is checked after the head is found below.
+        elseif record.t == "checked" then
+            if not validCheckedRecord(record) then return nil end
+        else
+            return nil
+        end
+    end
+    if not head then return nil end
+    for _, record in ipairs(records) do
+        if record.t == "snapshot" and not validSnapshotRecord(record, head) then return nil end
+    end
+    -- Only a Direct session can own snapshots. Target selection deliberately
+    -- retains a Direct override while the browser is open; console and Auto
+    -- must not accept an arbitrary snapshot that could later be written back.
+    for _, record in ipairs(records) do
+        if record.t == "snapshot" and (head.controlMode ~= "direct"
+            or (head.phase ~= "engaged" and head.phase ~= "target_select")) then
+            return nil
+        end
+    end
+    return head
+end
+
 -- Rebuilds `session` from decode()'s output. liveGroups is the freshly read
 -- group list: every group is located by path+group and takes its contextID and
 -- key from the live entry, never from the payload. Returns true when a session
 -- record was present and belongs to this ship.
 function State.restoreState(session, records, liveGroups)
-    if not session or not records then return false end
-    local head
-    for _, record in ipairs(records) do
-        if record.t == "session" then head = record; break end
-    end
+    if type(session) ~= "table" then return false end
+    local head = validatedSessionRecord(records)
     if not head then return false end
     -- Groups are matched by name, and turret group names are the same on every
     -- ship of a class. Without a ship check, a payload left over from ship A
@@ -539,25 +658,12 @@ function State.restoreState(session, records, liveGroups)
     for _, group in ipairs(liveGroups or {}) do
         byName[nameKey(group.path, group.group)] = group
     end
-    local restored = false
-    session.checkedGroupKeys = session.checkedGroupKeys or {}
+    local checkedGroupKeys = {}
     local snapshots = {}
     for _, record in ipairs(records) do
-        if record.t == "session" then
-            session.phase = record.phase or "console"
-            session.controlMode = (record.controlMode ~= "" and record.controlMode) or nil
-            session.povAnchor = record.povAnchor or "turret"
-            session.povMode = record.povMode or "manual"
-            session.autoNextTarget = record.autoNextTarget ~= "0"
-            session.preferAllTurrets = record.preferAllTurrets == "1"
-            if idsHeld then
-                session.aimTargetID = (record.aimTargetID ~= "" and record.aimTargetID) or nil
-                session.cameraMemberID = (record.cameraMemberID ~= "" and record.cameraMemberID) or nil
-            end
-            restored = true
-        elseif record.t == "checked" then
+        if record.t == "checked" then
             local live = byName[nameKey(record.path, record.group)]
-            if live then session.checkedGroupKeys[live.key] = true end
+            if live then checkedGroupKeys[live.key] = true end
         elseif record.t == "snapshot" then
             if record.kind == "single" then
                 -- A single-turret snapshot is addressed only by componentID, so
@@ -592,9 +698,23 @@ function State.restoreState(session, records, liveGroups)
     local camLive = byName[nameKey(head.camPath, head.camGroup)]
     local camIndex = tonumber(head.camIndex or "")
     local camMember = camLive and camIndex and (camLive.members or {})[camIndex]
+    -- All validation and reconstruction is complete. Only now may this mutate
+    -- the caller's candidate; on any refusal above, it is byte-for-byte the
+    -- object that onRestoreEnvelope created before it considered a swap.
+    session.phase = head.phase
+    session.controlMode = (head.controlMode ~= "" and head.controlMode) or nil
+    session.povAnchor = head.povAnchor
+    session.povMode = head.povMode
+    session.autoNextTarget = head.autoNextTarget == "1"
+    session.preferAllTurrets = head.preferAllTurrets == "1"
+    session.checkedGroupKeys = checkedGroupKeys
+    if idsHeld then
+        session.aimTargetID = (head.aimTargetID ~= "" and head.aimTargetID) or nil
+        session.cameraMemberID = (head.cameraMemberID ~= "" and head.cameraMemberID) or nil
+    end
     if camMember then session.cameraMemberID = camMember.componentID end
     session.directSnapshots = snapshots
-    return restored
+    return true
 end
 
 -- Mode and armed commands address a group by contextID+path+group, which

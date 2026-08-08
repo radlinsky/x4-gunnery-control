@@ -447,6 +447,7 @@ do
 
     -- The legacy single-snapshot fallback in snapshotsForSave still works.
     local legacy = State.newSession("443760", "gunnercontrol")
+    legacy.phase, legacy.controlMode = "engaged", "direct"
     legacy.directSnapshots = { kind = "single", shipID = "443760",
         componentID = "555", mode = "defend", armed = false }
     local legacyBack = State.newSession("443760", "gunnercontrol")
@@ -556,13 +557,28 @@ do
     assert(not State.restoreState(State.newSession(1, "g"), { { t = "checked" } }, {}),
         "matrix: no session record is refused")
 
+    -- A complete session record is the persistence schema. Older released
+    -- payloads can omit the whole stable-camera-location triplet, but no
+    -- released writer omitted the phase, control, POV, flag, or ID fields.
+    local function sessionRecord(values)
+        local record = {
+            t = "session", phase = "console", controlMode = "",
+            povAnchor = "turret", povMode = "manual",
+            autoNextTarget = "1", preferAllTurrets = "0",
+            shipID = "old", shipName = "", aimTargetID = "", cameraMemberID = "",
+            camPath = "", camGroup = "", camIndex = "",
+        }
+        for key, value in pairs(values or {}) do record[key] = value end
+        return record
+    end
+
     -- Every empty/nonempty saved/live ship-name pairing except two differing
     -- nonempty names is permitted. IDs still decide reload versus save/load.
     local function restoreWithNames(savedName, liveName)
         local candidate = State.newSession("new", "g")
         candidate.shipName = liveName
         return State.restoreState(candidate, {
-            { t = "session", shipID = "old", shipName = savedName, camIndex = "bogus" },
+            sessionRecord({ shipName = savedName }),
         }, {})
     end
     assert(restoreWithNames("", ""), "matrix: empty/empty ship names permit restore")
@@ -571,9 +587,19 @@ do
     assert(restoreWithNames("same", "same"), "matrix: matching ship names permit restore")
     assert(not restoreWithNames("saved", "other"), "matrix: differing ship names refuse restore")
 
-    -- A stale camera index must not invent a member. Non-operational and
-    -- unsupported records can be decoded, but the runtime camera gate rejects
-    -- them before any engine camera operation.
+    -- The first two emitted persistence formats had no shipName or stable
+    -- camera location (and carried a now-unused targetObjectID). These are
+    -- known complete legacy records, so their explicitly absent fields remain
+    -- compatible without accepting a partially-present modern triplet.
+    local legacyRecord = sessionRecord({ targetObjectID = "legacy-root" })
+    legacyRecord.shipName = nil
+    legacyRecord.camPath, legacyRecord.camGroup, legacyRecord.camIndex = nil, nil, nil
+    assert(State.restoreState(State.newSession("new", "g"), { legacyRecord }, {}),
+        "matrix: complete first-format session remains restorable")
+
+    -- A positive camera index is valid persisted state even when that member
+    -- has since disappeared. Restore accepts it without inventing a member so
+    -- the runtime can use its safe no-camera fallback and clear MD state.
     local staleCamera = State.newSession("same", "g")
     staleCamera.shipName = "ship"
     local nonCameraGroups = { { key = "g", path = "p", group = "g", members = {
@@ -581,9 +607,9 @@ do
         { componentID = "unsupported", operational = true, cameraSupported = false },
     } } }
     assert(State.restoreState(staleCamera, {
-        { t = "session", shipID = "same", shipName = "ship", camPath = "p", camGroup = "g", camIndex = "9" },
-    }, nonCameraGroups), "matrix: invalid camera index still restores session")
-    assert(staleCamera.cameraMemberID == nil, "matrix: invalid camera index is dropped")
+        sessionRecord({ shipID = "same", shipName = "ship", camPath = "p", camGroup = "g", camIndex = "9" }),
+    }, nonCameraGroups), "matrix: missing saved camera member still restores the session")
+    assert(staleCamera.cameraMemberID == nil, "matrix: missing saved camera member is not invented")
     assert(State.firstCameraMember(nonCameraGroups) == nil,
         "matrix: non-operational or unsupported restored members cannot host a camera")
 
@@ -593,19 +619,68 @@ do
     assert(not State.restoreState(State.newSession(1, "g"), State.decode("not-a-field"), {}),
         "matrix: malformed record cannot become a session")
 
+    -- Parseable truncation and out-of-domain values are refusals, before a
+    -- candidate is changed. This is the pure counterpart of the runtime
+    -- Direct-snapshot regression below.
+    local unchanged = State.newSession("same", "g")
+    local originalSnapshots = { { shipID = "same", kind = "group", contextID = "c",
+        path = "p", group = "g", mode = "defend", armed = true } }
+    unchanged.phase, unchanged.controlMode = "engaged", "direct"
+    unchanged.checkedGroupKeys = { live = true }
+    unchanged.directSnapshots = originalSnapshots
+    local function assertRefused(records, label)
+        assert(not State.restoreState(unchanged, records, {}), label)
+        eq(unchanged.phase, "engaged", label .. ": phase is unchanged")
+        eq(unchanged.controlMode, "direct", label .. ": control mode is unchanged")
+        assert(unchanged.checkedGroupKeys.live, label .. ": checks are unchanged")
+        assert(unchanged.directSnapshots == originalSnapshots, label .. ": snapshots are unchanged")
+    end
+    assertRefused({ { t = "session" } }, "matrix: truncated session is refused")
+    for _, bad in ipairs({
+        { phase = "broken" }, { controlMode = "auto" }, { povAnchor = "bridge" },
+        { povMode = "orbit" }, { autoNextTarget = "true" }, { preferAllTurrets = "2" },
+        { camPath = "p", camGroup = "g", camIndex = "1.5" },
+        { camPath = "p", camGroup = "", camIndex = "1" },
+    }) do
+        assertRefused({ sessionRecord(bad) }, "matrix: invalid session enum/form is refused")
+    end
+    assertRefused({ sessionRecord({ shipID = "same", phase = "engaged", controlMode = "direct" }), {
+        t = "snapshot", kind = "group", shipID = "same", contextID = "c", path = "p", group = "g", mode = "attack",
+    } }, "matrix: malformed snapshot is refused")
+    assertRefused({ sessionRecord(), {
+        t = "snapshot", kind = "group", shipID = "old", contextID = "c", path = "p", group = "g", mode = "attack", armed = "1",
+    } }, "matrix: console snapshot is refused")
+    assertRefused({ sessionRecord(), { t = "unknown" } }, "matrix: unknown record type is refused")
+
+    -- A Direct session intentionally keeps its snapshots while target
+    -- selection is open. This is persisted by saveState and must survive the
+    -- strict transport validation so the runtime can release those overrides
+    -- before returning to the console after a restore.
+    local targetSelect = State.newSession("same", "g")
+    assert(State.restoreState(targetSelect, {
+        sessionRecord({ shipID = "same", phase = "target_select", controlMode = "direct" }),
+        { t = "snapshot", kind = "group", shipID = "same", contextID = "c", path = "p", group = "g", mode = "attack", armed = "1" },
+    }, { { key = "live", contextID = "live", path = "p", group = "g" } }),
+        "matrix: target-select Direct snapshots restore")
+    eq(#targetSelect.directSnapshots, 1, "matrix: target-select Direct snapshot is retained")
+
     -- A changed-ID load drops a component-addressed single snapshot, while
     -- duplicate records do not make restore fail or add phantom snapshots.
     local changedIDs = State.newSession("new", "g")
-    assert(State.restoreState(changedIDs, {
-        { t = "session", shipID = "old", shipName = "" },
+    local changedHead = sessionRecord({ phase = "engaged", controlMode = "direct" })
+    assert(not State.restoreState(changedIDs, {
+        changedHead,
         { t = "snapshot", kind = "single", componentID = "old-turret", mode = "defend", armed = "1" },
+    }, {}), "matrix: malformed changed-ID snapshot is refused")
+    assert(State.restoreState(changedIDs, {
+        changedHead,
+        { t = "snapshot", kind = "single", shipID = "old", componentID = "old-turret", mode = "defend", armed = "1" },
     }, {}), "matrix: changed-ID session restores")
     eq(#changedIDs.directSnapshots, 0, "matrix: changed-ID single snapshot is dropped")
     local duplicates = State.newSession("same", "g")
+    local duplicate = sessionRecord({ shipID = "same" })
     assert(State.restoreState(duplicates, {
-        { t = "session", shipID = "same", shipName = "", phase = "console" },
-        { t = "session", shipID = "same", shipName = "", phase = "engaged" },
-        { t = "snapshot", kind = "group", path = "missing", group = "missing" },
+        duplicate, sessionRecord({ shipID = "same" }),
     }, {}), "matrix: duplicate session records are tolerated")
     eq(#duplicates.directSnapshots, 0, "matrix: duplicate/malformed snapshots do not manufacture state")
 

@@ -1329,7 +1329,7 @@ function menu.onShowMenu()
     if not session then
         session = newSession(ship)
         resuming = false
-        -- The partner of the not-seated guard in onRestoreSession: if the restore
+        -- The partner of the not-seated guard in onRestoreEnvelope: if the restore
         -- raised at gameLoadingDone ever arrives with the player off the chair,
         -- this is what collects the payload afterwards. Cheap either way -- MD
         -- only keeps a payload for a session that did not end cleanly, so a
@@ -2094,9 +2094,15 @@ local function init()
         session = candidate
         log("restore accepted; phase=" .. tostring(session.phase))
         if session.phase ~= "engaged" then
-            -- Nothing was overridden, or the payload predates engagement.
-            -- Leave the player on the console with the same groups checked.
-            State.returnToConsole(session)
+            -- Target selection can be entered from Direct-control. Its
+            -- snapshots remain live while the browser is open, so a restore
+            -- that deliberately returns to the console must release them and
+            -- clear MD first; otherwise the old autoassist override is
+            -- stranded with no session left able to restore it.
+            if session.controlMode == "direct" then
+                restoreDirect("restored target selection")
+            end
+            returnToConsole("restored non-engaged session")
             return
         end
         local target = id(session.aimTargetID)

@@ -90,6 +90,46 @@ assert(pcall(API.onRestoreEnvelope, { generation = 2, target = 0, payload = {} }
 assert(API.getSession() == live49 and API.getSessionEpoch() == epoch49,
     "nil/table restore payloads must not replace the session")
 
+-- A syntactically parseable but incomplete payload used to get fallback values
+-- from restoreState, swap over this live Direct session, and lose the only
+-- references capable of restoring the overridden turret. It must now be
+-- rejected before candidate/session handover, camera work, persistence writes,
+-- or any turret setting write.
+local direct49 = API.getSession()
+local directSnapshots49 = { {
+    shipID = direct49.shipID, kind = "group", contextID = 5, path = "p", group = "g",
+    mode = "defend", armed = true,
+} }
+direct49.phase, direct49.controlMode = "engaged", "direct"
+direct49.directSnapshots = directSnapshots49
+direct49.checkedGroupKeys = { ["group:5:p:g"] = true }
+local modeWrites49, armedWrites49 = 0, 0
+local originalMode49, originalArmed49 = fix.C.SetTurretGroupMode2, fix.C.SetTurretGroupArmed
+fix.C.SetTurretGroupMode2 = function(...) modeWrites49 = modeWrites49 + 1 end
+fix.C.SetTurretGroupArmed = function(...) armedWrites49 = armedWrites49 + 1 end
+local function assertDirectRestoreRefused49(payload, label)
+    local callbacks, events = #fix.pendingCallbacks, #fix.uiTriggeredEvents
+    assert(pcall(API.onRestoreEnvelope, { generation = 49, target = 0, payload = payload }),
+        label .. ": malformed restore must not throw")
+    assert(API.getSession() == direct49 and API.getSessionEpoch() == epoch49,
+        label .. ": malformed restore must retain the exact live Direct session and epoch")
+    assert(direct49.directSnapshots == directSnapshots49 and directSnapshots49[1].mode == "defend"
+        and directSnapshots49[1].armed == true,
+        label .. ": malformed restore must retain observable Direct snapshots")
+    assert(modeWrites49 == 0 and armedWrites49 == 0 and cameraCalls49 == 0,
+        label .. ": malformed restore must not write turrets or enter a camera")
+    assert(#fix.pendingCallbacks == callbacks and #fix.uiTriggeredEvents == events,
+        label .. ": malformed restore must not schedule callbacks or rewrite MD state")
+end
+assertDirectRestoreRefused49("t=session", "truncated session")
+local invalidPhase49 = X4GunneryState.saveState(direct49)
+invalidPhase49[1].phase = "not-a-phase"
+assertDirectRestoreRefused49(X4GunneryState.encode(invalidPhase49), "invalid phase")
+local malformedSnapshot49 = X4GunneryState.saveState(direct49)
+malformedSnapshot49[2].armed = nil
+assertDirectRestoreRefused49(X4GunneryState.encode(malformedSnapshot49), "truncated snapshot")
+fix.C.SetTurretGroupMode2, fix.C.SetTurretGroupArmed = originalMode49, originalArmed49
+
 local oldControl49 = fix.C.GetPlayerCurrentControlGroup
 fix.C.GetPlayerCurrentControlGroup = function() return "" end
 local seatedSession49, seatedEpoch49 = API.getSession(), API.getSessionEpoch()
@@ -129,17 +169,25 @@ do
     C.IsPlayerCameraTargetViewPossible = function() return false end
     fix.ffiStub.new = function() return groupBuffer end
 
-    local function payload59(controlMode)
+    local function payload59(controlMode, phase, missingSavedCamera)
         local source = State.newSession(42, "gunnercontrol")
-        source.shipName, source.phase, source.controlMode = "0", "engaged", controlMode
+        source.shipName, source.phase, source.controlMode = "0", phase or "engaged", controlMode
         source.groups = { {
             key = State.groupKey(5, "p", "g"), kind = "group", contextID = 5,
             path = "p", group = "g", componentID = 27, mode = "attack", armed = false,
             operationalCount = 1, totalCount = 1,
             members = { { componentID = 27, operational = true, cameraSupported = true } },
         } }
+        if missingSavedCamera then
+            source.groups[1].members[2] = {
+                componentID = 28, operational = true, cameraSupported = true,
+            }
+            source.groups[1].totalCount = 2
+            source.cameraMemberID = 28
+        else
+            source.cameraMemberID = 27
+        end
         source.checkedGroupKeys = { [source.groups[1].key] = true }
-        source.cameraMemberID = 27
         source.directSnapshots = controlMode == "direct" and { {
             shipID = 42, kind = "group", contextID = 5, path = "p", group = "g",
             mode = "attack", armed = false,
@@ -150,6 +198,38 @@ do
     local modeWrites59, armedWrites59 = 0, 0
     C.SetTurretGroupMode2 = function() modeWrites59 = modeWrites59 + 1 end
     C.SetTurretGroupArmed = function() armedWrites59 = armedWrites59 + 1 end
+    fix.resetUITriggeredEvents()
+    API.onRestoreEnvelope({ generation = 56, target = 0, payload = payload59("auto", nil, true) })
+    local missingAutoCamera56 = API.getSession()
+    assert(missingAutoCamera56.phase == "console" and missingAutoCamera56.controlMode == nil,
+        "56 Auto missing camera: restored session must release to the console")
+    assert(modeWrites59 == 0 and armedWrites59 == 0,
+        "56 Auto missing camera: safe fallback must not write turret settings")
+    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+        "56 Auto missing camera: safe fallback must clear MD persistence")
+
+    fix.resetUITriggeredEvents()
+    API.onRestoreEnvelope({ generation = 57, target = 0, payload = payload59("direct", nil, true) })
+    local missingCamera57 = API.getSession()
+    assert(missingCamera57.phase == "console" and missingCamera57.controlMode == nil,
+        "57 Direct missing camera: restored session must release to the console")
+    assert(modeWrites59 == 1 and armedWrites59 == 1,
+        "57 Direct missing camera: saved snapshot must be restored exactly once")
+    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+        "57 Direct missing camera: safe fallback must clear MD persistence")
+
+    modeWrites59, armedWrites59 = 0, 0
+    fix.resetUITriggeredEvents()
+    API.onRestoreEnvelope({ generation = 58, target = 0, payload = payload59("direct", "target_select") })
+    local targetSelect58 = API.getSession()
+    assert(targetSelect58.phase == "console" and targetSelect58.controlMode == nil,
+        "58 Direct target-select: restored session must release to the console")
+    assert(modeWrites59 == 1 and armedWrites59 == 1,
+        "58 Direct target-select: saved snapshot must be restored before console handoff")
+    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+        "58 Direct target-select: release must clear MD persistence")
+
+    modeWrites59, armedWrites59 = 0, 0
     fix.resetUITriggeredEvents()
     API.onRestoreEnvelope({ generation = 59, target = 0, payload = payload59("direct") })
     local direct59 = API.getSession()
