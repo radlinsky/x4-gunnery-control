@@ -2,7 +2,7 @@
 -- turret discovery and mutations; this companion only drives its narrow API.
 local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
-local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing = nil, nil, nil, 0, 0, nil, nil, nil, false
+local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
 local finishGroups, emitSummary
 
 local function text(id) return ReadText(20992, id) end
@@ -28,15 +28,24 @@ local function fieldsFor(item, extra)
     return fields
 end
 
-local function cleanup(reason, reopen, clearSweep)
+local function cleanup(reason, clearSweep)
     local activeSweep = sweep
     if api() then api().returnTestCamera() end
     inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved = nil, nil, 0, 0, nil, nil, nil
     if reason and activeSweep and activeSweep.phase ~= "complete" then log("abort", { reason = reason, ship_id = activeSweep.ship.id, ship_name = activeSweep.ship.name, ship_macro = activeSweep.ship.macro }) end
     if clearSweep then sweep = nil end
-    if reopen then
-        Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryMenu", { 0, 0 }, true)
-    end
+end
+
+-- Gunnery parks its live session before opening this companion. Every
+-- operator-driven exit must therefore hand ownership explicitly back to the
+-- main menu; a plain close leaves resumePending armed with no menu to consume
+-- it. Keep the latch set until the Test Lab is shown again so a Helper-induced
+-- re-entrant/late onCloseElement cannot request the handoff twice.
+local function returnToGunnery(reason)
+    if closing then return end
+    closing = true
+    cleanup(reason, true)
+    Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryMenu", { 0, 0 }, true)
 end
 
 local function startSweep()
@@ -101,6 +110,7 @@ local function verdict(value)
 end
 
 function menu.onShowMenu()
+    closing, suppressReopen = false, false
     menu.display()
 end
 
@@ -164,7 +174,7 @@ function menu.display()
             groups[1]:setColSpan(4):createText(text(16) .. ": pass/fail " .. tostring(summary.groupPass) .. "/" .. tostring(summary.groupFail))
             local reset = tableView:addRow("reset", {}); reset[1]:setColSpan(4):createButton({}):setText(text(2)); reset[1].handlers.onClick = function() sweep = nil; startSweep(); menu.display() end
         end
-        local abort = tableView:addRow("abort", {}); abort[1]:setColSpan(4):createButton({}):setText(text(9)); abort[1].handlers.onClick = function() cleanup("operator_abort", true, true) end
+        local abort = tableView:addRow("abort", {}); abort[1]:setColSpan(4):createButton({}):setText(text(9)); abort[1].handlers.onClick = function() returnToGunnery("operator_abort") end
     end
     frame:display()
 end
@@ -193,10 +203,15 @@ end
 
 function menu.onCloseElement(dueToClose)
     if closing then return end
+    if suppressReopen then
+        closing = true
+        cleanup("menu_closed", true)
+        Helper.closeMenu(menu, dueToClose, nil, false)
+        return
+    end
     closing = true
-    cleanup("menu_closed", false, true)
-    Helper.closeMenu(menu, dueToClose, nil, false)
-    closing = false
+    cleanup("menu_closed", true)
+    Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryMenu", { 0, 0 }, true)
 end
 
 local function init()
@@ -208,7 +223,13 @@ local function init()
             if main then Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab", { 0, 0 }, true) end
         end })
     end
-    local abort = function() if sweep then cleanup("player_context_changed", false, true) end end
+    local abort = function()
+        -- The player has left the chair (or a load is replacing the world), so
+        -- the automatic menu close must not resurrect Gunnery Control. This is
+        -- reset only when a later, deliberate Test Lab opening is shown.
+        suppressReopen = true
+        if sweep then cleanup("player_context_changed", true) end
+    end
     RegisterEvent("playerGetUp", abort)
     RegisterEvent("playerUndock", abort)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode) if mode ~= "cockpit" and mode ~= "external" and mode ~= "externalfirstperson" then abort() end end)

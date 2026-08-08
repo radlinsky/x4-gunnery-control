@@ -1297,9 +1297,10 @@ end
 -- Reuse the Map suspend/resume route instead — it is the one path already proven
 -- to hand a live session across an external menu, and its `resuming` branch in
 -- onShowMenu is also what re-enters the turret camera on the way back.
--- ponytail: dev-only, and it leaks resumePending if the Test Lab never reopens
--- this menu. Give it the watchdog treatment if the Test Lab ever grows an exit
--- that does not come back here.
+-- The Test Lab's operator Close and Abort paths explicitly reopen this menu;
+-- player-context and load teardown suppress that handoff because this session
+-- is ending independently. Keep those companion exits paired with this parked
+-- ownership contract or resumePending would have no menu to consume it.
 local function openTestLab()
     if session then
         -- The reload buttons live behind this menu, and a reload wipes all Lua
@@ -1638,7 +1639,10 @@ function menu.display()
             actions[4].handlers.onClick = openTestLab
         end
         actions[6]:setColSpan(3):createButton({}):setText(text(54))
-        actions[6].handlers.onClick = function() returnToConsole("target browser back button") end
+        actions[6].handlers.onClick = function()
+            restoreDirect("target browser back button")
+            returnToConsole("target browser back button")
+        end
         frame:display()
         return
     end

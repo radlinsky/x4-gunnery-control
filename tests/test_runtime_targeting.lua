@@ -34,15 +34,11 @@ assert(sess ~= nil, "expected a live session after onShowMenu()")
 --   direct --Esc--> target_select --Esc--> console
 -- Two closes from direct must always terminate at console.
 
--- NOTE on test setup approach: driving this through real public entry points is
--- not feasible in this harness. The only public paths that set directSnapshot
--- (startDirect/engageTarget) and that set phase=target_select while retaining
--- a snapshot (openTargetBrowser) are module-locals invoked through UI button
--- onClick handlers. Executing them requires a fully rendered Helper frame, which
--- in turn requires arithmetic on frame properties (e.g. controls.properties.y)
--- that the stub does not populate. Setting session fields directly via
--- TestAPI.getSession() is the only tractable approach without a full frame stub;
--- we document this explicitly here.
+-- NOTE on test setup approach: the harness cannot yet drive the full ingress
+-- through startDirect/engageTarget/openTargetBrowser, because those module-local
+-- paths require engine state beyond the frame stub. Set up that precise state
+-- through TestAPI.getSession(), then exercise the real public close callback or
+-- rendered Back-button callback for the behavior under test.
 
 -- ── 10a: target_select + directSnapshots -> onCloseElement("close") ─────────
 -- This is the exact bug state: player pressed Esc from the target picker while
@@ -61,6 +57,75 @@ assert(phaseAfterPickerClose == "console",
     .. "' instead of 'console'. The Esc cycle is still present.")
 assert(#(sess.directSnapshots or {}) == 0,
     "directSnapshots must be released when target_select closes to console")
+
+-- ── 10b: visible target-browser Back restores Direct settings ───────────────
+-- Unlike onCloseElement above, the visible Back button owns its own callback.
+-- A browser reopened from a Direct engagement still holds snapshots while its
+-- live turret groups are in autoassist, so that callback must restore before
+-- returning to the console. Drive the rendered button rather than a test API.
+gcMenu.onShowMenu()
+sess = API.getSession()
+local browserGroup = {
+    key = "browser-back-group", kind = "group", contextID = 10,
+    path = "browser-back-path", group = "browser-back", componentID = 1010,
+    displayName = "Browser Back Group", totalCount = 1, operationalCount = 1,
+    mode = "autoassist", armed = true, members = {},
+}
+sess.groups = { browserGroup }
+sess.phase = "target_select"
+sess.controlMode = "direct"
+sess.directSnapshots = { {
+    shipID = sess.shipID, kind = "group", contextID = browserGroup.contextID,
+    path = browserGroup.path, group = browserGroup.group,
+    mode = "attack", armed = false,
+} }
+
+local modeWrites10b, armedWrites10b = {}, {}
+local savedSetMode10b = C.SetTurretGroupMode2
+local savedSetArmed10b = C.SetTurretGroupArmed
+C.SetTurretGroupMode2 = function(ship, context, path, group, mode)
+    modeWrites10b[#modeWrites10b + 1] = {
+        ship = ship, context = context, path = path, group = group, mode = mode,
+    }
+end
+C.SetTurretGroupArmed = function(ship, context, path, group, armed)
+    armedWrites10b[#armedWrites10b + 1] = {
+        ship = ship, context = context, path = path, group = group, armed = armed,
+    }
+end
+
+gcMenu.display()
+local browserBack10b = fix.buttonByText("text:20991:54")
+assert(browserBack10b and browserBack10b.handlers.onClick,
+    "target browser must render a clickable Back to Gunnery Control button")
+browserBack10b.handlers.onClick()
+
+assert(sess.phase == "console",
+    "target-browser Back must return to the console after restoring Direct state")
+assert(#sess.directSnapshots == 0,
+    "target-browser Back must release the live Direct snapshots")
+assert(#modeWrites10b == 1 and modeWrites10b[1].mode == "attack",
+    "target-browser Back must restore the snapshotted turret mode exactly once")
+assert(#armedWrites10b == 1 and armedWrites10b[1].armed == false,
+    "target-browser Back must restore the snapshotted armed state exactly once")
+
+-- The same visible route is also used by the initial picker, before any Direct
+-- engagement exists. It must remain a harmless return with no turret writes.
+sess.phase = "target_select"
+sess.controlMode = "direct"
+sess.directSnapshots = {}
+gcMenu.display()
+local initialPickerBack10b = fix.buttonByText("text:20991:54")
+assert(initialPickerBack10b and initialPickerBack10b.handlers.onClick,
+    "initial target picker must render the same Back button")
+initialPickerBack10b.handlers.onClick()
+assert(sess.phase == "console",
+    "initial target-picker Back must still return to the console")
+assert(#modeWrites10b == 1 and #armedWrites10b == 1,
+    "initial target-picker Back must not write turret state without snapshots")
+
+C.SetTurretGroupMode2 = savedSetMode10b
+C.SetTurretGroupArmed = savedSetArmed10b
 
 -- ── 10c: bounded cycle check ────────────────────────────────────────────────
 -- Directly simulate the full Esc sequence: engaged/direct -> target_select -> console.
