@@ -90,7 +90,9 @@ if grep -Fq 'session.phase == "direct"' "$main"; then
   echo 'residual session.phase == "direct" found in main file' >&2
   exit 1
 fi
-grep -Fq 'local runtimeBuild = "2026-08-07-prefer-target-1"' "$main"
+# Shape, not value: a dated build id must exist so a debug log identifies the
+# build. Pinning the literal only forced a test edit on every bump.
+grep -Eq 'local runtimeBuild = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[^"]+"' "$main"
 grep -Fq 'initializing UI; build=" .. runtimeBuild' "$main"
 
 grep -Fq 'automatic frame hide queued for orphan check' "$main"
