@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-range-probe-3"
+local runtimeBuild = "2026-08-08-audit-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -429,6 +429,12 @@ local function restoreDirect(reason)
     -- Before the early return below: the override can outlive the snapshots,
     -- and leaving the chair must never leave the ship altered.
     clearPreferAllTurrets(reason)
+    -- Also before the early return, and for the same reason a level up: the
+    -- parked session outlives the snapshots. An Auto-engage session has no
+    -- snapshots at all, so leaving this at the end meant its record was never
+    -- cleared and a later chair ingress would restore a session the player had
+    -- already walked away from.
+    clearSnapshot()
     local snapshots = State.releaseDirect(session)
     if #snapshots == 0 then return end
     for _, snapshot in ipairs(snapshots) do
@@ -461,7 +467,6 @@ local function restoreDirect(reason)
         menu.display()
         log("repainted console after restore: " .. reason)
     end, false, getElapsedTime() + 0.5)
-    clearSnapshot()
 end
 
 local function returnToConsole(reason)
@@ -685,6 +690,12 @@ local function startAutoEngage(groups)
     local member = cameraMember()
     if not member then State.returnToConsole(session); return false end
     if not enterCamera(member) then State.returnToConsole(session); return false end
+    -- Auto-engage was never parked, so a save/load or a UI reload during it
+    -- dropped the player back at the console. It overrides no turret modes and
+    -- so needs no safety record, but the camera, the checked groups and the
+    -- phase are worth just as much here as in Direct control, and the payload
+    -- already carries controlMode.
+    persistSession()
     -- Finish the button callback before replacing the blurred console frame.
     -- Rebuilding a view during the click dispatch can leave the old frame
     -- visible until a second click on some X4/UI Extensions combinations.
@@ -1925,8 +1936,42 @@ reopenSuspendedSession = function(reason)
     end, false, getElapsedTime() + 0.50)
 end
 
+-- Re-points the engine soft target at a restored target. Every engine call gets
+-- its own pcall: an earlier version put GetDistanceBetween inside the argument
+-- list of the single log call, so when it raised, the failure went unlogged and
+-- the retry was never scheduled -- the probe deleted its own evidence.
+--
+-- ponytail: retries for five minutes because whether distance matters is still
+-- unmeasured, and one attempt at one distance cannot settle it. Collapse this to
+-- a single attempt, or delete it outright, once the log says which.
+local function attemptRepoint()
+    local targetID = session.repointTargetID
+    local attempt = (session.repointAttempts or 0) + 1
+    session.repointAttempts, session.repointNextAt = attempt, GetCurRealTime() + 5
+    local ok = select(2, pcall(function() return C.SetSofttarget(targetID, "") end))
+    local gotEngine, engine = pcall(function() return C.GetSofttarget2().softtargetID end)
+    local gotDistance, distance = pcall(function()
+        return C.GetDistanceBetween(session.shipID, targetID)
+    end)
+    log("re-point attempt " .. attempt .. " target=" .. tostring(targetID)
+        .. " ok=" .. tostring(ok)
+        .. " engine=" .. (gotEngine and tostring(engine) or "raised")
+        .. " distance=" .. (gotDistance and tostring(distance) or "raised"))
+    if ok == true or attempt >= 60 then
+        session.repointTargetID, session.repointAttempts, session.repointNextAt = nil, nil, nil
+    end
+end
+
 local function sessionWatchdog()
     if session then
+        -- Giving a pilot a fly-there order means opening the Map, and writing
+        -- the soft target under the player while they are picking things on it
+        -- would fight them for their own selection.
+        if session.repointTargetID and session.phase == "engaged"
+            and not State.isMapSuspended(session)
+            and GetCurRealTime() >= (session.repointNextAt or 0) then
+            attemptRepoint()
+        end
         local signature = table.concat({ session.lifecycle or "none", session.phase or "none", tostring(menu.shown and true or false), tostring(resumePending and true or false) }, ":")
         if signature ~= lastWatchdogSignature then
             lastWatchdogSignature = signature
@@ -2005,75 +2050,6 @@ local function init()
     end
     RegisterEvent("X4GunneryControl.RestoreTarget", onRestoreTarget)
 
-    -- The engine does not keep the soft target across a load or a reload, so the
-    -- restored session has to re-point it or the turrets have nothing to shoot
-    -- at. It refused on the first live load (build 2026-08-08-target-restore-1,
-    -- "could not re-point the soft target").
-    --
-    -- Not range. engageTarget bails out unless SetSofttarget returns true, and
-    -- it did not bail, so the engine accepted that same surface element at the
-    -- same distance while engaging: it was already out of range then. What
-    -- differs between the two calls is when they run, not how far away the
-    -- target is.
-    --
-    -- Hence the deferral -- which stands on its own terms anyway: enterCamera
-    -- (:658-667) saves whatever soft target it finds and writes it back a tick
-    -- later, so an inline write here would be undone even had the engine taken
-    -- it.
-    --
-    -- ponytail: one attempt, not a retry loop, since nothing suggests a second
-    -- would differ. Distance is logged only to keep range ruled out; the return
-    -- value and the engine read-back are logged separately because the call
-    -- reporting success does not prove the engine took it.
-    --
-    -- PROBE 2026-08-08, remove or promote once read. The first attempt is the
-    -- real behaviour; everything after a failure is the experiment. Retrying
-    -- turns the player flying toward the target into a distance-versus-success
-    -- reading, which is the only way to settle range either way -- one attempt
-    -- at one distance cannot. A later success is not a wasted write: it
-    -- re-points the target, which is what was wanted. If the log shows success
-    -- arriving as the distance falls, this becomes a real "re-acquire when back
-    -- in range" feature rather than a probe.
-    --
-    -- Five minutes of it, because ordering a pilot to fly somewhere takes far
-    -- longer than the minute a first guess allowed, and a probe that expires
-    -- before the player arrives measures nothing.
-    --
-    -- The previous build logged nothing at all here, not even a failure. The
-    -- cause was this function's own shape: GetDistanceBetween sat inside the
-    -- argument list of the only log call, so if it raised, the line was never
-    -- written AND the next attempt was never scheduled. A probe that deletes its
-    -- own evidence on the one path worth measuring. Hence: schedule the next
-    -- attempt first, keep every call that can raise inside its own pcall, and
-    -- log once the result is in hand.
-    local repointSoftTarget
-    repointSoftTarget = function(targetID, attempt)
-        local expectedSession, expectedEpoch = session, sessionEpoch
-        Helper.addDelayedOneTimeCallbackOnUpdate(function()
-            if not currentSession(expectedSession, expectedEpoch) then return end
-            if session.phase ~= "engaged" then return end
-            -- Giving the pilot the order means opening the Map, and writing the
-            -- soft target under the player while they pick things on it would
-            -- fight them for their own selection. Wait without spending one.
-            if State.isMapSuspended(session) then
-                repointSoftTarget(targetID, attempt)
-                return
-            end
-            local ok = select(2, pcall(function() return C.SetSofttarget(targetID, "") end))
-            local gotDistance, distance = pcall(function()
-                return C.GetDistanceBetween(session.shipID, targetID)
-            end)
-            local gotEngine, engine = pcall(function()
-                return C.GetSofttarget2().softtargetID
-            end)
-            log("re-point attempt " .. attempt .. " target=" .. tostring(targetID)
-                .. " ok=" .. tostring(ok)
-                .. " engine=" .. (gotEngine and tostring(engine) or "raised")
-                .. " distance=" .. (gotDistance and tostring(distance) or "raised"))
-            if ok ~= true and attempt < 60 then repointSoftTarget(targetID, attempt + 1) end
-        end, false, getElapsedTime() + (attempt == 1 and 0.3 or 5.0))
-    end
-
     -- One handler for both a save/load and a UI hot-reload. The payload carries
     -- only stable identifiers (path + group names), so the reload case never
     -- notices the contextID re-resolution that the load case depends on.
@@ -2109,10 +2085,18 @@ local function init()
         -- to some other object. MD held the same target as a component and the
         -- engine remapped it, so this is the one route that survives a load.
         if not session.aimTargetID and restoredTargetID then
-            session.aimTargetID = tostring(restoredTargetID)
-            log("RestoreSession: target recovered from MD: " .. session.aimTargetID)
+            session.aimTargetID = restoredTargetID
+            log("RestoreSession: target recovered from MD: " .. tostring(restoredTargetID))
         end
         restoredTargetID = nil
+        -- Everything above arrives as text or as a plain number: the payload is
+        -- a string and MD hands the target back as a Lua number. The FFI calls
+        -- take neither and raise "bad argument #1" -- which is what made Target
+        -- POV do nothing after a load. Converted here, at the one place a
+        -- session is built from foreign data, rather than at each of the eight
+        -- consumers that would each have to remember.
+        session.aimTargetID = session.aimTargetID and id(session.aimTargetID) or nil
+        session.cameraMemberID = session.cameraMemberID and id(session.cameraMemberID) or nil
         if not ok then
             -- Turret group names are identical across every ship of a class, so
             -- a payload from another ship would match and write its saved modes
@@ -2145,8 +2129,24 @@ local function init()
         end
         applyPov()
         if target ~= 0 then
-            log("re-point scheduled for " .. tostring(target))
-            repointSoftTarget(target, 1)
+            -- Measured before anything writes it, because the answer decides
+            -- whether the re-point below is needed at all: on the run that
+            -- finally worked, the re-point never executed and the turrets were
+            -- on target anyway, which points at the savegame having kept the
+            -- soft target. That was never checked, only assumed absent from the
+            -- UI-reload result. If this reads back as the target already, the
+            -- whole re-point mechanism can be deleted.
+            local read, before = pcall(function() return C.GetSofttarget2().softtargetID end)
+            log("RestoreSession: engine soft target before any write = "
+                .. (read and tostring(before) or "raised")
+                .. "; restored target = " .. tostring(target))
+            -- Handed to the watchdog rather than to a delayed callback of its
+            -- own. Two builds scheduled one from inside this event handler, a
+            -- tick before the menu opens, and neither ever fired even once --
+            -- "re-point scheduled" with no attempt after it. The watchdog
+            -- demonstrably keeps running, so use it instead of finding out why
+            -- the other did not.
+            session.repointTargetID = target
         end
         if menu.shown then
             -- The chair-ingress request route: the menu is already up and owns
