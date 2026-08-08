@@ -35,7 +35,10 @@ def records(path: pathlib.Path):
 
 
 def main() -> int:
-    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+    # Default to the skill directory this script lives in, not the caller's cwd.
+    # A "." default made the glob match nothing from the repo root, so the check
+    # reported success having validated zero records.
+    root = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else pathlib.Path(__file__).resolve().parent.parent
     errors: list[str] = []
     checked = 0
     for path in sorted((root / "references").glob("*.md")):
@@ -61,6 +64,11 @@ def main() -> int:
                 errors.append(f"{path}:{heading_line}: {heading!r} lacks a Finding field")
     if errors:
         print("\n".join(errors), file=sys.stderr)
+        return 1
+    # A validator that validated nothing must not report success: an empty run
+    # means the root is wrong, not that the knowledge base is clean.
+    if not checked:
+        print(f"no evidence records found under {root / 'references'}", file=sys.stderr)
         return 1
     print(f"X4 KB checks passed ({checked} records)")
     return 0
