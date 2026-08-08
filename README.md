@@ -118,5 +118,5 @@ The short local check is:
 
 ```bash
 ./scripts/validate.sh
-./scripts/package.sh 0.20
+./scripts/package.sh
 ```

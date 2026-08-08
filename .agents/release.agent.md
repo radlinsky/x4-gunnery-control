@@ -80,6 +80,11 @@ Once the version (e.g. `0.21`) and today's date are confirmed, make these edits
 
 After editing, read both files back and show the changed lines to the user.
 
+These two files are the only place the version lives. CI and the packaging
+scripts read `content.xml`; the release workflow derives it from the tag. If you
+ever find a version number hardcoded anywhere else, delete it rather than bump
+it — a second copy is what silently breaks CI one commit later.
+
 ---
 
 ## Step 5 — Review release notes

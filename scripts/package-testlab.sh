@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version=${1:?usage: scripts/package-testlab.sh VERSION}
+# shellcheck source=scripts/lib-release.sh
+source scripts/lib-release.sh
+# The Test Lab zip is named after the main extension's version it was built
+# against; no argument means "the current one".
+version=${1:-$(content_xml_version_dotted)}
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.[0-9][0-9]$ ]]; then
   echo "version must be MAJOR.MINOR with a two-digit minor (for example 0.20)" >&2
   exit 2

@@ -703,8 +703,8 @@ APIs.
 Build both archives:
 
 ```bash
-./scripts/package.sh 0.20
-./scripts/package-testlab.sh 0.20
+./scripts/package.sh
+./scripts/package-testlab.sh
 ```
 
 Extract both top-level extension directories beside one another:
@@ -762,8 +762,8 @@ save.
 The package builders always validate first. Build with the intended version:
 
 ```bash
-./scripts/package.sh 0.20
-./scripts/package-testlab.sh 0.20
+./scripts/package.sh
+./scripts/package-testlab.sh
 ```
 
 Inspect the archives before distributing them:

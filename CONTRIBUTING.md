@@ -10,6 +10,6 @@ On Windows, use `scripts\launch-x4-dev.bat` for runtime testing so loose files
 and `[X4GC]` diagnostics are enabled consistently. Linux developers should use
 the equivalent arguments documented in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Use `./scripts/package.sh 0.20` to create a Nexus-ready ZIP. Please include the
+Use `./scripts/package.sh` to create a Nexus-ready ZIP. Please include the
 output of `scripts/filter-gunnery-log.sh`, ship/bridge/turret details, game
 version, and active mod list in bug reports.

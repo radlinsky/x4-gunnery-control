@@ -9,8 +9,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y lua5.1 libxml2-utils shellcheck zip ripgrep
       - run: ./scripts/validate.sh
-      - run: ./scripts/package.sh 0.20
-      - run: ./scripts/package-testlab.sh 0.20
+      - run: ./scripts/package.sh
+      - run: ./scripts/package-testlab.sh
       - uses: actions/upload-artifact@v4
         with:
           name: x4-gunnery-control
