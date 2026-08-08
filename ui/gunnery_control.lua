@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-target-restore-2"
+local runtimeBuild = "2026-08-08-range-probe-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -2018,17 +2018,28 @@ local function init()
     -- would differ. Distance is logged only to keep range ruled out; the return
     -- value and the engine read-back are logged separately because the call
     -- reporting success does not prove the engine took it.
-    local function repointSoftTarget(targetID)
+    --
+    -- PROBE 2026-08-08, remove or promote once read. The single attempt above is
+    -- the real behaviour; everything after a failure is the experiment. Retrying
+    -- every few seconds for a minute turns the player flying toward the target
+    -- into a distance-versus-success reading, which is the only way to settle
+    -- range either way -- one attempt at one distance cannot. A later success is
+    -- not a wasted write: it re-points the target, which is what was wanted. If
+    -- the log shows success arriving as the distance falls, this becomes a real
+    -- "re-acquire when back in range" feature rather than a probe.
+    local repointSoftTarget
+    repointSoftTarget = function(targetID, attempt)
         local expectedSession, expectedEpoch = session, sessionEpoch
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) then return end
             if session.phase ~= "engaged" then return end
             local ok = C.SetSofttarget(targetID, "")
-            log("re-point soft target=" .. tostring(targetID)
+            log("re-point attempt " .. attempt .. " target=" .. tostring(targetID)
                 .. " ok=" .. tostring(ok)
                 .. " engine=" .. tostring(C.GetSofttarget2().softtargetID)
                 .. " distance=" .. tostring(C.GetDistanceBetween(session.shipID, targetID)))
-        end, false, getElapsedTime() + 0.3)
+            if not ok and attempt < 20 then repointSoftTarget(targetID, attempt + 1) end
+        end, false, getElapsedTime() + (attempt == 1 and 0.3 or 3.0))
     end
 
     -- One handler for both a save/load and a UI hot-reload. The payload carries
@@ -2101,7 +2112,7 @@ local function init()
             return
         end
         applyPov()
-        if target ~= 0 then repointSoftTarget(target) end
+        if target ~= 0 then repointSoftTarget(target, 1) end
         if menu.shown then
             -- The chair-ingress request route: the menu is already up and owns
             -- this session, so there is no handover to arrange. Setting
