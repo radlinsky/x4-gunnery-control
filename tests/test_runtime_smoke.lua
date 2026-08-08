@@ -1891,98 +1891,168 @@ do
     ffiStub.new                       = savedFfiNew
 end
 
--- ── 53. ship-wide "prefer my target" override ────────────────────────────────
+-- ── 53. camera gate accepts the container X4 returns on small ships ──────────
+-- Issue #11: on an M-class ship (Katana) SetPlayerCameraTargetView(turret) is
+-- accepted but GetExternalTargetViewComponent() reads back the turret's
+-- *container* (the ship). The old gate compared against the turret id only, saw
+-- a mismatch, and bounced the player from target_select to the console after
+-- ~30 ms, so Direct-control was unusable there. The container is a match.
+do
+    local savedContextByClass53 = C.GetContextByClass
+    local savedFocus53 = C.GetExternalTargetViewComponent
+    local savedOperational53 = C.IsComponentOperational
+
+    local grp53 = {
+        key = "grp53", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 60, displayName = "Katana Front", totalCount = 1, operationalCount = 1,
+        mode = "attack", armed = false, members = {
+            { componentID = 60, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "60" }
+        }
+    }
+    local function startSelection53()
+        gcMenu.onShowMenu()
+        local sess = API.getSession()
+        assert(sess ~= nil, "expected session for camera gate test (53)")
+        sess.groups = { grp53 }
+        sess.checkedGroupKeys = { ["grp53"] = true }
+        sess.phase = "console"
+        local before = #pendingCallbacks
+        assert(API.startTargetSelection(X4GunneryState.checkedGroups(sess)) == true,
+            "53: startTargetSelection must return true for a mutable operational group")
+        -- Drain the chained camera callbacks (0.05 s + 0.05 s) plus the deferred display.
+        for _ = 1, 3 do
+            for _, fn in ipairs(callbacksAfter(before)) do fn() end
+        end
+        return sess
+    end
+
+    C.IsComponentOperational = function() return true end
+    -- Turret 60 lives in ship 99, and the engine resolves the target view to it.
+    C.GetContextByClass = function() return 99 end
+    C.GetExternalTargetViewComponent = function() return 99 end
+
+    local logLen53 = #capturedLog
+    local sess53 = startSelection53()
+    assert(sess53.phase == "target_select",
+        "BUG (issue #11): the camera gate must accept the container the engine "
+        .. "returns; phase was '" .. tostring(sess53.phase) .. "' instead of 'target_select'")
+    for i = logLen53 + 1, #capturedLog do
+        assert(not string.find(capturedLog[i], "camera gate failed", 1, true),
+            "53: resolving to the container must not log a camera gate failure")
+    end
+
+    -- 53b: a focus that is neither the turret nor its container is a real
+    -- failure — but it must cost the player the camera, not the target browser.
+    C.GetExternalTargetViewComponent = function() return 12345 end
+    local logLen53b = #capturedLog
+    local sess53b = startSelection53()
+    assert(sess53b.phase == "target_select",
+        "BUG: a failed camera must leave the player in target_select, not bounce "
+        .. "them to the console; phase was '" .. tostring(sess53b.phase) .. "'")
+    local logged53b = false
+    for i = logLen53b + 1, #capturedLog do
+        if string.find(capturedLog[i], "camera gate failed", 1, true) then logged53b = true end
+    end
+    assert(logged53b, "53b: an unrelated camera focus must still log the gate failure")
+
+    C.GetContextByClass = savedContextByClass53
+    C.GetExternalTargetViewComponent = savedFocus53
+    C.IsComponentOperational = savedOperational53
+end
+
+-- ── 54. ship-wide "prefer my target" override ────────────────────────────────
 -- The override is worthless on a turret still sitting in autoassist: X4 ignores
 -- supplied targets for that mode (fight.attack.object.capital.xml:1756), so a
 -- turret left there keeps idling while the button looks like it worked. That is
 -- the fault the 2026-08-07 trial caught, hence the mode-write assertions.
 do
     gcMenu.onShowMenu()
-    local sess53 = API.getSession()
-    assert(sess53 ~= nil, "expected session for prefer-all-turrets test")
-    local grp53 = { key = "grp53", kind = "group", contextID = 5, path = "p", group = "g",
+    local sess54 = API.getSession()
+    assert(sess54 ~= nil, "expected session for prefer-all-turrets test")
+    local grp54 = { key = "grp54", kind = "group", contextID = 5, path = "p", group = "g",
         componentID = 53, displayName = "G53", totalCount = 1, operationalCount = 1,
         mode = "autoassist", armed = true, members = {
             { componentID = 53, displayName = "T1", operational = true,
               cameraSupported = true, componentKey = "53" }
         } }
-    sess53.groups = { grp53 }
-    sess53.checkedGroupKeys = { ["grp53"] = true }
-    sess53.phase, sess53.controlMode = "engaged", "direct"
-    sess53.aimTargetID, sess53.targetObjectID = 500, 500
+    sess54.groups = { grp54 }
+    sess54.checkedGroupKeys = { ["grp54"] = true }
+    sess54.phase, sess54.controlMode = "engaged", "direct"
+    sess54.aimTargetID, sess54.targetObjectID = 500, 500
     -- The pre-engagement mode the console must put the group back into.
-    sess53.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
-        shipID = sess53.shipID, mode = "defend", armed = true } }
+    sess54.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54.shipID, mode = "defend", armed = true } }
 
-    assert(sess53.preferAllTurrets == false,
+    assert(sess54.preferAllTurrets == false,
         "the ship-wide override must be off until the player asks for it")
 
-    local modeWrites53 = {}
-    local savedSetMode53 = C.SetTurretGroupMode2
+    local modeWrites54 = {}
+    local savedSetMode54 = C.SetTurretGroupMode2
     C.SetTurretGroupMode2 = function(ship, ctx, path, group, mode)
-        modeWrites53[#modeWrites53 + 1] = tostring(mode)
+        modeWrites54[#modeWrites54 + 1] = tostring(mode)
     end
-    local evts53 = {}
-    local savedAdd53 = AddUITriggeredEvent
+    local evts54 = {}
+    local savedAdd54 = AddUITriggeredEvent
     AddUITriggeredEvent = function(screen, control, params)
-        evts53[#evts53 + 1] = { screen = screen, control = control, params = params }
+        evts54[#evts54 + 1] = { screen = screen, control = control, params = params }
     end
 
-    local before53 = #pendingCallbacks
+    local before54 = #pendingCallbacks
     assert(API.applyPreferAllTurrets() == true, "applyPreferAllTurrets must report success")
-    assert(sess53.preferAllTurrets == true, "applying the override must record it on the session")
+    assert(sess54.preferAllTurrets == true, "applying the override must record it on the session")
 
     -- Every group the console took over goes back to its own mode, and nothing
     -- is ever written back to autoassist.
-    assert(#modeWrites53 > 0, "the override must restore the snapshot mode before issuing")
-    for _, m in ipairs(modeWrites53) do
+    assert(#modeWrites54 > 0, "the override must restore the snapshot mode before issuing")
+    for _, m in ipairs(modeWrites54) do
         assert(m ~= "autoassist",
             "the override must never leave a group on autoassist; X4 ignores supplied "
             .. "targets for that mode, so the turret would silently keep idling")
     end
-    assert(modeWrites53[1] == "defend",
-        "the override must restore the pre-engagement mode; wrote " .. tostring(modeWrites53[1]))
+    assert(modeWrites54[1] == "defend",
+        "the override must restore the pre-engagement mode; wrote " .. tostring(modeWrites54[1]))
 
     -- Raised a tick later, so the mode writes above have landed before MD reads
     -- the ship's turret modes back.
-    local immediate53 = 0
-    for _, e in ipairs(evts53) do
-        if e.control == "prefer_all_turrets" then immediate53 = immediate53 + 1 end
+    local immediate54 = 0
+    for _, e in ipairs(evts54) do
+        if e.control == "prefer_all_turrets" then immediate54 = immediate54 + 1 end
     end
-    assert(immediate53 == 0,
+    assert(immediate54 == 0,
         "the override event must be deferred a tick, not raised inside the same call")
-    for i = before53 + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
-    local applied53 = nil
-    for _, e in ipairs(evts53) do
-        if e.control == "prefer_all_turrets" then applied53 = e end
+    for i = before54 + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
+    local applied54 = nil
+    for _, e in ipairs(evts54) do
+        if e.control == "prefer_all_turrets" then applied54 = e end
     end
-    assert(applied53 ~= nil, "the deferred callback must raise prefer_all_turrets")
-    assert(applied53.params["ship"] ~= nil and applied53.params["target"] ~= nil,
+    assert(applied54 ~= nil, "the deferred callback must raise prefer_all_turrets")
+    assert(applied54.params["ship"] ~= nil and applied54.params["target"] ~= nil,
         "prefer_all_turrets must carry both the ship and the target")
 
     -- A target change re-issues the override. Without this the turrets fall
     -- silent the moment auto-next moves on, because the override names one
     -- specific target and dies with it.
-    local countBefore53 = #evts53
+    local countBefore54 = #evts54
     local before53b = #pendingCallbacks
-    sess53.aimTargetID = 501
+    sess54.aimTargetID = 501
     assert(API.applyPreferAllTurrets() == true, "re-issuing the override must succeed")
     for i = before53b + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
-    local reissued53 = 0
-    for i = countBefore53 + 1, #evts53 do
-        if evts53[i].control == "prefer_all_turrets" then reissued53 = reissued53 + 1 end
+    local reissued54 = 0
+    for i = countBefore54 + 1, #evts54 do
+        if evts54[i].control == "prefer_all_turrets" then reissued54 = reissued54 + 1 end
     end
-    assert(reissued53 == 1,
-        "a target change must re-issue the override exactly once; got " .. tostring(reissued53))
+    assert(reissued54 == 1,
+        "a target change must re-issue the override exactly once; got " .. tostring(reissued54))
 
     -- Release hands the ship back, and is a no-op when nothing is held.
     assert(API.clearPreferAllTurrets("test") == true, "release must report success when held")
-    assert(sess53.preferAllTurrets == false, "release must clear the session flag")
-    local cleared53 = 0
-    for _, e in ipairs(evts53) do
-        if e.control == "prefer_all_turrets_clear" then cleared53 = cleared53 + 1 end
+    assert(sess54.preferAllTurrets == false, "release must clear the session flag")
+    local cleared54 = 0
+    for _, e in ipairs(evts54) do
+        if e.control == "prefer_all_turrets_clear" then cleared54 = cleared54 + 1 end
     end
-    assert(cleared53 == 1, "release must raise prefer_all_turrets_clear exactly once")
+    assert(cleared54 == 1, "release must raise prefer_all_turrets_clear exactly once")
     assert(API.clearPreferAllTurrets("test again") == false,
         "release must be a no-op when the override is not held")
 
@@ -1991,55 +2061,55 @@ do
     -- player is directing drop to their own mode and stop shooting the engaged
     -- target -- reported in game on 2026-08-07, missile-defence groups went
     -- silent on release.
-    local armedWrites53 = {}
-    local savedSetArmed53 = C.SetTurretGroupArmed
+    local armedWrites54 = {}
+    local savedSetArmed54 = C.SetTurretGroupArmed
     C.SetTurretGroupArmed = function(_, _, _, _, armed)
-        armedWrites53[#armedWrites53 + 1] = armed
+        armedWrites54[#armedWrites54 + 1] = armed
     end
-    sess53.preferAllTurrets = true
-    sess53.phase, sess53.controlMode = "engaged", "direct"
+    sess54.preferAllTurrets = true
+    sess54.phase, sess54.controlMode = "engaged", "direct"
     -- The refresh inside applyPreferAllTurrets replaced the group list with
     -- whatever the stubbed readGroups returns, so put ours back.
-    sess53.groups = { grp53 }
-    sess53.checkedGroupKeys = { ["grp53"] = true }
-    local modeCount53 = #modeWrites53
+    sess54.groups = { grp54 }
+    sess54.checkedGroupKeys = { ["grp54"] = true }
+    local modeCount54 = #modeWrites54
     local before53d = #pendingCallbacks
     assert(API.clearPreferAllTurrets("resume test", true) == true,
         "release with resume must report success")
-    assert(#modeWrites53 == modeCount53,
+    assert(#modeWrites54 == modeCount54,
         "resuming must be deferred a tick, or MD reads autoassist back and the "
         .. "release never reaches those turrets")
     for i = before53d + 1, #pendingCallbacks do pcall(pendingCallbacks[i]) end
-    assert(modeWrites53[#modeWrites53] == "autoassist",
+    assert(modeWrites54[#modeWrites54] == "autoassist",
         "releasing from the button must put the checked groups back under "
-        .. "Direct-control; wrote " .. tostring(modeWrites53[#modeWrites53]))
-    assert(armedWrites53[#armedWrites53] == true,
+        .. "Direct-control; wrote " .. tostring(modeWrites54[#modeWrites54]))
+    assert(armedWrites54[#armedWrites54] == true,
         "a resumed group must be armed, or Direct-control is silent")
-    C.SetTurretGroupArmed = savedSetArmed53
+    C.SetTurretGroupArmed = savedSetArmed54
 
     -- Leaving the chair must never leave the ship altered. restoreDirect is the
     -- funnel every exit route uses (cease, get up, undock, target-destroyed with
     -- auto-next off), so clearing there covers all of them at once.
-    sess53.preferAllTurrets = true
+    sess54.preferAllTurrets = true
     -- Closing the target browser is the one exit route that reaches
     -- restoreDirect synchronously, which makes it the cheapest way to assert
     -- the funnel itself releases. Every other route (cease, get up, undock)
     -- reaches the same function.
-    sess53.phase = "target_select"
-    local countBefore53c = #evts53
+    sess54.phase = "target_select"
+    local countBefore53c = #evts54
     gcMenu.onCloseElement("close")
-    local clearedOnExit53 = 0
-    for i = countBefore53c + 1, #evts53 do
-        if evts53[i].control == "prefer_all_turrets_clear" then
-            clearedOnExit53 = clearedOnExit53 + 1
+    local clearedOnExit54 = 0
+    for i = countBefore53c + 1, #evts54 do
+        if evts54[i].control == "prefer_all_turrets_clear" then
+            clearedOnExit54 = clearedOnExit54 + 1
         end
     end
-    assert(clearedOnExit53 >= 1,
+    assert(clearedOnExit54 >= 1,
         "leaving the chair while the override is held must release every turret; "
         .. "otherwise the player walks away with a silently altered ship")
 
-    C.SetTurretGroupMode2 = savedSetMode53
-    AddUITriggeredEvent = savedAdd53
+    C.SetTurretGroupMode2 = savedSetMode54
+    AddUITriggeredEvent = savedAdd54
 end
 
 print("runtime smoke tests passed")

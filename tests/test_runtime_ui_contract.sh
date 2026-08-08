@@ -90,7 +90,7 @@ if grep -Fq 'session.phase == "direct"' "$main"; then
   echo 'residual session.phase == "direct" found in main file' >&2
   exit 1
 fi
-grep -Fq 'local runtimeBuild = "2026-08-06-notify-22"' "$main"
+grep -Fq 'local runtimeBuild = "2026-08-07-prefer-target-1"' "$main"
 grep -Fq 'initializing UI; build=" .. runtimeBuild' "$main"
 
 grep -Fq 'automatic frame hide queued for orphan check' "$main"
