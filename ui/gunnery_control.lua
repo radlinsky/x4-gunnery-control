@@ -1780,6 +1780,22 @@ local function redirectDockedMenu()
     end, false, getElapsedTime() + 0.05)
 end
 
+-- Both UI hooks exist only because kuertee UI Extensions adds registerCallback
+-- to the vanilla menu objects. That dependency is declared optional="true" on
+-- purpose -- UI Extensions ships under a different extension id on Nexus and on
+-- the Workshop, so a hard dependency would disable this mod for whichever half
+-- of players installed the other one -- which means we can be loaded without it.
+-- A host menu that exists but has no registerCallback is UI Extensions missing,
+-- not a startup race, and that deserves a message the player can act on.
+local function hookTimeoutMessage(docked)
+    if docked and not docked.registerCallback then
+        return "kuertee UI Extensions is not loaded (DockedMenu has no registerCallback)."
+            .. " The console still opens from the gameplanchange fallback, but it will not"
+            .. " reopen after closing the Map. Install UI Extensions."
+    end
+    return "UI hook registration timed out"
+end
+
 local function registerUIHooks()
     hookAttempts = hookAttempts + 1
     if not dockedHookRegistered then
@@ -1814,7 +1830,7 @@ local function registerUIHooks()
         if hookAttempts < 40 then
             Helper.addDelayedOneTimeCallbackOnUpdate(registerUIHooks, false, getElapsedTime() + 0.25)
         else
-            log("UI hook registration timed out")
+            log(hookTimeoutMessage(Helper.getMenu("DockedMenu")))
         end
     end
 end
@@ -1886,6 +1902,9 @@ local function init()
     -- Exposed for unit tests only: lets tests drive the camera gate that
     -- Direct-control goes through (issue #11).
     TestAPI.startTargetSelection = startTargetSelection
+    -- Exposed for unit tests only: the missing-UI-Extensions diagnosis, without
+    -- having to drive registerUIHooks through all 40 retries.
+    TestAPI.hookTimeoutMessage = hookTimeoutMessage
     RegisterEvent("playerGetUp", endForMovement)
     RegisterEvent("playerUndock", endForMovement)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)

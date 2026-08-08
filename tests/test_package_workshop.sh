@@ -98,6 +98,12 @@ if grep -q 'kuerteeUIExtensionsAndHUD"' "$STAGED_CONTENT"; then
   echo "FAIL: staged content.xml still names the non-Workshop dependency id" >&2
   exit 1
 fi
+# Optional on purpose: subscribers who got UI Extensions from Nexus have the mod
+# but not this id, and a hard dependency would disable us for them.
+if ! grep '<dependency id="ws_3477279743"' "$STAGED_CONTENT" | grep -q 'optional="true"'; then
+  echo "FAIL: the Workshop dependency should be optional=\"true\"" >&2
+  exit 1
+fi
 # Dropped on purpose: the repackage's version integer is not ours to predict.
 if grep '<dependency id="ws_3477279743"' "$STAGED_CONTENT" | grep -q 'version='; then
   echo "FAIL: the Workshop dependency should carry no version attribute" >&2
