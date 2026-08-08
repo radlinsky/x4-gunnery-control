@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.30] - 2026-08-07
 
 - New **All Turrets: Prefer My Target** during Direct-control: no more idle
   turrets. Every turret on the ship shoots your target when it can, and shoots
