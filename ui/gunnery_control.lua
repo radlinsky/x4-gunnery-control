@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-range-probe-2"
+local runtimeBuild = "2026-08-08-range-probe-3"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1123,8 +1123,15 @@ applyPov = function()
         componentID = session.cameraMemberID
     end
     if isNullID(componentID) then return false end
+    -- A restored session carries these as strings rather than ids: the payload is
+    -- text, and the target recovered from MD arrives as a plain Lua number. The
+    -- FFI call accepts neither and raises "bad argument #1", which is why Target
+    -- POV did nothing after a load while the very same component worked once it
+    -- had been picked by hand. Normalised here, since every anchor funnels
+    -- through this one call.
+    componentID = id(componentID)
     local ok, err = pcall(function() C.SetPlayerCameraTargetView(componentID, true) end)
-    if ok and anchor == "turret" then session.cameraMemberID = id(componentID) end
+    if ok and anchor == "turret" then session.cameraMemberID = componentID end
     logSession("applyPov anchor=" .. anchor .. " mode=" .. mode
         .. "; component=" .. tostring(componentID)
         .. "; ok=" .. tostring(ok) .. "; err=" .. tostring(err))
@@ -2031,6 +2038,14 @@ local function init()
     -- Five minutes of it, because ordering a pilot to fly somewhere takes far
     -- longer than the minute a first guess allowed, and a probe that expires
     -- before the player arrives measures nothing.
+    --
+    -- The previous build logged nothing at all here, not even a failure. The
+    -- cause was this function's own shape: GetDistanceBetween sat inside the
+    -- argument list of the only log call, so if it raised, the line was never
+    -- written AND the next attempt was never scheduled. A probe that deletes its
+    -- own evidence on the one path worth measuring. Hence: schedule the next
+    -- attempt first, keep every call that can raise inside its own pcall, and
+    -- log once the result is in hand.
     local repointSoftTarget
     repointSoftTarget = function(targetID, attempt)
         local expectedSession, expectedEpoch = session, sessionEpoch
@@ -2038,19 +2053,24 @@ local function init()
             if not currentSession(expectedSession, expectedEpoch) then return end
             if session.phase ~= "engaged" then return end
             -- Giving the pilot the order means opening the Map, and writing the
-            -- soft target under the player while they are picking things on it
-            -- would fight them for their own selection. Wait it out without
-            -- spending an attempt.
+            -- soft target under the player while they pick things on it would
+            -- fight them for their own selection. Wait without spending one.
             if State.isMapSuspended(session) then
                 repointSoftTarget(targetID, attempt)
                 return
             end
-            local ok = C.SetSofttarget(targetID, "")
+            local ok = select(2, pcall(function() return C.SetSofttarget(targetID, "") end))
+            local gotDistance, distance = pcall(function()
+                return C.GetDistanceBetween(session.shipID, targetID)
+            end)
+            local gotEngine, engine = pcall(function()
+                return C.GetSofttarget2().softtargetID
+            end)
             log("re-point attempt " .. attempt .. " target=" .. tostring(targetID)
                 .. " ok=" .. tostring(ok)
-                .. " engine=" .. tostring(C.GetSofttarget2().softtargetID)
-                .. " distance=" .. tostring(C.GetDistanceBetween(session.shipID, targetID)))
-            if not ok and attempt < 60 then repointSoftTarget(targetID, attempt + 1) end
+                .. " engine=" .. (gotEngine and tostring(engine) or "raised")
+                .. " distance=" .. (gotDistance and tostring(distance) or "raised"))
+            if ok ~= true and attempt < 60 then repointSoftTarget(targetID, attempt + 1) end
         end, false, getElapsedTime() + (attempt == 1 and 0.3 or 5.0))
     end
 
@@ -2124,7 +2144,10 @@ local function init()
             return
         end
         applyPov()
-        if target ~= 0 then repointSoftTarget(target, 1) end
+        if target ~= 0 then
+            log("re-point scheduled for " .. tostring(target))
+            repointSoftTarget(target, 1)
+        end
         if menu.shown then
             -- The chair-ingress request route: the menu is already up and owns
             -- this session, so there is no handover to arrange. Setting
