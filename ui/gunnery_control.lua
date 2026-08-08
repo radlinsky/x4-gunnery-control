@@ -1046,7 +1046,8 @@ end
 
 -- Test-only entry point for asserting that the delayed gate completes before
 -- the requested session POV is applied.
-function TestAPI.enterCamera(member) return enterCamera(member) end
+function TestAPI.enterCamera(member, options) return enterCamera(member, options) end
+function TestAPI.engageTarget(targetID) return engageTarget(targetID) end
 
 function TestAPI.getCameraFocus()
     return tostring(C.GetExternalTargetViewComponent())

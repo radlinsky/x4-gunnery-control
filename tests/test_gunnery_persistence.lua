@@ -76,4 +76,11 @@ fire("X4GunneryControl.RestoreTarget.10", 0)
 fire("X4GunneryControl.RestoreSession.10", "")
 assert(#envelopes == 3 and envelopes[3].generation == 10)
 
+-- A malformed lease is not allowed to pin the adapter forever: discard that
+-- request and permit a clean retry. MD only grants positive integer leases.
+assert(adapter.request())
+fire("X4GunneryControl.RestoreGrant", "not-a-generation")
+assert(adapter.request(), "an invalid grant resets the outstanding request")
+adapter.clear()
+
 print("persistence adapter tests passed")

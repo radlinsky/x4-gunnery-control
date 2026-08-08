@@ -546,4 +546,95 @@ do
     } } }), nil, "a turret that cannot host the camera is not a candidate")
 end
 
+-- Reviewer branch matrix: these deliberately small cases document the edges
+-- that are easy to lose in a persistence refactor.  The contract is named
+-- cases plus executable-line coverage, rather than a misleading branch %.
+do
+    -- nil session/records and a payload without a session record are refusals.
+    assert(not State.restoreState(nil, {}, {}), "matrix: nil session is refused")
+    assert(not State.restoreState(State.newSession(1, "g"), nil, {}), "matrix: nil records are refused")
+    assert(not State.restoreState(State.newSession(1, "g"), { { t = "checked" } }, {}),
+        "matrix: no session record is refused")
+
+    -- Every empty/nonempty saved/live ship-name pairing except two differing
+    -- nonempty names is permitted. IDs still decide reload versus save/load.
+    local function restoreWithNames(savedName, liveName)
+        local candidate = State.newSession("new", "g")
+        candidate.shipName = liveName
+        return State.restoreState(candidate, {
+            { t = "session", shipID = "old", shipName = savedName, camIndex = "bogus" },
+        }, {})
+    end
+    assert(restoreWithNames("", ""), "matrix: empty/empty ship names permit restore")
+    assert(restoreWithNames("saved", ""), "matrix: saved-only ship name permits restore")
+    assert(restoreWithNames("", "live"), "matrix: live-only ship name permits restore")
+    assert(restoreWithNames("same", "same"), "matrix: matching ship names permit restore")
+    assert(not restoreWithNames("saved", "other"), "matrix: differing ship names refuse restore")
+
+    -- A stale camera index must not invent a member. Non-operational and
+    -- unsupported records can be decoded, but the runtime camera gate rejects
+    -- them before any engine camera operation.
+    local staleCamera = State.newSession("same", "g")
+    staleCamera.shipName = "ship"
+    local nonCameraGroups = { { key = "g", path = "p", group = "g", members = {
+        { componentID = "dead", operational = false, cameraSupported = true },
+        { componentID = "unsupported", operational = true, cameraSupported = false },
+    } } }
+    assert(State.restoreState(staleCamera, {
+        { t = "session", shipID = "same", shipName = "ship", camPath = "p", camGroup = "g", camIndex = "9" },
+    }, nonCameraGroups), "matrix: invalid camera index still restores session")
+    assert(staleCamera.cameraMemberID == nil, "matrix: invalid camera index is dropped")
+    assert(State.firstCameraMember(nonCameraGroups) == nil,
+        "matrix: non-operational or unsupported restored members cannot host a camera")
+
+    -- Malformed escapes and records never raise or manufacture saved state.
+    local malformedEscapes = State.decode("t=session,shipName=bad%ZZ;not-a-field")
+    assert(#malformedEscapes == 2, "matrix: malformed escape/record is tolerated")
+    assert(not State.restoreState(State.newSession(1, "g"), State.decode("not-a-field"), {}),
+        "matrix: malformed record cannot become a session")
+
+    -- A changed-ID load drops a component-addressed single snapshot, while
+    -- duplicate records do not make restore fail or add phantom snapshots.
+    local changedIDs = State.newSession("new", "g")
+    assert(State.restoreState(changedIDs, {
+        { t = "session", shipID = "old", shipName = "" },
+        { t = "snapshot", kind = "single", componentID = "old-turret", mode = "defend", armed = "1" },
+    }, {}), "matrix: changed-ID session restores")
+    eq(#changedIDs.directSnapshots, 0, "matrix: changed-ID single snapshot is dropped")
+    local duplicates = State.newSession("same", "g")
+    assert(State.restoreState(duplicates, {
+        { t = "session", shipID = "same", shipName = "", phase = "console" },
+        { t = "session", shipID = "same", shipName = "", phase = "engaged" },
+        { t = "snapshot", kind = "group", path = "missing", group = "missing" },
+    }, {}), "matrix: duplicate session records are tolerated")
+    eq(#duplicates.directSnapshots, 0, "matrix: duplicate/malformed snapshots do not manufacture state")
+
+    -- Force the no-match/closing-loop paths that normal happy-path selections
+    -- skip, while preserving their public return values.
+    eq(State.turretGroupLabel("group_left"), "Left", "matrix: directional slot assignment")
+    assert(State.firstOperationalMember({ { members = { { componentID = 1, operational = false } } } }) == nil,
+        "matrix: no operational member")
+    assert(State.firstCameraMember({ { members = { { componentID = 1, operational = true, cameraSupported = false } } } }) == nil,
+        "matrix: no supported camera member")
+    assert(State.findMemberLocation({ groups = { { members = { { componentID = 1 } } } } }, 2) == nil,
+        "matrix: missing member location")
+    local retained = State.newSession(1, "g")
+    retained.selectedGroupKey, retained.selectedMemberID = "g", 2
+    State.retainSelection(retained, { { key = "g", members = { { componentID = 1, operational = false } } } })
+    assert(retained.selectedMemberID == nil, "matrix: unsupported retained selection falls back to none")
+    local checkedMatrix = State.newSession(1, "g")
+    checkedMatrix.groups = {
+        { key = "checked", operationalCount = 1, members = { { componentID = 1, operational = true } } },
+        { key = "unchecked", operationalCount = 1, members = { { componentID = 2, operational = false } } },
+        { key = "destroyed", operationalCount = 0, members = { { componentID = 3, operational = false } } },
+    }
+    State.toggleGroup(checkedMatrix, "checked")
+    assert(not State.allGroupsChecked(checkedMatrix), "matrix: unchecked mutable group prevents all-checked")
+    eq(#State.checkedGroups(checkedMatrix), 1, "matrix: checked group list excludes unchecked groups")
+    eq(#State.cameraRoster(checkedMatrix), 1, "matrix: camera roster filters non-operational and unchecked members")
+    eq(State.statusLabel(nil), "destroyed", "matrix: nil group status")
+    eq(State.statusLabel({ operationalCount = 1, totalCount = 2 }), "damaged", "matrix: damaged status")
+    eq(State.statusLabel({ operationalCount = 2, totalCount = 2 }), "operational", "matrix: operational status")
+end
+
 print("gunnery_state tests passed")

@@ -34,6 +34,7 @@ fi
 if command -v lua5.1 >/dev/null; then for file in tests/*.lua; do lua5.1 "$file"; done
 elif command -v lua >/dev/null; then for file in tests/*.lua; do lua "$file"; done
 else echo "warning: Lua runtime unavailable; skipped unit tests" >&2; fi
+./scripts/check-coverage.sh
 if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh tests/*.sh; else echo "warning: shellcheck unavailable" >&2; fi
 for file in tests/*.sh; do "$file"; done
 # Line 19 runs the test scripts directly, so a .sh committed as 100644 fails

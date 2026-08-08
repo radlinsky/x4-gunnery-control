@@ -220,6 +220,7 @@ function M.load()
     -- through fix.fireEvent(name, payload).
     local registeredEvents = {}   -- { [name] = { handler, ... } }
     local registeredEventCalls = {}
+    local registeredUIEvents = {}
     RegisterEvent = function(name, handler)
         if not registeredEvents[name] then registeredEvents[name] = {} end
         registeredEvents[name][#registeredEvents[name] + 1] = handler
@@ -230,6 +231,10 @@ function M.load()
         local handlers = registeredEvents[name]
         if not handlers then return end
         for _, h in ipairs(handlers) do h(name, payload) end
+    end
+
+    local function fireUIEvent(name, payload)
+        for _, handler in ipairs(registeredUIEvents[name] or {}) do handler(name, payload) end
     end
 
     -- ── 6. Helper stub ───────────────────────────────────────────────────────
@@ -270,26 +275,34 @@ function M.load()
                     addTableCalls = addTableCalls + 1
                     return {
                         addRow = function()
-                            return setmetatable({}, {
-                                __index = function()
-                                    return {
-                                        setColSpan  = function(t) return t end,
-                                        createText  = function() end,
-                                        createButton = function(_, bprops)
-                                            local entry = { active = (bprops or {}).active }
-                                            createdButtons[#createdButtons + 1] = entry
-                                            return {
-                                                setText = function(_, label)
-                                                    entry.text = label
-                                                end
-                                            }
-                                        end,
-                                        createCheckBox = function(_, checked)
-                                            createdCheckBoxes[#createdCheckBoxes + 1] = { checked = checked }
-                                        end,
-                                        createDropDown = function() end,
-                                        handlers = {},
-                                    }
+                            local row = {}
+                            return setmetatable(row, {
+                                -- Cache each cell. Production assigns handlers
+                                -- after createButton(), and retaining that same
+                                -- cell lets runtime tests exercise the actual
+                                -- click callback instead of a copied closure.
+                                __index = function(t, column)
+                                    local cell = { handlers = {} }
+                                    cell.setColSpan = function() return cell end
+                                    cell.createText = function() end
+                                    cell.createButton = function(_, bprops)
+                                        local entry = {
+                                            active = (bprops or {}).active,
+                                            handlers = cell.handlers,
+                                        }
+                                        createdButtons[#createdButtons + 1] = entry
+                                        return {
+                                            setText = function(_, label)
+                                                entry.text = label
+                                            end,
+                                        }
+                                    end
+                                    cell.createCheckBox = function(_, checked)
+                                        createdCheckBoxes[#createdCheckBoxes + 1] = { checked = checked }
+                                    end
+                                    cell.createDropDown = function() end
+                                    rawset(t, column, cell)
+                                    return cell
                                 end,
                             })
                         end,
@@ -342,7 +355,10 @@ function M.load()
         return "text:" .. tostring(page) .. ":" .. tostring(id)
     end
     -- RegisterEvent is set above (section 5).
-    registerForEvent    = function() end
+    registerForEvent    = function(name, _, handler)
+        registeredUIEvents[name] = registeredUIEvents[name] or {}
+        registeredUIEvents[name][#registeredUIEvents[name] + 1] = handler
+    end
     getElement          = function() return {} end
     local uiTriggeredEvents = {}
     AddUITriggeredEvent = function(screen, control, params)
@@ -369,6 +385,10 @@ function M.load()
     -- (line 5: local State = X4GunneryState).
     X4GunneryState = dofile("ui/gunnery_state.lua")
     X4GunneryPersistence = dofile("ui/gunnery_persistence.lua")
+    -- The control module deliberately reuses this table in game across a UI
+    -- reload. A fixture load promises a fresh environment instead, so discard
+    -- the previous test's closures before loading the next module instance.
+    X4GunneryControlAPI = nil
 
     -- ── 8. load the module ───────────────────────────────────────────────────
     -- init() is called at the bottom of the file, so this exercises the full
@@ -406,6 +426,7 @@ function M.load()
         logContains       = logContains,
         buttonByText      = buttonByText,
         fireEvent         = fireEvent,
+        fireUIEvent       = fireUIEvent,
         callbackCheckpoint = callbackCheckpoint,
         drainCallbacksSince = drainCallbacksSince,
         runCallback       = runCallback,
@@ -413,6 +434,7 @@ function M.load()
         pendingCallbacks  = pendingCallbacks,
         registeredEvents  = registeredEvents,
         registeredEventCalls = registeredEventCalls,
+        registeredUIEvents = registeredUIEvents,
         uiTriggeredEvents = uiTriggeredEvents,
         allFrames         = allFrames,
         -- scalars that tests only READ (not write) can be proxied via __index
