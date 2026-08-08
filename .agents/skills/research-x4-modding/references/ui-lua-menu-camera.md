@@ -729,9 +729,22 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   shows neither, on a hull whose XML has both kinds of padding.
 - Consequence: treat the runtime identifier as trimmed but never assume it of
   the file. Any tool that reads the XML directly must strip the value first, or
-  it will count `group_x ` and ` group_x ` as two groups. If console labels ever
-  regress to "Turret N" or lose their last direction word, this is the first
-  thing to re-check, and the fix is a trim at the `str()` boundary.
+  it will count `group_x ` and ` group_x ` as two groups.
+- Do NOT trim at the `str()`/FFI boundary. The same string is handed straight
+  back to the engine (`SetTurretGroupMode2`, `SetTurretGroupArmed`,
+  `GetTurretGroupMode2`, `IsTurretGroupArmed`) and is persisted into the MD save
+  record. If the engine's own table is keyed by the padded form, a trimmed write
+  misses silently and the turrets never move. Trim only what stays internal:
+  this project trims in `State.turretGroupLabel()` (display) and when building
+  and looking up the turret-slot-to-group candidate key (which spans two
+  separate APIs, `GetUpgradeGroups2` and `GetUpgradeSlotGroup`, so inconsistent
+  padding between them would break attribution). Engine-facing and persisted
+  values stay byte-exact.
+- Open question, self-diagnosing: `readGroups()` logs
+  `raw group id carries padding: "..."` at most once per session when a returned
+  path or group differs from its trimmed form. Zero lines means the engine
+  trims and this record's inference is confirmed. Check a session log to settle
+  it.
 
 ## Engine bug: SetPlayerCameraTargetView leaves Esc dead after get-up
 

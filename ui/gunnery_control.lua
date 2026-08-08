@@ -56,9 +56,18 @@ local sessionEpoch = 0
 local reopenSuspendedSession
 local activeExternalMenuName
 local lastWatchdogSignature
+-- Fires at most once per session when GetUpgradeGroups2 or GetUpgradeSlotGroup
+-- returns a path or group id that carries whitespace padding, proving that the
+-- engine does NOT trim before handing the value back to Lua. Silent when the
+-- engine trims (the normal case). Reset in discardSession so each session gets
+-- one log line at most, not one per repaint.
+local groupPaddingLogged = false
 
 local function text(id) return ReadText(20991, id) end
 local function str(pointer) return pointer ~= nil and ffi.string(pointer) or "" end
+-- Internal keys and log output only. Vanilla XML pads group attributes, but
+-- whatever the engine hands back has to go straight back to the engine.
+local function trim(value) return value:match("^%s*(.-)%s*$") or value end
 local function id(value) return ConvertStringTo64Bit(tostring(value)) end
 -- GetComponentData needs a ConvertStringTo64Bit'd id (vanilla passes
 -- `convertedComponent` / `object64` everywhere). A raw UniverseID silently
@@ -177,6 +186,13 @@ local function readGroups(ship)
     count = tonumber(C.GetUpgradeGroups2(buffer, count, ship, ""))
     for i = 0, count - 1 do
         local path, group = str(buffer[i].path), str(buffer[i].group)
+        -- Self-diagnosing probe: log once per session if the engine hands back a
+        -- padded path or group id, confirming the runtime does NOT trim for us.
+        -- Silent (zero log lines) when the engine trims before returning the value.
+        if not groupPaddingLogged and (path ~= trim(path) or group ~= trim(group)) then
+            groupPaddingLogged = true
+            log('raw group id carries padding: "' .. path .. '" / "' .. group .. '"')
+        end
         if path ~= ".." or group ~= "" then
             local info = C.GetUpgradeGroupInfo2(ship, "", buffer[i].contextid, path, group, "turret")
             if tonumber(info.count) > 0 then
@@ -189,7 +205,12 @@ local function readGroups(ship)
                     armed = C.IsTurretGroupArmed(ship, buffer[i].contextid, path, group),
                 }
                 groups[#groups + 1] = entry
-                local candidateKey = path .. "\31" .. group
+                -- Candidate key is internal-only: trim path and group so that
+                -- inconsistent XML padding between GetUpgradeGroups2 and
+                -- GetUpgradeSlotGroup (two separate APIs) does not silently break
+                -- turret-to-group attribution. The entry's own path/group fields
+                -- and every engine call that follows stay byte-exact as received.
+                local candidateKey = trim(path) .. "\31" .. trim(group)
                 candidates[candidateKey] = candidates[candidateKey] or {}
                 candidates[candidateKey][#candidates[candidateKey] + 1] = entry
             end
@@ -201,7 +222,7 @@ local function readGroups(ship)
         if component ~= 0 then
             local slotGroup, path, name = C.GetUpgradeSlotGroup(ship, "", "turret", slot), "", ""
             path, name = str(slotGroup.path), str(slotGroup.group)
-            local possible = candidates[path .. "\31" .. name] or {}
+            local possible = candidates[trim(path) .. "\31" .. trim(name)] or {}
             local entry = possible[1]
             if #possible > 1 then
                 -- The slot API returns no context ID, so same-named groups on
@@ -432,6 +453,7 @@ end
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
     if not session then return end
+    groupPaddingLogged = false
     -- Read directSnapshots BEFORE restoreDirect empties the list. The notify
     -- emission below (when seatLeaving is true) depends on whether this session
     -- actually held direct snapshots (Direct-control), not just on the reason code.

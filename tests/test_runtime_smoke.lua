@@ -1892,6 +1892,73 @@ do
     ffiStub.new                       = savedFfiNew
 end
 
+-- ── 55. readGroups: padded group IDs from two different APIs still attribute ──
+-- GetUpgradeGroups2 and GetUpgradeSlotGroup are separate engine APIs. The ship
+-- XML pads group= attributes with spaces, inconsistently. If one API returns
+-- "grp_front " and the other returns " grp_front", the candidate key lookup
+-- fails silently and the turret falls through to a "single" entry.
+-- Both sides are trimmed only when building/looking up the internal candidate
+-- key; entry.path/group and all engine-facing values stay byte-exact.
+
+do
+    local savedGetNumUpgradeGroups  = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups2    = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo2 = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots   = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup  = C.GetUpgradeSlotGroup
+    local savedFfiNew               = ffiStub.new
+
+    -- GetUpgradeGroups2 returns group id with trailing space.
+    local groupBuffer55 = {}
+    groupBuffer55[0] = { path = "p55", group = "grp_front_up_left ", contextid = 10 }
+    ffiStub.new = function() return groupBuffer55 end
+
+    C.GetNumUpgradeGroups  = function() return 1 end
+    C.GetUpgradeGroups2    = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function()
+        return { count = 1, currentcomponent = 201, currentmacro = "", slotsize = "",
+                 total = 1, operational = 1 }
+    end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 201 end
+    -- GetUpgradeSlotGroup returns the same group but with LEADING space instead.
+    C.GetUpgradeSlotGroup = function()
+        return { path = "p55", group = " grp_front_up_left" }
+    end
+
+    local groups55 = X4GunneryControlAPI.readGroups(42)
+
+    -- Without the fix the turret falls through to a "single" entry.
+    -- With the fix there is exactly one "group" entry and no "single" entry.
+    local groupEntry55, singleEntry55 = nil, nil
+    for _, g in ipairs(groups55) do
+        if g.kind == "group" then groupEntry55 = g end
+        if g.kind == "single" then singleEntry55 = g end
+    end
+    assert(groupEntry55 ~= nil,
+        "55 BUG: padded group id mismatch between GetUpgradeGroups2 and GetUpgradeSlotGroup "
+        .. "must not prevent turret attribution; expected a 'group' entry but got none")
+    assert(singleEntry55 == nil,
+        "55 BUG: turret fell through to a 'single' entry due to padded key mismatch; "
+        .. "the candidate key lookup must trim both path and group")
+    assert(#groupEntry55.members == 1,
+        "55: the turret must be a member of the group entry; got "
+        .. tostring(#(groupEntry55 and groupEntry55.members or {})) .. " members")
+    -- The stored group field must stay byte-exact (not trimmed).
+    assert(groupEntry55.group == "grp_front_up_left ",
+        "55: entry.group must be the raw (untrimmed) value from the engine; got '"
+        .. tostring(groupEntry55.group) .. "'")
+
+    C.GetNumUpgradeGroups             = savedGetNumUpgradeGroups
+    C.GetUpgradeGroups2               = savedGetUpgradeGroups2
+    C.GetUpgradeGroupInfo2            = savedGetUpgradeGroupInfo2
+    C.GetNumUpgradeSlots              = savedGetNumUpgradeSlots
+    C.GetUpgradeSlotCurrentComponent  = savedGetUpgradeSlotCurrentComponent
+    C.GetUpgradeSlotGroup             = savedGetUpgradeSlotGroup
+    ffiStub.new                       = savedFfiNew
+end
+
 -- ── 53. camera gate accepts the container X4 returns on small ships ──────────
 -- Issue #11: on an M-class ship (Katana) SetPlayerCameraTargetView(turret) is
 -- accepted but GetExternalTargetViewComponent() reads back the turret's

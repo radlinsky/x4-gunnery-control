@@ -20,7 +20,12 @@ end
 -- opaque group name is less useful than displaying its original value.
 function State.turretGroupLabel(identifier)
     if type(identifier) ~= "string" then return nil end
-    local name = string.lower(identifier)
+    -- Trim leading/trailing whitespace: vanilla XML pads group= attributes
+    -- inconsistently (e.g. "group_front_up_left " or "  group_front_down_mid ").
+    -- Only this entry point trims; engine-facing values stay byte-exact.
+    local trimmed = string.match(identifier, "^%s*(.-)%s*$")
+    if trimmed == nil or trimmed == "" then return nil end
+    local name = string.lower(trimmed)
     if not string.match(name, "^group_") then return nil end
 
     local directions = {
@@ -43,6 +48,9 @@ function State.turretGroupLabel(identifier)
     }
     local slots = {}
     for token in string.gmatch(name, "[^_]+") do
+        -- Trim each token so any residual whitespace from interior padding
+        -- cannot prevent the direction lookup from matching.
+        token = string.match(token, "^%s*(.-)%s*$") or token
         local word, suffix = string.match(token, "^(%a+)(%d*)$")
         local direction = word and directions[word]
         if direction and not slots[direction.slot] then

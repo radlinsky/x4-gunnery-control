@@ -363,4 +363,27 @@ assert(State.isNullID("0ull"), "isNullID: '0ull' lowercase cdata form is null")
 assert(not State.isNullID("463766"),    "isNullID: real id is not null")
 assert(not State.isNullID("463766ULL"), "isNullID: real id with ULL suffix is not null")
 
+-- turretGroupLabel: whitespace-tolerance for vanilla XML padding.
+-- The real ship XML pads group= values with spaces; assert that padded forms
+-- produce the same label as their unpadded counterparts, and that
+-- whitespace-only identifiers return nil.
+do
+    local unpaddedLeft = State.turretGroupLabel("group_front_up_left")
+    local unpaddedMid  = State.turretGroupLabel("group_front_up_middle")
+    -- trailing space (real: "group_front_up_left ")
+    eq(State.turretGroupLabel("group_front_up_left "), unpaddedLeft,
+        "trailing space must produce the same label as unpadded")
+    -- leading space (real: " group_front_up_mid " — mid and middle are synonyms)
+    eq(State.turretGroupLabel(" group_front_up_middle "), unpaddedMid,
+        "leading+trailing space must produce the same label as unpadded")
+    -- double leading space (real: "  group_front_down_mid ")
+    eq(State.turretGroupLabel("  group_front_down_mid "), State.turretGroupLabel("group_front_down_mid"),
+        "double leading space must produce the same label as unpadded")
+    -- whitespace-only must return nil
+    assert(State.turretGroupLabel("  ") == nil,
+        "two-space whitespace-only identifier must return nil")
+    assert(State.turretGroupLabel("   ") == nil,
+        "three-space whitespace-only identifier must return nil")
+end
+
 print("gunnery_state tests passed")
