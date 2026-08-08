@@ -40,7 +40,7 @@ grep -Fq 'Remove-Item Env:CLAUDE_PROJECT_DIR' scripts/validate-windows.ps1 \
 grep -Fq 'owner-tested Windows task' DEVELOPMENT.md \
   || fail 'manual WSL/X4 owner-test boundary missing from developer guide'
 
-python3 - .claude/settings.json <<'PY'
+python3 - .claude/settings.json .codex/hooks.json <<'PY'
 import json
 import sys
 
@@ -48,15 +48,23 @@ settings = json.load(open(sys.argv[1], encoding="utf-8"))
 hooks = settings["hooks"]["PostToolUse"]
 assert any(
     hook["matcher"] == "Edit|Write|NotebookEdit"
-    and hook["hooks"][0]["command"] == '"$CLAUDE_PROJECT_DIR/scripts/reload-advice.sh"'
+    and hook["hooks"][0]["command"] == '"$CLAUDE_PROJECT_DIR/.agents/hooks/reload-advice.sh"'
+    for hook in hooks
+)
+codex = json.load(open(sys.argv[2], encoding="utf-8"))
+hooks = codex["hooks"]["PostToolUse"]
+assert any(
+    "apply_patch" in hook["matcher"]
+    and ".agents/hooks/reload-advice.sh" in hook["hooks"][0]["command"]
+    and ".agents/hooks/reload-advice.sh" in hook["hooks"][0]["commandWindows"]
     for hook in hooks
 )
 PY
 
 space_root=$(mktemp -d '/tmp/x4gc hook contract with spaces.XXXXXX')
 trap 'rm -rf "$space_root"' EXIT
-mkdir -p "$space_root/scripts"
-cp scripts/reload-advice.sh "$space_root/scripts/reload-advice.sh"
+mkdir -p "$space_root/.agents/hooks"
+cp .agents/hooks/reload-advice.sh "$space_root/.agents/hooks/reload-advice.sh"
 hook_command=$(python3 -c '
 import json
 print(json.load(open(".claude/settings.json", encoding="utf-8"))["hooks"]["PostToolUse"][0]["hooks"][0]["command"])
@@ -64,5 +72,20 @@ print(json.load(open(".claude/settings.json", encoding="utf-8"))["hooks"]["PostT
 hook_output=$(printf '{"tool_input":{"file_path":"%s/ui/gunnery_control.lua"}}\n' "$space_root" \
   | CLAUDE_PROJECT_DIR="$space_root" bash -c "$hook_command")
 grep -Fq 'Reload UI' <<<"$hook_output" || fail 'quoted reload hook did not run from a spaced path'
+
+# Execute the registered Codex command too. Codex supplies apply_patch source
+# rather than Claude's one-file path, and resolves the shared hook from Git root.
+git -C "$space_root" init -q
+codex_hook_command=$(python3 -c '
+import json
+print(json.load(open(".codex/hooks.json", encoding="utf-8"))["hooks"]["PostToolUse"][0]["hooks"][0]["command"])
+')
+codex_payload=$(python3 -c '
+import json
+print(json.dumps({"tool_input": {"command": "*** Begin Patch\n*** Update File: ui/gunnery_control.lua\n*** End Patch"}}))
+')
+hook_output=$(cd "$space_root" && printf '%s\n' "$codex_payload" | bash -c "$codex_hook_command")
+grep -Fq 'Reload UI' <<<"$hook_output" \
+  || fail 'registered Codex reload hook did not run from a spaced path'
 
 echo 'release and settings contracts passed'

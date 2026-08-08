@@ -11,6 +11,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $agent = Join-Path $repo '.agents/release.agent.md'
 $prompt = Join-Path $repo '.github/prompts/release.prompt.md'
 $settings = Join-Path $repo '.claude/settings.json'
+$codexHooks = Join-Path $repo '.codex/hooks.json'
 
 if (-not (Test-Path -LiteralPath $prompt -PathType Leaf)) {
     Fail 'release prompt is not a regular file'
@@ -31,11 +32,18 @@ $hook = $parsedSettings.hooks.PostToolUse | Where-Object { $_.matcher -eq 'Edit|
 if ($null -eq $hook -or $null -eq $hook.hooks -or [string]::IsNullOrWhiteSpace($hook.hooks[0].command)) {
     Fail 'settings JSON has no executable PostToolUse reload-advice hook'
 }
+$parsedCodexHooks = Get-Content -LiteralPath $codexHooks -Raw | ConvertFrom-Json
+$codexHook = $parsedCodexHooks.hooks.PostToolUse | Where-Object { $_.matcher -match 'apply_patch' } | Select-Object -First 1
+if ($null -eq $codexHook -or $null -eq $codexHook.hooks -or
+    $codexHook.hooks[0].command -notmatch '\.agents/hooks/reload-advice\.sh' -or
+    $codexHook.hooks[0].commandWindows -notmatch '\.agents/hooks/reload-advice\.sh') {
+    Fail 'Codex hooks JSON has no cross-platform PostToolUse reload-advice hook'
+}
 
 $spaceRoot = Join-Path ([IO.Path]::GetTempPath()) ("x4gc contract with spaces " + [guid]::NewGuid())
 try {
-    New-Item -ItemType Directory -Path (Join-Path $spaceRoot 'scripts') -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repo 'scripts/reload-advice.sh') -Destination (Join-Path $spaceRoot 'scripts/reload-advice.sh')
+    New-Item -ItemType Directory -Path (Join-Path $spaceRoot '.agents/hooks') -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repo '.agents/hooks/reload-advice.sh') -Destination (Join-Path $spaceRoot '.agents/hooks/reload-advice.sh')
     # Git Bash receives Windows environment values unchanged, but Bash cannot
     # open C:\... paths. Convert the test root before expanding the parsed hook.
     $bashRoot = (& bash -lc "cygpath -u -- `"$spaceRoot`"").Trim()
@@ -50,6 +58,22 @@ try {
         $hookOutput = $payload | & bash -c $hook.hooks[0].command 2>&1
         if ($LASTEXITCODE -ne 0 -or ($hookOutput -join "`n") -notmatch 'Reload UI') {
             Fail "quoted reload hook did not execute from a spaced project path: $hookOutput"
+        }
+
+        & git -C $spaceRoot init --quiet
+        if ($LASTEXITCODE -ne 0) {
+            Fail 'could not initialize temporary Git root for the Codex hook contract'
+        }
+        $codexPayload = '{"tool_input":{"command":"*** Begin Patch\n*** Update File: ui/gunnery_control.lua\n*** End Patch"}}'
+        Push-Location $spaceRoot
+        try {
+            $codexOutput = $codexPayload | & cmd.exe /d /s /c $codexHook.hooks[0].commandWindows 2>&1
+        }
+        finally {
+            Pop-Location
+        }
+        if ($LASTEXITCODE -ne 0 -or ($codexOutput -join "`n") -notmatch 'Reload UI') {
+            Fail "registered Codex Windows hook did not execute from a spaced project path: $codexOutput"
         }
     }
     finally {

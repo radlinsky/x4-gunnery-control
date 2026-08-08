@@ -1,19 +1,21 @@
 # Asking the owner to reload or restart X4
 
-The owner drives the game; you cannot. A PostToolUse hook
-(`scripts/reload-advice.sh`) states the reset for each file you edit — follow it.
-Three things it cannot know, because it sees one file at a time:
+The owner drives the game; you cannot. The shared Claude/Codex PostToolUse hook
+(`.agents/hooks/reload-advice.sh`) states the reset for each edit — follow it.
+Three things still require whole-task judgment:
 
-- **The strictest category wins across the whole change.** A new or deleted file,
-  or any `t/`, `ui.xml` or `content.xml` edit, means a restart even when
-  `ui/*.lua` also changed and the hook said Reload UI.
+- **The strictest category wins across the whole change.** A new or deleted
+  X4-loaded file, or any `t/`, `ui.xml` or `content.xml` edit, means a restart
+  even when `ui/*.lua` also changed and the hook said Reload UI. Changes that
+  span multiple independent reload categories also mean one restart.
 - **If the change could break the gunnery menu, ask for a restart.** Test Lab is
   reachable only through that menu, so a broken menu leaves no button to click.
 - **Say it once, at the end, with authority**, naming what changed and exactly
   one reset. Never offer reload-or-restart as a choice.
 
-[docs/RELOADING.md](docs/RELOADING.md) is the table; `tests/test_reload_advice.sh`
-is the test. Change all three together.
+[docs/RELOADING.md](docs/RELOADING.md) is the table;
+`tests/test_reload_advice.sh` is the cross-client contract. Change all three
+together.
 
 # X4 research
 

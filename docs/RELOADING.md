@@ -16,7 +16,8 @@ appears to change — which looks exactly like a broken reload.
 | `libraries/*.xml`, AI scripts | install, then **Reload AI** (untested here — treat a failure as "restart") |
 | `t/*.xml` (text) | **restart** |
 | `ui.xml`, `content.xml` | **restart** |
-| A new file, or a file deleted | **restart** |
+| A new X4-loaded file, or an X4-loaded file deleted | **restart** |
+| Changes spanning more than one reload category | **restart** |
 | Test Lab's own `testlab/` files | **restart**, with `launch-x4-test-lab-dev.bat` |
 | Nothing changed, but the game is confused | **restart** |
 
@@ -95,14 +96,17 @@ command, or a restart.
 
 ## The hook
 
-`.claude/settings.json` registers a PostToolUse hook running
-`scripts/reload-advice.sh`. Whenever an agent edits a file X4 actually loads, the
-hook injects the instruction for that file's category, so the rule in AGENTS.md
-does not rest on the agent remembering to look here.
+`.claude/settings.json` and `.codex/hooks.json` register the same PostToolUse
+implementation at `.agents/hooks/reload-advice.sh`. Claude supplies one edited
+file path; Codex supplies an `apply_patch` command that may name several files.
+The hook understands both payloads and, for a multi-file Codex edit, selects the
+strictest result before injecting one instruction. Codex requires the owner to
+review and trust a new or changed project hook with `/hooks` before it runs.
 
 Files X4 never loads produce nothing, so ordinary repository work stays quiet.
 
-The script is also a plain CLI — `scripts/reload-advice.sh ui/gunnery_control.lua`
-prints the same line. The mapping is covered by `tests/test_reload_advice.sh`,
-which runs under `scripts/validate.sh`; keep the two files in step with this
-table.
+The script is also a plain CLI —
+`.agents/hooks/reload-advice.sh ui/gunnery_control.lua` prints the same line.
+The mapping, both client payloads, and multi-file precedence are covered by
+`tests/test_reload_advice.sh`, which runs under `scripts/validate.sh`; keep the
+hook and test in step with this table.
