@@ -65,7 +65,8 @@
 ### External Target View notice appears on every camera entry, not on repeated activation
 
 - X4: 9.00
-- Status: live-tested (observation); inference (cause)
+- Status: live-tested
+- Scope: the notice is live-tested; its cause remains inference
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, Windows 11, X4 9.00 Steam;
   `ui/core/lua/infobar2.lua` (notice generation)
@@ -156,7 +157,8 @@
 
 ### Restoring cockpit camera after GetUp locks player input
 - X4: 9.00
-- Status: live-tested (symptom); inference (precise mechanism)
+- Status: live-tested
+- Scope: the symptom is live-tested; the precise input-lock mechanism remains inference
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, Windows 11, X4 9.00 Steam
 - Live test: yes — symptom reproduced on 2026-08-04; ordering defect is unambiguous in
@@ -196,7 +198,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 #### Mechanism A: `useMiniWidgetSystem = true` disables default Esc/Del handling
 
 - X4: 9.00
-- Status: shipped-source (property meaning); live-tested (observed effect)
+- Status: live-tested
+- Corroboration: shipped-source establishes the property meaning
 - Source: `ui/addons/ego_detailmonitorhelper/helper.lua`
 - Live test: yes — fix observed 2026-08-04; Watch and compact Engage frames
   set `useMiniWidgetSystem = true` and did not receive `Esc`; removing that
@@ -230,7 +233,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 #### Mechanism C: a Helper frame must contain a table to receive Esc (decisive fix for Watch)
 
 - X4: 9.00
-- Status: shipped-source (mechanism); live-tested (outcome)
+- Status: live-tested
+- Corroboration: shipped-source establishes the frame/table mechanism
 - Source: `ui/addons/ego_detailmonitorhelper/helper.lua` (`frame:display()`);
   game session on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, Windows 11, X4 9.00 Steam
@@ -371,7 +375,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Follow camera cannot be parked on a turret: no ship-local component offset
 - X4: 9.00
-- Status: inference (scoped negative over the full ui-9.00 FFI index)
+- Status: inference
+- Scope: negative search over the full ui-9.00 FFI index
 - Source: `ui/addons/ego_detailmonitor/menu_followcamera.lua`;
   `ui/core/lua/targetsystem.lua`; full FFI index of ui-9.00 (1914 unique names)
 - Live test: no — negative result, untested as of 2026-08-04
@@ -429,7 +434,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### The engine exports far more than vanilla Lua declares
 - X4: 9.00
-- Status: shipped-source (binary export table)
+- Status: shipped-source
+- Scope: X4.exe binary export table
 - Source: PE export table of `X4.exe` via `objdump -p`, diffed against every
   `C.<name>` call site in `ui-9.00`
 - Live test: no — untested as of 2026-08-04
@@ -472,7 +478,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Free look is suppressed in Engage by the enemy soft target, not the camera
 - X4: 9.00
-- Status: inference (from shipped-source paths plus live observation)
+- Status: inference
+- Corroboration: shipped-source paths and a partial live observation
 - Source: `ui/gunnery_control.lua` `startWatch` vs `engageTarget`;
   `ui/core/lua/crosshair handling.lua` (`IsExternalTargetMode`)
 - Live test: partial — Watch (no enemy soft target) has working mouse look;
@@ -511,7 +518,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Custom MD play_cutscene is a playable main-view camera
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`,
   `md/x4_gunnery_control.xml` `CutsceneAim` cue, Windows 11, X4 9.00 Steam
 - Live test: yes — confirmed in both POVs (camera at turret and camera at
@@ -532,7 +539,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### A turret surface element is a valid cutscene anchor object
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`,
   `md/x4_gunnery_control.xml` `CutsceneAim` cue, Windows 11, X4 9.00 Steam
 - Live test: yes — camera observed positioned at the turret on 2026-08-04
@@ -543,7 +550,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Lua→MD AddUITriggeredEvent transport contract
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: three live rounds on 2026-08-04, extension `x4_gunnery_control`
   (`ui/gunnery_control.lua` `sendCutsceneAimStart` →
   `md/x4_gunnery_control.xml` `CutsceneAim.Start`), Windows 11, X4 9.00 Steam;
@@ -562,7 +569,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### anchordist=0 clips the camera inside the anchor; use the vanilla negative-distance idiom
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`;
   vanilla idiom in `md/cinematiccamera.xml:2504`
 - Live test: yes — anchordist=0 observed clipping through anchor geometry with
@@ -581,8 +588,9 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### No turret-target getter exists in the public FFI surface or in the undeclared engine exports examined so far
 
 - X4: 9.00
-- Status: shipped-source (negative result, public declarations); shipped-source
-  (negative result, binary export table); inference (MD script properties)
+- Status: inference
+- Corroboration: negative searches of shipped public declarations, the binary
+  export table, and MD script properties
 - Source: full LuaJIT ffi.cdef index of `ui-9.00` (3123 unique declarations
   across 80 Lua files) via `scripts/index-lua-ffi.sh`; PE export table of
   `X4.exe` via `objdump -p` (2493 named symbols; 609 not called by any shipped
@@ -618,9 +626,9 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### A turret slot cannot be attributed to a group, and on a ship it never needs to be
 
 - X4: 9.00
-- Status: live-tested (probe on a Boron L destroyer, 2026-08-07);
-  shipped-source (FFI declarations, vanilla callers, ship macros);
-  inference (the uniqueness argument)
+- Status: inference
+- Corroboration: a 2026-08-07 Boron L destroyer live probe plus shipped FFI
+  declarations, vanilla callers, and ship macros
 - Source: live probe logged as `[X4GC PROBE]` on
   `ship_bor_l_destroyer_01_a_macro` (14 turret slots, 9 groups);
   1924 unique FFI declarations across `ui-9.00`;
@@ -671,8 +679,9 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### 15 shipped ships have two turret groups that humanize to the same label
 
 - X4: 9.00
-- Status: shipped-source (the group identifiers); inference (the labels, derived
-  by replaying this project's `State.turretGroupLabel()` over them)
+- Status: inference
+- Corroboration: shipped-source group identifiers replayed through this
+  project's `State.turretGroupLabel()`
 - Source: `assets/units/size_l/ship_*.xml` and `assets/units/size_xl/ship_*.xml`
   across base game and all seven DLC catalogs, extracted to
   `.x4-research-cache/extracted/ships-comp-base-9.00`,
@@ -708,7 +717,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### Group identifiers in ship component XML carry surrounding whitespace
 
 - X4: 9.00
-- Status: shipped-source (the padding); inference (that the runtime strips it)
+- Status: inference
+- Corroboration: shipped-source proves padding; runtime trimming is inferred
 - Source: `.x4-research-cache/extracted/ships-comp-dlc-9.00/assets/units/size_l/
   ship_bor_l_destroyer_01.xml`, which contains `group="group_front_up_left "`,
   `group=" group_front_up_mid "`, `group="  group_front_down_mid "` and even
@@ -751,7 +761,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### Trigger and symptom
 
 - X4: 9.00
-- Status: live-tested (three in-game trials, 2026-08-06)
+- Status: live-tested
 - Source: game sessions on 2026-08-06, extension `x4_gunnery_control`
   build markers `2026-08-06-viewcycle-20` / `2026-08-06-notify-21`,
   Windows 11, X4 9.00 Steam; debug log archived at `debug with trial 2.log`

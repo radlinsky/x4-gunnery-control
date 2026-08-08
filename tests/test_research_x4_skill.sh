@@ -23,6 +23,11 @@ grep -Fq 'GetContainedShips' "$skill/references/ui-lua-menu-camera.md"
 grep -Fq 'mayattack' "$skill/references/md-ai.md"
 grep -Fq 'XTools_1.11.zip!Readme.txt' "$skill/references/tooling.md"
 grep -Fq 'documented-public' "$skill/references/tooling.md"
+grep -Fq 'English X4 Scripts and Modding' "$skill/references/source-registry.md"
+grep -Fq 'site:forum.egosoft.com' "$skill/references/source-registry.md"
+grep -Fq 'Discord' "$skill/references/source-registry.md"
+grep -Fq 'Nexus descriptions/files' "$skill/references/source-registry.md"
+grep -Fq 'Steam Workshop descriptions/discussions' "$skill/references/source-registry.md"
 grep -Fq 'SKILL_DIR=.agents/skills/research-x4-modding' "$skill/SKILL.md"
 grep -Fq 'search-x4.sh" --dry-run -- PATTERN' "$skill/SKILL.md"
 skill_invocation="${dollar}research-x4-modding"
@@ -33,12 +38,14 @@ grep -Fq 'Iterate on these' AGENTS.md
 for script in discover-x4-roots.sh search-x4.sh index-lua-ffi.sh prepare-xsd-cache.sh extract-selected-xrcat.sh; do
   "$scripts/$script" --help >/dev/null
 done
+python3 "$scripts/check-kb.py" "$skill" >/dev/null
 
-mkdir -p "$tmp/game" "$tmp/extracted/ui" "$tmp/extensions/example" "$tmp/schema/md" "$tmp/schema/libraries"
+mkdir -p "$tmp/game/extensions/example" "$tmp/extracted/ui" "$tmp/extensions/example" "$tmp/schema/md" "$tmp/schema/libraries"
 : >"$tmp/game/08.cat"
 printf 'ffi.cdef[[\nbool ExampleAPI(int value);\n]]\n' >"$tmp/extracted/ui/example.lua"
 printf 'ffi.cdef[[\nbool ExampleXplAPI(int value);\n]]\n' >"$tmp/extracted/ui/example.xpl"
 printf 'extension needle\n' >"$tmp/extensions/example/source.lua"
+printf 'root-discovered needle\n' >"$tmp/game/extensions/example/source.lua"
 printf '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:include schemaLocation="../libraries/md.xsd"/></xs:schema>\n' >"$tmp/schema/md/md.xsd"
 printf '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:include schemaLocation="common.xsd"/></xs:schema>\n' >"$tmp/schema/libraries/md.xsd"
 printf '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"/>\n' >"$tmp/schema/libraries/common.xsd"
@@ -53,6 +60,9 @@ grep -Fqx "root=$tmp/extracted" <<<"$search_dry"
 "$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle >/dev/null
 search_glob=$("$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle -g '*.lua')
 grep -Fq "$tmp/extensions/example/source.lua" <<<"$search_glob"
+search_root=$(X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" --dry-run -- root-discovered)
+grep -Fqx "root=$tmp/game/extensions" <<<"$search_root"
+X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" -- root-discovered >/dev/null
 
 index_dry=$("$scripts/index-lua-ffi.sh" --source "$tmp/extracted" --dry-run)
 grep -Fqx "source=$tmp/extracted" <<<"$index_dry"
@@ -77,6 +87,10 @@ test -f "$tmp/cache/schema/md/md.xsd"
 test -f "$tmp/cache/schema/libraries/common.xsd"
 if "$scripts/prepare-xsd-cache.sh" --source "$tmp/schema" --cache-root "$tmp/cache" >/dev/null 2>&1; then
   echo 'schema cache overwrote an existing destination' >&2
+  exit 1
+fi
+if "$scripts/prepare-xsd-cache.sh" --source "$tmp/schema" --cache-root "$PWD/research-schema-unsafe-fixture" >/dev/null 2>&1; then
+  echo 'schema cache accepted a tracked repository output' >&2
   exit 1
 fi
 
@@ -118,9 +132,15 @@ mkdir "$tmp/zip-source"
 cp "$tmp/fake-xrcat" "$tmp/zip-source/XRCatTool.exe"
 printf 'verified fixture\n' >"$tmp/zip-source/Readme.txt"
 zip -j -q "$tmp/tool.zip" "$tmp/zip-source/XRCatTool.exe" "$tmp/zip-source/Readme.txt"
+fixture_hash=$(sha256sum "$tmp/tool.zip" | awk '{print $1}')
+
+if "$scripts/extract-selected-xrcat.sh" --tool-zip "$tmp/tool.zip" --tool-cache "$tmp/rejected-cache" --input "$tmp/game/08.cat" --output "$tmp/rejected-output" --include '^ui/' >/dev/null 2>&1; then
+  echo 'XRCat wrapper accepted a tool ZIP that did not match the verified hash' >&2
+  exit 1
+fi
 
 dry_tool_cache="$tmp/dry-tool-cache"
-dry_command=$("$scripts/extract-selected-xrcat.sh" --tool-zip "$tmp/tool.zip" --tool-cache "$dry_tool_cache" --input "$tmp/game/08.cat" --output "$tmp/dry-output" --include '^ui/' --exclude '^assets/' --dry-run)
+dry_command=$("$scripts/extract-selected-xrcat.sh" --tool-zip "$tmp/tool.zip" --tool-cache "$dry_tool_cache" --expected-sha256 "$fixture_hash" --input "$tmp/game/08.cat" --output "$tmp/dry-output" --include '^ui/' --exclude '^assets/' --dry-run)
 grep -Fq 'prepare_command=unzip ' <<<"$dry_command"
 grep -Fq 'command=' <<<"$dry_command"
 test ! -e "$dry_tool_cache"
@@ -131,13 +151,15 @@ mapfile -t direct_args <"$tmp/direct-args"
 expected=(-in "$tmp/game/08.cat" -out "$tmp/direct-output" -include '^ui/' '.*\.lua$' -exclude '^assets/')
 [[ ${direct_args[*]} == "${expected[*]}" ]]
 
-X4GC_FAKE_ARGS="$tmp/zip-args" "$scripts/extract-selected-xrcat.sh" --tool-zip "$tmp/tool.zip" --tool-cache "$tmp/tool-cache" --input "$tmp/game/08.cat" --output "$tmp/zip-output" --include '^md/'
+X4GC_FAKE_ARGS="$tmp/zip-args" "$scripts/extract-selected-xrcat.sh" --tool-zip "$tmp/tool.zip" --tool-cache "$tmp/tool-cache" --expected-sha256 "$fixture_hash" --input "$tmp/game/08.cat" --output "$tmp/zip-output" --include '^md/'
 test -d "$tmp/zip-output"
 test -f "$tmp/tool-cache/XRCatTool.exe"
 test -f "$tmp/tool-cache/Readme.txt"
 test -x "$tmp/tool-cache/XRCatTool.exe"
 grep -Fqx -- '-include' "$tmp/zip-args"
 grep -Fqx '^md/' "$tmp/zip-args"
+X4GC_FAKE_ARGS="$tmp/zip-reuse-args" "$scripts/extract-selected-xrcat.sh" --tool-zip "$tmp/tool.zip" --tool-cache "$tmp/tool-cache" --expected-sha256 "$fixture_hash" --input "$tmp/game/08.cat" --output "$tmp/zip-reuse-output" --include '^ui/'
+test -d "$tmp/zip-reuse-output"
 
 if git ls-files | rg -q '(^|/)(\.x4-research-cache/|[^/]+\.(cat|dat)$)'; then
   echo 'cache, catalog, or data artifact is tracked' >&2

@@ -29,6 +29,7 @@
 - Source: in-game trial 2026-08-07; player-owned multi-turret ship, one hostile
   off a single flank, every turret group armed `autoassist` via Gunnery Control
   Direct-control
+- Live test: yes — reproduced in the described X4 9.00 trial on 2026-08-07
 - Finding: a turret on the flank facing away from the target rotates to track
   it but never fires, observed over 30 seconds. Autoassist therefore hands the
   target to every armed turret regardless of firing solution, and a turret with
@@ -42,6 +43,7 @@
 - Source: in-game trial 2026-08-07; `set_turret_targets` issued with
   `preferredtarget` and no `target` list, once per distinct turret mode on a
   player-owned ship
+- Live test: yes — reproduced in the described X4 9.00 trial on 2026-08-07
 - Finding: turrets that cannot attack the preferred target engage something
   else in range rather than holding fire, and that choice is **not** limited by
   the turret's own mode. Every turret on a ship set entirely to

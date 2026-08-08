@@ -4,9 +4,9 @@
 
 ### X4 debug log invocation is silent-failing and strict
 - X4: 9.00
-- Status: live-tested; corroborated by documented-public sources (Egosoft community wiki
-  "h2odragon's HOWTO-hackx4f" and Nexus article "Providing log files when submitting bug
-  report", both showing the form `-debug all -logfile debuglog.txt`)
+- Status: live-tested
+- Corroboration: documented-public Egosoft community wiki and a Nexus guide
+  both show the form `-debug all -logfile debuglog.txt`
 - Source: game debug.log; live run on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, X4 9.00 Steam, Windows 11 with WSL2
 - Live test: yes — all four argument forms tested on the same machine and build on 2026-08-04
