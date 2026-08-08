@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- New **All Turrets: Prefer My Target** during Direct-control: no more idle
+  turrets. Every turret on the ship shoots your target when it can, and shoots
+  something else in range when it cannot. **Release Other Turrets** hands the
+  rest of the ship back while your checked groups stay on your target; ceasing
+  or getting up releases everything.
+
+- The turret Mode column now updates when you cease an engagement. It used to
+  keep showing `autoassist` afterwards even though the turrets had already gone
+  back to their own mode, so the panel disagreed with the ship.
 - Direct-control works on small ships again. On a Katana the target browser
   appeared for a split second and then dumped the player back on the console.
   `enterCamera()` asks the engine for a target view on one turret and then reads

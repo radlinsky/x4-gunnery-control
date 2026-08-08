@@ -99,6 +99,9 @@ eq(s2.povMode, "manual", "newSession: povMode default manual")
 eq(s2.cameraIndex, 1, "newSession: cameraIndex default 1")
 eq(s2.aimTargetID, nil, "newSession: aimTargetID nil")
 eq(s2.autoNextTarget, true, "newSession: autoNextTarget defaults on")
+-- The override reaches every turret on the ship, not just the checked groups,
+-- so it is never on by default.
+eq(s2.preferAllTurrets, false, "newSession: preferAllTurrets defaults off")
 assert(s2.directSnapshots ~= nil, "newSession: directSnapshots exists")
 assert(type(s2.directSnapshots) == "table", "newSession: directSnapshots is table")
 assert(s2.directSnapshot == nil, "newSession: no legacy directSnapshot field")

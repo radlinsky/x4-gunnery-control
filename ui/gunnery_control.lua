@@ -39,7 +39,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-06-notify-22"
+local runtimeBuild = "2026-08-07-prefer-target-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -274,10 +274,12 @@ end
 local function setMode(group, mode)
     if group.kind == "group" then C.SetTurretGroupMode2(session.shipID, group.contextID, group.path, group.group, mode)
     else C.SetWeaponMode(group.componentID, mode) end
+    log("setMode wrote " .. tostring(group.group or group.componentID) .. " -> " .. tostring(mode))
 end
 local function setArmed(group, armed)
     if group.kind == "group" then C.SetTurretGroupArmed(session.shipID, group.contextID, group.path, group.group, armed)
     else C.SetWeaponArmed(group.componentID, armed) end
+    log("setArmed wrote " .. tostring(group.group or group.componentID) .. " -> " .. tostring(armed))
 end
 
 local function persistSnapshot(snapshots)
@@ -313,20 +315,105 @@ local function isDirectedGroup(group)
     return false
 end
 
+-- Ship-wide "prefer my target" override. Tells X4 to treat the engaged target
+-- as every turret's priority; a turret with no shot at it engages something
+-- else in range instead of tracking a target it can never hit (live-tested
+-- 2026-08-07, see md-ai.md). A turret's mode decides whether it receives the
+-- instruction, not what it shoots once it has it: in that trial, missiledefence
+-- turrets engaged ships. Do not describe the fallback as "its own mode".
+--
+-- Two details are load-bearing, both learned from the 2026-08-07 trial:
+--
+-- 1. Every group the console took over is put back into its own mode FIRST.
+--    X4 ignores supplied targets for autoassist turrets -- the shipped comment
+--    at aiscripts/fight.attack.object.capital.xml:1756 says target acquisition
+--    for that mode is handled in code. An override applied on top of the
+--    console's own autoassist silently does nothing and the turret keeps
+--    idling, which looks identical to success from the cockpit.
+-- 2. The event is raised a tick later, because MD reads the ship's turret
+--    modes back when it runs. In the trial three of five presses still saw
+--    autoassist in that read, so the mode writes above had not landed yet.
+--
+-- A group the player themselves left in autoassist stays there: that already
+-- means "shoot my target", so the override has nothing to add, and forcing it
+-- out would be the console rewriting a setting nobody asked it to touch.
+-- Defined after refresh(), which it calls; declared here because restoreDirect
+-- and engageTarget both sit above that definition.
+local applyPreferAllTurrets
+-- Same reason: restoreDirect's deferred repaint calls refresh(), which is
+-- defined below it.
+local refresh
+
+-- Puts the checked groups back under Direct-control after a release. The clear
+-- is ship-wide -- there is no per-group form of set_turret_targets -- so without
+-- this the groups the player is actually directing fall back to their own mode
+-- and stop shooting the engaged target, which is not what "release the others"
+-- means. Deferred a tick for the same reason the override is: MD reads the
+-- ship's turret modes back when it runs, and the release has to see each turret
+-- in its own mode rather than in autoassist.
+local function resumeDirectControl()
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        if session.phase ~= "engaged" or session.controlMode ~= "direct" then return end
+        for _, snapshot in ipairs(session.directSnapshots or {}) do
+            local group = findSnapshotGroup(snapshot)
+            if group and sameID(snapshot.shipID, session.shipID) then
+                setMode(group, "autoassist"); setArmed(group, true)
+            end
+        end
+        log("resumed direct control after release")
+        menu.display()
+    end, false, getElapsedTime() + 0.02)
+end
+
+-- Hands the rest of the ship back. Safe to call when the override was never
+-- applied. resume=true keeps the checked groups directed; teardown paths pass
+-- nothing, because restoreDirect writes their snapshots back straight after.
+local function clearPreferAllTurrets(reason, resume)
+    if not session or not session.preferAllTurrets then return false end
+    session.preferAllTurrets = false
+    AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets_clear", {
+        ["ship"] = ConvertStringToLuaID(tostring(session.shipID)),
+    })
+    log("prefer_all_turrets_clear emitted: " .. tostring(reason))
+    if resume then resumeDirectControl() end
+    return true
+end
+
 local function restoreDirect(reason)
     if not session then return end
+    -- Before the early return below: the override can outlive the snapshots,
+    -- and leaving the chair must never leave the ship altered.
+    clearPreferAllTurrets(reason)
     local snapshots = State.releaseDirect(session)
     if #snapshots == 0 then return end
     for _, snapshot in ipairs(snapshots) do
         local group = findSnapshotGroup(snapshot)
         if group and sameID(snapshot.shipID, session.shipID) then
             setMode(group, snapshot.mode); setArmed(group, snapshot.armed)
-            log("restored directed group: " .. reason)
+            log("restored directed group: " .. reason .. " id=" .. tostring(snapshot.group or snapshot.componentID) .. " mode=" .. tostring(snapshot.mode) .. " armed=" .. tostring(snapshot.armed))
         else
             -- One destroyed turret group must not prevent restoring the others.
             log("could not resolve directed group during restore: " .. reason)
         end
     end
+    -- snapshots is closed over rather than re-read off the session, because
+    -- releaseDirect has already emptied the session's own list.
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    -- Deferred rather than immediate: the engine's mode read-back lags the
+    -- write, so a same-frame refresh() would re-cache the pre-restore value.
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        refresh()
+        for _, snapshot in ipairs(snapshots) do
+            local found = findSnapshotGroup(snapshot)
+            log("post-restore readback " .. tostring(snapshot.group or snapshot.componentID) .. " wrote=" .. tostring(snapshot.mode) .. "/" .. tostring(snapshot.armed) .. " engine=" .. tostring(found and found.mode) .. "/" .. tostring(found and found.armed))
+        end
+        if session.phase ~= "console" then return end
+        menu.display()
+        log("repainted console after restore: " .. reason)
+    end, false, getElapsedTime() + 0.5)
     clearSnapshot()
 end
 
@@ -640,6 +727,7 @@ local function engageTarget(targetID)
             if State.canMutate(group) then orderable[#orderable + 1] = group end
         end
         local snaps = State.beginEngaged(session, orderable, "direct")
+        for _, s in ipairs(snaps) do log("snapshot took " .. tostring(s.group or s.componentID) .. " mode=" .. tostring(s.mode) .. " armed=" .. tostring(s.armed)) end
         persistSnapshot(snaps)
         for _, group in ipairs(orderable) do setMode(group, "autoassist"); setArmed(group, true) end
     end
@@ -648,6 +736,11 @@ local function engageTarget(targetID)
     -- cycleTarget and the element panel can identify the engaged object.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    -- The override names one specific target, so it dies with that target.
+    -- Every direct-mode target change funnels through here (auto-next, Next /
+    -- Previous Target, and picking a surface element), so re-issuing here is
+    -- what stops the turrets falling silent the moment a target is destroyed.
+    if session.preferAllTurrets then applyPreferAllTurrets() end
     -- A target click and the replacement compact frame occur on separate UI
     -- ticks. Keep this explicit so an auto-hide or failed frame creation can
     -- restore the snapshot rather than leaving autoassist armed invisibly.
@@ -664,9 +757,37 @@ local function engageTarget(targetID)
     return true
 end
 
-local function refresh()
+-- Forward-declared above restoreDirect; see the contract comment there.
+refresh = function()
     if not session then return end
     State.retainSelection(session, readGroups(session.shipID))
+end
+
+-- Forward-declared above restoreDirect; see the contract comment there.
+applyPreferAllTurrets = function()
+    if not session or session.phase ~= "engaged" then return false end
+    if isNullID(session.aimTargetID) then return false end
+    for _, snapshot in ipairs(session.directSnapshots or {}) do
+        local group = findSnapshotGroup(snapshot)
+        if group and sameID(snapshot.shipID, session.shipID) then
+            -- Mode only. The group stays armed, or it could not act on the
+            -- override at all.
+            setMode(group, snapshot.mode)
+        end
+    end
+    refresh()
+    session.preferAllTurrets = true
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    local shipID, targetID = session.shipID, session.aimTargetID
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not currentSession(expectedSession, expectedEpoch) then return end
+        AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
+            ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
+            ["target"] = ConvertStringToLuaID(tostring(targetID)),
+        })
+        log("prefer_all_turrets emitted target=" .. tostring(targetID))
+    end, false, getElapsedTime() + 0.01)
+    return true
 end
 
 local function relationLabel(component)
@@ -915,6 +1036,9 @@ local function sendCutsceneAimStart(pov)
     log("cutscene_aim_start pov=" .. tostring(pov)
         .. " anchor=" .. tostring(anchorID) .. " target=" .. tostring(tgtID))
 end
+
+function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
+function TestAPI.clearPreferAllTurrets(reason, resume) return clearPreferAllTurrets(reason, resume) end
 
 function TestAPI.sendCutsceneAimStart(pov) sendCutsceneAimStart(pov) end
 function TestAPI.sendCutsceneAimStop() sendCutsceneAimStop() end
@@ -1252,6 +1376,21 @@ function menu.display()
                 menu.display()
             end
             autoNextRow[2]:createText(text(78))
+            -- Ship-wide override. Lives here rather than on the console because
+            -- it needs an engaged target to prefer, and Direct-control's target
+            -- browser is the only way to choose one. Release stays greyed until
+            -- there is something to release.
+            local overrideRow = controls:addRow("prefer_all_turrets", {})
+            -- All Turrets: Prefer My Target (id 81)
+            overrideRow[1]:createButton({ active = not session.preferAllTurrets }):setText(text(81))
+            overrideRow[1].handlers.onClick = function()
+                applyPreferAllTurrets(); menu.display()
+            end
+            -- Release All Turrets (id 82)
+            overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
+            overrideRow[2].handlers.onClick = function()
+                clearPreferAllTurrets("release button", true); menu.display()
+            end
         end
         -- Auto-size frame height like the old direct panel (contract grep).
         viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize

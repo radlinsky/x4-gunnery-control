@@ -173,5 +173,102 @@
         <show_help custom="@event.param3.$text" duration="5s" position="1" silent="true"/>
       </actions>
     </cue>
+
+    <!-- Ship-wide "prefer my target" override (live-tested 2026-08-07).
+         No target list is sent on purpose. The schema says a turret that cannot
+         attack the preferred target chooses from the supplied list; with no list
+         it falls back to the engine's own acquisition, and the trial confirmed
+         such turrets engage something else in range rather than holding fire.
+         That fallback is the whole feature.
+
+         The weaponmode filter below selects which turrets receive the
+         instruction. It does NOT constrain what they shoot afterwards: in the
+         trial, turrets set to missiledefence engaged ships once the preference
+         was applied. Do not describe the fallback as "the turret's own mode".
+
+         Turret modes are read here rather than passed from Lua because the
+         weaponmode attribute wants an enum rather than a string, and this is
+         the shipped idiom (aiscripts/fight.attack.object.capital.xml:443).
+         autoassist is skipped deliberately: the shipped comment at
+         fight.attack.object.capital.xml:1756 states target acquisition for that
+         mode is handled in code and a supplied list is ignored, so issuing it
+         would be a silent no-op. The Lua side clears its own autoassist
+         override before raising this, and logs the count below so a live run
+         can still prove the mode writes landed first. -->
+    <cue name="PreferAllTurrets">
+      <cues>
+        <cue name="Apply" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'prefer_all_turrets'"/>
+          </conditions>
+          <actions>
+            <!-- Same transport contract as CutsceneAim.Start above: the engine
+                 prepends $ to Lua string keys, ids arrive as components. -->
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="$ship and $target">
+              <set_value name="$turrets" exact="$ship.turrets.operational.list"/>
+              <create_list name="$modes"/>
+              <do_all exact="$turrets.count" counter="$i">
+                <do_if value="not $modes.indexof.{$turrets.{$i}.mode}">
+                  <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
+                </do_if>
+              </do_all>
+              <do_for_each name="$mode" in="$modes">
+                <!-- towing and mining turrets have a job that is not shooting;
+                     autoassist would be a no-op, see the note above. -->
+                <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
+                  <set_turret_targets object="$ship" preferredtarget="$target" weaponmode="$mode" stopshootingold="false"/>
+                  <debug_text text="'[X4GC] prefer_all_turrets ship=' + $ship + ' target=' + $target + ' mode=' + $mode" chance="100"/>
+                </do_if>
+                <do_elseif value="$mode == weaponmode.autoassist">
+                  <!-- Expected to be zero for groups the console took over. A
+                       non-zero count here means either the player set a group
+                       to autoassist themselves, or the Lua mode writes had not
+                       landed yet, which is the exact fault seen on
+                       2026-08-07. -->
+                  <debug_text text="'[X4GC] prefer_all_turrets skipped autoassist turrets on ' + $ship" chance="100"/>
+                </do_elseif>
+              </do_for_each>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC] prefer_all_turrets: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <cue name="Release" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'prefer_all_turrets_clear'"/>
+          </conditions>
+          <actions>
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <do_if value="$ship">
+              <set_value name="$turrets" exact="$ship.turrets.operational.list"/>
+              <create_list name="$modes"/>
+              <do_all exact="$turrets.count" counter="$i">
+                <do_if value="not $modes.indexof.{$turrets.{$i}.mode}">
+                  <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
+                </do_if>
+              </do_all>
+              <do_for_each name="$mode" in="$modes">
+                <!-- No preferredtarget: clearpreferred defaults to true. -->
+                <set_turret_targets object="$ship" weaponmode="$mode" stopshootingold="false"/>
+                <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' mode=' + $mode" chance="100"/>
+              </do_for_each>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
   </cues>
 </mdscript>
