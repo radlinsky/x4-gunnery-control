@@ -957,6 +957,59 @@ save using `pcall`.
   establish that the channel is unusable, and the shipped delimited-string pattern above is
   the vanilla way to move more than one value through it.
 
-  Whether a serialised string round-trips this extension's session snapshot is untested. The
-  separate defect recorded at the same code location — that component IDs are reassigned on
-  save/load — is unaffected by transport and would still apply.
+  The string leg was live-tested the same day; see the next record. The separate defect noted
+  at that code location — component IDs are reassigned on save/load — is unaffected by
+  transport and would still apply.
+
+### A string survives a UI reload by way of an MD cue variable
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — a marker string stored from Lua, then fetched back after a reload, on
+  2026-08-08
+- Finding: Lua sent a unique marker to MD, which stored it in a cue variable. After a
+  `ScheduleReloadUI` wiped every Lua global, the reloaded file asked MD for the value before
+  storing a new one, and the marker written by the PREVIOUS life of the file came back as
+  `type=string`.
+
+  Measured sequence: `probe_store sending: probe-14`, then after the next reload
+  `probe_fetch: raising State.$probe=probe-14` and
+  `probe_restore: type=string; value=probe-14`.
+
+  The store leg used the Lua-to-MD table transport recorded above, carrying one string key,
+  so the only untested step was the return. The return used `raise_lua_event` with the cue
+  variable as `param`.
+
+  An MD cue variable is therefore the only storage measured in this session that outlives a
+  UI reload. Lua globals do not.
+
+  Also measured: MD logged its receipt roughly 0.6 to 0.7 in-game seconds after the Lua send,
+  so delivery crosses a tick and is not synchronous.
+
+  Not established by this test: any length limit on the payload, and whether the same value
+  survives save/load rather than only a reload.
+
+### refreshmd re-reads MD from disk, keeps cue variables, and does not re-fire completed cues
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — an on-demand cue's text edited mid-session, with a UI-only reload as the
+  control, on 2026-08-08
+- Finding: `ExecuteDebugCommand` was present in the menus environment (logged
+  `fn_present=true`), and `ExecuteDebugCommand("refreshmd", 0)` picked up an edit made to
+  `md/` while the game was running.
+
+  A `debug_text` string inside an on-demand cue was edited and copied into the game's
+  `extensions/` directory mid-session. A UI reload alone fired that cue and logged the OLD
+  text. After `refreshmd`, the same cue logged the NEW text. The control rules out the UI
+  reload having re-read MD.
+
+  Two behaviours measured alongside it. A cue variable set before `refreshmd` was still
+  readable after it. A conditionless root cue that had already fired did not fire again, so a
+  marker placed in such a cue cannot detect that a refresh happened — an earlier attempt in
+  this session failed for exactly that reason.
+
+  Not established by this test: the effect on cues mid-execution, on `instantiate="true"`
+  instances in flight, or on newly ADDED cues rather than edited ones.

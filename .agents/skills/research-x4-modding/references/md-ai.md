@@ -86,3 +86,27 @@
 
 Do not infer a target is attackable merely because it can be selected. Separate
 whole-object, engine, shield, turret, and station-module surface tests.
+
+### UI-triggered events sent during UI init at startup arrive before MD is listening
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — observed on both inits of a fresh launch on 2026-08-08
+- Finding: `AddUITriggeredEvent` calls made from a menu file's init at game startup produced
+  no MD-side effect at all. Two sends were logged from Lua, and the receiving cues logged
+  nothing for either.
+
+  The ordering is visible in the log: both Lua sends were logged before the MD script logged
+  its own activation. The same sends, issued from the same code after a UI reload later in
+  the session, were received normally and logged by MD within a second.
+
+  The events are dropped silently. Nothing in the log distinguishes "MD was not listening"
+  from "MD ignored it"; only the ordering does.
+
+  This is why an extension that needs MD state at startup cannot rely on a send from init
+  alone. This extension also re-sends on `gameLoadingDone`
+  (`ui/gunnery_control.lua`), which is the send that is actually received.
+
+  Not established by this test: the exact point at which MD begins accepting these events, or
+  whether a retry or delay from Lua would be received earlier than the `gameLoadingDone` hook.

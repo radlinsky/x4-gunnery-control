@@ -455,9 +455,33 @@ the current loose XML/Lua/text files. Wiping first ensures files deleted from
 the repository do not linger in the installed copy. It does not install
 Test Lab.
 
-Re-run the installer after every source change that must be tested in X4. A
-full X4 restart is the reliable way to reload UI Lua and extension XML; do not
-assume that loading a save hot-reloads them.
+Re-run the installer after every source change that must be tested in X4. Both
+reload commands read the loose files from disk, so the installer has to run
+first; without it a reload simply re-runs the copy the game already has.
+
+You do not need to restart X4 for Lua or MD changes. The Test Lab extension has
+Reload UI / Reload MD / Reload AI buttons, all live-tested on 2026-08-08 against
+X4 9.00:
+
+| Changed | To see it |
+|---|---|
+| `ui/*.lua` | installer, then **Reload UI** |
+| `md/*.xml` | installer, then **Reload MD**, then trigger the cue |
+| `t/*.xml`, `ui.xml`, `content.xml` | untested; assume a restart |
+
+Reload UI does not re-read MD, and Reload MD does not re-read UI Lua; they were
+verified independently with the other held fixed.
+
+Two consequences worth knowing before you lean on this. A UI reload discards
+every Lua global and every file-local, so live session state is lost and the
+console rebuilds from chair ingress — an MD cue variable is the only storage
+measured to survive it. And the Test Lab is reachable only through the gunnery
+menu, so an edit that breaks that menu leaves no button to click: that case
+needs UI Extensions' `/rui` chat command, or a restart.
+
+`refreshmd` keeps existing cue variables and does not re-run cues that already
+completed, so a marker in a conditionless root cue cannot tell you whether a
+refresh happened. Edit a cue that fires on demand and watch for its new text.
 
 On Windows, the launcher (`launch-x4-dev.bat`) runs `install-dev.sh`
 automatically before starting X4, so you do not need to run it by hand first
@@ -590,7 +614,8 @@ For each small change:
 6. Run the focused Lua test.
 7. Run `./scripts/validate.sh`.
 8. Re-run `install-dev.sh` (or just launch via `launch-x4-dev.bat`, which
-   runs the install automatically) and restart X4 for an in-game check.
+   runs the install automatically), then either restart X4 or use the Test Lab
+   reload buttons for an in-game check.
 9. Inspect `debug.log`, even when the menu appears to work.
 10. Run the relevant lifecycle and target-preservation cases from
     [TESTING.md](TESTING.md).
@@ -805,7 +830,7 @@ the in-game camera, lifecycle, target-preservation, or live-fire checks.
 |---|---|
 | `validate.sh` says a check was skipped | Install the named Lua or ShellCheck dependency and run it again. |
 | `install-dev.sh` rejects the game path | Point it at the directory containing `X4.exe`/`X4` and `extensions`, not at the extension folder. |
-| Changes do not appear in X4 | On Windows the launcher runs `install-dev.sh` automatically; on Linux run it manually. Use `launch-x4-dev.bat` on Windows or add `-prefersinglefiles` on Linux, verify the enabled extension, and fully restart X4. |
+| Changes do not appear in X4 | On Windows the launcher runs `install-dev.sh` automatically; on Linux run it manually. Use `launch-x4-dev.bat` on Windows or add `-prefersinglefiles` on Linux, verify the enabled extension, and either use the Test Lab reload buttons or fully restart X4. Reloads read from disk, so the installer must run first. |
 | `launch-x4-dev.bat` cannot find X4 | Pass the installation folder or full `X4.exe` path, or set `X4GC_GAME_ROOT` for a custom Steam library. |
 | No development log can be found | Use the directory printed by `launch-x4-dev.bat`; `debug.log` lands in X4's userdata folder under `Documents\Egosoft\X4\<numeric-id>\`. Confirm `-logfile debug.log` is present and unquoted: X4 writes nothing at all when it is missing or quoted. A stale `INVALID.FILENAME` beside it means an absolute path was passed instead of a bare filename. Remember that each launch truncates the previous log. |
 | Gunnery Control does not open | Confirm UI Extensions 9.00+, follow its current Protected UI Mode guidance, fully restart X4, and inspect `[X4GC]`/Lua errors. |
