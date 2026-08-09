@@ -18,7 +18,9 @@ appears to change — which looks exactly like a broken reload.
 | `ui.xml`, `content.xml` | **restart** |
 | A new X4-loaded file, or an X4-loaded file deleted | **restart** |
 | Changes spanning more than one reload category | **restart** |
-| Test Lab's own `testlab/` files | **restart**, with `launch-x4-test-lab-dev.bat` |
+| Test Lab's own `testlab/ui/*.lua` | install with `X4GC_INSTALL_TESTLAB=1`, then **Reload UI** |
+| Test Lab's own `testlab/md/*.xml` | install with `X4GC_INSTALL_TESTLAB=1`, then **Reload MD** |
+| Any other `testlab/` file (`ui.xml`, `content.xml`, `t/*.xml`, a new file) | **restart**, with `launch-x4-test-lab-dev.bat` |
 | Nothing changed, but the game is confused | **restart** |
 
 Restart means: exit X4, then run `scripts/launch-x4-dev.bat` (or

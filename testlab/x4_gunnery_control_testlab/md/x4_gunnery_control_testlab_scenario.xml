@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Gunnery Control Test Lab - Live Scenario Spawner
+  Developer-only.  Belongs in testlab, NOT in the shipped mod.
+
+  Spawns the fixture described by testlab/x4_gunnery_control_testlab/ui/
+  scenario_spec.lua.  The directing agent edits that spec; the owner clicks
+  Reload UI once; testlab.lua replays the spec into this script.
+
+  TRANSPORT
+  Lua cannot hand MD a nested table safely: the only live-tested Lua->MD payload
+  shape is a FLAT table of scalar keys, where the engine prepends '$' to every
+  Lua string key (research KB, "Lua->MD AddUITriggeredEvent transport contract",
+  live-tested 2026-08-04).  A multi-group spec is therefore streamed as a
+  sequence of flat events rather than one nested payload:
+
+    scenario_begin  {specId = "...", force = true|false}
+    scenario_group  {macro=, faction=, count=, distance=, spread=,
+                     behaviour="wait"|"attack"|"none", hostile=true|false,
+                     label=}                                  (repeated)
+    scenario_commit {}
+
+  Begin decides whether this spec should spawn at all (see IDEMPOTENCY), group
+  events queue definitions into ScenarioRoot.$Pending, and commit despawns the
+  previous fixture and creates the new one.  If Begin declines, the group and
+  commit events are ignored because ScenarioRoot.$Accepting is false.
+
+  IDEMPOTENCY
+  Every Reload UI re-runs testlab.lua, so the spec is re-sent on every reload.
+  ScenarioRoot.$SpawnedSpecId records the id of the fixture currently on the
+  field.  scenario_begin refuses when the incoming specId equals it, so a
+  Reload UI during an unrelated test cannot stack a second copy of the same
+  fleet.  Changing `id` in the spec (or pressing the on-demand button, which
+  sends force=true) is what makes it spawn again.  MD cue variables survive a
+  UI reload - that is the property the whole gunnery persistence layer is built
+  on (docs/RELOADING.md, "Two consequences worth knowing") - so this comparison
+  still holds after the reload that triggers it.
+
+  Despawn always precedes spawn on an accepted commit, so even a forced re-run
+  replaces rather than piles up.
+
+  Evidence citations
+  create_ship / owner exact / loadout level:
+    .x4-research-cache/extracted/scripts-9.00/md/rml_deliver_fleet.xml:251-259
+    .x4-research-cache/extracted/scripts-9.00/md/tutorial_captureship.xml:180-183
+    .x4-research-cache/extracted/scripts-9.00/md/lib_generic.xml:741-742
+
+  safepos with a z distance plus a max scatter:
+    .x4-research-cache/extracted/scripts-9.00/md/tutorial_map_missions.xml:523
+
+  macro.{<string>} - resolving a UI-supplied macro NAME to a macro:
+    .x4-research-cache/extracted/scripts-9.00/md/x4ep1_mentor_subscription.xml:9235-9236,9564
+
+  faction.{<string>} - INFERRED, not directly attested.  `faction` is a lookup
+  keyword exactly like `macro`
+    (.x4-research-cache/extracted/props-9.00/libraries/scriptproperties.xml:2862-2864
+     for macro, :2903-2907 for faction), and `lookup.faction.{$i}` indexing is
+  attested at
+    .x4-research-cache/extracted/scripts-9.00/md/gm_find_object.xml:1106-1108.
+  The `?` guard below falls back to faction.xenon and logs, so a wrong faction
+  string degrades to a visible log line rather than a broken cue.
+
+  do_for_each over a list of tables, with optional-key access ($Def.$key?):
+    .x4-research-cache/extracted/scripts-9.00/md/rml_deliver_fleet.xml:461-483
+
+  append_to_list of a table literal:
+    .x4-research-cache/extracted/scripts-9.00/md/factiongoal_plunder.xml:19
+
+  add_relation_boost (hostile):
+    .x4-research-cache/extracted/scripts-9.00/md/encounters.xml:300
+
+  Wait order (stationary):
+    .x4-research-cache/extracted/scripts-9.00/md/rml_repairobject.xml:290
+    .x4-research-cache/extracted/scripts-9.00/md/lib_generic.xml:762
+
+  Attack order:
+    .x4-research-cache/extracted/scripts-9.00/md/encounters.xml:301-306
+
+  do_for_each / destroy_object cleanup:
+    .x4-research-cache/extracted/scripts-9.00/md/cpu_ship_manager.xml:879-894
+
+  RELOAD NOTE: any change to THIS file requires a full game restart, because
+  testlab/ md is only reloadable together with the rest of the extension.
+  Editing scenario_spec.lua alone needs only install + Reload UI.
+  See docs/RELOADING.md.
+-->
+<mdscript name="X4GunneryTestLabScenario" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../../#modding/xsd/md.xsd">
+  <cues>
+    <cue name="ScenarioRoot">
+      <cues>
+
+        <!-- ScenarioBegin
+             AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin",
+               {specId = "...", force = true|false})
+             Opens an accepting window and clears any half-built queue. -->
+        <cue name="ScenarioBegin" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_begin'"/>
+          </conditions>
+          <actions>
+            <set_value name="$SpecId" exact="if @event.param3.$specId then event.param3.$specId else 'unnamed'"/>
+            <set_value name="$Force" exact="@event.param3.$force == true"/>
+
+            <do_if value="(not $Force) and ScenarioRoot.$SpawnedSpecId? and ScenarioRoot.$SpawnedSpecId == $SpecId">
+              <set_value name="ScenarioRoot.$Accepting" exact="false"/>
+              <debug_text text="'[X4GC TEST SCENARIO] skipped; spec already spawned id=' + $SpecId"/>
+            </do_if>
+            <do_else>
+              <set_value name="ScenarioRoot.$Accepting" exact="true"/>
+              <set_value name="ScenarioRoot.$PendingSpecId" exact="$SpecId"/>
+              <set_value name="ScenarioRoot.$Pending" exact="[]"/>
+              <debug_text text="'[X4GC TEST SCENARIO] accepting spec id=' + $SpecId + ' force=' + $Force"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <!-- ScenarioGroup
+             AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group",
+               {macro=, faction=, count=, distance=, spread=, behaviour=,
+                hostile=, label=})
+             One event per group in the spec.  Queued, not spawned. -->
+        <cue name="ScenarioGroup" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_group'"/>
+            <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+          </conditions>
+          <actions>
+            <append_to_list name="ScenarioRoot.$Pending" exact="table[
+              $label     = if @event.param3.$label     then event.param3.$label     else 'group',
+              $macro     = if @event.param3.$macro     then event.param3.$macro     else '',
+              $faction   = if @event.param3.$faction   then event.param3.$faction   else 'xenon',
+              $count     = if @event.param3.$count     then event.param3.$count     else 1,
+              $distance  = if @event.param3.$distance  then event.param3.$distance  else 5000,
+              $spread    = if @event.param3.$spread    then event.param3.$spread    else 0,
+              $behaviour = if @event.param3.$behaviour then event.param3.$behaviour else 'wait',
+              $hostile   = @event.param3.$hostile == true
+            ]"/>
+          </actions>
+        </cue>
+
+        <!-- ScenarioCommit
+             AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_commit")
+             Despawns the previous fixture, then creates every queued group. -->
+        <cue name="ScenarioCommit" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_commit'"/>
+            <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+          </conditions>
+          <actions>
+            <set_value name="ScenarioRoot.$Accepting" exact="false"/>
+
+            <!-- Replace, never stack. -->
+            <signal_cue_instantly cue="DespawnScenarioImpl"/>
+
+            <create_group groupname="ScenarioRoot.$Spawned"/>
+            <do_for_each name="$Def" in="ScenarioRoot.$Pending">
+              <do_if value="$Def.$macro == '' or not @macro.{$Def.$macro}">
+                <debug_text text="'[X4GC TEST SCENARIO] skipping group ' + $Def.$label + '; unknown macro=' + $Def.$macro"/>
+                <continue/>
+              </do_if>
+
+              <set_value name="$Owner" exact="@faction.{$Def.$faction}"/>
+              <do_if value="not $Owner">
+                <debug_text text="'[X4GC TEST SCENARIO] unknown faction=' + $Def.$faction + ' for group ' + $Def.$label + '; using xenon'"/>
+                <set_value name="$Owner" exact="faction.xenon"/>
+              </do_if>
+
+              <!-- Clamp to something a live test can actually manage. -->
+              <set_value name="$Count" exact="$Def.$count"/>
+              <do_if value="$Count lt 1"><set_value name="$Count" exact="1"/></do_if>
+              <do_if value="$Count gt 12"><set_value name="$Count" exact="12"/></do_if>
+
+              <do_all exact="$Count">
+                <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                             zone="player.zone" macro="macro.{$Def.$macro}">
+                  <owner exact="$Owner"/>
+                  <loadout>
+                    <level exact="1.0"/>
+                  </loadout>
+                  <safepos object="player.ship" z="$Def.$distance" max="$Def.$spread"/>
+                </create_ship>
+
+                <!-- Where a ship actually ended up is the first thing anyone
+                     asks when it cannot be found: safepos may move it, and a
+                     null player.zone would place it somewhere unexpected. -->
+                <debug_text text="'[X4GC TEST SCENARIO] created ' + $Ship + ' exists=' + $Ship.exists + ' sector=' + $Ship.sector.knownname + ' dist=' + $Ship.distanceto.{player.ship} + ' playersector=' + player.sector.knownname"/>
+
+                <do_if value="$Def.$hostile">
+                  <add_relation_boost object="$Ship" otherobject="player.ship"
+                                      value="$Ship.owner.relation.kill.max"
+                                      decay="1" delay="60min" silent="true"/>
+                </do_if>
+
+                <do_if value="$Def.$behaviour == 'wait'">
+                  <create_order id="'Wait'" object="$Ship" default="true"/>
+                </do_if>
+                <do_elseif value="$Def.$behaviour == 'attack'">
+                  <create_order id="'Attack'" object="$Ship" default="true">
+                    <param name="primarytarget" value="player.ship"/>
+                    <param name="pursuetargets" value="true"/>
+                  </create_order>
+                </do_elseif>
+              </do_all>
+
+              <debug_text text="'[X4GC TEST SCENARIO] group ' + $Def.$label + ' macro=' + $Def.$macro + ' faction=' + $Def.$faction + ' count=' + $Count + ' distance=' + $Def.$distance + ' behaviour=' + $Def.$behaviour"/>
+            </do_for_each>
+
+            <set_value name="ScenarioRoot.$SpawnedSpecId" exact="ScenarioRoot.$PendingSpecId"/>
+            <remove_value name="ScenarioRoot.$Pending"/>
+            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count"/>
+          </actions>
+        </cue>
+
+        <!-- DespawnScenario
+             AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
+             Manual cleanup.  Also clears the spawned id so the SAME spec can be
+             spawned again by a plain Reload UI. -->
+        <cue name="DespawnScenario" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'despawn_scenario'"/>
+          </conditions>
+          <actions>
+            <signal_cue_instantly cue="DespawnScenarioImpl"/>
+            <do_if value="ScenarioRoot.$SpawnedSpecId?">
+              <remove_value name="ScenarioRoot.$SpawnedSpecId"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <!-- DespawnScenarioImpl
+             Internal: removes every ship this script created, without explosion.
+             Safe when nothing has been spawned.
+             Source: cpu_ship_manager.xml:879-894 -->
+        <cue name="DespawnScenarioImpl" instantiate="true">
+          <conditions>
+            <event_cue_signalled/>
+          </conditions>
+          <actions>
+            <do_if value="ScenarioRoot.$Spawned?">
+              <do_for_each name="$Ship" in="ScenarioRoot.$Spawned">
+                <do_if value="$Ship.exists">
+                  <destroy_object object="$Ship" explosion="false"/>
+                </do_if>
+              </do_for_each>
+              <remove_value name="ScenarioRoot.$Spawned"/>
+            </do_if>
+            <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
+          </actions>
+        </cue>
+
+      </cues>
+    </cue>
+  </cues>
+</mdscript>

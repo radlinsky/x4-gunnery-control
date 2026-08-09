@@ -5,7 +5,11 @@
     <dependency name="ego_detailmonitorhelper"/>
     <dependency name="ego_detailmonitor"/>
     <dependency name="kuertee_ui_extensions"/>
+    <!-- scenario_spec.lua must load BEFORE testlab.lua: it publishes the global
+         the menu reads on load. Being an ordinary ui/*.lua entry is what lets a
+         spec edit ship with install + Reload UI instead of a game restart. -->
     <file name="ui/testlab_state.lua"/>
+    <file name="ui/scenario_spec.lua"/>
     <file name="ui/testlab.lua"/>
   </environment>
 </addon>

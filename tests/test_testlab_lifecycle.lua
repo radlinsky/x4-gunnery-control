@@ -1,7 +1,7 @@
 -- Test Lab close ownership: operator exits return to the parked Gunnery menu,
 -- while player-context/load teardown closes without resurrecting it.
 
-local function loadHarness()
+local function loadHarness(spec)
     -- This file builds several isolated runtimes in one Lua process. require()
     -- otherwise retains the first fixture's ffi table, so later C write spies
     -- would observe a different table from gunnery_control.lua.
@@ -40,6 +40,14 @@ local function loadHarness()
 
     X4GunneryTestLabState = nil
     dofile("testlab/x4_gunnery_control_testlab/ui/testlab_state.lua")
+    -- X4 loads ui.xml <file> entries in order, so the spec global is already
+    -- published by the time testlab.lua runs. `spec` defaults to the shipped
+    -- file so the ordinary lifecycle cases exercise the real load path.
+    if spec == nil then
+        dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
+    else
+        X4GunneryTestLabScenarioSpec = spec ~= "absent" and spec or nil
+    end
     local ok, err = pcall(dofile, "testlab/x4_gunnery_control_testlab/ui/testlab.lua")
     assert(ok, "testlab.lua failed to load: " .. tostring(err))
 
@@ -244,6 +252,124 @@ for _, contextEvent in ipairs({ "playerGetUp", "gameLoadingDone" }) do
         contextEvent .. " cleanup must not reopen Gunnery")
     assert(#harness.plainCloses >= 1,
         contextEvent .. " cleanup must allow the Test Lab to close locally")
+end
+
+-- Scenario spec transport. The spec is replayed on every UI load as a flat
+-- begin/group.../commit stream, because MD cannot be handed a nested table.
+local function scenarioEvents(harness)
+    local events = {}
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.screen == "X4GunneryTestLabScenario" then events[#events + 1] = event end
+    end
+    return events
+end
+
+-- An enabled spec fires begin, one group event per group, then commit, with the
+-- spec's own values and force=false (the load-time send must never force).
+do
+    local harness = loadHarness({
+        id = "m6-lone-hostile",
+        enabled = true,
+        groups = {
+            { label = "hostile", macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+              count = 1, distance = 4000, behaviour = "wait", hostile = true },
+            { label = "platform", macro = "ship_arg_l_destroyer_01_a_macro", faction = "player",
+              count = 2, distance = 2000, behaviour = "none" },
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 4, "enabled spec must fire begin + 2 groups + commit; got " .. #events)
+    assert(events[1].control == "scenario_begin", "first event must be scenario_begin")
+    assert(events[1].params.specId == "m6-lone-hostile", "begin must carry the spec id")
+    assert(events[1].params.force == false, "the load-time send must not force a respawn")
+    assert(events[2].control == "scenario_group" and events[3].control == "scenario_group",
+        "one scenario_group event per spec group")
+    assert(events[2].params.macro == "ship_xen_s_fighter_01_a_macro"
+        and events[2].params.faction == "xenon" and events[2].params.count == 1
+        and events[2].params.distance == 4000 and events[2].params.behaviour == "wait"
+        and events[2].params.hostile == true and events[2].params.spread == 0,
+        "group payload must carry the spec values, with spread defaulted to 0")
+    assert(events[3].params.count == 2 and events[3].params.behaviour == "none"
+        and events[3].params.hostile == false,
+        "a non-hostile group must send hostile=false rather than nil")
+    for _, event in ipairs(events) do
+        assert(type(event.params) ~= "table" or event.params.groups == nil,
+            "no event may carry a nested table; MD only accepts flat scalars")
+    end
+    assert(events[4].control == "scenario_commit", "last event must be scenario_commit")
+end
+
+-- A disabled spec is inert: it stays on disk but a Reload UI spawns nothing.
+do
+    local harness = loadHarness({
+        id = "parked", enabled = false,
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    assert(#scenarioEvents(harness) == 0, "a disabled spec must fire nothing on load")
+
+    -- The on-demand button forces the same spec through, so the owner can spawn
+    -- a parked fixture without the agent touching the file.
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    local rerun = harness.fix.buttonByText(ReadText(20992, 25))
+    assert(rerun and rerun.handlers.onClick, "Test Lab must expose the re-run button")
+    rerun.handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == 3 and events[1].params.force == true,
+        "the re-run button must force the current spec even when it is disabled")
+end
+
+-- Malformed specs are caught, logged, and never raise. Test Lab must still open
+-- and still offer despawn, because a broken spec is the moment cleanup matters.
+-- `reason` is the substring the rejection must name, in the SANITIZED form the
+-- log actually carries (log() replaces every non-word character with "_"), so a validator that
+-- silently swallows the failure (and reports the spec as merely absent) fails
+-- here rather than looking like a pass.
+local malformed = {
+    { label = "not a table", spec = 42, reason = "spec_is_not_a_table" },
+    { label = "missing id", spec = { enabled = true, groups = {} }, reason = "spec.id_must_be" },
+    { label = "non-boolean enabled", spec = { id = "x", enabled = "yes", groups = {} }, reason = "spec.enabled_must_be" },
+    { label = "empty groups", spec = { id = "x", enabled = true, groups = {} }, reason = "spec.groups_is_empty" },
+    { label = "group missing macro", spec = { id = "x", enabled = true,
+        groups = { { faction = "xenon", count = 1, distance = 100 } } }, reason = "groups_1_.macro" },
+    { label = "bad behaviour", spec = { id = "x", enabled = true,
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 100, behaviour = "loiter" } } },
+        reason = "groups_1_.behaviour" },
+    { label = "absent global", spec = "absent" },
+}
+for _, case in ipairs(malformed) do
+    local ok, harness = pcall(loadHarness, case.spec)
+    assert(ok, "a malformed spec (" .. case.label .. ") must not raise: " .. tostring(harness))
+    assert(#scenarioEvents(harness) == 0,
+        "a malformed spec (" .. case.label .. ") must spawn nothing")
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    assert(harness.fix.buttonByText(ReadText(20992, 26)) ~= nil,
+        "Test Lab must still offer despawn with a malformed spec (" .. case.label .. ")")
+
+    -- Forcing must not rescue a spec that could not be understood.
+    local rerun = harness.fix.buttonByText(ReadText(20992, 25))
+    assert(rerun and rerun.handlers.onClick, "the re-run button must exist with a malformed spec")
+    rerun.handlers.onClick()
+    assert(#scenarioEvents(harness) == 0,
+        "forcing a malformed spec (" .. case.label .. ") must still spawn nothing")
+
+    if case.reason then
+        local named = false
+        for _, line in ipairs(harness.fix.getCapturedLog()) do
+            if string.find(line, "action=rejected", 1, true) and string.find(line, case.reason) then
+                named = true
+            end
+        end
+        assert(named, "rejecting " .. case.label .. " must log a reason naming " .. case.reason)
+    end
+end
+
+-- The shipped spec file must itself stay loadable and inert, so that an
+-- unrelated Reload UI never spawns whatever the last test left behind.
+do
+    local shipped = dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
+    assert(type(shipped) == "table", "the shipped spec must return a table")
+    assert(shipped.enabled == false,
+        "the spec committed to the repository must be disabled; enable it only for a live run")
 end
 
 print("testlab lifecycle tests passed")

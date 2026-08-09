@@ -23,7 +23,7 @@ fi
 git diff --cached --check
 git diff --check
 
-xmllint --noout content.xml ui.xml t/*.xml md/*.xml testlab/x4_gunnery_control_testlab/content.xml testlab/x4_gunnery_control_testlab/ui.xml testlab/x4_gunnery_control_testlab/t/*.xml
+xmllint --noout content.xml ui.xml t/*.xml md/*.xml testlab/x4_gunnery_control_testlab/content.xml testlab/x4_gunnery_control_testlab/ui.xml testlab/x4_gunnery_control_testlab/t/*.xml testlab/x4_gunnery_control_testlab/md/*.xml
 if command -v luac5.1 >/dev/null; then
   for file in ui/*.lua testlab/x4_gunnery_control_testlab/ui/*.lua tests/*.lua; do luac5.1 -p "$file"; done
 elif command -v luac >/dev/null; then

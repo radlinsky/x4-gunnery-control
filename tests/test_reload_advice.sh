@@ -21,7 +21,14 @@ expect_contains "md/x4_gunnery_control.xml" "Reload MD"
 expect_contains "t/0001.xml" "full restart"
 expect_contains "ui.xml" "full restart"
 expect_contains "content.xml" "full restart"
-expect_contains "testlab/x4_gunnery_control_testlab/ui/testlab.lua" "launch-x4-test-lab-dev.bat"
+# Test Lab reloads like any other extension. Live-verified 2026-08-09: a
+# testlab/ui/*.lua edit applied on Reload UI, a testlab/md/*.xml edit on Reload
+# MD, neither needed a restart. Structural Test Lab files still restart.
+expect_contains "testlab/x4_gunnery_control_testlab/ui/testlab.lua" "Reload UI"
+expect_contains "testlab/x4_gunnery_control_testlab/ui/testlab.lua" "X4GC_INSTALL_TESTLAB=1"
+expect_contains "testlab/x4_gunnery_control_testlab/md/scenario.xml" "Reload MD"
+expect_contains "testlab/x4_gunnery_control_testlab/ui.xml" "launch-x4-test-lab-dev.bat"
+expect_contains "testlab/x4_gunnery_control_testlab/t/0001.xml" "launch-x4-test-lab-dev.bat"
 expect_contains "libraries/example.xml" "Reload AI"
 expect_contains "aiscripts/example.xml" "Reload AI"
 
@@ -40,9 +47,10 @@ expect_contains "md/x4_gunnery_control.xml" "sit at a gunnery console"
 expect_contains "ui/gunnery_control.lua" "THREE Test Lab buttons"
 expect_contains "md/x4_gunnery_control.xml" "THREE Test Lab buttons"
 
-# t/ and testlab/ must NOT be advised as a reload: those are the two cases where
-# the strict answer is a restart and the tempting answer is a button.
-for path in t/0001.xml testlab/x4_gunnery_control_testlab/ui/testlab.lua; do
+# Text and structural Test Lab files must NOT be advised as a reload: those are
+# the cases where the strict answer is a restart and the tempting answer is a
+# button.
+for path in t/0001.xml testlab/x4_gunnery_control_testlab/ui.xml testlab/x4_gunnery_control_testlab/t/0001.xml; do
   if .agents/hooks/reload-advice.sh "$path" | grep -Fq "Reload UI"; then
     fail "$path was advised as Reload UI, but it needs a restart"
   fi

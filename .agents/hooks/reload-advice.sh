@@ -35,7 +35,18 @@ category_for() {
   esac
   [[ "$loaded" == true ]] || return 0
 
+  # Test Lab reloads like any other extension: editing the body of a file the
+  # game already loads is a reload, not a restart. Live-verified 2026-08-09 --
+  # a testlab/ui/*.lua edit applied on Reload UI and a testlab/md/*.xml edit on
+  # Reload MD. Only structural changes (ui.xml, content.xml, text, new files)
+  # still need the restart, and those fall through to the rules below.
   if [[ "$path" == testlab/* ]]; then
+    if [[ "$operation" != add && "$operation" != delete ]]; then
+      case "$path" in
+        testlab/*/ui/*.lua) printf 'ui-testlab\t%s\n' "$path" ; return 0 ;;
+        testlab/*/md/*.xml) printf 'md-testlab\t%s\n' "$path" ; return 0 ;;
+      esac
+    fi
     printf 'restart-testlab\t%s\n' "$path"
   elif [[ "$operation" == add || "$operation" == delete ]]; then
     printf 'restart\t%s\n' "$path"
@@ -53,7 +64,11 @@ render_advice() {
   local category=$1 paths=$2
   case "$category" in
     restart-testlab)
-      echo "RELOAD: **full restart**. Exit X4 and run scripts/launch-x4-test-lab-dev.bat. Test Lab files changed: ${paths}." ;;
+      echo "RELOAD: **full restart**. Exit X4 and run scripts/launch-x4-test-lab-dev.bat. Test Lab files changed structurally: ${paths}." ;;
+    ui-testlab)
+      echo "RELOAD: run X4GC_INSTALL_TESTLAB=1 scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> open Test Lab -> **Reload UI**. A UI reload wipes Lua state. Test Lab UI files changed: ${paths}." ;;
+    md-testlab)
+      echo "RELOAD: run X4GC_INSTALL_TESTLAB=1 scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> open Test Lab -> **Reload MD**, then trigger the changed cue again. Test Lab MD files changed: ${paths}." ;;
     restart)
       echo "RELOAD: **full restart**. Exit X4 and run scripts/launch-x4-dev.bat (it installs on its own). A reload cannot safely apply all changed X4 files: ${paths}." ;;
     ui)
@@ -91,6 +106,14 @@ advise_targets() {
     if [[ "$category" == restart-testlab ]]; then chosen=restart-testlab; break; fi
     if [[ "$category" == restart ]]; then chosen=restart; fi
   done
+  # A restart that includes any Test Lab file must use the Test Lab launcher:
+  # launch-x4-dev.bat does not install testlab/, so the owner would restart into
+  # a game still running the previous Test Lab build.
+  if [[ "$chosen" == restart ]]; then
+    for classified_path in "${paths[@]}"; do
+      if [[ "$classified_path" == testlab/* ]]; then chosen=restart-testlab; break; fi
+    done
+  fi
 
   local joined
   joined=$(IFS=', '; echo "${paths[*]}")
