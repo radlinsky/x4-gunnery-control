@@ -609,7 +609,7 @@ GetComponentData = function(component, ...)
         elseif k == "isknown" then vals[#vals + 1] = true
         elseif k == "isradarvisible" then vals[#vals + 1] = true
         elseif k == "maxradarrange" then vals[#vals + 1] = 40000
-        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        elseif k == "isplayerowned" then vals[#vals + 1] = false  -- hostile, not player-owned
         else vals[#vals + 1] = nil
         end
     end
@@ -681,7 +681,7 @@ GetComponentData = function(component, ...)
         elseif k == "isknown" then vals[#vals + 1] = true
         elseif k == "isradarvisible" then vals[#vals + 1] = true
         elseif k == "maxradarrange" then vals[#vals + 1] = 40000
-        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        elseif k == "isplayerowned" then vals[#vals + 1] = false  -- enemies, not player-owned
         else vals[#vals + 1] = nil
         end
     end
@@ -796,7 +796,7 @@ GetComponentData = function(component, ...)
         elseif k == "isknown" then vals[#vals + 1] = true
         elseif k == "isradarvisible" then vals[#vals + 1] = true
         elseif k == "maxradarrange" then vals[#vals + 1] = 40000
-        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        elseif k == "isplayerowned" then vals[#vals + 1] = false  -- enemy ships, not player-owned
         else vals[#vals + 1] = nil
         end
     end
@@ -944,7 +944,7 @@ GetComponentData = function(component, ...)
         elseif k == "isknown" then vals[#vals + 1] = true
         elseif k == "isradarvisible" then vals[#vals + 1] = true
         elseif k == "maxradarrange" then vals[#vals + 1] = 40000
-        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        elseif k == "isplayerowned" then vals[#vals + 1] = false  -- enemy ship, not player-owned
         else vals[#vals + 1] = false
         end
     end
@@ -1010,7 +1010,7 @@ GetComponentData = function(component, ...)
         elseif k == "isknown" then vals[#vals + 1] = true
         elseif k == "isradarvisible" then vals[#vals + 1] = true
         elseif k == "maxradarrange" then vals[#vals + 1] = 40000
-        elseif k == "isplayerowned" then vals[#vals + 1] = true
+        elseif k == "isplayerowned" then vals[#vals + 1] = false  -- enemy ship, not player-owned
         else vals[#vals + 1] = nil
         end
     end
@@ -1416,6 +1416,131 @@ do
 
     C.SetTurretGroupMode2 = savedSetMode54
     AddUITriggeredEvent = savedAdd54
+end
+
+-- ── 56. player-faction objects are never offered as engagement targets ─────────
+-- Player-owned ships and stations must be excluded from readTargetCandidates()
+-- regardless of whether they arrive via the sector sweep or as the current soft
+-- target (force=true). The check lives in isEligibleEngagementTarget so force
+-- cannot skip it.
+do
+    gcMenu.onShowMenu()
+    local sess56 = API.getSession()
+    assert(sess56 ~= nil, "expected session for player-faction exclusion test")
+    sess56.phase = "target_select"
+
+    GetPlayerContextByClass = function() return 1 end
+    C.GetContextByClass = function(comp) return comp end
+    C.GetDistanceBetween = function() return 500 end
+    C.IsComponentOperational = function() return true end
+
+    -- 200 = player-owned ship; 201 = player-owned station; 300 = hostile ship.
+    -- 400 = friendly-but-not-player-owned ship (must remain selectable).
+    GetContainedShips    = function() return { 200, 300, 400 } end
+    GetContainedStations = function() return { 201 } end
+
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then
+                -- Only the two player-owned objects return true.
+                vals[#vals + 1] = (comp == 200 or comp == 201)
+            elseif k == "isenemy" then
+                vals[#vals + 1] = (comp == 300)
+            elseif k == "ishostile" then vals[#vals + 1] = false
+            elseif k == "isfriend"  then vals[#vals + 1] = (comp == 400)
+            elseif k == "isknown"   then vals[#vals + 1] = true
+            elseif k == "isradarvisible" then vals[#vals + 1] = true
+            elseif k == "maxradarrange"  then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil
+            end
+        end
+        return unpack(vals)
+    end
+
+    -- 56a: player-owned ship excluded from sector sweep.
+    -- 56b: player-owned station excluded from sector sweep.
+    -- 56c: hostile ship still included.
+    -- 56d: non-player-faction friendly still included.
+    gcMenu.display()
+    local rows56 = fix.getCreatedButtons()
+    local function foundID(id)
+        -- The target browser renders each candidate's name; the stubs return
+        -- C.GetComponentName -> "0" for everything, so distinguish by checking
+        -- that isEligibleEngagementTarget would have accepted it.
+        -- Drive it directly through the TestAPI's readTargetCandidates path
+        -- (target_select phase display calls readTargetCandidates internally).
+        -- We verify the results by asking isEligibleEngagementTarget per id.
+        local ok, _ = isEligibleEngagementTarget(id)
+        return ok
+    end
+
+    -- Direct eligibility probe: the function is module-local but called through
+    -- the tested code path above. Re-drive it via the public cycleTarget path
+    -- which internally calls readTargetCandidates and builds from it.
+    -- Use the TestAPI to count candidates instead.
+    assert(type(X4GunneryControlAPI.readTargetCandidates) == "function"
+        or type(X4GunneryControlAPI.cycleTarget) == "function",
+        "readTargetCandidates or cycleTarget must be accessible for test 56")
+
+    -- Drive via cycleTarget: set sess to direct/engaged so cycleTarget reads the list.
+    local grp56 = { key = "grp56", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 27, displayName = "G56", totalCount = 1, operationalCount = 1,
+        mode = "attack", armed = false, members = {
+            { componentID = 27, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "27" }
+        } }
+    sess56.groups = { grp56 }
+    sess56.checkedGroupKeys = { ["grp56"] = true }
+    sess56.phase = "engaged"
+    sess56.controlMode = "direct"
+    sess56.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess56.shipID, mode = "attack", armed = false } }
+    sess56.cameraMemberID = 27
+    -- Start at hostile 300; cycle should find 400 (the friendly non-player), not 200/201.
+    sess56.targetObjectID = 300
+    sess56.aimTargetID = 300
+    C.SetPlayerCameraTargetView = function() return true end
+    C.SetSofttarget = function() return true end
+
+    -- Advance clock so hasMultipleTargets memo from earlier tests is stale.
+    clock = clock + 200
+
+    -- Cycle forward; the only other candidate must be 400 (friendly non-player-owned).
+    -- 200 (player ship) and 201 (player station) must not appear.
+    X4GunneryControlAPI.cycleTarget(1)
+    local after56 = sess56.targetObjectID
+    assert(tostring(after56) ~= "200",
+        "56a BUG: player-owned ship 200 appeared as a cycle target; "
+        .. "isEligibleEngagementTarget must reject isplayerowned=true")
+    assert(tostring(after56) ~= "201",
+        "56b BUG: player-owned station 201 appeared as a cycle target; "
+        .. "isEligibleEngagementTarget must reject isplayerowned=true")
+    assert(tostring(after56) == "400",
+        "56c/d: after cycling from hostile 300 the only remaining target must be "
+        .. "friendly non-player-owned 400; got " .. tostring(after56))
+
+    -- 56e: player-owned soft target excluded even with force=true.
+    -- Set the soft target to the player-owned ship and verify it is not added.
+    local savedGetSofttarget = C.GetSofttarget2
+    C.GetSofttarget2 = function()
+        return { softtargetID = 200, softtargetConnectionName = "" }
+    end
+    sess56.phase = "target_select"
+    -- A forced player-owned soft target must not appear; cycle after resetting
+    -- targetObjectID to something else.
+    sess56.targetObjectID = 300
+    sess56.aimTargetID = 300
+    sess56.phase = "engaged"
+    sess56.controlMode = "direct"
+    clock = clock + 200
+    X4GunneryControlAPI.cycleTarget(1)
+    local afterSoft56 = sess56.targetObjectID
+    assert(tostring(afterSoft56) ~= "200",
+        "56e BUG: player-owned soft target 200 (force=true path) must be excluded; "
+        .. "the isplayerowned check must fire before force can bypass visibility")
+    C.GetSofttarget2 = savedGetSofttarget
 end
 
 print("runtime targeting tests passed")

@@ -40,7 +40,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-08-camera-index-resync"
+local runtimeBuild = "2026-08-09-exclude-player-faction"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -751,7 +751,7 @@ local function engageTarget(targetID)
     if targetID == nil then return false end
     local target = id(targetID)
     if target == 0 or not isEligibleEngagementTarget(target) then
-        log("refused engagement target on the current ship " .. tostring(targetID))
+        log("refused ineligible engagement target (own ship or player-owned) " .. tostring(targetID))
         return false
     end
     if not C.SetSofttarget(target, "") then
@@ -865,6 +865,11 @@ end
 
 isEligibleEngagementTarget = function(component)
     local object = targetRoot(component)
+    -- Player-faction-owned ships and stations must never appear as targets.
+    -- This check sits here rather than in State so it can call componentData,
+    -- and because force=true in add() only bypasses visibility/range — not
+    -- this function — so a player-owned soft target is excluded too.
+    if componentData(object, "isplayerowned") then return false, object end
     return State.isEngagementTargetAllowed(session and session.shipID, object), object
 end
 
