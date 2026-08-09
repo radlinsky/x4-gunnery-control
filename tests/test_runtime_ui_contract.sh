@@ -193,6 +193,7 @@ start="$cutscene/cues/cue[@name=\"Start\"]"
 stop="$cutscene/cues/cue[@name=\"Stop\"]"
 destroyed="$watch/cues/cue[@name=\"WatchedTargetDestroyed\"]"
 guard="$destroyed/actions/do_if[@value=\"CutsceneAim.\$Target? and event.object == CutsceneAim.\$Target\"]"
+handle_guard="CutsceneAim.\$Handle? and CutsceneAim.\$Handle != null"
 assert_md_xpath 1 "count($watch)" 'CutsceneAim must have exactly one TargetWatch'
 assert_md_xpath 0 "count($cutscene/cues/cue[@name=\"TargetDestroyed\"])" \
   'TargetDestroyed must not activate as a direct CutsceneAim child'
@@ -219,7 +220,13 @@ assert_md_xpath 1 "count($stop/actions/remove_value[@name=\"CutsceneAim.\$Target
   'Stop must clear the target before cancelling TargetWatch'
 assert_md_xpath 1 "count($guard)" \
   'TargetDestroyed must reject queued events for a stale target'
-assert_md_xpath 1 "count($guard/do_if[@value=\"CutsceneAim.\$Handle\"]/stop_cutscene)" \
+assert_md_xpath 3 "count(//stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'CutsceneAim must retain exactly its three cutscene-stop paths'
+assert_md_xpath 1 "count($start/actions/do_if[@value=\"$handle_guard\"]/stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'Start must declaration-check the current cutscene handle before stopping it'
+assert_md_xpath 1 "count($stop/actions/do_if[@value=\"$handle_guard\"]/stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'Stop must declaration-check the current cutscene handle before stopping it'
+assert_md_xpath 1 "count($guard/do_if[@value=\"$handle_guard\"]/stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
   'Only the current target destruction may stop the cutscene'
 assert_md_xpath 1 "count($guard/remove_value[@name=\"CutsceneAim.\$Target\"])" \
   'TargetDestroyed must disarm the handled target'

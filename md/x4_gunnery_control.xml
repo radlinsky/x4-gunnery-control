@@ -127,7 +127,7 @@
           </conditions>
           <actions>
             <!-- Guarded restart: stop any in-progress cutscene first. -->
-            <do_if value="CutsceneAim.$Handle">
+            <do_if value="CutsceneAim.$Handle? and CutsceneAim.$Handle != null">
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
@@ -202,7 +202,7 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'cutscene_aim_stop'"/>
           </conditions>
           <actions>
-            <do_if value="CutsceneAim.$Handle">
+            <do_if value="CutsceneAim.$Handle? and CutsceneAim.$Handle != null">
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
@@ -229,7 +229,7 @@
                      old destruction event was already queued while Start
                      retargeted, it must not stop the new target's handle. -->
                 <do_if value="CutsceneAim.$Target? and event.object == CutsceneAim.$Target">
-                  <do_if value="CutsceneAim.$Handle">
+                  <do_if value="CutsceneAim.$Handle? and CutsceneAim.$Handle != null">
                     <stop_cutscene cutscene="CutsceneAim.$Handle"/>
                     <set_value name="CutsceneAim.$Handle" exact="null"/>
                   </do_if>
