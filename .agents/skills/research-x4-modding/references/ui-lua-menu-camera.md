@@ -875,8 +875,14 @@ confirmed Esc is restored after the popup appears on every exit route tested
 same commit that moved the emission to `discardSession`; those routes were
 not individually live-tested but share the same discardSession code path.
 
-Known ceiling: if the player has hints/help texts disabled in game options the
-popup may not display and the Esc bug would return.
+The earlier claim that a player could disable hints/help texts in Game Options
+was retracted on 2026-08-08. Current X4 9.00 shipped `gameoptions.lua` exposes
+no global Help Text toggle, and `ego_helptext/helptext.lua` queues custom
+`helptext` events without consulting such an option. The absence of a
+player-accessible global setting is an `inference` from the complete scoped
+Game Options and HelpText source search; the handler behavior itself is
+`shipped-source`. Acceptance tests should directly check that the custom popup
+appears and that `Esc` works. They require no Help Text preflight setting.
 
 Fallback that was removed: commit `2f8691d` implemented an invisible 1×1
 offscreen throwaway frame on a dedicated layer (`viewCycleLayer = 2`) as an

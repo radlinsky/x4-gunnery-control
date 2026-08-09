@@ -20,6 +20,11 @@ done
 grep -Fq 'X4: 9.00' "$skill/references/ui-lua-menu-camera.md"
 grep -Fq 'gunnercontrol' "$skill/references/ui-lua-menu-camera.md"
 grep -Fq 'GetContainedShips' "$skill/references/ui-lua-menu-camera.md"
+grep -Fq 'They require no Help Text preflight setting.' "$skill/references/ui-lua-menu-camera.md"
+if rg -n -F 'hints/help texts disabled in game options' "$skill/references/ui-lua-menu-camera.md"; then
+  echo 'skill still claims that X4 exposes a Help Text Game Options toggle' >&2
+  exit 1
+fi
 grep -Fq 'mayattack' "$skill/references/md-ai.md"
 grep -Fq 'before object-event registration' "$skill/references/md-ai.md"
 grep -Fq 'Rename a cue when moving it across the hierarchy' "$skill/references/md-ai.md"
