@@ -40,7 +40,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-09-exclude-player-faction"
+local runtimeBuild = "2026-08-09-resume-repoint"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1375,6 +1375,18 @@ function menu.onShowMenu()
             State.returnToConsole(session)
             log("could not restore suspended gunnery camera; returning to console")
         end
+    end
+    -- Both resume routes (Test Lab reopen and Map suspend) re-enter the engaged
+    -- view without re-applying the engine soft target. Only the MD restore path
+    -- ever set repointTargetID, so a plain close-and-reopen lost the target
+    -- reticule while a Reload UI (which goes through the restore path) kept it.
+    -- Hand the aim target to the watchdog here so the same refusal/retry policy
+    -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
+    -- so the mode guard is required: dropping it would create a reticule Auto
+    -- never otherwise shows.
+    if (resuming or mapSuspendResume) and session.phase == "engaged"
+        and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
+        session.repointTargetID = session.aimTargetID
     end
     menu.display()
 end
