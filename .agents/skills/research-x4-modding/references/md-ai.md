@@ -25,6 +25,20 @@
   `typeof ... == datatype.component` value as well. When teardown removes the
   variable, make any queued-event action guard definition-safe too.
 
+### Rename a cue when moving it across the hierarchy of a save-persistent script
+- X4: 9.00
+- Status: live-tested
+- Source: X4 9.00 Steam `debug.log`, 2026-08-08 R2 fresh process loading a
+  disposable save from the prior `X4GunneryControl` cue hierarchy
+- Live test: yes — reproduced once on 2026-08-08 with commit c79b0f6 and runtime
+  marker `2026-08-08-target-watch-fix`
+- Finding: moving `TargetDestroyed` from a direct child to a nested watcher while
+  retaining its name produced `Duplicate cue name TargetDestroyed` on save load,
+  even though the new XML contained only one cue with that name. Saved MD state
+  colliding with the moved definition is an inference; the direct observation is
+  the duplicate-name error. Give a moved cue a new unique name and verify it by
+  loading the same save in a fresh process.
+
 ## AI fire-control interpretation
 
 ### Autoassist does not create manual turret possession

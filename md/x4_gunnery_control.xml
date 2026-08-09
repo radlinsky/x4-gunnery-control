@@ -220,7 +220,7 @@
             <check_value value="CutsceneAim.$Target? and typeof CutsceneAim.$Target == datatype.component"/>
           </conditions>
           <cues>
-            <cue name="TargetDestroyed">
+            <cue name="WatchedTargetDestroyed">
               <conditions>
                 <event_object_destroyed object="CutsceneAim.$Target"/>
               </conditions>

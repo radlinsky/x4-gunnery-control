@@ -191,11 +191,13 @@ cutscene='/mdscript/cues/cue[@name="CutsceneAim"]'
 watch="$cutscene/cues/cue[@name=\"TargetWatch\"]"
 start="$cutscene/cues/cue[@name=\"Start\"]"
 stop="$cutscene/cues/cue[@name=\"Stop\"]"
-destroyed="$watch/cues/cue[@name=\"TargetDestroyed\"]"
+destroyed="$watch/cues/cue[@name=\"WatchedTargetDestroyed\"]"
 guard="$destroyed/actions/do_if[@value=\"CutsceneAim.\$Target? and event.object == CutsceneAim.\$Target\"]"
 assert_md_xpath 1 "count($watch)" 'CutsceneAim must have exactly one TargetWatch'
 assert_md_xpath 0 "count($cutscene/cues/cue[@name=\"TargetDestroyed\"])" \
   'TargetDestroyed must not activate as a direct CutsceneAim child'
+assert_md_xpath 0 "count(//cue[@name=\"TargetDestroyed\"])" \
+  'The saved TargetDestroyed cue name must not be reused after moving the watcher'
 assert_md_xpath cancel "string($watch/@onfail)" 'TargetWatch must cancel when its target gate fails'
 assert_md_xpath 1 "count($watch/conditions/check_value[@value=\"CutsceneAim.\$Target? and typeof CutsceneAim.\$Target == datatype.component\"])" \
   'TargetWatch must require an existing component target'
