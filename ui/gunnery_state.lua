@@ -300,8 +300,18 @@ function State.cycleCamera(session, delta)
         session.cameraMemberID = nil
         return nil
     end
-    -- Clamp stale index into valid range before applying delta.
+    -- cameraMemberID is what the camera actually shows; cameraIndex is a cache
+    -- of its position that several paths (restore, beginTargetSelection,
+    -- cinematic anchoring) do not update, so re-derive it here rather than
+    -- trusting it. Falls back to the cached index when the member is gone.
     local idx = session.cameraIndex or 1
+    if session.cameraMemberID then
+        local want = normID(session.cameraMemberID)
+        for i, m in ipairs(roster) do
+            if normID(m.componentID) == want then idx = i break end
+        end
+    end
+    -- Clamp stale index into valid range before applying delta.
     if idx < 1 or idx > #roster then idx = 1 end
     idx = ((idx - 1 + delta) % #roster) + 1
     session.cameraIndex = idx

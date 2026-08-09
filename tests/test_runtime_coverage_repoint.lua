@@ -12,6 +12,8 @@ fix.API.runSessionWatchdog()
 assert(attempts == 2, "watchdog re-point retries one exception then abandons refusal")
 local requestsBefore = #fix.uiTriggeredEvents
 fix.fireUIEvent("gameLoadingDone")
-assert(#fix.uiTriggeredEvents == requestsBefore,
-    "gameLoadingDone must coalesce an already-outstanding persistence request")
+assert(#fix.uiTriggeredEvents == requestsBefore + 1,
+    "gameLoadingDone must force a new state_request, abandoning the dead pre-load one")
+assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "state_request",
+    "gameLoadingDone forced request must emit state_request")
 print("runtime coverage repoint tests passed")

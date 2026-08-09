@@ -81,8 +81,16 @@ function Persistence.new(deps)
         deps.emit("session_end", {})
     end
 
-    function api.request()
-        if outstanding then return false end
+    function api.request(force)
+        if outstanding then
+            -- a forced re-request is for when the world changed underneath the
+            -- request (a savegame load), so the in-flight request can never be
+            -- granted.  reset() rather than clear(): clear() emits session_end,
+            -- which makes MD delete State.$active and would destroy the very
+            -- payload we are trying to restore.
+            if not force then return false end
+            reset()
+        end
         outstanding = true
         nonce, generation, targetSeen, sessionSeen = allocateNonce(), nil, false, false
         targetValue, sessionValue = nil, nil

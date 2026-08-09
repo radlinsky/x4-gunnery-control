@@ -196,10 +196,30 @@ m = State.cycleCamera(cs, -1)
 eq(m.componentID, 203, "cycleCamera -1: wraps backwards from 1 to 3")
 eq(cs.cameraIndex, 3, "cycleCamera -1: index wraps to 3")
 
--- cycleCamera clamps stale index
-cs.cameraIndex = 99
+-- cycleCamera clamps stale index (only reachable with no cameraMemberID to
+-- re-derive from)
+cs.cameraIndex, cs.cameraMemberID = 99, nil
 m = State.cycleCamera(cs, 1)
 assert(m ~= nil, "cycleCamera: stale index is clamped, returns a member")
+
+-- cycleCamera re-derives its position from cameraMemberID. Restore sets only
+-- cameraMemberID, leaving cameraIndex at the newSession default of 1; without
+-- re-deriving, the first cycle after a load steps from the wrong place and
+-- skips a member.
+local ds = State.newSession(1, "g")
+ds.groups = { rgrpA, rgrpB }
+State.toggleGroup(ds, "A"); State.toggleGroup(ds, "B")
+ds.cameraMemberID, ds.cameraIndex = 203, 1   -- as a restore leaves it
+m = State.cycleCamera(ds, 1)
+eq(m.componentID, 102, "cycleCamera: wraps from the restored member, not from cameraIndex")
+eq(ds.cameraIndex, 1, "cycleCamera: index resynced to the restored member before moving")
+ds.cameraMemberID, ds.cameraIndex = 201, 1
+m = State.cycleCamera(ds, -1)
+eq(m.componentID, 102, "cycleCamera -1: steps back from the restored member")
+-- normID boundary: the id may come back from FFI with a "ULL" suffix.
+ds.cameraMemberID, ds.cameraIndex = "203ULL", 1
+m = State.cycleCamera(ds, 1)
+eq(m.componentID, 102, "cycleCamera: re-derives across the ULL id boundary")
 
 -- cycleCamera on empty roster
 local es = State.newSession(1, "g")

@@ -121,4 +121,70 @@ assert(#raceEnvelopes == 1 and raceEnvelopes[1].payload == "encoded-b" and raceE
 assert(raceAdapter.request(), "B completion must release the adapter for another restore")
 raceAdapter.clear()
 
+-- Forced re-request (savegame-load path): a new adapter receives a request,
+-- gets no grant (simulating the pre-load dead request), then a forced
+-- request(true) abandons the dead one and starts a fresh one.
+local forceEvents, forceHandlers, forceEnvelopes = {}, {}, {}
+local forceAdapter = Persistence.new({
+    State = State,
+    emit = function(control, payload) forceEvents[#forceEvents + 1] = { control = control, payload = payload } end,
+    register = function(name, handler)
+        forceHandlers[name] = forceHandlers[name] or {}
+        forceHandlers[name][#forceHandlers[name] + 1] = handler
+    end,
+    toLuaID = function(value) return "lua:" .. value end,
+    onEnvelope = function(value) forceEnvelopes[#forceEnvelopes + 1] = value end,
+})
+local function fireForce(name, value)
+    for _, handler in ipairs(forceHandlers[name] or {}) do handler(name, value) end
+end
+
+-- first request goes outstanding, no grant arrives (dead request)
+assert(forceAdapter.request(), "initial request must succeed")
+local deadNonce = forceEvents[#forceEvents].payload.nonce
+assert(not forceAdapter.request(), "unforced request while outstanding must coalesce")
+
+-- forced re-request: must abandon the dead request and emit a new state_request
+local eventCountBeforeForce = #forceEvents
+assert(forceAdapter.request(true), "forced request must succeed even when outstanding")
+assert(#forceEvents == eventCountBeforeForce + 1, "forced request must emit exactly one new event")
+assert(forceEvents[#forceEvents].control == "state_request", "forced request must emit state_request")
+local newNonce = forceEvents[#forceEvents].payload.nonce
+assert(newNonce ~= deadNonce, "forced request must emit a different nonce")
+
+-- no session_end must have been emitted at any point (reset(), not clear())
+for _, ev in ipairs(forceEvents) do
+    assert(ev.control ~= "session_end", "forced re-request must not emit session_end (must use reset not clear)")
+end
+
+-- a late grant carrying the abandoned nonce must be ignored entirely
+local eventCountBeforeStale = #forceEvents
+fireForce("X4GunneryControl.RestoreGrant", "x4gc1:" .. deadNonce .. ":20")
+assert(#forceEvents == eventCountBeforeStale, "stale grant for abandoned nonce must not emit state_accept")
+assert(not forceHandlers["X4GunneryControl.RestoreTarget.20"],
+    "stale grant must not install RestoreTarget handler")
+assert(not forceHandlers["X4GunneryControl.RestoreSession.20"],
+    "stale grant must not install RestoreSession handler")
+assert(not forceAdapter.request(), "adapter must still be outstanding after stale grant was ignored")
+
+-- a grant for the new nonce must be accepted and its reply pair must complete
+fireForce("X4GunneryControl.RestoreGrant", "x4gc1:" .. newNonce .. ":21")
+assert(forceEvents[#forceEvents].control == "state_accept", "new nonce grant must emit state_accept")
+assert(forceEvents[#forceEvents].payload.nonce == newNonce, "state_accept must carry the new nonce")
+assert(forceEvents[#forceEvents].payload.generation == 21, "state_accept must carry the granted generation")
+assert(forceHandlers["X4GunneryControl.RestoreTarget.21"],
+    "new nonce grant must install RestoreTarget handler")
+assert(forceHandlers["X4GunneryControl.RestoreSession.21"],
+    "new nonce grant must install RestoreSession handler")
+fireForce("X4GunneryControl.RestoreTarget.21", 77)
+assert(#forceEnvelopes == 0, "target-first response still waits for session")
+fireForce("X4GunneryControl.RestoreSession.21", "restored")
+assert(#forceEnvelopes == 1 and forceEnvelopes[1].payload == "restored" and forceEnvelopes[1].target == 77,
+    "reply pair for new nonce must complete the envelope")
+
+-- final session_end guard: still none after the whole forced sequence
+for _, ev in ipairs(forceEvents) do
+    assert(ev.control ~= "session_end", "session_end must never appear in the forced re-request sequence")
+end
+
 print("persistence adapter tests passed")

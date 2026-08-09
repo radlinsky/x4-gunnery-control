@@ -106,8 +106,14 @@ grep -Fq 'State.decode(envelope and envelope.payload)' "$main"
 # taken while engaged reloads into the chair, so the gameLoadingDone raise is
 # what normally does the work; the chair-ingress raise is the fallback that
 # collects the payload if it ever lands with the player off the console.
-if [ "$(grep -Fc 'persistence.request()' "$main")" -lt 3 ]; then
-  echo 'persistence request must be raised at init, at gameLoadingDone, and at chair ingress' >&2
+# gameLoadingDone uses request(true) to force a new request, abandoning the dead
+# pre-load one; init and chair ingress use unforced request().
+if [ "$(grep -Fc 'persistence.request()' "$main")" -lt 2 ]; then
+  echo 'persistence request must be raised at init and at chair ingress (unforced)' >&2
+  exit 1
+fi
+if ! grep -Fq 'persistence.request(true)' "$main"; then
+  echo 'persistence request must be raised at gameLoadingDone with force=true' >&2
   exit 1
 fi
 # Ensure the old single-phase strings are gone — any hit is a residual bug.
