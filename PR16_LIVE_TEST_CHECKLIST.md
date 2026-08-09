@@ -1,9 +1,275 @@
-# PR #16 live X4 acceptance checklist
+# PR #16 agent-directed live X4 acceptance runbook
 
-Use this document to test PR #16 against a disposable X4 save. Work in order,
-stop at the first unsafe failure, and write observations directly into the note
-blocks. Do not infer a pass from silence unless the test explicitly says silence
-is expected.
+This is a stateful runbook for an LLM agent directing the owner through PR #16
+live testing against a disposable X4 save. The owner drives X4; the agent reads
+and writes this file, monitors `debug.log`, explains one test in plain English,
+gives bounded step-by-step actions, waits for the owner's report, reconciles the
+report with the log, and records the result before continuing.
+
+The agent must work in order and stop at the first unsafe failure. It must not
+infer a pass from silence unless the test explicitly says silence is expected.
+
+## Agent run state
+
+The directing agent updates this block before it gives an owner action and again
+after it records a result. This is the resume point for a later agent or compacted
+conversation. Do not erase prior test notes.
+
+- Run status: **NOT STARTED**
+- Run ID/date:
+- Current section/test: **Preflight**
+- Current row/step: **Not started**
+- Last completed test: **None**
+- Exact tested commit/build:
+- Results requiring rerun: **None**
+- Last owner report:
+- Absolute `debug.log` path:
+- Live-monitor command/session:
+- Current evidence-window start:
+- Evidence byte offset start:
+- Evidence byte offset end:
+- Latest log line reviewed:
+- Active blocker: **None**
+- Next owner action: **Wait for agent instructions**
+
+## Run records
+
+This section is append-only. On the first run, replace the placeholder with the
+template below. After a fix, new build, or new X4 process, append another record;
+never overwrite the earlier run.
+
+_No run records yet._
+
+```text
+### Run <ID> — <IN PROGRESS|STOPPED|COMPLETE>
+- Started/ended:
+- Commit and runtime build:
+- X4 process/build-marker line:
+- Required reset performed:
+- debug.log path:
+- Starting/ending byte offsets:
+- Supersedes run:
+- Tests/rows requiring rerun:
+- Stop reason:
+```
+
+## LLM agent operating contract
+
+### Division of responsibility
+
+The agent:
+
+- Reads this entire operating contract before acting, then reads the complete
+  section for the current test before directing it.
+- Uses repository tools to inspect the working tree, runtime build marker,
+  scripts, implementation, and `debug.log` itself.
+- Updates **Agent run state**, the current test's result fields, timestamps,
+  evidence paths, exact observations, and relevant log excerpt with
+  `apply_patch` after every completed test or matrix row.
+- Decides PASS, FAIL, BLOCKED, or NOT RUN from the written criteria. The owner
+  reports what happened; the agent owns classification and must explain it.
+- Keeps ordinary output concise. It quotes only the log lines needed to support
+  the decision and never enables continuous success logging in the mod.
+
+The owner:
+
+- Drives X4, observes the screen, takes requested screenshots/video, and reports
+  exactly what happened.
+- Does not have to interpret protocol internals or decide the result.
+- Stops pressing controls immediately when the agent or hard-stop rule says to
+  stop.
+
+The agent cannot click, type, save, load, move, target, or inspect anything
+inside X4. It must never phrase an unperformed owner action as though it already
+happened.
+
+All build-marker, line-count, exact-log-message, repetition, and raw-error checks
+in the source test steps are **agent actions**. The agent must not ask the owner
+to inspect, count, search, copy, or transcribe routine log output. The owner only
+reports visible game state and completion of requested game actions.
+
+### Starting or resuming a run
+
+1. Read **Agent run state** and the result field for the named current test.
+2. If Run status contains `STOPPED`, Active blocker is not `None`, or the last
+   result is FAIL/BLOCKED pending a decision, issue **no X4 action**. Preserve and
+   review evidence first. Resume only after the owner authorizes the fix/setup
+   change and the agent appends a run record with the new commit/build, required
+   reset, and exact rerun scope.
+3. Inspect `git status --short` and `git log -1 --oneline`. Do not touch unrelated
+   user files. A modified checklist is expected during a run; a modified tracked
+   X4-loaded file means the installed build may not match and blocks new results
+   until reconciled. Record the exact tested commit during Preflight.
+4. If the run state and filled results disagree, stop and ask the owner which run
+   is authoritative. Do not silently overwrite evidence.
+5. Ask only for missing facts that cannot be read from the repository or log,
+   such as the save, ship, bindings, visible group states, or screenshot path.
+   Make no assumptions about the game state.
+6. Resume at the first incomplete row of the current test. Do not repeat a
+   completed destructive action merely to regain context.
+
+### Monitor `debug.log` directly
+
+The launcher-created **X4 Gunnery Log** window is for the owner. The directing
+agent must start its own repository-side monitor; it must not ask the owner to
+read or transcribe routine log output.
+
+1. Obtain and verify the absolute WSL path to the current `debug.log`. Prefer the
+   launcher-reported path recorded during Preflight. If it is not known, ask the
+   owner; do not guess between X4 account directories.
+2. If X4 is already running, query the whole file for the latest build marker
+   before starting the live tail; the tailer deliberately skips bytes that
+   existed when it started because they may belong to a previous process:
+
+   ```bash
+   rg -n -F '[X4GC] UI initialized; build=' "/absolute/path/to/debug.log" | tail -n 1
+   ```
+
+   Compare the complete line with the expected build. Record its line number and
+   current byte offset. If the marker is absent or stale, do not issue a game
+   action.
+3. Before issuing game actions, start this as a long-running tool process and
+   retain its session identifier:
+
+   ```bash
+   ./scripts/tail-gunnery-log.sh "/absolute/path/to/debug.log"
+   ```
+
+4. Poll that process immediately before giving a test batch, after every owner
+   report, and once more before recording the result. Read all new output. If
+   the tool session was lost, restart it and recover from the recorded byte
+   offsets before continuing.
+5. Immediately before each owner-action batch, wait for writes to settle and
+   record the byte count as `Evidence byte offset start`:
+
+   ```bash
+   wc -c < "/absolute/path/to/debug.log"
+   ```
+
+   After the owner reports, poll the monitor, record the new byte count as the
+   end offset, and inspect exactly the new byte range. If `END` is smaller than
+   `START`, the log was truncated: stop and re-verify the process/build marker.
+
+   ```bash
+   tail -c "+$((START + 1))" "/absolute/path/to/debug.log" \
+     | head -c "$((END - START))"
+   ```
+
+   Wall-clock times are supporting context; byte offsets are authoritative for
+   `zero`, `exactly one`, and repeated-line claims. If either offset is missing,
+   mark the log-dependent assertions BLOCKED.
+6. The filtered monitor is not a complete error detector. After every owner
+   report, scan that exact byte range for both mod lines and broad errors:
+
+   ```bash
+   tail -c "+$((START + 1))" "/absolute/path/to/debug.log" \
+     | head -c "$((END - START))" \
+     | rg -n -i 'x4_gunnery|X4Gunnery|\[X4GC|lua.*error|ffi.*error|schema.*error|cue.*error|error.*cue|exception'
+   ```
+
+   Scan the whole raw file once during final evidence packaging for broader
+   context, but never charge a pre-window error or line count to the current row.
+7. Treat a truncation/reset notice as a new X4 process. Re-verify the exact
+   current-build marker before accepting more results.
+8. Do not mark a log-dependent condition PASS when the monitor was unavailable.
+   Recover the exact range from recorded offsets or mark the test BLOCKED.
+9. If the same diagnostic repeats at update/scan cadence, tell the owner to stop
+   immediately and follow the failure protocol. Do not continue polling a flood
+   while the game generates more of it.
+
+### Direct one test at a time
+
+For each mandatory test, each M4/M8/M9 matrix row, each requested conditional
+row, and each Test Lab ship sweep:
+
+1. Update **Agent run state** to the exact test/row and set its evidence-window
+   start time.
+2. In plain English, tell the owner:
+   - what behavior this test is proving;
+   - why it matters to the PR;
+   - the required starting screen, ship, targets, checked groups, and baseline;
+   - what success will look like; and
+   - the specific hard-stop symptom for this test.
+3. Give a short numbered action batch. Preserve the source step numbers in this
+   file, but translate implementation terms into visible controls and outcomes.
+   For a long test, issue only the steps needed to reach the next observation
+   checkpoint. A batch has at most three owner actions and at most one
+   irreversible action (Quick Save/Load, Reload UI, Cease/Get Up, destroying a
+   target, or opening an unsupported full menu). End immediately after the next
+   visible/log checkpoint. Never dump several matrix rows into one owner turn.
+4. End the instruction turn with an explicit wait. Ask the owner to reply using:
+
+   ```text
+   Completed through step/row:
+   What I saw:
+   Group modes/armed values that changed:
+   Camera/target/POV result:
+   Popup or error text:
+   Screenshot/video filename:
+   Anything unexpected:
+   ```
+
+5. Do not give the next game action until the owner reports back. While handling
+   that report, poll the live monitor and scan the raw error context yourself.
+6. If the report is incomplete for a required visible condition, ask one focused
+   follow-up and wait. Do not turn “seemed fine” into PASS.
+7. When a long test reaches an intermediate checkpoint, record the observation
+   in its Notes but leave its Result incomplete. Then give the next bounded batch.
+8. When all criteria for the row/test are known, classify it, write the result
+   and evidence into this file, update **Agent run state**, and only then proceed.
+
+### Recording rules
+
+- For prose tests, replace the entire selected result line with one unambiguous
+  value such as `Result: **PASS**`; do not merely tick a box.
+- For matrix tables, replace the row's bracket controls with the full bold word
+  `**PASS**`, `**FAIL**`, `**BLOCKED**`, or `**NOT RUN**`, plus concise evidence
+  and timestamp in that row. Never check a `P/F/B` box. Set the matrix-level
+  result with the full word only after all required rows complete.
+- Record the owner's visible observation separately from the agent-observed log
+  evidence. Never attribute a log observation to the owner.
+- Include start/end wall-clock times, the first differing source step, exact
+  target/camera/group identity where required, and evidence filenames.
+- Keep only relevant excerpts in this Markdown; raw logs can contain local paths
+  or account identifiers and belong in the evidence package, not pasted in full.
+- A clean log cannot replace a required visual observation. A reassuring visual
+  result cannot override a required error or missing protocol line in the log.
+- Do not rewrite a prior result after a new build is installed. Start a new run
+  record, append `Run <ID>: <RESULT> — <evidence>` to the affected Notes, and
+  clearly mark the older observation superseded without deleting it.
+- Treat edits made while running this checklist as a live journal. Do not commit
+  or publish filled owner results and local evidence paths unless the owner asks.
+
+### Continue, pause, or stop
+
+- **PASS:** write the result, summarize why it passed in one or two sentences,
+  then introduce only the next test.
+- **BLOCKED:** write exactly what fixture/action was unavailable. A mandatory
+  BLOCKED result sets `Run status: **STOPPED — BLOCKED**` and requires an owner
+  decision before more X4 input. For a conditional/destructive row whose safe
+  fixture is simply unavailable, record BLOCKED without setting Active blocker,
+  then continue to the next conditional row. If a safe setup adjustment could
+  unblock it, explain one adjustment and wait for approval. Do not improvise
+  spawning, save editing, destructive damage, or configuration.
+- **FAIL or any hard stop:** tell the owner to stop all X4 input, record FAIL and
+  the first differing step, poll/copy the logs, and preserve screenshots. Stop
+  the test sequence. Set `Run status: **STOPPED — FAIL**`, set
+  `Next owner action: **No X4 input**`, and record the Active blocker. Diagnose
+  from the evidence and repository; do not ask the owner to retry the same
+  action first.
+- If a fix is within the active task's authority, implement it, add deterministic
+  coverage, validate, and follow the repository's reload-advice hook. Otherwise,
+  present the evidence and ask before editing.
+- After any code/content/Test Lab change, do not resume at the next test until
+  the agent has recorded the new commit/build, applied the one reset required by
+  `docs/RELOADING.md`, and explicitly marked earlier affected live results as
+  needing rerun. Never offer reload versus restart as a choice.
+- Do not push or update the PR until the complete mandatory set passes and the
+  owner authorizes publication.
+- After the mandatory set passes, direct every conditional/destructive case for
+  which the owner has a safe fixture. Record unavailable cases as BLOCKED rather
+  than silently skipping them. Never ask the owner to perform O1–O7; the agent
+  verifies those from the automated suite and records them as offline-only.
 
 ## Result vocabulary
 
@@ -25,51 +291,61 @@ Stop the current test immediately if any of these occur:
 - The player is left with a stuck external/cinematic camera, missing HUD, dead
   input, or an `Esc` key that no longer opens the expected screen.
 - The gunnery menu disappears or breaks so Test Lab cannot be reached.
-- A parked engagement produces no `restore accepted; phase=engaged` within ten
-  seconds after load or Reload UI.
+- A persisted phase produces no `restore accepted; phase=<required phase>` within
+  ten seconds after load or Reload UI. Engaged rows require `phase=engaged`;
+  M7B and M9D require `phase=target_select`.
 - A Lua, FFI, MD property lookup, schema, or cue error appears.
 - The same `[X4GC]` diagnostic repeats at scan/update cadence.
 
 When one occurs:
 
-1. Do not press more keys to try to cure it.
-2. Take a screenshot or short video if the failure is visible.
-3. Record the first numbered step that differed.
-4. Copy the complete `debug.log` before another launch truncates it.
-5. Save the filtered log separately.
-6. Record the ship, chair, checked groups, camera turret, target, and POV.
+1. **Owner:** do not press more keys to try to cure it.
+2. **Owner:** take a screenshot or short video if the failure is visible and
+   report the current ship, chair, checked groups, camera turret, target, and POV.
+3. **Agent:** record the first numbered step that differed.
+4. **Agent:** copy the complete `debug.log` before another launch truncates it.
+5. **Agent:** save and inspect the exact filtered/raw evidence range separately.
+6. **Agent:** set the stopped run state and write the owner's reported state into
+   this checklist before diagnosing or editing.
 
 A persistence-protocol failure blocks the PR. Do not substitute another
 transport or retry until the evidence has been reviewed.
 
 ### Evidence window for every test
 
-Use one wall-clock window per test so counts from earlier rows do not leak into
-later results:
+Use one byte-offset window per owner-action batch so counts from earlier actions
+do not leak into later results. A long test/row can have several ordered ranges
+in its Notes. Wall-clock time is supporting context only:
 
-1. Before step 1, write the local start time (including seconds) in that test's
-   notes and take the requested baseline screenshot.
-2. After the last step, write the local end time before starting another test.
-3. Save the filtered lines for that interval. The launcher-created tail is for
-   immediate feedback; the final evidence comes from the on-disk log:
+1. **Agent:** before issuing step 1, write the local start time and settled
+   `wc -c` start offset in that test's Notes.
+2. **Owner:** take the requested baseline screenshot and perform only the bounded
+   action batch supplied by the agent.
+3. **Agent:** after the owner reports, write the local end time and `wc -c` end
+   offset before issuing another action. Extract exactly that range to a
+   test-specific temporary file:
 
    ```bash
-   ./scripts/filter-gunnery-log.sh "/path/to/debug.log" > pr16-live.log
+   tail -c "+$((START + 1))" "/path/to/debug.log" \
+     | head -c "$((END - START))" > "/tmp/pr16-<run>-<test>-raw.log"
    ```
 
-4. Also inspect the **raw** `debug.log` around the same timestamps. The filtered
-   view intentionally omits unrelated engine noise and therefore cannot prove
-   the absence of every Lua/FFI/MD/schema/cue failure. This command produces a
-   broad error index; inspect matching context and record only errors from this
-   extension or the test action:
+4. **Agent:** filter that exact range and build its raw-error index. The filtered
+   view intentionally omits unrelated engine noise and cannot prove the absence
+   of every Lua/FFI/MD/schema/cue failure:
 
    ```bash
-   rg -n -i 'x4_gunnery|X4Gunnery|\[X4GC|lua.*error|ffi.*error|schema.*error|cue.*error|error.*cue|exception' "/path/to/debug.log" > pr16-errors.log
+   ./scripts/filter-gunnery-log.sh "/tmp/pr16-<run>-<test>-raw.log" \
+     > "/tmp/pr16-<run>-<test>-filtered.log"
+   rg -n -i 'x4_gunnery|X4Gunnery|\[X4GC|lua.*error|ffi.*error|schema.*error|cue.*error|error.*cue|exception' \
+     "/tmp/pr16-<run>-<test>-raw.log" \
+     > "/tmp/pr16-<run>-<test>-errors.log"
    ```
 
 5. Unless a row says otherwise, `exactly one`, `zero`, and line-count claims
-   apply only inside that row's recorded start/end window. `[X4GC TEST]` sweep
-   records do not count as normal `[X4GC]` lifecycle lines.
+   apply only inside that row's recorded byte range. `[X4GC TEST]` sweep records
+   do not count as normal `[X4GC]` lifecycle lines. Missing/invalid offsets make
+   log-dependent assertions BLOCKED, not PASS.
 
 ### How to prove the checked-group set
 
@@ -137,14 +413,15 @@ set from a single current turret.
 8. Confirm the launcher prints `Reinstalling loose development files...`, the
    resolved `debug.log` path, and opens a second **X4 Gunnery Log** window. That
    second window is the filtered live tail. Record the printed log path above.
-9. In the filtered tail window, find exactly this current-build marker:
+9. **Agent:** find exactly this current-build marker in `debug.log` and record its
+   line number/byte offset:
 
    ```text
    [X4GC] UI initialized; build=2026-08-08-pr-review
    ```
 
-10. If the marker is missing or shows another build, mark preflight **FAIL** and
-   stop. The installed files are not the files under test.
+10. **Agent:** if the marker is missing or shows another build, mark preflight
+    **FAIL** and stop. The installed files are not the files under test.
 11. Open a gunnery console and confirm the **Test Lab** button exists.
 12. Record the current Quick Save and Quick Load bindings. Use those bindings
     below so opening an unsupported full menu does not silently end a session.
@@ -195,14 +472,14 @@ Purpose: prove the installed build starts, the menu remains reachable, and the
 new protocol does not flood ordinary logs.
 
 1. After preflight, remain outside the gunnery chair for 60 seconds.
-2. Record the start/end time of this outside-chair interval. Watch the filtered
-   tail. Ignore the one startup marker; count any repeated `[X4GC]` lines.
+2. **Agent:** record the start/end offsets of this outside-chair interval. Ignore
+   the one startup marker and count any repeated `[X4GC]` lines in that range.
 3. Sit at the gunnery console.
 4. Wait for Gunnery Control to open and settle for ten seconds.
 5. Record a second start/end time and do nothing for another 60 seconds.
 6. Confirm the console lists turret groups and that Test Lab is reachable.
-7. Confirm there are no repeating request/grant, commit, scan, camera, lifecycle,
-   or watchdog messages during either idle period.
+7. **Agent:** confirm there are no repeating request/grant, commit, scan, camera,
+   lifecycle, or watchdog messages during either idle period.
 
 Pass:
 
@@ -243,7 +520,8 @@ live-only inference until this test succeeds.
 6. In the engaged upper-right panel, use the bottom **Test Lab** button below
    Prefer/Release. Do not enter Test Lab from the console or target browser.
 7. In Test Lab, click **Reload UI** once.
-8. Confirm a new current-build startup marker appears.
+8. **Agent:** confirm a new current-build startup marker appears in the evidence
+   range.
 9. Wait ten seconds without changing the view.
 10. Confirm the engaged Direct panel returns with the same camera turret, hull
     target, and Turret/manual POV.
@@ -483,7 +761,7 @@ of reviving a stale target.
    sufficient because the current soft target is deliberately retained.
    Do not use a friendly/player-owned target for live fire.
 5. Wait at least six seconds for the Auto scan cadence.
-6. Confirm the filtered log contains exactly one:
+6. **Agent:** confirm the evidence range contains exactly one:
 
    ```text
    [X4GC] auto target lost; scanning without a target
@@ -524,7 +802,7 @@ Notes/log excerpt:
 7. Confirm Direct stays engaged and B becomes the root, soft, and aim target.
    In Turret POV the camera must remain anchored to the selected turret while
    looking toward B; in Target POV it must use B as the saved target anchor.
-8. Confirm exactly one major transition line begins:
+8. **Agent:** confirm exactly one major transition line begins:
 
    ```text
    [X4GC] engaged target lost; auto-next engaged
@@ -551,7 +829,7 @@ Notes/log excerpt:
 5. Destroy A, or otherwise make its component non-operational. Moving an
    operational A out of range does not trigger this branch.
 6. Confirm the UI returns to the target browser and resets to Turret/manual.
-7. Confirm exactly one major transition line begins:
+7. **Agent:** confirm exactly one major transition line begins:
 
    ```text
    [X4GC] engaged target lost; back to target selection
@@ -639,7 +917,8 @@ For each row:
 4. Re-establish the phase.
 5. Open Test Lab again from the same button.
 6. Click **Reload UI**.
-7. Confirm the current startup marker and expected restore result.
+7. **Agent:** confirm the current startup marker and required restore line;
+   **owner:** confirm the expected visible restored state.
 8. Confirm there is no blank frame, orphaned input, or stale second restore.
 9. At teardown, compare a complete restored camera-roster cycle with the saved
    cycle and preserve the restored console screenshot for engaged rows.
@@ -756,14 +1035,17 @@ Notes/log excerpt:
 1. Across the tests above, complete at least five Direct **Cease Engagement**
    operations and at least three **Get Up** operations.
 2. Record whether each restored exact mode/armed values.
-3. Filter the log for `post-restore readback mismatch`.
+3. **Agent:** filter the accumulated evidence for
+   `post-restore readback mismatch`.
 4. Require zero matches for a pass.
-5. Start one stable **Auto** engagement, wait until its panel and target have
-   visibly settled, then record the current filtered line count and start time.
-6. Take no action for 60 seconds, record the end time, and count only new
-   filtered `[X4GC]` lines during that minute.
-7. Require zero normal-success lines during the stable minute.
-8. A natural camera mismatch may log once per session; the same line repeating
+5. **Owner:** start one stable **Auto** engagement, wait until its panel and
+   target have visibly settled, then report that checkpoint.
+6. **Agent:** record the stable-minute start time and byte offset, then instruct
+   the owner to take no action for 60 seconds.
+7. **Agent:** record the end time/offset and count only new filtered `[X4GC]`
+   lines in that exact byte range.
+8. Require zero normal-success lines during the stable minute.
+9. A natural camera mismatch may log once per session; the same line repeating
    every 0.25 seconds is a failure.
 
 | # | Source test | Exit (`Cease`/`Get Up`) | Group + baseline mode/armed | Actual mode/armed | Exact? | Evidence |
@@ -781,7 +1063,7 @@ Result: [ ] PASS [ ] FAIL [ ] BLOCKED [ ] NOT RUN
 
 Mismatch count:
 
-Stable-minute filtered line count:
+Stable-minute byte range and filtered line count:
 
 Notes/evidence:
 
@@ -822,7 +1104,7 @@ Run once in Direct and once in Auto if a controlled setup is available.
 3. While Test Lab remains open, make every camera-capable member in the checked
    groups unavailable/non-operational.
 4. Click **Reload UI**.
-5. Confirm this one-shot line:
+5. **Agent:** confirm this one-shot line:
 
    ```text
    [X4GC] restore has no camera member; returning to console
@@ -847,7 +1129,8 @@ Run once in Direct and once in Auto if a controlled setup is available.
 5. Click **Reload UI**.
 6. Confirm no dangling or wrong component becomes the target.
 7. Confirm the mode uses its safe target-loss/no-target behavior.
-8. Confirm no FFI or MD error appears and teardown remains safe.
+8. **Agent:** confirm no FFI or MD error appears; **owner:** confirm teardown
+   remains visibly safe.
 
 Result: [ ] PASS [ ] FAIL [ ] BLOCKED [ ] NOT RUN
 
@@ -935,15 +1218,21 @@ Run this once on the primary fixture and again for each extra ship used above.
 1. Sit in the ship's gunnery chair and open Gunnery Control.
 2. Click **Test Lab** from the console action row.
 3. Click **Start Current Ship Sweep**.
-4. For each listed turret, click **Inspecting turret camera**.
-5. Observe the unobscured turret camera for five seconds.
-6. After returning to the chair, choose exactly one: Visual Pass, Visual Fail,
-   Retry, or Skip.
-7. Do not mark Visual Pass merely because technical checks passed.
-8. After all physical turrets have a verdict, allow Test Lab to complete every
+4. **Agent:** direct exactly one listed turret per owner turn and record its
+   displayed index/name before issuing the action.
+5. **Owner:** for that turret only, click **Inspecting turret camera** and observe
+   the unobscured camera for the full five seconds.
+6. After returning to the chair, report what was visible. When the agent asks
+   for the verdict action, choose exactly one: Visual Pass, Visual Fail, Retry,
+   or Skip.
+7. **Agent:** poll/reconcile the technical log result and owner's observation,
+   write that turret's index/name/verdict/evidence in Notes, then wait before
+   directing the next turret.
+8. Do not mark Visual Pass merely because technical checks passed.
+9. After all physical turrets have a verdict, allow Test Lab to complete every
    mutable group snapshot/apply/restore check.
-9. Record the final on-screen summary.
-10. At the end of the X4 run, parse `[X4GC TEST]` records into CSV.
+10. Record the final on-screen summary.
+11. At the end of the X4 run, parse `[X4GC TEST]` records into CSV.
 
 Pass gate:
 
@@ -1042,7 +1331,10 @@ Owner result: **OFFLINE ONLY**
 
 ## Final evidence package
 
-Before another launch:
+Before another launch, the directing agent performs the filesystem/log commands
+below. The owner only supplies screenshots, videos, and visible observations.
+If the agent cannot access the recorded log path, it stops and asks for access
+rather than delegating routine log interpretation back to the owner.
 
 1. Copy the complete `debug.log` to a stable filename.
 2. From the repository root, create the filtered log:
