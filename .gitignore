@@ -17,3 +17,8 @@ __folder_managed_by_vortex
 /debug_filtered.txt
 /*.png
 /*chat.txt
+
+# Live acceptance-run scratch: the filled-in checklist and one-off plans are
+# per-run notes carrying local paths, not repository documentation.
+/PR16_LIVE_TEST_CHECKLIST.md
+/AUTO_TARGET_POV_PLAN.md
