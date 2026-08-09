@@ -188,6 +188,12 @@
               <param name="target_y" number="0"/>
               <param name="target_z" number="0"/>
             </play_cutscene>
+            <!-- TargetWatch is cancelled during MD init when no target exists.
+                 Re-arm it only after this event has supplied and normalized a
+                 target. reset_cue takes effect after this action block, so a
+                 retarget replaces the old listener instead of accumulating
+                 instances. -->
+            <reset_cue cue="TargetWatch"/>
           </actions>
         </cue>
 
@@ -200,20 +206,39 @@
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
+            <!-- Disarm the per-target listener as well as the camera. -->
+            <remove_value name="CutsceneAim.$Target"/>
+            <reset_cue cue="TargetWatch"/>
           </actions>
         </cue>
 
-        <cue name="TargetDestroyed" instantiate="true">
+        <!-- Do not register event_object_destroyed until Start has supplied a
+             component. A static listener evaluates the object expression at
+             MD init, when CutsceneAim.$Target does not exist. -->
+        <cue name="TargetWatch" onfail="cancel">
           <conditions>
-            <event_object_destroyed object="CutsceneAim.$Target"/>
+            <check_value value="CutsceneAim.$Target? and typeof CutsceneAim.$Target == datatype.component"/>
           </conditions>
-          <actions>
-            <do_if value="CutsceneAim.$Handle">
-              <stop_cutscene cutscene="CutsceneAim.$Handle"/>
-              <set_value name="CutsceneAim.$Handle" exact="null"/>
-            </do_if>
-            <debug_text text="'[X4GC] cutscene_aim stopped: target destroyed'" chance="100"/>
-          </actions>
+          <cues>
+            <cue name="TargetDestroyed">
+              <conditions>
+                <event_object_destroyed object="CutsceneAim.$Target"/>
+              </conditions>
+              <actions>
+                <!-- A reset is applied after the triggering action block. If an
+                     old destruction event was already queued while Start
+                     retargeted, it must not stop the new target's handle. -->
+                <do_if value="CutsceneAim.$Target? and event.object == CutsceneAim.$Target">
+                  <do_if value="CutsceneAim.$Handle">
+                    <stop_cutscene cutscene="CutsceneAim.$Handle"/>
+                    <set_value name="CutsceneAim.$Handle" exact="null"/>
+                  </do_if>
+                  <remove_value name="CutsceneAim.$Target"/>
+                  <reset_cue cue="parent"/>
+                </do_if>
+              </actions>
+            </cue>
+          </cues>
         </cue>
       </cues>
     </cue>

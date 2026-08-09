@@ -11,6 +11,20 @@
   `../libraries/md.xsd` and its dependencies. Copy only that recursive tree to
   an explicit ignored cache; never unpack catalogs into the repository.
 
+### Pair `?` with a value or type check before object-event registration
+- X4: 9.00
+- Status: shipped-source
+- Source: `md/story_paranid.xml:7644`; `libraries/common.xsd`
+  (`event_object_destroyed`)
+- Live test: no — the operator interpretation is untested as of 2026-08-08
+- Finding: shipped MD uses `$MainPlayerShip? and $MainPlayerShip != null`
+  before dereferencing the variable. Treat `?` as a declaration/existence
+  guard, not proof that the value is non-null; that semantic interpretation is
+  an inference from the shipped idiom. Before activating an object event such
+  as `event_object_destroyed`, require a non-null or
+  `typeof ... == datatype.component` value as well. When teardown removes the
+  variable, make any queued-event action guard definition-safe too.
+
 ## AI fire-control interpretation
 
 ### Autoassist does not create manual turret possession

@@ -5,6 +5,19 @@ cd "$(dirname "$0")/.."
 main=ui/gunnery_control.lua
 persist=ui/gunnery_persistence.lua
 testlab=testlab/x4_gunnery_control_testlab/ui/testlab.lua
+md=md/x4_gunnery_control.xml
+
+assert_md_xpath() {
+  local expected=$1
+  local expression=$2
+  local description=$3
+  local actual
+  actual=$(xmllint --xpath "$expression" "$md")
+  if [[ "$actual" != "$expected" ]]; then
+    echo "$description: expected $expected, found $actual" >&2
+    exit 1
+  fi
+}
 
 if grep -q 'releaseFrameHandle' "$main" "$testlab"; then
   echo "obsolete releaseFrameHandle call found" >&2
@@ -164,18 +177,60 @@ grep -Fq 'seatLeaving = true' "$main"
 
 grep -Fq 'cutscene_aim_start' "$main"
 grep -Fq 'cutscene_aim_stop' "$main"
-grep -Fq 'cutscene_aim_start' md/x4_gunnery_control.xml
-grep -Fq 'cutscene_aim_stop' md/x4_gunnery_control.xml
-grep -Fq 'play_cutscene' md/x4_gunnery_control.xml
-grep -Fq 'stop_cutscene' md/x4_gunnery_control.xml
-grep -Fq 'cinematicmode' md/x4_gunnery_control.xml
+grep -Fq 'cutscene_aim_start' "$md"
+grep -Fq 'cutscene_aim_stop' "$md"
+grep -Fq 'play_cutscene' "$md"
+grep -Fq 'stop_cutscene' "$md"
+grep -Fq 'cinematicmode' "$md"
+# The destroyed-object event source is evaluated when its cue activates. Keep
+# it below a null-safe gate: on fresh MD init there is no CutsceneAim.$Target.
+# Start re-arms exactly one watcher after normalizing the target. Stop clears
+# and cancels it. A queued event for the previous target is harmless because
+# the destructive actions compare event.object with the current target.
+cutscene='/mdscript/cues/cue[@name="CutsceneAim"]'
+watch="$cutscene/cues/cue[@name=\"TargetWatch\"]"
+start="$cutscene/cues/cue[@name=\"Start\"]"
+stop="$cutscene/cues/cue[@name=\"Stop\"]"
+destroyed="$watch/cues/cue[@name=\"TargetDestroyed\"]"
+guard="$destroyed/actions/do_if[@value=\"CutsceneAim.\$Target? and event.object == CutsceneAim.\$Target\"]"
+assert_md_xpath 1 "count($watch)" 'CutsceneAim must have exactly one TargetWatch'
+assert_md_xpath 0 "count($cutscene/cues/cue[@name=\"TargetDestroyed\"])" \
+  'TargetDestroyed must not activate as a direct CutsceneAim child'
+assert_md_xpath cancel "string($watch/@onfail)" 'TargetWatch must cancel when its target gate fails'
+assert_md_xpath 1 "count($watch/conditions/check_value[@value=\"CutsceneAim.\$Target? and typeof CutsceneAim.\$Target == datatype.component\"])" \
+  'TargetWatch must require an existing component target'
+assert_md_xpath 1 "count($destroyed/conditions/event_object_destroyed[@object=\"CutsceneAim.\$Target\"])" \
+  'TargetDestroyed must listen to the gated target'
+assert_md_xpath 0 "count(${destroyed}[@instantiate])" \
+  'TargetDestroyed must remain one-shot under its per-target parent'
+assert_md_xpath reset_cue "name(($start/actions/*)[last()])" \
+  'Start must finish by re-arming TargetWatch'
+assert_md_xpath TargetWatch "string(($start/actions/*)[last()]/@cue)" \
+  'Start must re-arm TargetWatch'
+assert_md_xpath 1 "count($start/actions/play_cutscene/following-sibling::reset_cue[@cue=\"TargetWatch\"])" \
+  'Start must re-arm TargetWatch after starting the cutscene'
+assert_md_xpath reset_cue "name(($stop/actions/*)[last()])" \
+  'Stop must finish by cancelling TargetWatch'
+assert_md_xpath TargetWatch "string(($stop/actions/*)[last()]/@cue)" \
+  'Stop must cancel TargetWatch'
+assert_md_xpath 1 "count($stop/actions/remove_value[@name=\"CutsceneAim.\$Target\"][following-sibling::reset_cue[@cue=\"TargetWatch\"]])" \
+  'Stop must clear the target before cancelling TargetWatch'
+assert_md_xpath 1 "count($guard)" \
+  'TargetDestroyed must reject queued events for a stale target'
+assert_md_xpath 1 "count($guard/do_if[@value=\"CutsceneAim.\$Handle\"]/stop_cutscene)" \
+  'Only the current target destruction may stop the cutscene'
+assert_md_xpath 1 "count($guard/remove_value[@name=\"CutsceneAim.\$Target\"])" \
+  'TargetDestroyed must disarm the handled target'
+assert_md_xpath 1 "count($guard/reset_cue[@cue=\"parent\"] \
+  [preceding-sibling::remove_value[@name=\"CutsceneAim.\$Target\"]])" \
+  'TargetDestroyed must cancel its parent watcher after handling the target'
 # Notify cue: load-bearing popup that cures the dead-Esc engine bug by forcing
 # View.createView/DisplayView in ego_viewhelper. show_help with a custom
 # expression is the mechanism; event.param3.$text carries the Lua string.
-grep -Fq "cue name=\"Notify\"" md/x4_gunnery_control.xml
-grep -Fq 'show_help' md/x4_gunnery_control.xml
+grep -Fq "cue name=\"Notify\"" "$md"
+grep -Fq 'show_help' "$md"
 # shellcheck disable=SC2016
-grep -Fq "custom=\"@event.param3.\$text\"" md/x4_gunnery_control.xml
+grep -Fq "custom=\"@event.param3.\$text\"" "$md"
 # Text ids 79 (restored-settings) and 80 (disengaged) used by leaveChair.
 grep -Fq '<t id="79">' t/0001.xml
 grep -Fq '<t id="80">' t/0001.xml
