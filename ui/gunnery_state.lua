@@ -929,26 +929,14 @@ function State.restoreState(session, records, liveGroups)
         -- A checked group is under Direct-control, whose temporary mode is
         -- always TICK_MODE. The checked and baseline records are independent:
         -- baseline is the stand-up revert target, while checked describes the
-        -- current engagement. Rebuilding staged from baseline alone therefore
-        -- shows a defend/other mode while the live direct session is in
-        -- attackenemies.
-        local stagedMode = checkedGroupKeys[stagedKey] and State.TICK_MODE or entry.mode
+        -- current engagement. An unchecked group whose committed baseline is
+        -- TICK_MODE is the tick->commit->untick case: keep the checkbox clear,
+        -- display the normal unticked fallback, and retain TICK_MODE in the
+        -- baseline so standing up can still restore the committed mode.
+        local isChecked = checkedGroupKeys[stagedKey] == true
+        local stagedMode = isChecked and State.TICK_MODE
+            or (entry.mode == State.TICK_MODE and State.UNTICK_FALLBACK or entry.mode)
         restoredStaged[stagedKey] = { mode = stagedMode, armed = entry.armed }
-        -- Same binding seedBaseline applies at a fresh sit-down: a group whose
-        -- mode is TICK_MODE comes up ticked. It has to be re-applied here
-        -- because the checkbox and the mode arrive on this path from two
-        -- independent record types -- "checked" above, "baseline" here -- and
-        -- nothing else re-couples them. Without this a group could restore
-        -- unticked while its dropdown reads Attack all enemies, and stay that
-        -- way: retainSelection only ever prunes ticks, never adds one.
-        --
-        -- Reachable in ordinary play: tick a group, commit it (which writes
-        -- TICK_MODE into committedBaseline), untick it (which leaves the
-        -- baseline alone), then save. The reload restored the committed mode
-        -- and the empty checked set and rendered the contradiction. The same
-        -- ship entered fresh rendered it correctly, which is what made it look
-        -- unreproducible.
-        if entry.mode == State.TICK_MODE then checkedGroupKeys[stagedKey] = true end
     end
     -- Last, so it wins over the componentID read in the loop: group name plus
     -- position is the only form of "which turret" that outlives a load.

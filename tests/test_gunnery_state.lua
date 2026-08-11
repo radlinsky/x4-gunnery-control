@@ -476,15 +476,13 @@ do
     eq(#orphaned.committedBaseline, 0, "a baseline entry with no live group must be dropped")
     eq(next(orphaned.checkedGroupKeys), nil, "a checked group with no live group must be dropped")
 
-    -- Regression: a restored session must apply the same checkbox/mode binding
-    -- that seedBaseline applies at a fresh sit-down. Reached by committing a
-    -- ticked group (which writes TICK_MODE into committedBaseline) and then
-    -- unticking it (which leaves the baseline alone) before saving: the payload
-    -- then carries a baseline of attackenemies and an EMPTY checked set. Without
-    -- the binding the group restores unticked while its dropdown reads Attack
-    -- all enemies, and nothing ever re-ticks it -- retainSelection only prunes.
-    -- seedBaseline cannot cover this: a restored session has a non-empty
-    -- committedBaseline, which is exactly the condition that skips seeding.
+    -- Regression: a restored session must preserve the independently saved
+    -- checkbox state. Reached by committing a ticked group (which writes
+    -- TICK_MODE into committedBaseline) and then unticking it (which leaves
+    -- the baseline alone) before saving: the payload then carries a baseline
+    -- of attackenemies and an EMPTY checked set. Restore must keep it unchecked
+    -- and display the unticked fallback, while retaining the baseline so
+    -- standing up can still revert the committed mode.
     local committed = State.newSession("443760", "gunnercontrol")
     committed.groups = session.groups
     committed.committedBaseline = {
@@ -494,10 +492,12 @@ do
     assert(next(committed.checkedGroupKeys) == nil, "fixture must save with nothing checked")
     local rebound = State.newSession("443760", "gunnercontrol")
     State.restoreState(rebound, State.decode(State.encode(State.saveState(committed))), session.groups)
-    eq(rebound.checkedGroupKeys["group:NEW:../:" .. nasty], true,
-        "a group restored in TICK_MODE must come up ticked, as it would at sit-down")
-    eq(rebound.staged["group:NEW:../:" .. nasty].mode, State.TICK_MODE,
-        "and its staged mode must still be the committed one")
+    eq(rebound.checkedGroupKeys["group:NEW:../:" .. nasty], nil,
+        "an explicitly unticked group must remain unchecked after restore")
+    eq(rebound.staged["group:NEW:../:" .. nasty].mode, State.UNTICK_FALLBACK,
+        "an unticked TICK_MODE baseline must restore its Defend fallback")
+    eq(rebound.committedBaseline[1].mode, State.TICK_MODE,
+        "the committed TICK_MODE baseline must remain available for revert")
 
     -- Regression: a normal direct engagement saves the original baseline and
     -- the checked group separately. Restore must rebuild the checked group's

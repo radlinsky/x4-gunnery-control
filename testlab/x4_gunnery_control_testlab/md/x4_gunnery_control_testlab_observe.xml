@@ -175,9 +175,17 @@
                  because logging happened to be switched off. -->
             <do_if value="player.ship">
               <set_value name="$Target" exact="null"/>
-              <do_if value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
-                <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+              <!-- A live Gunnery Control session supplies the target it
+                   actually ordered. It outranks the engine soft target, which
+                   can briefly lag during restore or surface-component changes.
+                   Free play has no AimTarget, so retain soft target then the
+                   hard player target as its fallback chain. -->
+              <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
               </do_if>
+              <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+              </do_elseif>
               <do_elseif value="player.target?">
                 <set_value name="$Target" exact="player.target"/>
               </do_elseif>
@@ -310,13 +318,16 @@
                      unparseable garbage.  Seen live on missile hits, where the
                      emitter is not in weapons.operational.list and $Weapon.mode
                      does not resolve. -->
-                <!-- Same target precedence as Direct-control itself: the soft
-                     target is what the mod aims at, and player.target is the
-                     free-play fallback when no session is pushing state. -->
+                <!-- Same target precedence as Direct-control itself: AimTarget
+                     is authoritative while a session is active; soft target
+                     and player.target are the free-play fallbacks. -->
                 <set_value name="$Aimed" exact="null"/>
-                <do_if value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
-                  <set_value name="$Aimed" exact="ObserveRoot.$SoftTarget"/>
+                <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                  <set_value name="$Aimed" exact="ObserveRoot.$AimTarget"/>
                 </do_if>
+                <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                  <set_value name="$Aimed" exact="ObserveRoot.$SoftTarget"/>
+                </do_elseif>
                 <do_elseif value="player.target?">
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
