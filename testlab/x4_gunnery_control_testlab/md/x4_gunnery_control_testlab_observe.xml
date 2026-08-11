@@ -77,10 +77,20 @@
   free play it never arrives and the log simply carries player.target, which is
   correct rather than degraded.
 
+  THE SNAPSHOT
+  The old per-second sweep is not gone, it is demand-driven: "Mark moment" now
+  fires one burst of per-weapon solution lines.  Hits say what a turret shot;
+  only the snapshot says why a turret is NOT shooting, which is the difference
+  between MASKED and OUT OF ARC and is invisible from the cockpit.  Firing it by
+  hand costs fourteen raycasts at the instant the owner cares, instead of 7252
+  a session on the off chance.
+
   VOCABULARY
-  Nothing here is classified as ON SOLUTION / OUT OF RANGE / OUT OF ARC /
-  MASKED.  A hit is a hit; the four condition names describe why a turret could
-  not shoot, and this logger no longer measures that.
+  The snapshot logs los_ex, inrange and ready as raw values and stops there.
+  Mapping them to ON SOLUTION / OUT OF RANGE / OUT OF ARC / MASKED is the
+  analyst's job: the engine exposes no arc test at all, so OUT OF ARC can only
+  ever be read off as "aimable and in range yet never firing", which is an
+  interpretation and must not be baked into a log line.
 
   RELOAD NOTE: any change to THIS file requires a full game restart, because
   testlab/ md is only reloadable together with the rest of the extension.
@@ -136,7 +146,73 @@
           </conditions>
           <actions>
             <set_value name="ObserveRoot.$MarkCount" exact="ObserveRoot.$MarkCount + 1"/>
-            <debug_text text="'[X4GC TEST MARK] label=mark_' + ObserveRoot.$MarkCount + ' enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
+            <set_value name="$Label" exact="'mark_' + ObserveRoot.$MarkCount"/>
+            <debug_text text="'[X4GC TEST MARK] label=' + $Label + ' enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
+
+            <!-- The one-shot solution snapshot.  This is the sweep that used to
+                 run once a second, kept only as a burst fired by hand at the
+                 instant the owner is looking at something wrong.
+
+                 It exists because HIT lines answer "what did the turret shoot"
+                 but never "why is this one not shooting".  MASKED and OUT OF
+                 ARC are indistinguishable from the cockpit - both look like a
+                 turret pointed at the target holding its fire - yet the doc
+                 says they behave oppositely, OUT OF ARC switching away and
+                 MASKED staying put.  los_ex plus inrange is what separates
+                 them.
+
+                 One raycast per weapon, not two.  excludeself="false" was
+                 measured returning blocked 7252 times out of 7252 on a live
+                 ship and carries no information at all; excludeself="true" is
+                 the informative one.  yaw and pitch are gone for the same
+                 reason: $turret.rotation is the mounted base, one fixed value
+                 per turret for an entire session.
+
+                 The whole cost is fourteen raycasts on a button press, so
+                 there is no gate on $Enabled: a snapshot must never be lost
+                 because logging happened to be switched off. -->
+            <do_if value="player.ship">
+              <set_value name="$Target" exact="null"/>
+              <do_if value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+              </do_if>
+              <do_elseif value="player.target?">
+                <set_value name="$Target" exact="player.target"/>
+              </do_elseif>
+
+              <do_if value="$Target">
+                <do_for_each name="$Weapon" in="player.ship.weapons.operational.list">
+                  <check_line_of_sight name="$LosEx" object="$Weapon" target="$Target" excludeself="true" useaimtarget="true"/>
+                  <!-- The engine's own definition of in-range, verbatim from
+                       shipped combat AI: distance plus half the target's size
+                       under max fire range.  There is no arc term anywhere in
+                       vanilla's firing-solution test, which is why OUT OF ARC
+                       has to be read off as "aimable but never firing" rather
+                       than measured directly. -->
+                  <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>
+                  <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
+                    + ' t=' + player.age
+                    + ' weapon=' + $Weapon
+                    + ' mode=' + $Weapon.mode
+                    + ' isturret=' + $Weapon.isclass.turret
+                    + ' ready=' + $Weapon.isreadytofire
+                    + ' los_ex=' + $LosEx
+                    + ' inrange=' + ($Dist + ($Target.size / 2) lt $Weapon.maxfirerange)
+                    + ' dist=' + $Dist
+                    + ' maxrange=' + $Weapon.maxfirerange"/>
+                </do_for_each>
+                <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
+                  + ' t=' + player.age
+                  + ' end tgt=' + $Target
+                  + ' tgtname=' + $Target.knownname
+                  + ' tgtsize=' + $Target.size
+                  + ' prefer=' + ObserveRoot.$Prefer
+                  + ' pilot=' + (if player.ship.pilot then player.ship.pilot.command.value else 'none')"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label + ' t=' + player.age + ' end tgt=none'"/>
+              </do_else>
+            </do_if>
           </actions>
         </cue>
 
@@ -169,8 +245,18 @@
              resolves object= when the listening cue activates.  Re-arming on
              every toggle is therefore what keeps the listener pointed at the
              ship the owner is actually flying after a ship change.  Flip the
-             switch off and on again after changing ships. -->
-        <cue name="ObserveArm">
+             switch off and on again after changing ships.
+
+             checkinterval is mandatory here, not a pacing choice.  MD refuses
+             to load a cue whose conditions are all non-event:
+               "Found non-event condition 'check_value', event condition
+                required!"
+             which is exactly how the first run of this file failed - the toggle
+             logged enabled=1 and then nothing else ever appeared, because both
+             listeners hang off a cue the engine had rejected.  One boolean test
+             a second is free, and the listeners underneath are events, so they
+             still cost nothing between hits. -->
+        <cue name="ObserveArm" checkinterval="1s">
           <conditions>
             <check_value value="ObserveRoot.$Enabled"/>
           </conditions>

@@ -11,6 +11,7 @@ printf '%s\n' \
   '[X4GC TEST SCENARIO] capture done; owner=faction.player' \
   '[X4GC TEST HIT] t=1234.5 weapon=99 mode=weaponmode.defend istgt=true prefer=true' \
   '[X4GC TEST CENSUS] t=1234.5 pilot=attackobject modes=99=weaponmode.defend,' \
+  '[X4GC TEST SOLUTION] label=mark_1 t=1234.5 weapon=99 los_ex=true inrange=true' \
   '[X4GC TEST OBSERVE] enabled=true t=1234.5' \
   '[X4GC TEST MARK] label=hold_fire_shot t=1234.5' \
   'Error x4_gunnery example' > "$fixture"
@@ -24,6 +25,7 @@ grep -Fq '[X4GC TEST SCENARIO] capture done' <<< "$output"
 # enumeration, these three fail rather than silently vanishing from captures.
 grep -Fq '[X4GC TEST HIT] t=1234.5' <<< "$output"
 grep -Fq '[X4GC TEST CENSUS] t=1234.5' <<< "$output"
+grep -Fq '[X4GC TEST SOLUTION] label=mark_1' <<< "$output"
 grep -Fq '[X4GC TEST OBSERVE] enabled=true' <<< "$output"
 grep -Fq '[X4GC TEST MARK] label=hold_fire_shot' <<< "$output"
 grep -Fq 'Error x4_gunnery example' <<< "$output"
