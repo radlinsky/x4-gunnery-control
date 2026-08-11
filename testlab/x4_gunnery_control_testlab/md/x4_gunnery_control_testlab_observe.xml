@@ -91,6 +91,12 @@
         <set_value name="$Enabled" exact="false"/>
         <set_value name="$MarkCount" exact="0"/>
         <set_value name="$Prefer" exact="false"/>
+        <!-- Seeded so the ObserveLoop time guard has something to compare
+             against on its very first check.  Derived from player.age rather
+             than written as a bare -1 so it carries the time datatype: player.age
+             is a time (suffix s, scriptproperties.xml:2396) and comparing a time
+             against a plain number is a type error, not a false. -->
+        <set_value name="$LastSample" exact="player.age - 1s"/>
       </actions>
       <cues>
 
@@ -107,9 +113,10 @@
           <actions>
             <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
             <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
-            <do_if value="ObserveRoot.$Enabled">
-              <reset_cue cue="ObserveLoop"/>
-            </do_if>
+            <!-- No reset_cue here.  ObserveLoop instantiates on its own
+                 checkinterval, so arming is picked up within a second by the
+                 engine's own polling, and poking a cue that instantiates is
+                 what produced the re-entrant freeze in the first place. -->
           </actions>
         </cue>
 
@@ -154,11 +161,24 @@
              The sampler.  checkinterval paces it AND re-polls the gate: a
              condition-only cue with no checkinterval is not re-evaluated on its
              own, so an $Enabled that flips to true after this cue first failed
-             its condition could otherwise never be noticed.  ObserveToggle also
-             resets it, which only makes arming take effect at once instead of
-             up to a second later.  Ending in reset_cue re-arms for the next
-             tick (both idioms are heavily attested in shipped md/: 128 uses of
-             reset_cue cue="this", 262 of checkinterval="1s").
+             its condition could otherwise never be noticed.
+
+             instantiate plus checkinterval, NOT reset_cue cue="this".  The
+             first version of this cue combined checkinterval with a trailing
+             self-reset, which froze the game hard and wrote a 4.3 GB debug.log
+             in seconds: the reset re-satisfied the condition immediately, so
+             the cue re-fired without any game time passing (every line in that
+             log carried the identical timestamp 247034.45).  instantiate lets
+             the engine own the pacing, which is the shipped idiom - see
+             StationPeaceful_Zoom_VisibilityCheck,
+             .x4-research-cache/extracted/scripts-9.00/md/cinematiccamera.xml:2004,
+             which is checkinterval="1s" instantiate="true" with no self-reset.
+
+             $LastSample is a belt-and-braces guard on top of that: no sample is
+             ever emitted twice for the same value of player.age, so even if a
+             future edit reintroduces a re-entrant path it cannot run away
+             again.  A freeze that needs the process killed is expensive enough
+             to be worth two lines of paranoia.
 
              1s is a deliberate compromise: fast enough that a turret going
              silent is visible, slow enough that the per-turret raycast sweep
@@ -166,11 +186,13 @@
              hit, so an all-turrets sweep is strictly more expensive than
              anything the engine does (md-ai.md:49) - hence the hard $Enabled
              gate and the idle path when there is no target. -->
-        <cue name="ObserveLoop" checkinterval="1s">
+        <cue name="ObserveLoop" instantiate="true" checkinterval="1s">
           <conditions>
             <check_value value="ObserveRoot.$Enabled"/>
+            <check_value value="player.age gt ObserveRoot.$LastSample"/>
           </conditions>
           <actions>
+            <set_value name="ObserveRoot.$LastSample" exact="player.age"/>
             <!-- player.occupiedship is null in a gunnery chair - it means "in
                  the PILOT seat" (scriptproperties.xml:2416), and the whole mod
                  exists for the case where the player is not in it.  player.ship
@@ -198,10 +220,10 @@
               <debug_text text="'[X4GC TEST STATE] t=' + $Now
                 + ' ship=' + $Ship
                 + ' shipname=' + $Ship.knownname
-                + ' pilot=' + (if $Ship.pilot? then $Ship.pilot.command else 'none')
-                + ' hardtgt=' + (if player.target? then player.target else 'none')
-                + ' softtgt=' + (if ObserveRoot.$SoftTarget? then ObserveRoot.$SoftTarget else 'none')
-                + ' aimtgt=' + (if ObserveRoot.$AimTarget? then ObserveRoot.$AimTarget else 'none')
+                + ' pilot=' + (if $Ship.pilot then $Ship.pilot.command.value else 'none')
+                + ' hardtgt=' + (if player.target then player.target else 'none')
+                + ' softtgt=' + (if ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget then ObserveRoot.$SoftTarget else 'none')
+                + ' aimtgt=' + (if ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget then ObserveRoot.$AimTarget else 'none')
                 + ' prefer=' + ObserveRoot.$Prefer
                 + ' tgt=' + (if $Target then $Target else 'none')
                 + ' tgtname=' + (if $Target then $Target.knownname else 'none')
@@ -243,7 +265,9 @@
                 </do_for_each>
               </do_if>
             </do_if>
-            <reset_cue cue="this"/>
+            <!-- Deliberately no reset_cue: instantiate plus checkinterval means
+                 the engine schedules the next tick.  Self-resetting here is the
+                 exact line that froze the game. -->
           </actions>
         </cue>
 
