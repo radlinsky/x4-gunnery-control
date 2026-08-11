@@ -476,6 +476,49 @@ do
     eq(#orphaned.committedBaseline, 0, "a baseline entry with no live group must be dropped")
     eq(next(orphaned.checkedGroupKeys), nil, "a checked group with no live group must be dropped")
 
+    -- Regression: a restored session must preserve the independently saved
+    -- checkbox state. Reached by committing a ticked group (which writes
+    -- TICK_MODE into committedBaseline) and then unticking it (which leaves
+    -- the baseline alone) before saving: the payload then carries a baseline
+    -- of attackenemies and an EMPTY checked set. Restore must keep it unchecked
+    -- and display the unticked fallback, while retaining the baseline so
+    -- standing up can still revert the committed mode.
+    local committed = State.newSession("443760", "gunnercontrol")
+    committed.groups = session.groups
+    committed.committedBaseline = {
+        { kind = "group", shipID = "443760", contextID = "OLD", path = "../",
+          group = nasty, mode = State.TICK_MODE, armed = true },
+    }
+    assert(next(committed.checkedGroupKeys) == nil, "fixture must save with nothing checked")
+    local rebound = State.newSession("443760", "gunnercontrol")
+    State.restoreState(rebound, State.decode(State.encode(State.saveState(committed))), session.groups)
+    eq(rebound.checkedGroupKeys["group:NEW:../:" .. nasty], nil,
+        "an explicitly unticked group must remain unchecked after restore")
+    eq(rebound.staged["group:NEW:../:" .. nasty].mode, State.UNTICK_FALLBACK,
+        "an unticked TICK_MODE baseline must restore its Defend fallback")
+    eq(rebound.committedBaseline[1].mode, State.TICK_MODE,
+        "the committed TICK_MODE baseline must remain available for revert")
+
+    -- Regression: a normal direct engagement saves the original baseline and
+    -- the checked group separately. Restore must rebuild the checked group's
+    -- current staged mode as TICK_MODE rather than showing the baseline mode
+    -- in the dropdown while the checkbox says it is directed.
+    local directSaved = State.newSession("443760", "gunnercontrol")
+    directSaved.groups = session.groups
+    local directKey = session.groups[1].key
+    directSaved.checkedGroupKeys[directKey] = true
+    directSaved.committedBaseline = {
+        { kind = "group", shipID = "443760", contextID = "OLD", path = "../",
+          group = nasty, mode = "defend", armed = true },
+    }
+    local directBack = State.newSession("443760", "gunnercontrol")
+    State.restoreState(directBack, State.decode(State.encode(State.saveState(directSaved))), session.groups)
+    local directRestoredKey = "group:NEW:../:" .. nasty
+    eq(directBack.checkedGroupKeys[directRestoredKey], true,
+        "a checked direct group must remain checked after restore")
+    eq(directBack.staged[directRestoredKey].mode, State.TICK_MODE,
+        "a checked direct group must restore its temporary attackenemies mode")
+
     -- The legacy single-snapshot fallback in snapshotsForSave still works.
     local legacy = State.newSession("443760", "gunnercontrol")
     legacy.phase, legacy.controlMode = "engaged", "direct"

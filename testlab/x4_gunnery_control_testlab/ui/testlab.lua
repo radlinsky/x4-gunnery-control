@@ -16,6 +16,53 @@ local function log(event, fields)
     DebugError(table.concat(parts, " "))
 end
 
+-- Fire-control observability. MD owns the sample loop and emits every log line
+-- (md/x4_gunnery_control_testlab_observe.xml); this side is only the master
+-- switch, the marker, and the two facts MD cannot see for itself. Off by
+-- default, so installing the Test Lab does not flood debug.log on its own.
+local observing = false
+
+-- The engine SOFT target and the session's Prefer My Target flag are the whole
+-- reason any Lua runs here: MD has player.target but no soft-target equivalent
+-- (scriptproperties.xml has no player.softtarget at all), and the mod session is
+-- Lua-side state. Both come from the main mod's already-public test API
+-- (ui/gunnery_control.lua:1121 getSession, :1169 getTestSofttarget), so the
+-- shipped mod is untouched and nothing here needs ffi -- this file deliberately
+-- contains no require("ffi") and no C. calls, and that stays true.
+local function pushObserveState()
+    if not observing then return end
+    local bridge = api()
+    if not bridge then return end
+    local payload = {}
+    local soft = bridge.getTestSofttarget and bridge.getTestSofttarget()
+    -- getTestSofttarget reports "0" for "nothing selected". Sending that would
+    -- make MD prefer a dead id over player.target, so it is simply omitted.
+    if soft and soft.id and soft.id ~= "0" then
+        payload.softtgt = ConvertStringToLuaID(soft.id)
+    end
+    -- No session is the ordinary free-play case, not an error: MD then logs
+    -- player.target and prefer stays false.
+    local session = bridge.getSession and bridge.getSession()
+    if session then
+        payload.prefer = session.preferAllTurrets == true
+        if session.aimTargetID then payload.aimtgt = ConvertStringToLuaID(tostring(session.aimTargetID)) end
+    end
+    AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state", payload)
+    -- Self-rescheduling at the MD sample rate, the pattern the main mod's
+    -- session watchdog uses (ui/gunnery_control.lua:2224) because it runs with
+    -- no displayed frame. Whether it keeps firing with every menu closed is
+    -- unverified; if it stops, MD still writes the full STATE and SOLUTION
+    -- block and only softtgt/prefer go stale. Degrades, does not break.
+    if Helper then Helper.addDelayedOneTimeCallbackOnUpdate(pushObserveState, false, getElapsedTime() + 1.0) end
+end
+
+local function setObserving(enabled)
+    observing = enabled
+    AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_toggle", { enabled = enabled })
+    log("observe", { action = enabled and "on" or "off" })
+    if enabled then pushObserveState() end
+end
+
 -- Scenario spec: the fixture for the next live test, authored on disk in
 -- ui/scenario_spec.lua and replayed into MD on every UI load. Every field is
 -- validated here rather than in MD, because a bad value in Lua is a log line
@@ -252,6 +299,18 @@ function menu.display()
         AddUITriggeredEvent("X4GunneryTestLabScenario", "arm_capture")
         log("scenario", { action = "arm_capture" })
     end
+    -- Fire-control logging. Arm it here, then close the menu and play normally:
+    -- the sampler lives in MD, so it keeps running with every menu shut. Mark
+    -- stamps the interesting instant; MD numbers the marks, because mid-combat
+    -- the point is one click and not typing a label.
+    local observeRow = tableView:addRow("observe", {})
+    observeRow[1]:setColSpan(2):createButton({}):setText(text(29) .. ": " .. (observing and "ON" or "OFF"))
+    observeRow[1].handlers.onClick = function() setObserving(not observing); menu.display() end
+    observeRow[3]:setColSpan(2):createButton({}):setText(text(30))
+    observeRow[3].handlers.onClick = function()
+        AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
+        log("observe", { action = "mark" })
+    end
     if not sweep then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(4):createText(text(12))
         local start = tableView:addRow("start", {}); start[1]:setColSpan(4):createButton({}):setText(text(2)); start[1].handlers.onClick = function() startSweep(); menu.display() end
@@ -325,6 +384,11 @@ end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
+    -- A UI reload destroys this file-local state but leaves MD cue variables
+    -- alive. The new Lua instance starts OFF, so explicitly converge MD on
+    -- that state before rendering the menu; otherwise ObserveArm keeps
+    -- logging while the button says OFF.
+    if AddUITriggeredEvent then setObserving(false) end
     -- Replay the fixture spec on every UI load. This is the whole point of the
     -- design: the agent edits scenario_spec.lua, the owner clicks Reload UI
     -- once. MD refuses a spec id it has already spawned, so a Reload UI during

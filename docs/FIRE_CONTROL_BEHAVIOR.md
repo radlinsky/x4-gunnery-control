@@ -17,10 +17,10 @@ These words mean one specific thing throughout this document.
 - **Your pilot** — whoever is flying your ship while you sit at the Gunnery Console. Your pilot may be **attacking** a target, or may be flying or idle.
 - **Prefer My Target** — the "Other Turrets" toggle in Direct-control. It sends your target to every turret group on the ship, not only the ticked ones.
 
-Confidence is marked on every behavior:
+Confidence is marked on every behavior, strongest first:
 
-- **LIVE** — watched happen in game.
 - **X4 CODE** — stated in Egosoft's own game scripts.
+- **LIVE** — watched happen in game.
 - **INFERRED** — worked out from the two above, not directly watched.
 - **UNTESTED** — the mod has code for this, but it has not been confirmed in game.
 - **UNKNOWN** — not known yet.
@@ -47,17 +47,26 @@ The situations that matter for this mod. Each is checked against **your target**
 
 ## Table 2: Turret group modes
 
-The modes a turret group can be in. The in-game label is what X4 shows in the turret mode menu.
+The modes a turret group can be in. The in-game label is exactly what X4 shows in the turret mode menu, and they are listed here in the order that menu lists them.
+
+Five of these are **restrict** or **prioritise** modes. "Attack only X" means the turret will not engage anything outside class X. "Attack X first" is not a restriction at all — it is Attack all enemies with a sort order, so anything can still be shot.
 
 | In-game label | What the group does | Prefer My Target ON | Confidence |
 |---|---|---|---|
+| **Defend** | Fires only when defending against a threat, not on all enemies. | Shoots your target.  X4's own combat AI hands Defend turrets an enemy list with a "shoot this one first" mark, exactly as Prefer My Target does | X4 CODE |
 | **Attack all enemies** | Shoots any enemy in range. This is what every ticked group is set to. | Shoots your target; behaves as Table 3 | LIVE |
-| **Defend** | Fires only when defending against a threat, not on all enemies. | Is sent your target and will treat it as an enemy to shoot | UNTESTED |
-| **Missile defence** | Shoots incoming missiles, not ships. | Is sent your target; whether it will shoot a ship is | UNTESTED |
-| **Mine** | Turret task not built for shooting ships. | Is sent your target; effect | UNKNOWN |
-| **Tow** | Turret task not built for shooting ships. | Is sent your target; effect | UNKNOWN |
-| **Hold fire** | Does not fire. | Is sent your target; whether it fires anyway is | UNKNOWN |
-| **(auto-assist)** | X4's automatic mode: the game picks the turret's target itself. No player-facing label in the turret menu; it is the game's default handling. | **Ignores the command.** It follows your *locked target*, not your selected target (see Table 6). | X4 CODE |
+| **Attack only capital ships** | Will not engage anything smaller than a capital ship. | Shoots your target if it is a capital ship. If your target is a fighter, this is a target the mode is built not to engage | INFERRED |
+| **Attack capital ships first** | Shoots any enemy, capital ships preferred. Not a restriction. | Shoots your target | INFERRED |
+| **Attack only fighters** | Will not engage anything larger than a fighter. | Shoots your target if it is a fighter. If your target is a capital ship, this is a target the mode is built not to engage | INFERRED |
+| **Attack fighters first** | Shoots any enemy, fighters preferred. Not a restriction. | Shoots your target | INFERRED |
+| **Shoot only missiles** | Shoots incoming missiles, not ships. | Is sent your target. Whether it then shoots a ship rather than only missiles is not known | UNTESTED |
+| **Shoot missiles first** | Shoots any enemy, missiles preferred. Not a restriction. | Shoots your target | INFERRED |
+| **Attack my current enemy** | X4's automatic mode. The game picks the turret's target itself. | **Ignores the command.** It follows your *locked target*, not your selected target (see Table 6) | X4 CODE |
+| **Mining** | Turret task built for asteroids. | Is sent your target. On X4's own ships, mining turrets are handed the full enemy list exactly like every other mode; X4 only holds them to asteroids on the ship you are personally flying. Whether the turret acts on a ship is | UNTESTED |
+| **Towing** | Turret task not built for shooting. | No effect. Towing is the single mode X4's own combat AI skips when it hands out targets, and the single mode it excludes when it orders a cease-fire | X4 CODE |
+| **Hold fire** *(not in the menu)* | Does not fire. | Prefer My Target is the only thing that can reach a Hold fire group at all; the ordinary target command cannot address that mode. X4 uses Hold fire as its own way to make a ship stop shooting — a fleeing ship is put on Hold fire without its target list being cleared, which hints Hold fire wins. But X4 never sends a target to a Hold fire turret, so its own scripts do not settle it | UNKNOWN |
+
+**Hold fire is not a mode you can pick.** It is absent from X4's turret mode menu entirely. A group is only in Hold fire because a script, a fleet order, or this mod put it there.
 
 ---
 
@@ -101,7 +110,7 @@ Because the mod tells no turret what to shoot in Auto-engage, each situation pla
 These apply on top of everything above.
 
 - **Not armed means no fire.** A turret group that is not armed does not fire, whatever its mode or your selection. Direct-control arms your ticked groups when you engage. In Auto-engage, a group keeps whatever armed state you gave it.
-- **When your target can no longer be attacked** (it is destroyed, surrenders, or changes owner), one of two things happens under Direct-control. If **Auto-next target** is on (the default) and there is another target in range, Direct-control moves to that target automatically. Otherwise, the target-selection screen reopens and you pick again. The surrender and change-of-owner case is **UNTESTED**.
+- **When your target can no longer be attacked** (it is destroyed, surrenders, or changes owner), one of two things happens under Direct-control. If **Auto-next target** is on (the default) and there is another target in range, Direct-control moves to that target automatically. Otherwise, the target-selection screen reopens and you pick again. When a target changes owner or otherwise stops being one you are allowed to attack, X4's own combat AI notices on its own: it stops firing at it, drops it from its target lists, and picks a new target. That part is the game's doing, not the mod's. **X4 CODE**
 - **Selecting part of a ship.** You can select one component (a specific turret or engine) instead of a whole ship. Direct-control aims at that component, and the situations in Table 1 apply to it the same way.
 - **Standing up.** When you stand up from the console, every turret group goes back to the mode and armed state it had before you sat down. The one exception is if you pressed **Update turret behavior**, which makes your current settings the ones it returns to instead.
 
@@ -113,7 +122,7 @@ For readers who want the mechanism. Two separate mod actions are involved.
 
 **1. Ticked groups (the fallback list).** When you engage in Direct-control, the mod sends each ticked group two instructions: first your target alone, then your target plus every other enemy in range, both marked "shoot this one first." This is the `DirectFallback` action. Because your target is marked preferred and the others are also supplied, a turret that cannot aim at or reach your target has a ready set to switch to. This action is limited to groups on Attack all enemies, which is exactly what ticked groups are.
 
-**2. Prefer My Target (unticked groups).** This sends the same "your target first" instruction to the whole ship without limiting it to one mode, which is the only way to reach groups on auto-assist or Hold fire. Releasing it sends the enemy list back with no preferred target, returning the ship to its prior state. This is the `PreferAllTurrets` action.
+**2. Prefer My Target (unticked groups).** This sends the same "your target first" instruction to the whole ship without limiting it to one mode, which is the only way to reach groups on Attack my current enemy or on Hold fire. Releasing it sends the enemy list back with no preferred target, returning the ship to its prior state. This is the `PreferAllTurrets` action.
 
 What the game itself checks, per situation, for a ticked turret:
 
@@ -135,13 +144,13 @@ Plain-language meaning for the names used above and in the mod's code.
 | Name | In-game label | Plain meaning |
 |---|---|---|
 | `weaponmode.attackenemies` | Attack all enemies | Shoots any enemy from a list of targets the mod provides. |
-| `weaponmode.autoassist` | (none; game default) | The game aims the turret itself and ignores any target list the mod sends. |
-| `weaponmode.holdfire` | Hold fire | The turret does not fire. |
-| `weaponmode.missiledefence` | Missile defence | Shoots incoming missiles, not ships. |
+| `weaponmode.autoassist` | Attack my current enemy | The game aims the turret itself and ignores any target list the mod sends. |
+| `weaponmode.holdfire` | (none; not in the turret menu) | The turret does not fire. Only a script can put a group in this mode. |
+| `weaponmode.missiledefence` | Shoot only missiles | Shoots incoming missiles, not ships. |
 | `weaponmode.defend` | Defend | Fires only when defending, not on all enemies. |
 | `set_turret_targets` | (none; internal) | The command that tells a ship's turrets what to shoot. Carries a list of targets, an optional "shoot this one first" target, and an optional limit to one mode. |
 | preferred target | (none; internal) | The "shoot this one first" mark. The game honors it only if the turret can aim at that target; if it cannot, the turret uses the rest of the list. |
 | Selected target (soft target) | your current selection | The target you pick out in the main Gunnery Console menu. The mod can set this, and Direct-control aims your turrets at it. |
-| Locked target (hard target) | your locked target | The primary target your ship's own systems track, set by locking a target in the normal HUD. The mod **cannot** set this. Auto-assist turrets follow this target, which is why they ignore the mod's selection. |
+| Locked target (hard target) | your locked target | The primary target your ship's own systems track, set by locking a target in the normal HUD. The mod **cannot** set this. Turrets on Attack my current enemy follow this target, which is why they ignore the mod's selection. |
 
-*Some turret modes (Mine, Tow) appear in the game's turret menu but are not covered above because they are not built for shooting ships. Auto-assist has no menu label; it is the game's default when no other mode is chosen.*
+*Table 2 lists every mode the game's turret menu offers, plus Hold fire, which the menu does not offer and only a script can set.*

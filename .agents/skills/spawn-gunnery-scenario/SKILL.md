@@ -1,3 +1,8 @@
+---
+name: spawn-gunnery-scenario
+description: Spawns the ship fixture a live test needs, in the Test Lab extension, without a game restart per scenario.
+---
+
 # spawn-gunnery-scenario
 
 Spawns the ship fixture a live test needs, in the Test Lab extension, without a

@@ -925,7 +925,18 @@ function State.restoreState(session, records, liveGroups)
     -- config immediately, before the player makes any new changes.
     local restoredStaged = {}
     for _, entry in ipairs(baseline) do
-        restoredStaged[State.baselineStagedKey(entry)] = { mode = entry.mode, armed = entry.armed }
+        local stagedKey = State.baselineStagedKey(entry)
+        -- A checked group is under Direct-control, whose temporary mode is
+        -- always TICK_MODE. The checked and baseline records are independent:
+        -- baseline is the stand-up revert target, while checked describes the
+        -- current engagement. An unchecked group whose committed baseline is
+        -- TICK_MODE is the tick->commit->untick case: keep the checkbox clear,
+        -- display the normal unticked fallback, and retain TICK_MODE in the
+        -- baseline so standing up can still restore the committed mode.
+        local isChecked = checkedGroupKeys[stagedKey] == true
+        local stagedMode = isChecked and State.TICK_MODE
+            or (entry.mode == State.TICK_MODE and State.UNTICK_FALLBACK or entry.mode)
+        restoredStaged[stagedKey] = { mode = stagedMode, armed = entry.armed }
     end
     -- Last, so it wins over the componentID read in the loop: group name plus
     -- position is the only form of "which turret" that outlives a load.
