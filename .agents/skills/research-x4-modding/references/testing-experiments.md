@@ -33,6 +33,50 @@ discriminator for `Esc` (it is not). Reading the shipped Helper property
 documentation resolved the actual mechanism in one search. Source order matters:
 read the shipped source before designing a probe, not after.
 
+## Negative result 2026-08-11: a passive capture cannot attribute fire to a turret
+
+X4 9.00, Test Lab observability logger
+`testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml`.
+One ~10 minute free-play session on the player ship "Ray" (14 turrets, ids
+`0x6c2bc`-`0x6c2cf`): 622 STATE samples and 7252 per-turret SOLUTION samples to
+`debug.log`. n=1 ship, n=1 session.
+
+The capture did not answer the behavioural question it was built for, and the
+design cannot answer it, for two structural reasons rather than sampling ones:
+
+- The "was it hit, by whom" signal it polled, `lastattacker`, is SHIP-scoped —
+  no turret id ever appeared (see the attacker-attribution record in
+  `ui-lua-menu-camera.md`).
+- The aim-direction signal it polled, `$turret.rotation`, is STATIC — the
+  mounted base orientation, one constant value per turret for the whole session
+  (see the `$turret.rotation` record in `md-ai.md`).
+
+With no per-turret hit signal and no per-turret pointing signal, nothing in a
+mixed free-play capture separates the contribution of one turret, or one turret
+MODE, from the rest. A third confound compounded it: the sweep enumerated only
+`turrets.operational.list`, which excludes missile turrets, leaving an
+unmeasured emitter that could account for hits.
+
+Design rule that follows: any experiment intended to establish per-turret-mode
+behaviour must be CONTROLLED — isolate by construction so only one class of
+turret can possibly be firing (zero turrets in the competing mode, pilot idle so
+the main guns are silent, missile turrets accounted for) rather than capturing a
+mixed engagement and trying to disambiguate afterwards. Do not rebuild passive
+observability expecting attribution to fall out of it.
+
+Amended 2026-08-11 — this narrows the lesson, and the narrowing matters: the
+failure is specific to POLLING, not to attribution. A shipped-source spike found
+that MD does expose per-turret attribution, as event payloads rather than
+property reads. `event_object_attacked_object` carries the firing weapon in
+`param3.{2}`, and `event_weapon_fired` paired with `bullet.launcher` gives
+per-shot bore direction (records in `md-ai.md`). There is no per-turret
+current-target property anywhere in the 9.00 surface and there was never going to
+be one — selection runs in an engine-side "shoot controller" that scripts write
+to and never read back. So the corrected instrumentation rule is to LISTEN, not
+to sample. Isolation by construction is still required on top of that: a hit
+event names the turret that fired, but not the MODE that chose the target, so
+mode-level questions still need a scenario where only one mode can be acting.
+
 ## Live run 2026-08-04
 
 X4 9.00 Steam, Windows 11 with WSL2, extension `x4_gunnery_control` build marker
