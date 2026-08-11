@@ -925,7 +925,23 @@ function State.restoreState(session, records, liveGroups)
     -- config immediately, before the player makes any new changes.
     local restoredStaged = {}
     for _, entry in ipairs(baseline) do
-        restoredStaged[State.baselineStagedKey(entry)] = { mode = entry.mode, armed = entry.armed }
+        local stagedKey = State.baselineStagedKey(entry)
+        restoredStaged[stagedKey] = { mode = entry.mode, armed = entry.armed }
+        -- Same binding seedBaseline applies at a fresh sit-down: a group whose
+        -- mode is TICK_MODE comes up ticked. It has to be re-applied here
+        -- because the checkbox and the mode arrive on this path from two
+        -- independent record types -- "checked" above, "baseline" here -- and
+        -- nothing else re-couples them. Without this a group could restore
+        -- unticked while its dropdown reads Attack all enemies, and stay that
+        -- way: retainSelection only ever prunes ticks, never adds one.
+        --
+        -- Reachable in ordinary play: tick a group, commit it (which writes
+        -- TICK_MODE into committedBaseline), untick it (which leaves the
+        -- baseline alone), then save. The reload restored the committed mode
+        -- and the empty checked set and rendered the contradiction. The same
+        -- ship entered fresh rendered it correctly, which is what made it look
+        -- unreproducible.
+        if entry.mode == State.TICK_MODE then checkedGroupKeys[stagedKey] = true end
     end
     -- Last, so it wins over the componentID read in the loop: group name plus
     -- position is the only form of "which turret" that outlives a load.

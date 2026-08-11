@@ -476,6 +476,29 @@ do
     eq(#orphaned.committedBaseline, 0, "a baseline entry with no live group must be dropped")
     eq(next(orphaned.checkedGroupKeys), nil, "a checked group with no live group must be dropped")
 
+    -- Regression: a restored session must apply the same checkbox/mode binding
+    -- that seedBaseline applies at a fresh sit-down. Reached by committing a
+    -- ticked group (which writes TICK_MODE into committedBaseline) and then
+    -- unticking it (which leaves the baseline alone) before saving: the payload
+    -- then carries a baseline of attackenemies and an EMPTY checked set. Without
+    -- the binding the group restores unticked while its dropdown reads Attack
+    -- all enemies, and nothing ever re-ticks it -- retainSelection only prunes.
+    -- seedBaseline cannot cover this: a restored session has a non-empty
+    -- committedBaseline, which is exactly the condition that skips seeding.
+    local committed = State.newSession("443760", "gunnercontrol")
+    committed.groups = session.groups
+    committed.committedBaseline = {
+        { kind = "group", shipID = "443760", contextID = "OLD", path = "../",
+          group = nasty, mode = State.TICK_MODE, armed = true },
+    }
+    assert(next(committed.checkedGroupKeys) == nil, "fixture must save with nothing checked")
+    local rebound = State.newSession("443760", "gunnercontrol")
+    State.restoreState(rebound, State.decode(State.encode(State.saveState(committed))), session.groups)
+    eq(rebound.checkedGroupKeys["group:NEW:../:" .. nasty], true,
+        "a group restored in TICK_MODE must come up ticked, as it would at sit-down")
+    eq(rebound.staged["group:NEW:../:" .. nasty].mode, State.TICK_MODE,
+        "and its staged mode must still be the committed one")
+
     -- The legacy single-snapshot fallback in snapshotsForSave still works.
     local legacy = State.newSession("443760", "gunnercontrol")
     legacy.phase, legacy.controlMode = "engaged", "direct"
