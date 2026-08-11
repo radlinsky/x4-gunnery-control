@@ -25,6 +25,10 @@ REPO_CONTENT_XML="content.xml"
 # Capture the repo's content.xml before any run so we can compare after
 ORIGINAL_CONTENT_XML=$(cat "$REPO_CONTENT_XML")
 
+# package-workshop.sh requires VERSION to match content.xml's integer version.
+xml_version_int=$(grep -o 'version="[0-9]*"' "$REPO_CONTENT_XML" | head -1 | grep -o '[0-9]*')
+pkg_version=$(printf '%d.%02d' "$((xml_version_int / 100))" "$((xml_version_int % 100))")
+
 WORKSHOP_ID_FILE="release/workshop-id.txt"
 
 ###############################################################################
@@ -39,7 +43,7 @@ run_workshop_pkg() {
   # neither of which is under test here. Letting them through means every
   # validate.sh run prints them twice, which trains the reader to ignore
   # warnings. The assertions below read the staged files directly.
-  X4GC_SKIP_VALIDATE=1 bash "$SCRIPT" 0.20 > /dev/null 2>&1
+  X4GC_SKIP_VALIDATE=1 bash "$SCRIPT" "$pkg_version" > /dev/null 2>&1
 }
 
 ###############################################################################

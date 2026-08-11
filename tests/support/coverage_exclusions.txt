@@ -1,0 +1,4 @@
+# Each exclusion must be an engine-only executable line in ui/gunnery_control.lua.
+# Format: ui/gunnery_control.lua:LINE # durable reason
+# Keep this list empty unless a line cannot execute under the stock-Lua runtime
+# fixture; the checker rejects stale, broad, or undocumented exclusions.

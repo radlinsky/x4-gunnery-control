@@ -3,7 +3,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 main=ui/gunnery_control.lua
+persist=ui/gunnery_persistence.lua
 testlab=testlab/x4_gunnery_control_testlab/ui/testlab.lua
+md=md/x4_gunnery_control.xml
+
+assert_md_xpath() {
+  local expected=$1
+  local expression=$2
+  local description=$3
+  local actual
+  actual=$(xmllint --xpath "$expression" "$md")
+  if [[ "$actual" != "$expected" ]]; then
+    echo "$description: expected $expected, found $actual" >&2
+    exit 1
+  fi
+}
 
 if grep -q 'releaseFrameHandle' "$main" "$testlab"; then
   echo "obsolete releaseFrameHandle call found" >&2
@@ -28,7 +42,6 @@ if grep -Fq 'controlGroup() == "gunnertrigger"' "$main"; then
 fi
 grep -Fq 'C.GetContextByClass(C.GetPlayerID(), "container", false)' "$main"
 grep -Fq 'C.IsComponentClass(ship, "ship")' "$main"
-grep -Fq '; resolved ship ' "$main"
 # A frame that hides the HUD never gets it back: only the fullscreen console
 # (no playerControls) may do so, and it does that by being the non-targetBrowser
 # case of keepHUDVisible = targetBrowser.
@@ -67,7 +80,6 @@ fi
 grep -Fq 'local function sessionWatchdog()' "$main"
 grep -Fq 'reopenSuspendedSession("returned to " .. tostring(mode))' "$main"
 grep -Fq 'State.lifecycle.suspendedMap' "$main"
-grep -Fq 'MapMenu cleanup callback' "$main"
 grep -Fq 'map.registerCallback("on_menu_cleanup"' "$main"
 grep -Fq 'externalMenu == "MapMenu" and State.isOwned(session)' "$main"
 grep -Fq 'C.SetTrackedMenuFullscreen(menu.name, false)' "$main"
@@ -77,10 +89,34 @@ grep -Fq 'session.phase == "engaged"' "$main"
 grep -Fq 'session.controlMode' "$main"
 # New lifecycle entry point replaces beginWatch/beginDirect.
 grep -Fq 'State.beginEngaged' "$main"
-# Snapshot list; single session.directSnapshot is now session.directSnapshots.
-grep -Fq 'directSnapshots' "$main"
-# MD passthrough for save: list form.
-grep -Fq 'State.snapshotsForSave' "$main"
+# Baseline: directSnapshots renamed to committedBaseline; staged buffer added.
+grep -Fq 'committedBaseline' "$main"
+grep -Fq 'session.staged' "$main"
+# The adapter commits one atomic table. Its session half remains an encoded
+# string because raise_lua_event returns only one scalar; the paired component
+# target travels separately and is buffered before control receives an envelope.
+grep -Fq 'State.encode(deps.State.saveState(session))' "$persist"
+grep -Fq 'deps.emit("session_commit", payload)' "$persist"
+grep -Fq 'x4gc1:&lt;nonce&gt;:&lt;generation&gt;' md/x4_gunnery_control.xml
+grep -Fq "param=\"'x4gc1:' + State.\$requestNonce + ':' + State.\$generation\"" md/x4_gunnery_control.xml
+grep -Fq "State.\$acceptedNonce == State.\$requestNonce" md/x4_gunnery_control.xml
+grep -Fq 'deps.emit("state_request", { nonce = nonce })' "$persist"
+grep -Fq 'deps.emit("state_accept", { nonce = grantedRequestNonce, generation = grantedGeneration })' "$persist"
+grep -Fq 'State.decode(envelope and envelope.payload)' "$main"
+# The restore resolves group contextIDs, which needs a seated player. A save
+# taken while engaged reloads into the chair, so the gameLoadingDone raise is
+# what normally does the work; the chair-ingress raise is the fallback that
+# collects the payload if it ever lands with the player off the console.
+# gameLoadingDone uses request(true) to force a new request, abandoning the dead
+# pre-load one; init and chair ingress use unforced request().
+if [ "$(grep -Fc 'persistence.request()' "$main")" -lt 2 ]; then
+  echo 'persistence request must be raised at init and at chair ingress (unforced)' >&2
+  exit 1
+fi
+if ! grep -Fq 'persistence.request(true)' "$main"; then
+  echo 'persistence request must be raised at gameLoadingDone with force=true' >&2
+  exit 1
+fi
 # Ensure the old single-phase strings are gone — any hit is a residual bug.
 if grep -Fq 'session.phase == "watch"' "$main"; then
   echo 'residual session.phase == "watch" found in main file' >&2
@@ -93,9 +129,22 @@ fi
 # Shape, not value: a dated build id must exist so a debug log identifies the
 # build. Pinning the literal only forced a test edit on every bump.
 grep -Eq 'local runtimeBuild = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[^"]+"' "$main"
-grep -Fq 'initializing UI; build=" .. runtimeBuild' "$main"
+grep -Fq 'UI initialized; build=" .. runtimeBuild' "$main"
 
-grep -Fq 'automatic frame hide queued for orphan check' "$main"
+for removed_log in \
+  'watchdog state changed' \
+  'raw group id carries padding' \
+  'restore engine soft target before write' \
+  'notify emitted:' \
+  'repainted console after restore:' \
+  'registered DockedMenu redirect hook' \
+  'registered MapMenu cleanup hook'; do
+  if grep -Fq "$removed_log" "$main"; then
+    echo "removed default telemetry remains: $removed_log" >&2
+    exit 1
+  fi
+done
+
 grep -Fq 'orphaned menu detected by watchdog' "$main"
 grep -Fq 'engagement transition confirmed by frame creation' "$main"
 grep -Fq 'standardButtons = { back = true, close = true }' "$main"
@@ -132,22 +181,72 @@ if grep -A20 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCame
   exit 1
 fi
 grep -Fq 'seatLeaving = true' "$main"
-grep -Fq 'logSession("left chair: "' "$main"
 
 grep -Fq 'cutscene_aim_start' "$main"
 grep -Fq 'cutscene_aim_stop' "$main"
-grep -Fq 'cutscene_aim_start' md/x4_gunnery_control.xml
-grep -Fq 'cutscene_aim_stop' md/x4_gunnery_control.xml
-grep -Fq 'play_cutscene' md/x4_gunnery_control.xml
-grep -Fq 'stop_cutscene' md/x4_gunnery_control.xml
-grep -Fq 'cinematicmode' md/x4_gunnery_control.xml
+grep -Fq 'cutscene_aim_start' "$md"
+grep -Fq 'cutscene_aim_stop' "$md"
+grep -Fq 'play_cutscene' "$md"
+grep -Fq 'stop_cutscene' "$md"
+grep -Fq 'cinematicmode' "$md"
+# The destroyed-object event source is evaluated when its cue activates. Keep
+# it below a null-safe gate: on fresh MD init there is no CutsceneAim.$Target.
+# Start re-arms exactly one watcher after normalizing the target. Stop clears
+# and cancels it. A queued event for the previous target is harmless because
+# the destructive actions compare event.object with the current target.
+cutscene='/mdscript/cues/cue[@name="CutsceneAim"]'
+watch="$cutscene/cues/cue[@name=\"TargetWatch\"]"
+start="$cutscene/cues/cue[@name=\"Start\"]"
+stop="$cutscene/cues/cue[@name=\"Stop\"]"
+destroyed="$watch/cues/cue[@name=\"WatchedTargetDestroyed\"]"
+guard="$destroyed/actions/do_if[@value=\"CutsceneAim.\$Target? and event.object == CutsceneAim.\$Target\"]"
+handle_guard="CutsceneAim.\$Handle? and CutsceneAim.\$Handle != null"
+assert_md_xpath 1 "count($watch)" 'CutsceneAim must have exactly one TargetWatch'
+assert_md_xpath 0 "count($cutscene/cues/cue[@name=\"TargetDestroyed\"])" \
+  'TargetDestroyed must not activate as a direct CutsceneAim child'
+assert_md_xpath 0 "count(//cue[@name=\"TargetDestroyed\"])" \
+  'The saved TargetDestroyed cue name must not be reused after moving the watcher'
+assert_md_xpath cancel "string($watch/@onfail)" 'TargetWatch must cancel when its target gate fails'
+assert_md_xpath 1 "count($watch/conditions/check_value[@value=\"CutsceneAim.\$Target? and typeof CutsceneAim.\$Target == datatype.component\"])" \
+  'TargetWatch must require an existing component target'
+assert_md_xpath 1 "count($destroyed/conditions/event_object_destroyed[@object=\"CutsceneAim.\$Target\"])" \
+  'TargetDestroyed must listen to the gated target'
+assert_md_xpath 0 "count(${destroyed}[@instantiate])" \
+  'TargetDestroyed must remain one-shot under its per-target parent'
+assert_md_xpath reset_cue "name(($start/actions/*)[last()])" \
+  'Start must finish by re-arming TargetWatch'
+assert_md_xpath TargetWatch "string(($start/actions/*)[last()]/@cue)" \
+  'Start must re-arm TargetWatch'
+assert_md_xpath 1 "count($start/actions/play_cutscene/following-sibling::reset_cue[@cue=\"TargetWatch\"])" \
+  'Start must re-arm TargetWatch after starting the cutscene'
+assert_md_xpath reset_cue "name(($stop/actions/*)[last()])" \
+  'Stop must finish by cancelling TargetWatch'
+assert_md_xpath TargetWatch "string(($stop/actions/*)[last()]/@cue)" \
+  'Stop must cancel TargetWatch'
+assert_md_xpath 1 "count($stop/actions/remove_value[@name=\"CutsceneAim.\$Target\"][following-sibling::reset_cue[@cue=\"TargetWatch\"]])" \
+  'Stop must clear the target before cancelling TargetWatch'
+assert_md_xpath 1 "count($guard)" \
+  'TargetDestroyed must reject queued events for a stale target'
+assert_md_xpath 3 "count(//stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'CutsceneAim must retain exactly its three cutscene-stop paths'
+assert_md_xpath 1 "count($start/actions/do_if[@value=\"$handle_guard\"]/stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'Start must declaration-check the current cutscene handle before stopping it'
+assert_md_xpath 1 "count($stop/actions/do_if[@value=\"$handle_guard\"]/stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'Stop must declaration-check the current cutscene handle before stopping it'
+assert_md_xpath 1 "count($guard/do_if[@value=\"$handle_guard\"]/stop_cutscene[@cutscene=\"CutsceneAim.\$Handle\"])" \
+  'Only the current target destruction may stop the cutscene'
+assert_md_xpath 1 "count($guard/remove_value[@name=\"CutsceneAim.\$Target\"])" \
+  'TargetDestroyed must disarm the handled target'
+assert_md_xpath 1 "count($guard/reset_cue[@cue=\"parent\"] \
+  [preceding-sibling::remove_value[@name=\"CutsceneAim.\$Target\"]])" \
+  'TargetDestroyed must cancel its parent watcher after handling the target'
 # Notify cue: load-bearing popup that cures the dead-Esc engine bug by forcing
 # View.createView/DisplayView in ego_viewhelper. show_help with a custom
 # expression is the mechanism; event.param3.$text carries the Lua string.
-grep -Fq "cue name=\"Notify\"" md/x4_gunnery_control.xml
-grep -Fq 'show_help' md/x4_gunnery_control.xml
+grep -Fq "cue name=\"Notify\"" "$md"
+grep -Fq 'show_help' "$md"
 # shellcheck disable=SC2016
-grep -Fq "custom=\"@event.param3.\$text\"" md/x4_gunnery_control.xml
+grep -Fq "custom=\"@event.param3.\$text\"" "$md"
 # Text ids 79 (restored-settings) and 80 (disengaged) used by leaveChair.
 grep -Fq '<t id="79">' t/0001.xml
 grep -Fq '<t id="80">' t/0001.xml
@@ -288,14 +387,10 @@ fi
 
 grep -Fq 'SetPlayerCameraCockpitView' "$main"
 
-# Apply skips towing, mining and autoassist, so Release has nothing of ours to
-# clear on those modes and must skip them too. An unfiltered clear reaches
-# turrets the console never touched -- on a mixed ship that is someone else's
-# mining or towing job. Both loops carry the same filter; assert two of them.
-# shellcheck disable=SC2016
-if [ "$(grep -c 'weaponmode.towing) and (\$mode != weaponmode.mining) and (\$mode != weaponmode.autoassist)' md/x4_gunnery_control.xml)" -ne 2 ]; then
-  echo "PreferAllTurrets Apply and Release must both filter towing/mining/autoassist" >&2
-  exit 1
-fi
+# The mode-filter rule that used to live here was inverted on 2026-08-10: the
+# ship-wide override now reaches every turret whatever its mode. Its replacement,
+# and the per-cue split that keeps DirectFallback scoped, live in
+# tests/test_turret_targets_contract.sh, which is where every other
+# set_turret_targets structural rule already was.
 
 echo "runtime UI contract checks passed"

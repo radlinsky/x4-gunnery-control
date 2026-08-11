@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- **Loading a save no longer loses your gunnery session.** You come back to the
+  same turret groups, the same turret POV and the same target, in Direct-control
+  or Auto-engage. Before, a load dumped you at the console with your turrets
+  still overridden and **Cease Engagement** unable to give them back.
+
+- **Target POV works after loading.** It used to do nothing until you switched
+  to another surface element and back.
+
+## [0.30] - 2026-08-07
+
 - New **All Turrets: Prefer My Target** during Direct-control: no more idle
   turrets. Every turret on the ship shoots your target when it can, and shoots
   something else in range when it cannot. **Release Other Turrets** hands the

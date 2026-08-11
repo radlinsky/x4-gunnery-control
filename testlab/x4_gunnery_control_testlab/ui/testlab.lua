@@ -2,7 +2,7 @@
 -- turret discovery and mutations; this companion only drives its narrow API.
 local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
-local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing = nil, nil, nil, 0, 0, nil, nil, nil, false
+local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
 local finishGroups, emitSummary
 
 local function text(id) return ReadText(20992, id) end
@@ -14,6 +14,97 @@ local function log(event, fields)
     for key, value in pairs(fields or {}) do parts[#parts + 1] = key .. "=" .. safe(value) end
     table.sort(parts, function(a, b) return a < b end)
     DebugError(table.concat(parts, " "))
+end
+
+-- Scenario spec: the fixture for the next live test, authored on disk in
+-- ui/scenario_spec.lua and replayed into MD on every UI load. Every field is
+-- validated here rather than in MD, because a bad value in Lua is a log line
+-- while a bad value in MD is a silently dead cue.
+local function validateSpec(raw)
+    if type(raw) ~= "table" then return nil, "spec is not a table" end
+    if type(raw.id) ~= "string" or raw.id == "" then return nil, "spec.id must be a non-empty string" end
+    if raw.enabled ~= true and raw.enabled ~= false then return nil, "spec.enabled must be true or false" end
+    if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
+    local groups = {}
+    for index, group in ipairs(raw.groups) do
+        local where = "groups[" .. index .. "]"
+        if type(group) ~= "table" then return nil, where .. " is not a table" end
+        if type(group.macro) ~= "string" or group.macro == "" then return nil, where .. ".macro must be a non-empty string" end
+        if type(group.faction) ~= "string" or group.faction == "" then return nil, where .. ".faction must be a non-empty string" end
+        if type(group.count) ~= "number" or group.count < 1 then return nil, where .. ".count must be a positive number" end
+        -- Signed, like x and y: MD passes this straight to safepos as z, so a
+        -- negative value spawns the group astern. The old non-negative guard
+        -- rejected the whole spec whenever a group used that.
+        if type(group.distance) ~= "number" then return nil, where .. ".distance must be a number" end
+        local behaviour = group.behaviour or "wait"
+        if behaviour ~= "wait" and behaviour ~= "attack" and behaviour ~= "none" then
+            return nil, where .. ".behaviour must be wait, attack or none"
+        end
+        groups[#groups + 1] = {
+            label = tostring(group.label or ("group" .. index)),
+            macro = group.macro,
+            faction = group.faction,
+            count = math.floor(group.count),
+            distance = group.distance,
+            spread = tonumber(group.spread) or 0,
+            x = tonumber(group.x) or 0,
+            y = tonumber(group.y) or 0,
+            behaviour = behaviour,
+            hostile = group.hostile == true,
+        }
+    end
+    if #groups == 0 then return nil, "spec.groups is empty" end
+    return { id = raw.id, enabled = raw.enabled, groups = groups }
+end
+
+-- The spec file is a plain data literal, but it is hand-edited by an agent, so
+-- a syntax error or a typo must degrade to a log line rather than take the
+-- whole Test Lab menu down with it.
+local function loadSpec()
+    if X4GunneryTestLabScenarioSpec == nil then return nil, nil end
+    local ok, spec, reason = pcall(validateSpec, X4GunneryTestLabScenarioSpec)
+    if not ok then return nil, "spec load raised: " .. tostring(spec) end
+    if not spec then return nil, tostring(reason or "spec rejected") end
+    return spec, nil
+end
+
+local scenarioSpec, scenarioSpecError = loadSpec()
+
+local function scenarioSpecLabel()
+    if scenarioSpecError then return "invalid (" .. scenarioSpecError .. ")" end
+    if not scenarioSpec then return "none" end
+    return scenarioSpec.id .. (scenarioSpec.enabled and " (enabled)" or " (disabled)")
+end
+
+-- MD cannot be handed a nested table: the only live-tested Lua->MD payload is a
+-- flat table of scalars. The spec is therefore streamed as begin / one event per
+-- group / commit. See the transport note in the MD script.
+local function sendScenarioSpec(force)
+    if scenarioSpecError then
+        log("scenario_spec", { action = "rejected", reason = scenarioSpecError })
+        return false
+    end
+    if not scenarioSpec then
+        log("scenario_spec", { action = "absent" })
+        return false
+    end
+    if not scenarioSpec.enabled and not force then
+        log("scenario_spec", { action = "inert", spec_id = scenarioSpec.id })
+        return false
+    end
+    AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin",
+        { specId = scenarioSpec.id, force = force == true })
+    for _, group in ipairs(scenarioSpec.groups) do
+        AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group", {
+            label = group.label, macro = group.macro, faction = group.faction,
+            count = group.count, distance = group.distance, spread = group.spread,
+            x = group.x, y = group.y,
+            behaviour = group.behaviour, hostile = group.hostile,
+        })
+    end
+    AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_commit")
+    log("scenario_spec", { action = "sent", spec_id = scenarioSpec.id, groups = #scenarioSpec.groups, forced = tostring(force == true) })
+    return true
 end
 
 local function shipFields(item)
@@ -28,15 +119,24 @@ local function fieldsFor(item, extra)
     return fields
 end
 
-local function cleanup(reason, reopen, clearSweep)
+local function cleanup(reason, clearSweep)
     local activeSweep = sweep
     if api() then api().returnTestCamera() end
     inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved = nil, nil, 0, 0, nil, nil, nil
     if reason and activeSweep and activeSweep.phase ~= "complete" then log("abort", { reason = reason, ship_id = activeSweep.ship.id, ship_name = activeSweep.ship.name, ship_macro = activeSweep.ship.macro }) end
     if clearSweep then sweep = nil end
-    if reopen then
-        Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryMenu", { 0, 0 }, true)
-    end
+end
+
+-- Gunnery parks its live session before opening this companion. Every
+-- operator-driven exit must therefore hand ownership explicitly back to the
+-- main menu; a plain close leaves resumePending armed with no menu to consume
+-- it. Keep the latch set until the Test Lab is shown again so a Helper-induced
+-- re-entrant/late onCloseElement cannot request the handoff twice.
+local function returnToGunnery(reason)
+    if closing then return end
+    closing = true
+    cleanup(reason, true)
+    Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryMenu", { 0, 0 }, true)
 end
 
 local function startSweep()
@@ -101,6 +201,7 @@ local function verdict(value)
 end
 
 function menu.onShowMenu()
+    closing, suppressReopen = false, false
     menu.display()
 end
 
@@ -111,8 +212,46 @@ function menu.display()
     if sweep and sweep.phase == "inspecting" then return end
     local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(900), height = Helper.scaleY(520), standardButtons = { close = true } })
     local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(880) })
-    local title = tableView:addRow(false, { bgColor = Color["row_background_header"] })
+    local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
     title[1]:setColSpan(4):createText(text(1), Helper.headerRowCenteredProperties)
+    local reloadRow = tableView:addRow("reload", {})
+    for index, spec in ipairs({ { text(22), "ui" }, { text(23), "md" }, { text(24), "ai" } }) do
+        local label, kind = spec[1], spec[2]
+        reloadRow[index]:createButton({}):setText(label)
+        reloadRow[index].handlers.onClick = function()
+            if kind == "ui" then
+                -- Both functions were present and worked when this was live-tested
+                -- on 2026-08-08; fn_present is still logged because a future patch
+                -- removing one would otherwise look like a button that does nothing.
+                log("reload", { kind = kind, fn_present = tostring(ScheduleReloadUI ~= nil) })
+                if ScheduleReloadUI then ScheduleReloadUI() end
+            else
+                -- Second arg MUST be 0, not nil: nil segfaults the game.
+                -- refreshmd is live-tested; refreshai is not, and the AI button is
+                -- here only because it costs one table entry to offer it.
+                log("reload", { kind = kind, fn_present = tostring(ExecuteDebugCommand ~= nil) })
+                if ExecuteDebugCommand then ExecuteDebugCommand("refresh" .. kind, 0) end
+            end
+        end
+    end
+    local specRow = tableView:addRow(false, {})
+    specRow[1]:setColSpan(4):createText(text(27) .. ": " .. scenarioSpecLabel())
+    local scenarioRow = tableView:addRow("scenario", {})
+    scenarioRow[1]:setColSpan(2):createButton({}):setText(text(25)); scenarioRow[1].handlers.onClick = function()
+        sendScenarioSpec(true)
+    end
+    scenarioRow[3]:setColSpan(2):createButton({}):setText(text(26)); scenarioRow[3].handlers.onClick = function()
+        AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
+        log("scenario", { action = "despawn" })
+    end
+    -- Arms the ownership-change test. The Test Lab cannot be opened while
+    -- engaged, so this cannot flip an owner on the spot; it arms MD to do it on
+    -- the NEXT Direct-control engage instead. See ArmCapture in the MD script.
+    local captureRow = tableView:addRow("capture", {})
+    captureRow[1]:setColSpan(4):createButton({}):setText(text(28)); captureRow[1].handlers.onClick = function()
+        AddUITriggeredEvent("X4GunneryTestLabScenario", "arm_capture")
+        log("scenario", { action = "arm_capture" })
+    end
     if not sweep then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(4):createText(text(12))
         local start = tableView:addRow("start", {}); start[1]:setColSpan(4):createButton({}):setText(text(2)); start[1].handlers.onClick = function() startSweep(); menu.display() end
@@ -144,7 +283,7 @@ function menu.display()
             groups[1]:setColSpan(4):createText(text(16) .. ": pass/fail " .. tostring(summary.groupPass) .. "/" .. tostring(summary.groupFail))
             local reset = tableView:addRow("reset", {}); reset[1]:setColSpan(4):createButton({}):setText(text(2)); reset[1].handlers.onClick = function() sweep = nil; startSweep(); menu.display() end
         end
-        local abort = tableView:addRow("abort", {}); abort[1]:setColSpan(4):createButton({}):setText(text(9)); abort[1].handlers.onClick = function() cleanup("operator_abort", true, true) end
+        local abort = tableView:addRow("abort", {}); abort[1]:setColSpan(4):createButton({}):setText(text(9)); abort[1].handlers.onClick = function() returnToGunnery("operator_abort") end
     end
     frame:display()
 end
@@ -173,14 +312,24 @@ end
 
 function menu.onCloseElement(dueToClose)
     if closing then return end
+    if suppressReopen then
+        closing = true
+        cleanup("menu_closed", true)
+        Helper.closeMenu(menu, dueToClose, nil, false)
+        return
+    end
     closing = true
-    cleanup("menu_closed", false, true)
-    Helper.closeMenu(menu, dueToClose, nil, false)
-    closing = false
+    cleanup("menu_closed", true)
+    Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryMenu", { 0, 0 }, true)
 end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
+    -- Replay the fixture spec on every UI load. This is the whole point of the
+    -- design: the agent edits scenario_spec.lua, the owner clicks Reload UI
+    -- once. MD refuses a spec id it has already spawned, so a Reload UI during
+    -- an unrelated test does not stack a second copy of the same fleet.
+    if AddUITriggeredEvent then sendScenarioSpec(false) end
     if Helper then Helper.registerMenu(menu) end
     if api() then
         api().registerTestLab({ open = function()
@@ -188,7 +337,13 @@ local function init()
             if main then Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab", { 0, 0 }, true) end
         end })
     end
-    local abort = function() if sweep then cleanup("player_context_changed", false, true) end end
+    local abort = function()
+        -- The player has left the chair (or a load is replacing the world), so
+        -- the automatic menu close must not resurrect Gunnery Control. This is
+        -- reset only when a later, deliberate Test Lab opening is shown.
+        suppressReopen = true
+        if sweep then cleanup("player_context_changed", true) end
+    end
     RegisterEvent("playerGetUp", abort)
     RegisterEvent("playerUndock", abort)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode) if mode ~= "cockpit" and mode ~= "external" and mode ~= "externalfirstperson" then abort() end end)

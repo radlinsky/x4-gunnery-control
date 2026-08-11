@@ -5,12 +5,35 @@
   <cues>
     <cue name="State">
       <cues>
-        <cue name="BeginSession" instantiate="true">
+        <!-- One commit carries the encoded Lua record plus the optional target.
+             Keeping them together avoids a save between the old two events
+             producing a session associated with a previous target. -->
+        <cue name="CommitSession" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'session_begin'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'session_commit'"/>
           </conditions>
           <actions>
-            <set_value name="State.$active" exact="event.param3"/>
+            <set_value name="State.$active" exact="@event.param3.$payload"/>
+            <do_if value="not State.$active">
+              <set_value name="State.$active" exact="@event.param3.{'payload'}"/>
+            </do_if>
+            <!-- Clear first. An explicit no-target commit must never retain an
+                 older component reference. Lua table keys may be $-prefixed
+                 by the transport, hence the two forms below. -->
+            <remove_value name="State.$target"/>
+            <set_value name="State.$hasTarget" exact="@event.param3.$hasTarget"/>
+            <do_if value="not State.$hasTarget">
+              <set_value name="State.$hasTarget" exact="@event.param3.{'hasTarget'}"/>
+            </do_if>
+            <do_if value="State.$hasTarget">
+              <set_value name="State.$target" exact="@event.param3.$target"/>
+              <do_if value="not State.$target">
+                <set_value name="State.$target" exact="@event.param3.{'target'}"/>
+              </do_if>
+              <do_if value="typeof State.$target != datatype.component and State.$target">
+                <set_value name="State.$target" exact="component.{State.$target}"/>
+              </do_if>
+            </do_if>
           </actions>
         </cue>
         <cue name="EndSession" instantiate="true">
@@ -19,6 +42,18 @@
           </conditions>
           <actions>
             <remove_value name="State.$active"/>
+            <remove_value name="State.$target"/>
+            <remove_value name="State.$hasTarget"/>
+            <remove_value name="State.$requestNonce"/>
+            <remove_value name="State.$acceptedNonce"/>
+            <remove_value name="State.$acceptedGeneration"/>
+            <!-- Invalidate a grant that has not yet been accepted. -->
+            <do_if value="@State.$generation">
+              <set_value name="State.$generation" exact="State.$generation + 1"/>
+            </do_if>
+            <do_else>
+              <set_value name="State.$generation" exact="1"/>
+            </do_else>
           </actions>
         </cue>
         <cue name="RequestState" instantiate="true">
@@ -26,23 +61,57 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'state_request'"/>
           </conditions>
           <actions>
-            <!-- Diagnostic: log the raw MD table so a live run reveals whether
-                 keys are plain or $-prefixed on the MD side. This settles the
-                 MD->Lua $ question once a save/load is performed in-game.
-                 The @ and the do_if are both required: State.$active does not
-                 exist until a Direct-control session has run, and referencing a
-                 missing variable raises "Property lookup failed" into the log on
-                 every load for every player. -->
-            <do_if value="@State.$active">
-              <debug_text text="'[X4GC] RequestState: State.$active=' + State.$active" chance="100"/>
-              <raise_lua_event name="'X4GunneryControl.RestoreSession'" param="State.$active"/>
+            <!-- The grant has one scalar parameter, so echo the Lua request
+                 nonce alongside the MD-owned generation as
+                 x4gc1:&lt;nonce&gt;:&lt;generation&gt;.  Lua rejects a delayed grant
+                 whose nonce belongs to a cleared request even if that lease
+                 number was never accepted locally. -->
+            <set_value name="State.$requestNonce" exact="@event.param3.$nonce"/>
+            <do_if value="not State.$requestNonce">
+              <set_value name="State.$requestNonce" exact="@event.param3.{'nonce'}"/>
             </do_if>
-            <do_else>
-              <!-- Raising with an unset variable is what produced "Property
-                   lookup failed: State.$active" on every load; there is nothing
-                   to restore in this case, so simply do not raise. -->
-              <debug_text text="'[X4GC] RequestState: no saved session state'" chance="100"/>
-            </do_else>
+            <do_if value="State.$requestNonce">
+              <do_if value="@State.$generation">
+                <set_value name="State.$generation" exact="State.$generation + 1"/>
+              </do_if>
+              <do_else>
+                <set_value name="State.$generation" exact="1"/>
+              </do_else>
+              <!-- Shipped MD sources use + to compose string expressions. -->
+              <raise_lua_event name="'X4GunneryControl.RestoreGrant'" param="'x4gc1:' + State.$requestNonce + ':' + State.$generation"/>
+            </do_if>
+          </actions>
+        </cue>
+        <!-- `raise_lua_event` names are expressions in the XSD. This dynamic
+             name use remains live-test inference; it is isolated here so a
+             failed transport test has one protocol surface to revisit. -->
+        <cue name="AcceptState" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'state_accept'"/>
+          </conditions>
+          <actions>
+            <set_value name="State.$acceptedGeneration" exact="@event.param3.$generation"/>
+            <do_if value="not State.$acceptedGeneration">
+              <set_value name="State.$acceptedGeneration" exact="@event.param3.{'generation'}"/>
+            </do_if>
+            <set_value name="State.$acceptedNonce" exact="@event.param3.$nonce"/>
+            <do_if value="not State.$acceptedNonce">
+              <set_value name="State.$acceptedNonce" exact="@event.param3.{'nonce'}"/>
+            </do_if>
+            <do_if value="State.$acceptedGeneration == State.$generation and State.$acceptedNonce == State.$requestNonce">
+              <do_if value="@State.$target">
+                <raise_lua_event name="'X4GunneryControl.RestoreTarget.' + State.$generation" param="State.$target"/>
+              </do_if>
+              <do_else>
+                <raise_lua_event name="'X4GunneryControl.RestoreTarget.' + State.$generation" param="0"/>
+              </do_else>
+              <do_if value="@State.$active">
+                <raise_lua_event name="'X4GunneryControl.RestoreSession.' + State.$generation" param="State.$active"/>
+              </do_if>
+              <do_else>
+                <raise_lua_event name="'X4GunneryControl.RestoreSession.' + State.$generation" param="''"/>
+              </do_else>
+            </do_if>
           </actions>
         </cue>
       </cues>
@@ -58,7 +127,7 @@
           </conditions>
           <actions>
             <!-- Guarded restart: stop any in-progress cutscene first. -->
-            <do_if value="CutsceneAim.$Handle">
+            <do_if value="CutsceneAim.$Handle? and CutsceneAim.$Handle != null">
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
@@ -102,12 +171,11 @@
                  dead-center. Known ceiling: with this between-objects asset,
                  perpendicular turret aim can still put the camera at/inside
                  the hull; a custom cutscene asset with turret-local offsets is
-                 a separate research track. All values logged for tuning. -->
+                 a separate research track. -->
             <set_value name="CutsceneAim.$Dist" exact="CutsceneAim.$Anchor.size + 50m"/>
             <do_if value="CutsceneAim.$Pov == 'turret'">
               <set_value name="CutsceneAim.$Dist" exact="[CutsceneAim.$Anchor.size, 3m].max"/>
             </do_if>
-            <debug_text text="'[X4GC] cutscene_aim_start raw=' + event.param3 + ' anchor=' + CutsceneAim.$Anchor + ' (' + typeof CutsceneAim.$Anchor + ') target=' + CutsceneAim.$Target + ' (' + typeof CutsceneAim.$Target + ') pov=' + CutsceneAim.$Pov + ' dist=' + CutsceneAim.$Dist + ' ax=' + (CutsceneAim.$Dist * 0.4) + ' ay=' + (CutsceneAim.$Dist * 0.2)" chance="100"/>
             <play_cutscene cinematicmode="true" result="CutsceneAim.$Handle" key="'Follow_A_Lookat_B'">
               <param name="duration" number="999999"/>
               <param name="anchor" object="CutsceneAim.$Anchor"/>
@@ -120,7 +188,12 @@
               <param name="target_y" number="0"/>
               <param name="target_z" number="0"/>
             </play_cutscene>
-            <debug_text text="'[X4GC] cutscene_aim handle=' + CutsceneAim.$Handle" chance="100"/>
+            <!-- TargetWatch is cancelled during MD init when no target exists.
+                 Re-arm it only after this event has supplied and normalized a
+                 target. reset_cue takes effect after this action block, so a
+                 retarget replaces the old listener instead of accumulating
+                 instances. -->
+            <reset_cue cue="TargetWatch"/>
           </actions>
         </cue>
 
@@ -129,25 +202,43 @@
             <event_ui_triggered screen="'X4GunneryControl'" control="'cutscene_aim_stop'"/>
           </conditions>
           <actions>
-            <do_if value="CutsceneAim.$Handle">
+            <do_if value="CutsceneAim.$Handle? and CutsceneAim.$Handle != null">
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
-            <debug_text text="'[X4GC] cutscene_aim_stop'" chance="100"/>
+            <!-- Disarm the per-target listener as well as the camera. -->
+            <remove_value name="CutsceneAim.$Target"/>
+            <reset_cue cue="TargetWatch"/>
           </actions>
         </cue>
 
-        <cue name="TargetDestroyed" instantiate="true">
+        <!-- Do not register event_object_destroyed until Start has supplied a
+             component. A static listener evaluates the object expression at
+             MD init, when CutsceneAim.$Target does not exist. -->
+        <cue name="TargetWatch" onfail="cancel">
           <conditions>
-            <event_object_destroyed object="CutsceneAim.$Target"/>
+            <check_value value="CutsceneAim.$Target? and typeof CutsceneAim.$Target == datatype.component"/>
           </conditions>
-          <actions>
-            <do_if value="CutsceneAim.$Handle">
-              <stop_cutscene cutscene="CutsceneAim.$Handle"/>
-              <set_value name="CutsceneAim.$Handle" exact="null"/>
-            </do_if>
-            <debug_text text="'[X4GC] cutscene_aim stopped: target destroyed'" chance="100"/>
-          </actions>
+          <cues>
+            <cue name="WatchedTargetDestroyed">
+              <conditions>
+                <event_object_destroyed object="CutsceneAim.$Target"/>
+              </conditions>
+              <actions>
+                <!-- A reset is applied after the triggering action block. If an
+                     old destruction event was already queued while Start
+                     retargeted, it must not stop the new target's handle. -->
+                <do_if value="CutsceneAim.$Target? and event.object == CutsceneAim.$Target">
+                  <do_if value="CutsceneAim.$Handle? and CutsceneAim.$Handle != null">
+                    <stop_cutscene cutscene="CutsceneAim.$Handle"/>
+                    <set_value name="CutsceneAim.$Handle" exact="null"/>
+                  </do_if>
+                  <remove_value name="CutsceneAim.$Target"/>
+                  <reset_cue cue="parent"/>
+                </do_if>
+              </actions>
+            </cue>
+          </cues>
         </cue>
       </cues>
     </cue>
@@ -174,27 +265,30 @@
       </actions>
     </cue>
 
-    <!-- Ship-wide "prefer my target" override (live-tested 2026-08-07).
-         No target list is sent on purpose. The schema says a turret that cannot
-         attack the preferred target chooses from the supplied list; with no list
-         it falls back to the engine's own acquisition, and the trial confirmed
-         such turrets engage something else in range rather than holding fire.
-         That fallback is the whole feature.
+    <!-- Ship-wide "prefer my target" override (live-tested 2026-08-09 and
+         2026-08-10). A hostile target list IS sent, and must be: the schema says
+         a turret that cannot aim at the preferred target chooses from the
+         supplied list, and an omitted list is not "the engine's own acquisition"
+         but a hard error, "Evaluated value 'null' is not of type list", which
+         throws and applies nothing. That fallback list is the whole feature.
 
-         The weaponmode filter below selects which turrets receive the
-         instruction. It does NOT constrain what they shoot afterwards: in the
-         trial, turrets set to missiledefence engaged ships once the preference
-         was applied. Do not describe the fallback as "the turret's own mode".
+         An earlier version of this comment described a listless call and cited a
+         2026-08-07 trial for its behaviour. That trial's call was the one that
+         threw, so it observed nothing; the record is retracted in md-ai.md.
 
-         Turret modes are read here rather than passed from Lua because the
-         weaponmode attribute wants an enum rather than a string, and this is
-         the shipped idiom (aiscripts/fight.attack.object.capital.xml:443).
-         autoassist is skipped deliberately: the shipped comment at
-         fight.attack.object.capital.xml:1756 states target acquisition for that
-         mode is handled in code and a supplied list is ignored, so issuing it
-         would be a silent no-op. The Lua side clears its own autoassist
-         override before raising this, and logs the count below so a live run
-         can still prove the mode writes landed first. -->
+         Neither Apply nor Release passes weaponmode. The attribute selects which
+         turrets RECEIVE the instruction, and the owner's requirement is that
+         this button reach all of them, so the selector is omitted and the engine
+         default ("any", common.xsd:36223) applies. The per-call comments carry
+         the reasoning and the two known limits; the contract test enforces the
+         omission on these two cues and enforces its PRESENCE on DirectFallback,
+         which is scoped to the ticked groups on purpose.
+
+         Until 2026-08-10 this swept a deduplicated list of the ship's live
+         turret modes and skipped six of them. That is gone. Do not reintroduce a
+         mode loop here without the owner asking for one: it cannot reach
+         autoassist or holdfire turrets at all, and it silently narrows a button
+         whose entire meaning is "everything". -->
     <cue name="PreferAllTurrets">
       <cues>
         <cue name="Apply" instantiate="true">
@@ -213,31 +307,62 @@
               <set_value name="$target" exact="component.{$target}"/>
             </do_if>
             <do_if value="$ship and $target">
-              <set_value name="$turrets" exact="$ship.turrets.operational.list"/>
-              <create_list name="$modes"/>
-              <do_all exact="$turrets.count" counter="$i">
-                <do_if value="not $modes.indexof.{$turrets.{$i}.mode}">
-                  <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
-                </do_if>
-              </do_all>
-              <set_value name="$applied" exact="0"/>
-              <do_for_each name="$mode" in="$modes">
-                <!-- towing and mining turrets have a job that is not shooting;
-                     autoassist would be a no-op, see the note above. -->
-                <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
-                  <set_turret_targets object="$ship" preferredtarget="$target" weaponmode="$mode" stopshootingold="false"/>
-                  <set_value name="$applied" operation="add"/>
-                </do_if>
-                <do_elseif value="$mode == weaponmode.autoassist">
-                  <!-- Expected to be zero for groups the console took over. A
-                       non-zero count here means either the player set a group
-                       to autoassist themselves, or the Lua mode writes had not
-                       landed yet, which is the exact fault seen on
-                       2026-08-07. -->
-                  <debug_text text="'[X4GC] prefer_all_turrets skipped autoassist turrets on ' + $ship" chance="100"/>
-                </do_elseif>
-              </do_for_each>
-              <debug_text text="'[X4GC] prefer_all_turrets ship=' + $ship + ' target=' + $target + ' modes=' + $applied" chance="100"/>
+              <!-- target is not optional in practice. Without it the action
+                   evaluates null for its target list and throws "Evaluated
+                   value 'null' is not of type list", so nothing is applied and
+                   stopshootingold never gets a chance to drop the old target.
+                   All 24 shipped set_turret_targets calls that pass
+                   preferredtarget also pass target; see
+                   aiscripts/fight.attack.object.capital.xml:2172 for the shape
+                   copied here. The list is what a turret falls back to when it
+                   has no shot at the preferred target, so it has to be the
+                   real hostile set, not just [$target]. -->
+              <find_ship name="$hostiles" space="$ship.sector" masstraffic="false" multiple="true">
+                <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
+              </find_ship>
+              <do_if value="not $hostiles.indexof.{$target}">
+                <append_to_list name="$hostiles" exact="$target"/>
+              </do_if>
+              <!-- No weaponmode, deliberately. The attribute is optional and
+                   "defaults to any" (common.xsd:36223), so leaving it off is
+                   what makes this button mean every turret on the ship. It is
+                   also the ONLY way to reach autoassist and holdfire turrets:
+                   neither is a member of weaponmodelookup (common.xsd:2419), so
+                   neither can ever be named in the attribute, and any loop over
+                   modes necessarily skips them.
+
+                   This replaces a six-mode exclusion list (towing, mining,
+                   autoassist, holdfire, missiledefence, defend). Dropping it is
+                   an owner decision, not an oversight, and it has consequences
+                   that are the point rather than bugs: a Missile Defence turret
+                   will shoot the hull you picked instead of watching for
+                   missiles, and a Defend turret will engage a target that is not
+                   attacking you. "Prefer my target" now means what it says.
+                   Release puts every one of them back.
+
+                   Two known limits, neither fixable from here. Autoassist
+                   turrets receive the call but discard script-supplied target
+                   lists outright; Egosoft say so at
+                   aiscripts/fight.attack.object.capital.xml:1756. Whether a
+                   target list moves a holdfire turret at all is UNTESTED as of
+                   2026-08-10; "do not shoot" may well win. Do not record either
+                   as working until a live session says so.
+
+                   Two calls, and the order matters. stopshootingold (default
+                   true) only drops targets that are absent from the new list, so
+                   a single call carrying the full hostile set can never dislodge
+                   a turret already shooting one of them: the old target is in
+                   the list, so it stays valid and the preference waits for a
+                   re-selection that never comes. Live-tested 2026-08-09: turret
+                   515058 held target B at los=1 solution=1 on the preferred A.
+                   The narrow call forces every turret off whatever it holds and
+                   onto $target; the wide call immediately restores the fallback
+                   set for turrets that cannot AIM at $target, without dislodging
+                   the ones that just took it. Aim, not hit: a turret whose own
+                   hull blocks the shot can aim, so it takes $target and holds
+                   fire. -->
+              <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
+              <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
             </do_if>
             <do_else>
               <debug_text text="'[X4GC] prefer_all_turrets: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
@@ -255,28 +380,187 @@
               <set_value name="$ship" exact="component.{$ship}"/>
             </do_if>
             <do_if value="$ship">
-              <set_value name="$turrets" exact="$ship.turrets.operational.list"/>
-              <create_list name="$modes"/>
-              <do_all exact="$turrets.count" counter="$i">
-                <do_if value="not $modes.indexof.{$turrets.{$i}.mode}">
-                  <append_to_list name="$modes" exact="$turrets.{$i}.mode"/>
-                </do_if>
-              </do_all>
-              <set_value name="$cleared" exact="0"/>
-              <do_for_each name="$mode" in="$modes">
-                <!-- Same filter as Apply, and for the same reason: Apply never
-                     set a preferred target on these modes, so there is nothing
-                     of ours to clear. Clearing anyway would reach turrets doing
-                     someone else's job on a mixed ship. -->
-                <do_if value="($mode != weaponmode.towing) and ($mode != weaponmode.mining) and ($mode != weaponmode.autoassist)">
-                  <!-- No preferredtarget: clearpreferred defaults to true. -->
-                  <set_turret_targets object="$ship" weaponmode="$mode" stopshootingold="false"/>
-                  <set_value name="$cleared" operation="add"/>
-                </do_if>
-              </do_for_each>
-              <debug_text text="'[X4GC] prefer_all_turrets_clear ship=' + $ship + ' modes=' + $cleared" chance="100"/>
+              <!-- Same hostile list as Apply, for the same reason: omitting
+                   target made the action throw on a null list, so the release
+                   never actually cleared anything. Handing back the unfiltered
+                   hostile set with no preferredtarget is the pre-Apply state. -->
+              <find_ship name="$hostiles" space="$ship.sector" masstraffic="false" multiple="true">
+                <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
+              </find_ship>
+              <!-- No weaponmode, matching Apply exactly. Release has to reach
+                   every turret Apply reached or the override becomes impossible
+                   to switch off for the modes it newly covers: a Missile Defence
+                   turret left holding a hull preference would keep shooting
+                   hulls for the rest of the session. Symmetry here is not
+                   tidiness, it is the off switch.
+                   No preferredtarget: clearpreferred defaults to true. -->
+              <set_turret_targets object="$ship" target="$hostiles"/>
             </do_if>
           </actions>
+        </cue>
+
+        <!-- Gives the directed groups a fallback target list, so a turret that
+             cannot bear on $target rolls to a hostile it can engage instead of
+             tracking one it will never fire on. That idle turret is the whole
+             reason the ship-wide override button was built.
+
+             The engine's fallback asks whether a turret can AIM at the preferred
+             target, not whether it can hit it. It therefore recovers OUT OF ARC
+             and OUT OF RANGE, both confirmed live, and does NOT recover MASKED:
+             a turret trained on the target with own hull in the line of fire
+             holds fire indefinitely, and no mod can observe that condition well
+             enough to work around it. Accepted, not a bug in this cue.
+
+             The mode is attackenemies, not autoassist. Autoassist discards
+             script-supplied target lists outright; Egosoft say so in a shipped
+             comment at aiscripts/fight.attack.object.capital.xml:1756, so a
+             fallback list issued for it can never arrive. attackenemies honours
+             the list, and vanilla uses exactly this shape at capital.xml:2172.
+             Live-tested 2026-08-09 and 2026-08-10 on a player-piloted capital:
+             an attackenemies group obeyed preferredtarget, and rolled to another
+             hostile when the engaged one was OUT OF RANGE or OUT OF ARC. It does
+             not roll off a MASKED target; that condition is unrecoverable.
+
+             weaponmode stays a real selector because the console binds the
+             checkbox to the mode: a group is in attackenemies exactly when it
+             is ticked, so this reaches the directed groups and no one else.
+
+             Two paths share this cue.
+
+             Engage: $target is hostile, so find_ship already returns it and the
+             indexof guard appends it only if the sector query somehow missed it.
+             Narrow call then wide call, in that order, because stopshootingold
+             defaults true and only drops targets absent from the new list, so
+             a single wide call could never pull a turret off what it already
+             holds. The narrow list of one forces the switch; the wide call then
+             restores a fallback set without dislodging the turrets that just
+             took the preferred target.
+
+             Ownership change: the target changed hands, so the relation filter
+             no longer returns it and mayattack confirms the ship may not shoot
+             it. The narrow call is skipped, because it would lock every turret
+             onto what is now a friendly. Only the wide call is issued, with no
+             preferred target, so stopshootingold drops the stale target and the
+             turrets roll to the next hostile instead of falling silent. This
+             replaces vanilla's cease_fire at capital.xml:1088-1091, which does
+             not reach attackenemies groups the console is directing. -->
+        <cue name="DirectFallback" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'direct_fallback'"/>
+          </conditions>
+          <actions>
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="$ship and $target">
+              <find_ship name="$hostiles" space="$ship.sector" masstraffic="false" multiple="true">
+                <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
+              </find_ship>
+              <do_if value="not $hostiles.indexof.{$target}">
+                <!-- Only re-insert if the ship can still attack the target.
+                     An ownership change makes the target player-owned, so adding
+                     it here would direct turrets at a friendly. mayattack checks
+                     kill relation and fire-authorisation override together
+                     (scriptproperties.xml:119), matching the capital.xml:1070
+                     condition that governs the cease_fire we are replacing. -->
+                <do_if value="$ship.mayattack.{$target}">
+                  <append_to_list name="$hostiles" exact="$target"/>
+                </do_if>
+              </do_if>
+              <do_if value="$hostiles.indexof.{$target}">
+                <!-- Target is still hostile: narrow call forces every turret
+                     off whatever it holds and onto $target; wide call restores
+                     the fallback set for turrets that have no shot at it.
+                     Both carry preferredtarget so the engine records the
+                     preference even on turrets that cannot engage immediately. -->
+                <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target" weaponmode="weaponmode.attackenemies"/>
+                <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target" weaponmode="weaponmode.attackenemies"/>
+              </do_if>
+              <do_else>
+                <!-- Target is no longer attackable (ownership change, surrender,
+                     capture). Issue the full hostile set with no preferred target.
+                     stopshootingold (default true) drops the now-absent target
+                     automatically, so turrets roll to whatever is in the list
+                     rather than holding fire. clearpreferred defaults to true. -->
+                <set_turret_targets object="$ship" target="$hostiles" weaponmode="weaponmode.attackenemies"/>
+              </do_else>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC] direct_fallback: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <!-- Arms an ownership-change listener on the engaged target. Emitted by
+             Lua alongside direct_fallback on every target change (emitDirectFallback).
+             Emitted on every Direct-control target change, unconditionally.
+             Direct-control has one weapon mode now: attackenemies. The old
+             pilot-state branch that could send groups to autoassist instead was
+             removed on 2026-08-10, so there is no longer a path that skips this.
+
+             Pattern mirrors CutsceneAim: Arm is instantiate and sets module-scope
+             variables on DirectWatch; OwnerWatch is a plain sibling, reset by
+             Arm each time so only one instance listens at a time. -->
+        <cue name="DirectWatch">
+          <cues>
+            <cue name="Arm" instantiate="true">
+              <conditions>
+                <event_ui_triggered screen="'X4GunneryControl'" control="'direct_watch'"/>
+              </conditions>
+              <actions>
+                <!-- Same transport contract as all other cues above: engine
+                     prepends $ to Lua string keys; ids arrive as components. -->
+                <set_value name="DirectWatch.$ship" exact="@event.param3.$ship"/>
+                <set_value name="DirectWatch.$target" exact="@event.param3.$target"/>
+                <do_if value="typeof DirectWatch.$ship != datatype.component and DirectWatch.$ship">
+                  <set_value name="DirectWatch.$ship" exact="component.{DirectWatch.$ship}"/>
+                </do_if>
+                <do_if value="typeof DirectWatch.$target != datatype.component and DirectWatch.$target">
+                  <set_value name="DirectWatch.$target" exact="component.{DirectWatch.$target}"/>
+                </do_if>
+                <!-- reset_cue cancels the current OwnerWatch (if any) and
+                     re-arms it with the new target. Without this, each engage
+                     would accumulate a separate listener on a different target. -->
+                <reset_cue cue="OwnerWatch"/>
+              </actions>
+            </cue>
+
+            <!-- Listens for an ownership change on the engaged target and signals
+                 Lua to re-issue the directed fallback. onfail=cancel means the
+                 cue self-cancels if its check_value is false at arm time (i.e.,
+                 DirectWatch.$target is not yet a component). -->
+            <cue name="OwnerWatch" onfail="cancel">
+              <conditions>
+                <check_value value="DirectWatch.$target? and typeof DirectWatch.$target == datatype.component"/>
+              </conditions>
+              <cues>
+                <cue name="OwnerChanged">
+                  <conditions>
+                    <event_object_changed_owner object="DirectWatch.$target"/>
+                  </conditions>
+                  <actions>
+                    <!-- Re-issue only when the ship can no longer attack the
+                         target. An owner change that keeps the target hostile
+                         (faction swap within the enemy set) needs no action;
+                         the engaged list is already correct. mayattack covers
+                         kill relation plus fire-authorisation override, matching
+                         capital.xml:1070 exactly. DirectTargetLost carries the
+                         target component as its scalar so Lua can verify this
+                         event is for the current session's engaged target and
+                         not a stale one from a previous engagement. -->
+                    <do_if value="DirectWatch.$ship? and not DirectWatch.$ship.mayattack.{DirectWatch.$target}">
+                      <raise_lua_event name="'X4GunneryControl.DirectTargetLost'" param="DirectWatch.$target"/>
+                    </do_if>
+                  </actions>
+                </cue>
+              </cues>
+            </cue>
+          </cues>
         </cue>
       </cues>
     </cue>

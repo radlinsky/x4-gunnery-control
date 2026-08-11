@@ -6,6 +6,30 @@ release/RELEASE_NOTES.md by hand; the two audiences read the same text.[/i]
 I never liked the vanilla gunnery control chair - you sit down and get the same
 boring menu. This mod replaces it with a real turret console.
 
+[h2]New in this release[/h2]
+
+[b]New features[/b]
+[list]
+[*][b]All Turrets: Prefer My Target[/b] (new Direct-control button): every turret
+on the ship prefers your selected target, regardless of Mode — including Missile
+Defence, Defend, Mine and Tow turrets. Turrets that are out of range or cannot
+swing round to your target roll to another hostile; turrets where your own hull
+is in the way track the target and hold fire.
+[*][b]Release Other Turrets[/b]: turns off ship-wide "Prefer My Target" mode
+and returns every turret it reached to its own settings.
+[/list]
+
+[b]Bug fixes[/b]
+[list]
+[*]Direct-control now works on M ships that resolve camera view to the ship
+container instead of a dedicated turret camera.
+[*]If a target-view camera attach fails, target selection stays open instead of
+kicking you out of the session.
+[*]Turret groups with duplicate names are now still controllable.
+[*]The group [b]Mode[/b] column now refreshes correctly after
+[b]Cease Engagement[/b].
+[/list]
+
 [h2]What you can do[/h2]
 
 [b]Pick your turret groups.[/b] Every physical turret group gets a row with a
@@ -16,13 +40,30 @@ ship's behaviour tab.
 
 Then two buttons light up:
 
-[b]Auto-engage[/b] - changes nothing. Your turrets keep doing what they were
-already doing. This is just for sitting back and watching them work.
+[b]Auto-engage[/b] - issues no fire orders. Your turrets still choose their own
+targets, but before entering the camera it writes your checked groups' staged
+console settings to the ship (so ticking a group, which sets its Mode to
+[b]Attack all enemies[/b], does take effect for the duration). The camera cycles
+only through the turrets of the checked groups. Everything is reverted when you
+press [b]Get Up[/b].
 
 [b]Direct-control[/b] - you tell the checked groups what to shoot.
 [b]Select Engagement Target[/b] lists ships and stations in radar range; click
 one and its hull is engaged immediately. You can also point every checked group
 at a specific surface element instead - a turret, a shield generator, an engine.
+
+By default in Direct-control, your checked groups focus only your chosen target.
+If that target is out of range for some checked turrets, those turrets can sit
+idle.
+
+When you are in Direct-control, two extra controls are available:
+[b]Other Turrets: Prefer My Target[/b] and [b]Release Other Turrets[/b].
+Prefer My Target pushes every turret on the ship to prefer your target, whatever
+Mode it is in - no exceptions. A Missile Defence turret will shoot your chosen
+ship instead of watching for incoming missiles; a Defend turret will engage a
+target that is not attacking you; Mine and Tow turrets are included too.
+Release Other Turrets is the off switch and returns everything it reached to
+its own settings.
 
 [list]
 [*][b]Auto-next Target when destroyed[/b] is on by default: when the target
@@ -32,6 +73,11 @@ actually manning the gun.
 [*][b]Next Target[/b] / [b]Previous Target[/b] step through the same list
 without reopening the browser.
 [/list]
+
+Ticking a group's checkbox sets that group's Mode to [b]Attack all enemies[/b].
+Everything you change in the console is temporary and undone when you press
+[b]Get Up[/b] - unless you press [b]Update turret behavior[/b] first, which
+makes the changes permanent.
 
 [h2]Four ways to watch[/h2]
 
@@ -49,9 +95,9 @@ changes what is being shot at.
 
 [h2]Leaving the seat[/h2]
 
-[b]Cease Engagement[/b], [b]Get Up[/b], closing the console, undocking, or
-changing ships puts every group back exactly as you found it, and a short popup
-confirms it.
+[b]Get Up[/b], closing the console, undocking, or changing ships puts every
+group back to whatever you last made permanent with [b]Update turret behavior[/b],
+and a short popup confirms it.
 
 [h2]Things to know[/h2]
 
@@ -61,7 +107,10 @@ when to fire, and whether a target is legal to attack. You say [i]what[/i], not
 [i]how[/i].
 [*][b]Turret POV cinematic often clips into your own hull[/b] and looks rough.
 Target POV cinematic is the prettier of the two.
-[*]Cinematic views hide the entire UI, including this mod's panel.
+[*]On some S/M ships, turret target view can resolve to a wider ship-level
+camera framing instead of a tight turret component view.
+[*]If two turret groups share the same name, some member rows or camera picks
+can appear under the sibling label. Commands still apply to the correct group.
 [/list]
 
 [h2]Requirements[/h2]
@@ -72,4 +121,9 @@ Target POV cinematic is the prettier of the two.
 UI Extensions and HUD[/url] 9.00 or newer. This is a hard requirement - X4 will
 not load Gunnery Control without it. Steam lists it as a required item and
 subscribes you to it along with this mod.
+[/list]
+
+[h2]Issues[/h2]
+[list]
+[*][url=https://github.com/radlinsky/x4-gunnery-control/issues]Known issues and bug tracker on GitHub[/url]
 [/list]

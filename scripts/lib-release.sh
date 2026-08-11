@@ -30,6 +30,14 @@ content_xml_version() {
   grep -o 'version="[0-9]*"' "$root/content.xml" | head -1 | grep -o '[0-9]*'
 }
 
+content_xml_version_dotted() {
+  # Inverse of x4_version_int: 30 -> 0.30.  Lets callers that just want "the
+  # version this tree is at" avoid repeating it (CI used to hardcode it and rot).
+  local int
+  int=$(content_xml_version)
+  printf '%d.%02d\n' $(( int / 100 )) $(( int % 100 ))
+}
+
 # copy_extension_files <dest>
 # Copies the complete shipped set of the MAIN extension (not Test Lab) into the
 # directory given as $1.  The directory must already exist.  Behaviour is

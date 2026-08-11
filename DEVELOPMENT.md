@@ -362,6 +362,7 @@ live-fire tests.
 | `scripts/validate.sh` | Full static and unit validation entry point |
 | `scripts/install-dev.sh` | Loose-file installation of the main extension |
 | `scripts/launch-x4-dev.bat` | Windows launcher with development logging arguments |
+| `scripts/validate-windows.ps1` | Windows checkout and launcher command-contract checks used by CI |
 | `scripts/filter-gunnery-log.sh` | Filters main lifecycle, Test Lab, and relevant error records |
 | `scripts/package.sh` | Main Nexus ZIP builder |
 | `scripts/package-testlab.sh` | Developer Test Lab ZIP builder |
@@ -404,6 +405,9 @@ A complete run performs all of the following:
 5. Runs the shell tests, including Test Lab log parsing.
 6. Rejects tracked catalog, Vortex-management, and debug-log artifacts.
 7. Checks the main extension and required UI dependency IDs.
+8. Checks whitespace in the committed branch diff and any staged/unstaged
+   tracked changes. Pull-request CI uses the PR base SHA for the full review
+   diff.
 
 The last line should be:
 
@@ -455,9 +459,13 @@ the current loose XML/Lua/text files. Wiping first ensures files deleted from
 the repository do not linger in the installed copy. It does not install
 Test Lab.
 
-Re-run the installer after every source change that must be tested in X4. A
-full X4 restart is the reliable way to reload UI Lua and extension XML; do not
-assume that loading a save hot-reloads them.
+Re-run the installer after every source change that must be tested in X4. You do
+not need to restart X4 for Lua or MD changes; the Test Lab has Reload UI /
+Reload MD / Reload AI buttons.
+
+**[docs/RELOADING.md](docs/RELOADING.md) is the authoritative answer to "reload
+or restart?"** — which button for which file, what needs a full restart, and why.
+Do not restate that table here; it exists in one place so it cannot drift.
 
 On Windows, the launcher (`launch-x4-dev.bat`) runs `install-dev.sh`
 automatically before starting X4, so you do not need to run it by hand first
@@ -522,6 +530,11 @@ scripts\launch-x4-dev.bat
 The launcher exits `0` on success, `2` when `X4.exe` was not found, `3` when
 Windows failed to start X4, and `4` when the install step failed.
 
+CI runs the batch launchers only through their deterministic missing-`X4.exe`
+path, from a directory containing spaces. It proves quoting and error handling,
+not a real WSL installation or an X4 launch. Installing WSL, locating the game,
+and running the in-game matrix remain an owner-tested Windows task.
+
 The launcher validates `X4.exe`, sets the game directory as the working
 directory, and adds these parameters (with the resolved log directory printed
 first):
@@ -570,6 +583,24 @@ rg '\[X4GC TEST\]' "/path/to/debug.log"
 rg -i 'error|exception|ffi|x4_gunnery' "/path/to/debug.log"
 ```
 
+To watch the log while you play instead of reading it afterwards, set
+`X4GC_TAIL_LOG=1` before running `launch-x4-dev.bat`. It opens a second window
+running `scripts/tail-gunnery-log.sh`, which finds the log itself and prints
+matching lines as they arrive. Two details in it are deliberate:
+
+- It starts *before* X4 and skips whatever is already in the file, announcing
+  `--- skipping N bytes from the previous run ---`. The file on disk at that
+  moment is the previous run; printing it replays a finished session as if it
+  were live, which has already cost one debugging session. When X4 truncates,
+  the new run is shown from its first line.
+- It tracks a byte offset rather than consulting the file size. Size and mtime
+  go stale while X4 holds the handle open, which is why `tail -f` does not work
+  here.
+
+Run it by hand with a path argument (`./scripts/tail-gunnery-log.sh /path/to/debug.log`)
+from WSL or Linux. It only ever shows lines written after it started; use
+`filter-gunnery-log.sh` to read a log that is already finished.
+
 Use `[X4GC]` for main-extension diagnostics and `[X4GC TEST]` for structured
 Test Lab records. Lifecycle diagnostics record the transition reason, ownership
 state, visual phase, chair/ship context, camera focus, and pause state when the
@@ -590,7 +621,8 @@ For each small change:
 6. Run the focused Lua test.
 7. Run `./scripts/validate.sh`.
 8. Re-run `install-dev.sh` (or just launch via `launch-x4-dev.bat`, which
-   runs the install automatically) and restart X4 for an in-game check.
+   runs the install automatically), then either restart X4 or use the Test Lab
+   reload buttons for an in-game check.
 9. Inspect `debug.log`, even when the menu appears to work.
 10. Run the relevant lifecycle and target-preservation cases from
     [TESTING.md](TESTING.md).
@@ -680,8 +712,8 @@ APIs.
 Build both archives:
 
 ```bash
-./scripts/package.sh 0.20
-./scripts/package-testlab.sh 0.20
+./scripts/package.sh
+./scripts/package-testlab.sh
 ```
 
 Extract both top-level extension directories beside one another:
@@ -739,8 +771,8 @@ save.
 The package builders always validate first. Build with the intended version:
 
 ```bash
-./scripts/package.sh 0.20
-./scripts/package-testlab.sh 0.20
+./scripts/package.sh
+./scripts/package-testlab.sh
 ```
 
 Inspect the archives before distributing them:
@@ -805,7 +837,7 @@ the in-game camera, lifecycle, target-preservation, or live-fire checks.
 |---|---|
 | `validate.sh` says a check was skipped | Install the named Lua or ShellCheck dependency and run it again. |
 | `install-dev.sh` rejects the game path | Point it at the directory containing `X4.exe`/`X4` and `extensions`, not at the extension folder. |
-| Changes do not appear in X4 | On Windows the launcher runs `install-dev.sh` automatically; on Linux run it manually. Use `launch-x4-dev.bat` on Windows or add `-prefersinglefiles` on Linux, verify the enabled extension, and fully restart X4. |
+| Changes do not appear in X4 | On Windows the launcher runs `install-dev.sh` automatically; on Linux run it manually. Use `launch-x4-dev.bat` on Windows or add `-prefersinglefiles` on Linux, verify the enabled extension, and either use the Test Lab reload buttons or fully restart X4. Reloads read from disk, so the installer must run first. |
 | `launch-x4-dev.bat` cannot find X4 | Pass the installation folder or full `X4.exe` path, or set `X4GC_GAME_ROOT` for a custom Steam library. |
 | No development log can be found | Use the directory printed by `launch-x4-dev.bat`; `debug.log` lands in X4's userdata folder under `Documents\Egosoft\X4\<numeric-id>\`. Confirm `-logfile debug.log` is present and unquoted: X4 writes nothing at all when it is missing or quoted. A stale `INVALID.FILENAME` beside it means an absolute path was passed instead of a bare filename. Remember that each launch truncates the previous log. |
 | Gunnery Control does not open | Confirm UI Extensions 9.00+, follow its current Protected UI Mode guidance, fully restart X4, and inspect `[X4GC]`/Lua errors. |
@@ -840,9 +872,14 @@ disagree — by design. The bump order that makes it go green:
 1. Add `## [MAJOR.MINOR] - DATE` as the new top heading in `CHANGELOG.md` with
    the release notes beneath it.
 2. Update `content.xml`'s `version` integer and `date` to match.
+3. Review `release/RELEASE_NOTES.md` and `release/workshop-description.bbcode`.
+   Both are player-facing and intentionally versionless; update them when the
+   release adds features or changes the user-visible behaviour. The Workshop
+   description is edited on the website and survives every tool run; keep the
+   in-repo copy in step.
 
-Do them together in one commit. Pushing either change alone leaves the repo
-red.
+Do steps 1–2 together in one commit. Pushing either change alone leaves the
+repo red. Step 3 can be the same commit or a preceding one.
 
 ### Tag and GitHub release
 

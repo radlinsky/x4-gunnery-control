@@ -7,6 +7,27 @@ The technical record is CHANGELOG.md; this is what a player reads.
 I never liked the vanilla gunnery control chair — you sit down and get the same
 boring menu. This mod replaces it with a real turret console.
 
+## New in this release
+
+- **New features**
+- **All Turrets: Prefer My Target** Normally, only the turret group(s)
+  you selected to control will try and fire at your target. If your target
+  goes out of range from any of your selected turrets, those turrets will sit idle.
+  This button tells **every** turret on the ship to prefer your chosen target,
+  regardless of Mode — including Missile Defence, Defend, Mine and Tow turrets.
+  Turrets that are out of range or cannot swing round to your target will roll
+  to another hostile; turrets where your own hull is in the way will track the
+  target and hold fire.
+- **Release Other Turrets** Turns off the ship-wide "Prefer my target" mode
+  and returns every turret this button reached back to its own settings.
+
+- **Bug fixes**
+- Direct-control now works on M ships lacking a turret camera.
+- If the camera cannot attach for a target-view request, target selection stays
+  open so you can continue playing instead of being kicked out.
+- Turret groups with duplicate names are now still controllable.
+- The group **Mode** column now refreshes correctly after **Cease Engagement**.
+
 ## What you can do
 
 **Pick your turret groups.** Every physical turret group gets a row with a
@@ -17,8 +38,11 @@ behaviour tab.
 
 Then two buttons light up:
 
-**Auto-engage** — changes nothing. Your turrets keep doing what they were
-already doing. This is just for sitting back and watching them work.
+**Auto-engage** — issues no fire orders. Your turrets still choose their own
+targets, but before entering the camera it writes your checked groups' staged
+console settings to the ship (so ticking a group, which sets its Mode to **Attack
+all enemies**, does take effect for the duration). The camera cycles only through
+the turrets of the checked groups. Everything is reverted when you get up.
 
 **Direct-control** — you tell the checked groups what to shoot.
 **Select Engagement Target** lists ships and stations in radar range; click one
@@ -31,6 +55,18 @@ specific surface element instead — a turret, a shield generator, an engine.
   actually manning the gun.
 - **Next Target** / **Previous Target** step through the same list without
   reopening the browser.
+- **Other Turrets: Prefer My Target** pushes every turret on the ship to prefer
+  your target, whatever Mode it is in — no exceptions. That means a Missile
+  Defence turret will shoot your chosen ship instead of watching for incoming
+  missiles, and a Defend turret will engage a target that is not attacking you.
+  Mine and Tow turrets are included too.
+- **Release Other Turrets** turns that ship-wide preference back off and
+  returns everything it reached to its own settings.
+
+A few things to know: ticking a group's checkbox sets that group's Mode to
+**Attack all enemies**. Everything you change in the console is temporary and
+undone when you press **Get Up**, unless you press **Update turret behavior**
+first, which makes the changes permanent.
 
 ## Four ways to watch
 
@@ -46,9 +82,9 @@ specific surface element instead — a turret, a shield generator, an engine.
 
 ## Leaving the seat
 
-**Cease Engagement**, **Get Up**, closing the console, undocking, or changing
-ships puts every group back exactly as you found it, and a short popup confirms
-it.
+**Get Up**, closing the console, undocking, or changing ships puts every group
+back to whatever you last made permanent with **Update turret behavior**, and a
+short popup confirms it.
 
 ## Things to know
 
@@ -60,6 +96,11 @@ it.
 - **The camera's aim point is a good guess.** X4 offers no way to ask a turret
   what it is shooting at, so the mod picks the most likely target the same way
   the game would. Usually right, occasionally not.
+- On some S/M ships, a turret-target camera request can resolve to a wider
+  ship-level view instead of a tight turret component view.
+- If two turret groups share the same name, member rows can appear under the
+  wrong name and Direct-control can open the camera on a sibling group's
+  representative turret. Commands still apply to the correct group.
 - Cinematic views hide the entire UI, including this mod's panel.
 
 ## Requirements
