@@ -9,12 +9,21 @@ printf '%s\n' \
   '[X4GC] transition event=menu_show lifecycle=owned phase=console' \
   '[X4GC TEST] turret_result ship=1' \
   '[X4GC TEST SCENARIO] capture done; owner=faction.player' \
+  '[X4GC TEST STATE] t=1234.5 pilot=attackobject hardtgt=1637331' \
+  '[X4GC TEST SOLUTION] t=1234.5 turret=99 mode=holdfire los_ex=true inrange=true' \
+  '[X4GC TEST MARK] label=hold_fire_shot t=1234.5' \
   'Error x4_gunnery example' > "$fixture"
 
 output=$(./scripts/filter-gunnery-log.sh "$fixture")
 grep -Fq '[X4GC] transition event=menu_show' <<< "$output"
 grep -Fq '[X4GC TEST] turret_result' <<< "$output"
 grep -Fq '[X4GC TEST SCENARIO] capture done' <<< "$output"
+# The fire-control observability prefixes. These are the regression guard for
+# the open-ended TEST branch in the pattern; if someone narrows it back to an
+# enumeration, these three fail rather than silently vanishing from captures.
+grep -Fq '[X4GC TEST STATE] t=1234.5' <<< "$output"
+grep -Fq '[X4GC TEST SOLUTION] t=1234.5' <<< "$output"
+grep -Fq '[X4GC TEST MARK] label=hold_fire_shot' <<< "$output"
 grep -Fq 'Error x4_gunnery example' <<< "$output"
 if grep -Fq 'unrelated line' <<< "$output"; then
   echo "filter retained an unrelated line" >&2

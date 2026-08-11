@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Gunnery Control Test Lab - Fire-Control Observability Logger
+  Developer-only.  Belongs in testlab, NOT in the shipped mod.
+
+  PURPOSE
+  docs/FIRE_CONTROL_BEHAVIOR.md carries rows marked UNTESTED and UNKNOWN,
+  mostly the "Prefer My Target ON" column.  They are unresolved because there
+  was no way to see, after the fact, what the turrets were doing at an
+  interesting moment.  This script samples turret fire-control state during
+  ordinary free play so a capture can be read back and a row promoted to LIVE.
+
+  WHY THIS LIVES IN MD AND NOT IN LUA
+  docs/HANDOFF-fire-control-observability.md section 3 proposed two cooperating
+  loggers, a Lua state sampler plus an MD firing-solution prober.  MD turned out
+  to read almost the entire field list natively, so the Lua half collapsed away:
+
+    player.age                          timestamp, the only MD clock
+    player.ship.pilot.command           matches Lua aicommandraw exactly
+    player.target                       props-9.00/.../scriptproperties.xml:2438
+    player.ship.turrets.operational.list             scriptproperties.xml:539
+    $turret.mode                                     scriptproperties.xml:1448
+    $target.lastattacker / .lastattacktime      scriptproperties.xml:187-188
+    $turret.rotation.yaw / .pitch                 scriptproperties.xml:58-60
+
+  $turret.mode is strictly better than the Lua group-level read the handoff
+  assumed: it resolves holdfire and autoassist per turret, which
+  GetTurretGroupMode2 does not distinguish.  $target.lastattacker likewise
+  supersedes GetLastAttackInfo and needs no ffi, which matters because
+  testlab/ui/testlab.lua deliberately contains zero require("ffi") and zero C.
+  calls.  Keeping it that way is why only two fields are pushed in from Lua.
+
+  Running in MD also means the sampler ticks with every menu closed, which is
+  the entire free-play use case.  A Lua timer's ability to fire frameless was
+  never verified; here it is a nice-to-have rather than load-bearing.
+
+  TRANSPORT
+  Same flat-scalar contract as the scenario script: the engine prepends '$' to
+  every Lua string key (research KB, "Lua->MD AddUITriggeredEvent transport
+  contract", live-tested 2026-08-04).  Component ids arrive as components
+  because Lua converts them with ConvertStringToLuaID.
+
+    observe_toggle {enabled = true|false}
+    observe_mark   {}
+    observe_state  {softtgt =, aimtgt =, prefer = true|false}
+
+  observe_state is only sent while a Direct-control session exists.  In plain
+  free play it never arrives and the log simply carries player.target, which is
+  correct rather than degraded.
+
+  TWO OPEN QUESTIONS THIS SCRIPT ANSWERS FROM ITS OWN OUTPUT
+  1. excludeself semantics.  common.xsd:21722 declares default="false" while its
+     own documentation string says "True by default" - a contradiction in the
+     shipped schema that no live test has settled.  Rather than guess, every
+     turret is raycast TWICE, logged as los_ex and los_inc.  One capture
+     containing a turret shooting through open space and a turret masked by the
+     player's own hull settles it with no throwaway probe cue.
+  2. Live barrel or mounted base.  scriptproperties.xml:58 documents rotation as
+     "relative to parent", which for a turret is traverse angle relative to the
+     hull, exactly the wanted quantity.  componentslot has a .rotation versus
+     .staticrotation split where staticrotation is annotated "ignoring offset
+     changes due to animation" (scriptproperties.xml:1483-1486), implying plain
+     .rotation does include animation, but that is inference.  Logging yaw and
+     pitch every sample answers it directly: swing the ship hard and read
+     whether the numbers move.
+
+     yaw and pitch are logged rather than rotation.forward.x/y/z because they
+     are documented angle members certain to exist, and an unparseable property
+     expression kills an MD cue silently.  The full geometric cone test is a
+     later refinement, only if the barrel proves live AND los plus range turns
+     out to be insufficient.
+
+  VOCABULARY
+  Deliberately NOT classified here.  los_ex, los_inc and inrange are logged as
+  raw booleans and the analyst maps them to ON SOLUTION / OUT OF RANGE / MASKED
+  / OUT OF ARC.  Pre-labelling a line MASKED before question 1 is settled would
+  bake in a guess.  check_line_of_sight is fine as an API name; the condition
+  names are the four above and nothing else.
+
+  RELOAD NOTE: any change to THIS file requires a full game restart, because
+  testlab/ md is only reloadable together with the rest of the extension.
+  See docs/RELOADING.md.
+-->
+<mdscript name="X4GunneryTestLabObserve" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../../#modding/xsd/md.xsd">
+  <cues>
+    <cue name="ObserveRoot">
+      <actions>
+        <!-- Off by default.  A long play session must not flood debug.log
+             because the extension happens to be installed; nothing is written
+             until the owner arms it from the Test Lab menu. -->
+        <set_value name="$Enabled" exact="false"/>
+        <set_value name="$MarkCount" exact="0"/>
+        <set_value name="$Prefer" exact="false"/>
+      </actions>
+      <cues>
+
+        <!-- ObserveToggle
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_toggle",
+               {enabled = true|false})
+             The master switch.  Resetting ObserveLoop is what actually starts
+             sampling: the loop parks on an unsatisfied condition while
+             disabled, so it needs a kick to re-evaluate. -->
+        <cue name="ObserveToggle" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_toggle'"/>
+          </conditions>
+          <actions>
+            <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
+            <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
+            <do_if value="ObserveRoot.$Enabled">
+              <reset_cue cue="ObserveLoop"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <!-- ObserveMark
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
+             Stamps the interesting instant so the window is greppable
+             afterwards.  The label is generated here as an incrementing
+             counter rather than typed by the owner: mid-combat the whole point
+             is one click, and "which mark was that" is answered by reading the
+             surrounding lines.  Marks are accepted even while logging is off,
+             so a mark is never silently swallowed. -->
+        <cue name="ObserveMark" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_mark'"/>
+          </conditions>
+          <actions>
+            <set_value name="ObserveRoot.$MarkCount" exact="ObserveRoot.$MarkCount + 1"/>
+            <debug_text text="'[X4GC TEST MARK] label=mark_' + ObserveRoot.$MarkCount + ' enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
+          </actions>
+        </cue>
+
+        <!-- ObserveState
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state",
+               {softtgt =, aimtgt =, prefer = true|false})
+             The only two facts MD cannot see for itself: the engine SOFT target
+             (MD has player.target and no soft equivalent - scriptproperties.xml
+             has no player.softtarget at all) and the mod session's
+             preferAllTurrets / aimTargetID.  Pushed from Lua only while a
+             Direct-control session exists. -->
+        <cue name="ObserveState" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_state'"/>
+          </conditions>
+          <actions>
+            <set_value name="ObserveRoot.$SoftTarget" exact="@event.param3.$softtgt"/>
+            <set_value name="ObserveRoot.$AimTarget" exact="@event.param3.$aimtgt"/>
+            <set_value name="ObserveRoot.$Prefer" exact="@event.param3.$prefer == true"/>
+          </actions>
+        </cue>
+
+        <!-- ObserveLoop
+             The sampler.  checkinterval paces it AND re-polls the gate: a
+             condition-only cue with no checkinterval is not re-evaluated on its
+             own, so an $Enabled that flips to true after this cue first failed
+             its condition could otherwise never be noticed.  ObserveToggle also
+             resets it, which only makes arming take effect at once instead of
+             up to a second later.  Ending in reset_cue re-arms for the next
+             tick (both idioms are heavily attested in shipped md/: 128 uses of
+             reset_cue cue="this", 262 of checkinterval="1s").
+
+             1s is a deliberate compromise: fast enough that a turret going
+             silent is visible, slow enough that the per-turret raycast sweep
+             stays affordable.  Vanilla's own solution check breaks on the first
+             hit, so an all-turrets sweep is strictly more expensive than
+             anything the engine does (md-ai.md:49) - hence the hard $Enabled
+             gate and the idle path when there is no target. -->
+        <cue name="ObserveLoop" checkinterval="1s">
+          <conditions>
+            <check_value value="ObserveRoot.$Enabled"/>
+          </conditions>
+          <actions>
+            <!-- player.occupiedship is null in a gunnery chair - it means "in
+                 the PILOT seat" (scriptproperties.xml:2416), and the whole mod
+                 exists for the case where the player is not in it.  player.ship
+                 is the enclosing ship context and is the correct read here. -->
+            <do_if value="player.ship">
+              <set_value name="$Ship" exact="player.ship"/>
+
+              <!-- The soft target is what Direct-control actually aims at, so
+                   it wins when present.  Falling back to player.target is what
+                   makes plain free play work with no Lua involvement at all. -->
+              <set_value name="$Target" exact="null"/>
+              <do_if value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+              </do_if>
+              <do_elseif value="player.target?">
+                <set_value name="$Target" exact="player.target"/>
+              </do_elseif>
+
+              <set_value name="$Now" exact="player.age"/>
+
+              <!-- One STATE line per sample.  hardtgt and softtgt are logged
+                   separately on purpose: auto-assist follows the locked target
+                   while Direct-control aims at the selected one, and the
+                   divergence between them is itself a thing to catch. -->
+              <debug_text text="'[X4GC TEST STATE] t=' + $Now
+                + ' ship=' + $Ship
+                + ' shipname=' + $Ship.knownname
+                + ' pilot=' + (if $Ship.pilot? then $Ship.pilot.command else 'none')
+                + ' hardtgt=' + (if player.target? then player.target else 'none')
+                + ' softtgt=' + (if ObserveRoot.$SoftTarget? then ObserveRoot.$SoftTarget else 'none')
+                + ' aimtgt=' + (if ObserveRoot.$AimTarget? then ObserveRoot.$AimTarget else 'none')
+                + ' prefer=' + ObserveRoot.$Prefer
+                + ' tgt=' + (if $Target then $Target else 'none')
+                + ' tgtname=' + (if $Target then $Target.knownname else 'none')
+                + ' lasthit_by=' + (if $Target and $Target.lastattacker? then $Target.lastattacker else 'none')
+                + ' lasthit_t=' + (if $Target then $Target.lastattacktime else -1)
+                + ' turrets=' + $Ship.turrets.operational.count"/>
+
+              <!-- No target means there is nothing to compute a solution
+                   against, so the sweep is skipped entirely and only the cheap
+                   STATE line is written.  This is the idle path during
+                   ordinary flight. -->
+              <do_if value="$Target">
+                <do_for_each name="$Turret" in="$Ship.turrets.operational.list">
+                  <!-- Both raycasts, every turret, every sample.  See the
+                       excludeself note in the file header: the shipped schema
+                       contradicts itself about the default, so the log carries
+                       both answers and the capture settles it. -->
+                  <check_line_of_sight name="$LosEx" object="$Turret" target="$Target" excludeself="true" useaimtarget="true"/>
+                  <check_line_of_sight name="$LosInc" object="$Turret" target="$Target" excludeself="false" useaimtarget="true"/>
+
+                  <!-- The engine's own definition of in-range, verbatim from
+                       shipped combat AI: distance plus half the target's size
+                       under max fire range (md-ai.md:47-50).  There is no arc
+                       term anywhere in vanilla's firing-solution test. -->
+                  <set_value name="$Dist" exact="$Turret.distanceto.{$Target}"/>
+                  <set_value name="$InRange" exact="$Dist + ($Target.size / 2) lt $Turret.maxfirerange"/>
+
+                  <debug_text text="'[X4GC TEST SOLUTION] t=' + $Now
+                    + ' turret=' + $Turret
+                    + ' mode=' + $Turret.mode
+                    + ' los_ex=' + $LosEx
+                    + ' los_inc=' + $LosInc
+                    + ' inrange=' + $InRange
+                    + ' dist=' + $Dist
+                    + ' maxrange=' + $Turret.maxfirerange
+                    + ' tgtsize=' + $Target.size
+                    + ' yaw=' + $Turret.rotation.yaw
+                    + ' pitch=' + $Turret.rotation.pitch"/>
+                </do_for_each>
+              </do_if>
+            </do_if>
+            <reset_cue cue="this"/>
+          </actions>
+        </cue>
+
+      </cues>
+    </cue>
+  </cues>
+</mdscript>

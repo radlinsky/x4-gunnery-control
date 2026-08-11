@@ -6,7 +6,12 @@ set -euo pipefail
 # [X4GC TEST SCENARIO] is the spawner's own prefix. It was excluded until
 # 2026-08-10 purely because the pattern demanded a "]" straight after "TEST",
 # which silently hid every spawn and capture line from the filtered log.
-X4GC_LOG_PATTERN='\[X4GC( TEST( SCENARIO)?)?\]|[Ee]rror.*(X4GC|x4_gunnery)|[Ee]xception.*(X4GC|x4_gunnery)'
+# The TEST branch is therefore open-ended rather than an enumeration of known
+# sub-prefixes: adding STATE, SOLUTION and MARK by name would have re-armed the
+# exact same trap for the next prefix anyone invents. [^]]* stops at the closing
+# bracket, so this still cannot swallow an unrelated line that merely mentions
+# X4GC further along.
+X4GC_LOG_PATTERN='\[X4GC( TEST[^]]*)?\]|[Ee]rror.*(X4GC|x4_gunnery)|[Ee]xception.*(X4GC|x4_gunnery)'
 [[ "${BASH_SOURCE[0]}" != "${0}" ]] && return 0
 
 if [[ $# -ne 1 ]]; then
