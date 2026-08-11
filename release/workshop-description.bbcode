@@ -1,4 +1,4 @@
-]633;E;cat <<'EOF'\x0a[i]Paste this into the Workshop item's description field on the website.\x0aWorkshopTool ignores name and description on update unless -namedesc up is\x0apassed, so what you paste there survives every release. Keep it in step with\x0arelease/RELEASE_NOTES.md by hand\x3b the two audiences read the same text.[/i]\x0a\x0aEOF\x0a;c880c50b-dcdb-4560-9b79-d61cf7a76748]633;C[i]Paste this into the Workshop item's description field on the website.
+[i]Paste this into the Workshop item's description field on the website.
 WorkshopTool ignores name and description on update unless -namedesc up is
 passed, so what you paste there survives every release. Keep it in step with
 release/RELEASE_NOTES.md by hand; the two audiences read the same text.[/i]
@@ -10,14 +10,13 @@ boring menu. This mod replaces it with a real turret console.
 
 [b]New features[/b]
 [list]
-[*][b]All Turrets: Prefer My Target[/b] (new Direct-control button): every combat turret
-that can hit your selected target will do so, including turrets outside your
-checked groups. Turrets that cannot fire on that target will still engage valid
-in-range hostiles instead of sitting idle.
-[*][b]Release Other Turrets[/b]: turns off ship-wide "Prefer My Target" mode.
-Non-selected turrets return to normal behavior, and selected turrets return to
-default Direct-control behavior (they focus your chosen target and can go idle
-if that target is out of range).
+[*][b]All Turrets: Prefer My Target[/b] (new Direct-control button): every turret
+on the ship prefers your selected target, regardless of Mode — including Missile
+Defence, Defend, Mine and Tow turrets. Turrets that are out of range or cannot
+swing round to your target roll to another hostile; turrets where your own hull
+is in the way track the target and hold fire.
+[*][b]Release Other Turrets[/b]: turns off ship-wide "Prefer My Target" mode
+and returns every turret it reached to its own settings.
 [/list]
 
 [b]Bug fixes[/b]
@@ -41,8 +40,12 @@ ship's behaviour tab.
 
 Then two buttons light up:
 
-[b]Auto-engage[/b] - changes nothing. Your turrets keep doing what they were
-already doing. This is just for sitting back and watching them work.
+[b]Auto-engage[/b] - issues no fire orders. Your turrets still choose their own
+targets, but before entering the camera it writes your checked groups' staged
+console settings to the ship (so ticking a group, which sets its Mode to
+[b]Attack all enemies[/b], does take effect for the duration). The camera cycles
+only through the turrets of the checked groups. Everything is reverted when you
+press [b]Get Up[/b].
 
 [b]Direct-control[/b] - you tell the checked groups what to shoot.
 [b]Select Engagement Target[/b] lists ships and stations in radar range; click
@@ -54,13 +57,13 @@ If that target is out of range for some checked turrets, those turrets can sit
 idle.
 
 When you are in Direct-control, two extra controls are available:
-[b]All Turrets: Prefer My Target[/b] and [b]Release Other Turrets[/b].
-Prefer My Target pushes every combat turret on the ship to prefer your target;
-turrets that cannot hit it can still shoot other valid in-range hostiles.
-Release Other Turrets turns that ship-wide preference back off: non-selected
-turrets return to normal logic, and selected turrets go back to default
-Direct-control behavior (which can mean idle when your chosen target is out of
-range).
+[b]Other Turrets: Prefer My Target[/b] and [b]Release Other Turrets[/b].
+Prefer My Target pushes every turret on the ship to prefer your target, whatever
+Mode it is in - no exceptions. A Missile Defence turret will shoot your chosen
+ship instead of watching for incoming missiles; a Defend turret will engage a
+target that is not attacking you; Mine and Tow turrets are included too.
+Release Other Turrets is the off switch and returns everything it reached to
+its own settings.
 
 [list]
 [*][b]Auto-next Target when destroyed[/b] is on by default: when the target
@@ -70,6 +73,11 @@ actually manning the gun.
 [*][b]Next Target[/b] / [b]Previous Target[/b] step through the same list
 without reopening the browser.
 [/list]
+
+Ticking a group's checkbox sets that group's Mode to [b]Attack all enemies[/b].
+Everything you change in the console is temporary and undone when you press
+[b]Get Up[/b] - unless you press [b]Update turret behavior[/b] first, which
+makes the changes permanent.
 
 [h2]Four ways to watch[/h2]
 
@@ -87,9 +95,9 @@ changes what is being shot at.
 
 [h2]Leaving the seat[/h2]
 
-[b]Cease Engagement[/b], [b]Get Up[/b], closing the console, undocking, or
-changing ships puts every group back exactly as you found it, and a short popup
-confirms it.
+[b]Get Up[/b], closing the console, undocking, or changing ships puts every
+group back to whatever you last made permanent with [b]Update turret behavior[/b],
+and a short popup confirms it.
 
 [h2]Things to know[/h2]
 

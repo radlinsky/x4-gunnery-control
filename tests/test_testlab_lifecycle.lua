@@ -114,11 +114,11 @@ local function loadHarness(spec)
             session.cameraMemberID = 27
         end
         if spec.direct then
-            session.directSnapshots = { {
+            session.committedBaseline = { {
                 shipID = session.shipID, kind = "group", contextID = 5,
                 path = "p", group = "g", mode = "attack", armed = false,
             } }
-            -- Direct owns the group as autoassist/armed while the snapshot
+            -- Direct owns the group as autoassist/armed while the baseline
             -- retains the exact settings that later teardown must restore.
             groupMode, groupArmed = "autoassist", true
         end
@@ -185,18 +185,18 @@ for _, spec in ipairs(standardCloseCases) do
     assert(writesAfterResume.mode == 0 and writesAfterResume.armed == 0,
         "resuming " .. spec.label .. " must not restore turret settings")
     if spec.direct then
-        assert(#session.directSnapshots == 1,
-            spec.label .. " must retain ownership of its matching Direct snapshot")
-        local snapshot = session.directSnapshots[1]
+        assert(#session.committedBaseline == 1,
+            spec.label .. " must retain the matching committedBaseline entry")
+        local snapshot = session.committedBaseline[1]
         assert(#session.groups == 1 and session.groups[1].kind == "group",
             spec.label .. " must retain the matching live turret group")
         assert(tostring(session.groups[1].contextID) == "5"
             and session.groups[1].path == "p" and session.groups[1].group == "g",
-            spec.label .. " live turret group must still match its snapshot locator")
+            spec.label .. " live turret group must still match its baseline locator")
         assert(snapshot.shipID == session.shipID and snapshot.contextID == 5
             and snapshot.path == "p" and snapshot.group == "g"
             and snapshot.mode == "attack" and snapshot.armed == false,
-            spec.label .. " must preserve the original Direct snapshot unchanged")
+            spec.label .. " must preserve the original committedBaseline entry unchanged")
 
         harness.fix.API.endForMovement()
         local teardownWrites = harness.getWrites()
@@ -205,8 +205,10 @@ for _, spec in ipairs(standardCloseCases) do
         assert(teardownWrites.mode == 1 and teardownWrites.armed == 1,
             spec.label .. " must restore mode and armed exactly once at later teardown; got "
             .. tostring(teardownWrites.mode) .. "/" .. tostring(teardownWrites.armed))
-        assert(#session.directSnapshots == 0,
-            spec.label .. " teardown must release snapshot ownership")
+        -- committedBaseline persists for the session lifetime (never cleared by releaseDirect).
+        -- Correct teardown is confirmed by the turret-write counts above and getSession() == nil.
+        assert(#session.committedBaseline == 1,
+            spec.label .. " teardown must leave committedBaseline intact (revert data is not erased)")
     end
 end
 
@@ -287,8 +289,9 @@ do
     assert(events[2].params.macro == "ship_xen_s_fighter_01_a_macro"
         and events[2].params.faction == "xenon" and events[2].params.count == 1
         and events[2].params.distance == 4000 and events[2].params.behaviour == "wait"
-        and events[2].params.hostile == true and events[2].params.spread == 0,
-        "group payload must carry the spec values, with spread defaulted to 0")
+        and events[2].params.hostile == true and events[2].params.spread == 0
+        and events[2].params.x == 0 and events[2].params.y == 0,
+        "group payload must carry the spec values, with spread/x/y defaulted to 0")
     assert(events[3].params.count == 2 and events[3].params.behaviour == "none"
         and events[3].params.hostile == false,
         "a non-hostile group must send hostile=false rather than nil")
@@ -297,6 +300,41 @@ do
             "no event may carry a nested table; MD only accepts flat scalars")
     end
     assert(events[4].control == "scenario_commit", "last event must be scenario_commit")
+end
+
+-- x/y bearing offsets: when set they are forwarded as scalars; when omitted
+-- they default to 0.  Both cases must still produce a flat (non-nested) payload.
+do
+    -- With x and y explicitly set.
+    local harness = loadHarness({
+        id = "bearing-explicit",
+        enabled = true,
+        groups = {
+            { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+              count = 1, distance = 3000, x = 1500, y = -800, behaviour = "wait" },
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 3, "bearing spec must fire begin + 1 group + commit; got " .. #events)
+    assert(events[2].params.x == 1500 and events[2].params.y == -800,
+        "explicit x/y must be forwarded in the group payload")
+    assert(type(events[2].params.x) == "number" and type(events[2].params.y) == "number",
+        "x and y must be numbers in the payload")
+end
+do
+    -- With x and y omitted: must default to 0, not nil.
+    local harness = loadHarness({
+        id = "bearing-omitted",
+        enabled = true,
+        groups = {
+            { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+              count = 1, distance = 3000, behaviour = "wait" },
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 3, "omitted-bearing spec must fire begin + 1 group + commit; got " .. #events)
+    assert(events[2].params.x == 0 and events[2].params.y == 0,
+        "omitted x/y must default to 0 in the group payload")
 end
 
 -- A disabled spec is inert: it stays on disk but a Reload UI spawns nothing.

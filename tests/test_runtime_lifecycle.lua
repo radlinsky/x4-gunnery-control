@@ -99,8 +99,7 @@ gcMenu.onShowMenu()
 local sess44a = API.getSession()
 assert(sess44a ~= nil, "expected session for notify test (44a)")
 sess44a.phase = "console"
-sess44a.directSnapshots = { { kind = "group", contextID = 0, path = "fake", group = "grp",
-    shipID = sess44a.shipID, mode = "attack", armed = true, componentID = 55 } }
+sess44a.controlMode = "direct"
 AddUITriggeredEvent = function(screen, control, params)
     capturedEvents44[#capturedEvents44 + 1] = { screen = screen, control = control, params = params }
 end
@@ -110,11 +109,11 @@ for _, e in ipairs(capturedEvents44) do
     if e.screen == "X4GunneryControl" and e.control == "notify" then notifyEvA = e; break end
 end
 assert(notifyEvA ~= nil,
-    "leaveChair must emit AddUITriggeredEvent('X4GunneryControl','notify',...) when direct snapshots were held")
+    "leaveChair must emit AddUITriggeredEvent('X4GunneryControl','notify',...) when in direct mode")
 assert(type(notifyEvA.params) == "table",
     "notify event params must be a table")
 assert(notifyEvA.params["text"] == ReadText(20991, 79),
-    "notify text with direct snapshots must be ReadText(20991, 79) (restored-settings); got: "
+    "notify text with direct controlMode must be ReadText(20991, 79) (restored-settings); got: "
     .. tostring(notifyEvA.params["text"]))
 
 -- 44b: session WITHOUT direct snapshots.
@@ -123,7 +122,7 @@ gcMenu.onShowMenu()
 local sess44b = API.getSession()
 assert(sess44b ~= nil, "expected session for notify test (44b)")
 sess44b.phase = "console"
--- directSnapshots is empty by default from onShowMenu.
+-- controlMode is nil by default from onShowMenu.
 AddUITriggeredEvent = function(screen, control, params)
     capturedEvents44b[#capturedEvents44b + 1] = { screen = screen, control = control, params = params }
 end
@@ -133,7 +132,7 @@ for _, e in ipairs(capturedEvents44b) do
     if e.screen == "X4GunneryControl" and e.control == "notify" then notifyEvB = e; break end
 end
 assert(notifyEvB ~= nil,
-    "leaveChair must emit AddUITriggeredEvent('X4GunneryControl','notify',...) when no direct snapshots were held")
+    "leaveChair must emit AddUITriggeredEvent('X4GunneryControl','notify',...) when not in direct mode")
 assert(notifyEvB.params["text"] == ReadText(20991, 80),
     "notify text without direct snapshots must be ReadText(20991, 80) (disengaged); got: "
     .. tostring(notifyEvB.params["text"]))

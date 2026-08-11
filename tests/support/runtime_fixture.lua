@@ -197,6 +197,7 @@ function M.load()
     local allFrames         = {}
     local createdButtons    = {}
     local createdCheckBoxes = {}
+    local createdDropDowns  = {}
     local clearedFrames     = {}
     local closeMenuCalls    = 0
     -- Teardown calls in order: "clear<layer>" / "close". Ordering is the whole
@@ -245,6 +246,7 @@ function M.load()
             frameProps        = {}
             createdButtons    = {}
             createdCheckBoxes = {}
+            createdDropDowns  = {}
         end,
         -- Layers passed to Helper.clearFrame since the test last reset the list.
         clearFrame              = function(m, layer)
@@ -303,7 +305,9 @@ function M.load()
                                             handlers = cell.handlers,
                                         }
                                     end
-                                    cell.createDropDown = function() end
+                                    cell.createDropDown = function()
+                                        createdDropDowns[#createdDropDowns + 1] = { handlers = cell.handlers }
+                                    end
                                     rawset(t, column, cell)
                                     return cell
                                 end,
@@ -466,6 +470,7 @@ function M.load()
     exposed.getFrameProps        = function() return frameProps end
     exposed.getCreatedButtons    = function() return createdButtons end
     exposed.getCreatedCheckBoxes = function() return createdCheckBoxes end
+    exposed.getCreatedDropDowns  = function() return createdDropDowns end
     exposed.getClearedFrames     = function() return clearedFrames end
     exposed.getTeardownTrace     = function() return teardownTrace end
     exposed.getCloseMenuCalls    = function() return closeMenuCalls end

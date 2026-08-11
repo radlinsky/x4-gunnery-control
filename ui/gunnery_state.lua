@@ -141,7 +141,15 @@ function State.newSession(shipID, controlGroup)
         -- just the checked groups, which is why it is an explicit action with
         -- its own button and not a default.
         preferAllTurrets = false,
-        directSnapshots = {},
+        -- Revert target on stand-up: what modes and armed states the ship's
+        -- turrets return to when the player leaves the chair. Seeded from the
+        -- ship's actual state at sit-down, updated only by an explicit
+        -- "Update turret behavior" commit.
+        committedBaseline = {},
+        -- Pending config: what the console rows show and edit. Seeded alongside
+        -- committedBaseline at sit-down; diverges as the player makes changes.
+        -- Nothing reaches the turrets until a commit point.
+        staged = {},
         selectedGroupKey = nil, selectedMemberID = nil, cameraMemberID = nil,
         targetObjectID = nil, targetCandidates = {},
     }
@@ -226,12 +234,67 @@ function State.retainSelection(session, groups)
     end
 end
 
-function State.toggleGroup(session, groupKey)
+-- The mode string that the dropdown yields for "Attack all enemies"
+-- (Helper.turretModes[2].id in ego_detailmonitorhelper/helper.lua:12714).
+-- Lua uses the bare id; MD uses the weaponmode.attackenemies prefix.
+-- This is the mode ticking assigns and the binding tests against.
+State.TICK_MODE = "attackenemies"
+
+-- When a group that was seeded ticked at sit-down (the ship was already in
+-- attackenemies from a previously committed session — correct and intended) is
+-- unticked it has no preTickMode to restore. "defend" is the deliberate fallback:
+-- it keeps the group protecting the ship rather than aggressive or silent.
+State.UNTICK_FALLBACK = "defend"
+
+-- Apply tick side-effects on a staged entry: set mode to TICK_MODE and
+-- record the displaced mode in preTickMode so an untick can restore it.
+-- Mutates staged[groupKey] in-place; creates the entry if needed.
+-- defaultArmed is the group's live armed state, used only when the entry
+-- must be created from scratch (same contract as stageMode).
+local function applyTick(session, groupKey, defaultArmed)
+    local s = session.staged and session.staged[groupKey]
+    if s then
+        -- preTickMode must never be TICK_MODE itself, or untick "restores" the
+        -- mode the group already has and the checkbox looks dead. Two ways in:
+        -- a double-tick, and a group whose live mode was already TICK_MODE when
+        -- it was ticked. Guard the value, not just the first write.
+        if not s.preTickMode and s.mode ~= State.TICK_MODE then s.preTickMode = s.mode end
+        s.mode = State.TICK_MODE
+    else
+        -- No staged entry yet: invent one from defaults. preTickMode is nil
+        -- so untick falls back to UNTICK_FALLBACK.
+        if session.staged then
+            session.staged[groupKey] = { mode = State.TICK_MODE, armed = defaultArmed }
+        end
+    end
+end
+
+-- Apply untick side-effects: restore preTickMode or fall back to UNTICK_FALLBACK.
+-- The fallback comment is by State.UNTICK_FALLBACK above.
+local function applyUntick(session, groupKey)
+    local s = session.staged and session.staged[groupKey]
+    if s then
+        s.mode = s.preTickMode or State.UNTICK_FALLBACK
+        s.preTickMode = nil
+    end
+    -- No staged entry: nothing to restore. The group's live mode is unchanged.
+end
+
+-- Toggle the checked state for one group, applying mode side-effects to staged.
+-- Ticking sets staged.mode = TICK_MODE and records the displaced mode in
+-- staged.preTickMode. Unticking restores preTickMode (or UNTICK_FALLBACK when
+-- the group was seeded ticked without a prior manual tick — e.g. the ship was
+-- already in attackenemies from a previously committed session).
+-- defaultArmed is the group's live armed state, forwarded to applyTick only
+-- when a staged entry must be created from scratch.
+function State.toggleGroup(session, groupKey, defaultArmed)
     if session.checkedGroupKeys[groupKey] then
         session.checkedGroupKeys[groupKey] = nil
+        applyUntick(session, groupKey)
         return false
     else
         session.checkedGroupKeys[groupKey] = true
+        applyTick(session, groupKey, defaultArmed)
         return true
     end
 end
@@ -248,15 +311,25 @@ function State.allGroupsChecked(session)
     return any
 end
 
--- Select-all checkbox: check every mutable group, or clear the selection when
--- they are already all checked. Returns the new checked state.
+-- Select-all checkbox: check every mutable group (applying tick side-effects to
+-- staged), or clear the selection when they are already all checked (applying
+-- untick side-effects). Returns the new checked state.
 function State.toggleAllGroups(session)
     if State.allGroupsChecked(session) then
+        -- Untick every currently checked group so preTickMode is restored.
+        for key in pairs(session.checkedGroupKeys or {}) do
+            applyUntick(session, key)
+        end
         session.checkedGroupKeys = {}
         return false
     end
     for _, group in ipairs(session.groups or {}) do
-        if State.canMutate(group) then session.checkedGroupKeys[group.key] = true end
+        if State.canMutate(group) and not session.checkedGroupKeys[group.key] then
+            -- Only tick groups that are not already checked: already-checked
+            -- ones keep their existing preTickMode.
+            session.checkedGroupKeys[group.key] = true
+            applyTick(session, group.key, group.armed)
+        end
     end
     return true
 end
@@ -321,8 +394,8 @@ function State.cycleCamera(session, delta)
 end
 
 -- Replaces beginWatch and beginDirect. Sets phase to "engaged" and
--- controlMode. For "auto" produces no snapshots; for "direct" builds one
--- snapshot per group and stores the list in session.directSnapshots.
+-- controlMode. committedBaseline is seeded at sit-down (seedBaseline) and is
+-- not modified here; it is the revert target regardless of controlMode.
 function State.beginEngaged(session, groups, controlMode)
     session.phase = "engaged"
     session.controlMode = controlMode
@@ -334,22 +407,7 @@ function State.beginEngaged(session, groups, controlMode)
     -- Set cameraMemberID to the first roster member (nil if none).
     local roster = State.cameraRoster(session)
     session.cameraMemberID = roster[1] and roster[1].componentID or nil
-    if controlMode == "direct" then
-        local snaps = {}
-        for _, group in ipairs(groups or {}) do
-            snaps[#snaps + 1] = {
-                shipID = session.shipID, kind = group.kind,
-                componentID = group.componentID, contextID = group.contextID,
-                path = group.path, group = group.group,
-                mode = group.mode, armed = group.armed,
-            }
-        end
-        session.directSnapshots = snaps
-        return snaps
-    else
-        session.directSnapshots = {}
-        return session.directSnapshots
-    end
+    return session.committedBaseline or {}
 end
 
 function State.returnToConsole(session)
@@ -359,13 +417,134 @@ function State.returnToConsole(session)
     session.cameraMemberID, session.targetObjectID = nil, nil
 end
 
--- Returns session.directSnapshots (possibly empty), resets it to {}, and if
--- phase is "engaged" sets phase back to "console". Never returns nil.
+-- Returns session.committedBaseline (never empties it), and if phase is
+-- "engaged" sets phase back to "console". committedBaseline persists for the
+-- session lifetime; the caller reads it to write modes back to the ship.
+-- Never returns nil.
 function State.releaseDirect(session)
-    local snaps = session.directSnapshots or {}
-    session.directSnapshots = {}
     if session.phase == "engaged" then session.phase = "console" end
-    return snaps
+    return session.committedBaseline or {}
+end
+
+-- Seed committedBaseline and staged from the ship's actual modes at sit-down.
+-- committedBaseline is what reverts on stand-up; staged is what the console
+-- edits. Both start identical; they diverge as the player makes changes without
+-- committing. Called once per session from onShowMenu, never from refresh().
+-- The staged key for a baseline entry. staged is keyed by the live group.key, so
+-- every reader has to derive the same string from a baseline entry's locator
+-- fields. Deriving it in more than one place is how seeding and committing drift
+-- apart: a group whose key is not literally the derived form then reads as
+-- permanently dirty while the commit silently updates nothing. One helper, used
+-- by the seed side and every reader, makes that impossible.
+function State.baselineStagedKey(entry)
+    if entry.kind == "single" then return State.singleKey(entry.componentID) end
+    return State.groupKey(entry.contextID, entry.path, entry.group)
+end
+
+function State.seedBaseline(session, groups)
+    local baseline = {}
+    local staged = {}
+    for _, group in ipairs(groups or {}) do
+        local entry = {
+            shipID = session.shipID, kind = group.kind,
+            componentID = group.componentID, contextID = group.contextID,
+            path = group.path, group = group.group,
+            mode = group.mode, armed = group.armed,
+        }
+        baseline[#baseline + 1] = entry
+        -- Key by what the readers will derive, not by group.key. These agree for
+        -- a group read off the ship, but a caller-supplied group.key need not
+        -- match, and a mismatch is silent in both directions.
+        local stagedKey = State.baselineStagedKey(entry)
+        staged[stagedKey] = { mode = group.mode, armed = group.armed }
+        -- The checkbox is bound to the mode in both directions, so a group the
+        -- ship is already flying in TICK_MODE must come up ticked -- otherwise a
+        -- committed change survives standing up but its checkbox does not, and
+        -- ticking it then records TICK_MODE as its own preTickMode and the
+        -- checkbox stops doing anything at all. No preTickMode is stored: there
+        -- is no earlier mode to go back to, so untick falls to UNTICK_FALLBACK.
+        if group.mode == State.TICK_MODE then
+            session.checkedGroupKeys[stagedKey] = true
+        end
+    end
+    session.committedBaseline = baseline
+    session.staged = staged
+end
+
+-- Update the staged mode for one group and sync the checkbox. The ship is not
+-- touched. The checkbox is bound to TICK_MODE: setting the mode to TICK_MODE
+-- ticks the group; setting it to anything else unticks it.
+--
+-- defaultArmed is the group's LIVE armed state, passed by the caller. A group
+-- can exist without a staged entry (a refresh() that discovers a turret group
+-- after sit-down, or a legacy payload whose staged was rebuilt empty), and
+-- inventing armed = false there would disarm a group the player never touched
+-- the moment the change is committed.
+function State.stageMode(session, groupKey, mode, defaultArmed)
+    if not session or not session.staged then return end
+    local s = session.staged[groupKey]
+    -- Capture the old mode before writing so the checkbox-sync can use it as
+    -- preTickMode. Once s.mode is overwritten the information is gone.
+    local oldMode = s and s.mode
+    local wasAttackEnemies = oldMode == State.TICK_MODE
+    local isAttackEnemies  = mode == State.TICK_MODE
+    if s then s.mode = mode
+    else session.staged[groupKey] = { mode = mode, armed = defaultArmed } end
+    -- Sync the checkbox. When the player picks a mode from the dropdown the
+    -- checkbox follows: attackenemies ticks it, any other mode unticks it.
+    if not wasAttackEnemies and isAttackEnemies then
+        -- Tick: record the displaced mode in preTickMode so untick can restore it.
+        -- Only set preTickMode when not already set, so a second tick doesn't
+        -- overwrite it with TICK_MODE itself.
+        session.checkedGroupKeys[groupKey] = true
+        local entry = session.staged[groupKey]
+        if entry and not entry.preTickMode then entry.preTickMode = oldMode end
+    elseif wasAttackEnemies and not isAttackEnemies then
+        -- Untick: the caller chose a specific mode via the dropdown; honour it
+        -- directly rather than going through preTickMode (which would restore
+        -- the mode as of the last tick, which may differ from what was just picked).
+        session.checkedGroupKeys[groupKey] = nil
+        local entry = session.staged[groupKey]
+        if entry then entry.mode = mode; entry.preTickMode = nil end
+    end
+end
+
+-- Update the staged armed state for one group. The ship is not touched.
+-- defaultMode is the group's LIVE mode, passed by the caller, for the same
+-- reason as above: "" is not a valid weapon mode, so a manufactured entry must
+-- carry what the turret is actually set to rather than an empty string.
+function State.stageArmed(session, groupKey, armed, defaultMode)
+    if not session or not session.staged then return end
+    local s = session.staged[groupKey]
+    if s then s.armed = armed
+    else session.staged[groupKey] = { mode = defaultMode, armed = armed } end
+end
+
+-- Returns true when staged differs from committedBaseline for any group.
+-- Compares mode and armed for each baseline entry against the matching staged
+-- entry, so it stays accurate while a temporary apply is active on the ship.
+function State.isStagedDirty(session)
+    if not session then return false end
+    local staged = session.staged
+    if not staged then return false end
+    for _, entry in ipairs(session.committedBaseline or {}) do
+        local s = staged[State.baselineStagedKey(entry)]
+        if not s or s.mode ~= entry.mode or s.armed ~= entry.armed then return true end
+    end
+    return false
+end
+
+-- Advance committedBaseline to match staged (permanent commit). Called when
+-- the player presses "Update turret behavior"; the caller writes staged to the
+-- ship before calling this.
+function State.commitStagedToBaseline(session)
+    if not session then return end
+    local staged = session.staged
+    if not staged then return end
+    for _, entry in ipairs(session.committedBaseline or {}) do
+        local s = staged[State.baselineStagedKey(entry)]
+        if s then entry.mode = s.mode; entry.armed = s.armed end
+    end
 end
 
 -- Mission Director values must not retain LuaJIT cdata references. Copy only
@@ -497,8 +676,11 @@ function State.saveState(session)
         camGroup = camGroup and camGroup.group or "",
         camIndex = tostring(camIndex or ""),
     } }
-    for _, snap in ipairs(State.snapshotsForSave(session.directSnapshots)) do
-        local record = { t = "snapshot" }
+    -- committedBaseline travels as "baseline" records so restoreState can write
+    -- modes back on stand-up even after a savegame load. Without it a load after
+    -- a temporary apply strands the ship in temp modes with nothing to revert to.
+    for _, snap in ipairs(State.snapshotsForSave(session.committedBaseline)) do
+        local record = { t = "baseline" }
         for key, value in pairs(snap) do
             record[key] = (type(value) == "boolean") and flag(value) or tostring(value)
         end
@@ -584,11 +766,12 @@ local function validSessionRecord(record)
     -- intentionally ignored now (the target root is derived), but remains a
     -- valid optional legacy field rather than making an old save unrestorable.
     if record.targetObjectID ~= nil and not isString(record.targetObjectID) then return false end
+    -- directedMode: legacy field, no longer written or acted on; ignored if present.
     return validCameraLocation(record)
 end
 
-local function validSnapshotRecord(record, sessionRecord)
-    if record.t ~= "snapshot" or (record.kind ~= "group" and record.kind ~= "single")
+local function validSnapshotLike(record, sessionRecord, expectedT)
+    if record.t ~= expectedT or (record.kind ~= "group" and record.kind ~= "single")
         or not hasStringFields(record, { "shipID", "mode", "armed" })
         or record.shipID == "" or record.shipID ~= sessionRecord.shipID
         or not validFlag(record.armed) then
@@ -598,6 +781,14 @@ local function validSnapshotRecord(record, sessionRecord)
         return isString(record.componentID) and record.componentID ~= ""
     end
     return hasStringFields(record, { "contextID", "path", "group" })
+end
+
+local function validSnapshotRecord(record, sessionRecord)
+    return validSnapshotLike(record, sessionRecord, "snapshot")
+end
+
+local function validBaselineRecord(record, sessionRecord)
+    return validSnapshotLike(record, sessionRecord, "baseline")
 end
 
 local function validCheckedRecord(record)
@@ -620,6 +811,9 @@ local function validatedSessionRecord(records)
             if not head then head = record end
         elseif record.t == "snapshot" then
             -- Its session identity is checked after the head is found below.
+            -- Legacy record type kept for payloads written before the rename.
+        elseif record.t == "baseline" then
+            -- Its session identity is checked after the head is found below.
         elseif record.t == "checked" then
             if not validCheckedRecord(record) then return nil end
         else
@@ -629,10 +823,10 @@ local function validatedSessionRecord(records)
     if not head then return nil end
     for _, record in ipairs(records) do
         if record.t == "snapshot" and not validSnapshotRecord(record, head) then return nil end
+        if record.t == "baseline" and not validBaselineRecord(record, head) then return nil end
     end
-    -- Only a Direct session can own snapshots. Target selection deliberately
-    -- retains a Direct override while the browser is open; console and Auto
-    -- must not accept an arbitrary snapshot that could later be written back.
+    -- Legacy: only a Direct session can own snapshot records. Baseline records
+    -- are valid in any session (they are always present after sit-down seeding).
     for _, record in ipairs(records) do
         if record.t == "snapshot" and (head.controlMode ~= "direct"
             or (head.phase ~= "engaged" and head.phase ~= "target_select")) then
@@ -670,11 +864,13 @@ function State.restoreState(session, records, liveGroups)
     end
     local checkedGroupKeys = {}
     local snapshots = {}
+    local baseline = {}
     for _, record in ipairs(records) do
         if record.t == "checked" then
             local live = byName[nameKey(record.path, record.group)]
             if live then checkedGroupKeys[live.key] = true end
         elseif record.t == "snapshot" then
+            -- Legacy record type (payloads written before the baseline rename).
             if record.kind == "single" then
                 -- A single-turret snapshot is addressed only by componentID, so
                 -- it is restorable across a reload and meaningless across a
@@ -701,7 +897,35 @@ function State.restoreState(session, records, liveGroups)
                     }
                 end
             end
+        elseif record.t == "baseline" then
+            -- committedBaseline: matched by name, same rules as snapshots for
+            -- contextID resolution. Single-turret entries survive only a reload.
+            if record.kind == "single" then
+                if idsHeld then
+                    baseline[#baseline + 1] = {
+                        kind = "single", shipID = tostring(session.shipID),
+                        componentID = record.componentID,
+                        mode = record.mode, armed = record.armed == "1",
+                    }
+                end
+            else
+                local live = byName[nameKey(record.path, record.group)]
+                if live then
+                    baseline[#baseline + 1] = {
+                        kind = record.kind, shipID = tostring(session.shipID),
+                        contextID = live.contextID, path = live.path,
+                        group = live.group,
+                        mode = record.mode, armed = record.armed == "1",
+                    }
+                end
+            end
         end
+    end
+    -- Rebuild staged from restored baseline so the console shows the committed
+    -- config immediately, before the player makes any new changes.
+    local restoredStaged = {}
+    for _, entry in ipairs(baseline) do
+        restoredStaged[State.baselineStagedKey(entry)] = { mode = entry.mode, armed = entry.armed }
     end
     -- Last, so it wins over the componentID read in the loop: group name plus
     -- position is the only form of "which turret" that outlives a load.
@@ -723,7 +947,18 @@ function State.restoreState(session, records, liveGroups)
         session.cameraMemberID = (head.cameraMemberID ~= "" and head.cameraMemberID) or nil
     end
     if camMember then session.cameraMemberID = camMember.componentID end
-    session.directSnapshots = snapshots
+    -- committedBaseline restored from "baseline" records; staged rebuilt from it.
+    -- Legacy "snapshot" records (payloads written before the rename) populate
+    -- committedBaseline when no baseline records are present, preserving the
+    -- revert-on-stand-up guarantee across an upgrade from an older save.
+    if #baseline > 0 then
+        session.committedBaseline = baseline
+    elseif #snapshots > 0 then
+        session.committedBaseline = snapshots
+    end
+    if #restoredStaged > 0 or next(restoredStaged) ~= nil then
+        session.staged = restoredStaged
+    end
     return true
 end
 

@@ -32,7 +32,10 @@ local function validateSpec(raw)
         if type(group.macro) ~= "string" or group.macro == "" then return nil, where .. ".macro must be a non-empty string" end
         if type(group.faction) ~= "string" or group.faction == "" then return nil, where .. ".faction must be a non-empty string" end
         if type(group.count) ~= "number" or group.count < 1 then return nil, where .. ".count must be a positive number" end
-        if type(group.distance) ~= "number" or group.distance < 0 then return nil, where .. ".distance must be a non-negative number" end
+        -- Signed, like x and y: MD passes this straight to safepos as z, so a
+        -- negative value spawns the group astern. The old non-negative guard
+        -- rejected the whole spec whenever a group used that.
+        if type(group.distance) ~= "number" then return nil, where .. ".distance must be a number" end
         local behaviour = group.behaviour or "wait"
         if behaviour ~= "wait" and behaviour ~= "attack" and behaviour ~= "none" then
             return nil, where .. ".behaviour must be wait, attack or none"
@@ -44,6 +47,8 @@ local function validateSpec(raw)
             count = math.floor(group.count),
             distance = group.distance,
             spread = tonumber(group.spread) or 0,
+            x = tonumber(group.x) or 0,
+            y = tonumber(group.y) or 0,
             behaviour = behaviour,
             hostile = group.hostile == true,
         }
@@ -93,6 +98,7 @@ local function sendScenarioSpec(force)
         AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group", {
             label = group.label, macro = group.macro, faction = group.faction,
             count = group.count, distance = group.distance, spread = group.spread,
+            x = group.x, y = group.y,
             behaviour = group.behaviour, hostile = group.hostile,
         })
     end
@@ -237,6 +243,14 @@ function menu.display()
     scenarioRow[3]:setColSpan(2):createButton({}):setText(text(26)); scenarioRow[3].handlers.onClick = function()
         AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
         log("scenario", { action = "despawn" })
+    end
+    -- Arms the ownership-change test. The Test Lab cannot be opened while
+    -- engaged, so this cannot flip an owner on the spot; it arms MD to do it on
+    -- the NEXT Direct-control engage instead. See ArmCapture in the MD script.
+    local captureRow = tableView:addRow("capture", {})
+    captureRow[1]:setColSpan(4):createButton({}):setText(text(28)); captureRow[1].handlers.onClick = function()
+        AddUITriggeredEvent("X4GunneryTestLabScenario", "arm_capture")
+        log("scenario", { action = "arm_capture" })
     end
     if not sweep then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(4):createText(text(12))

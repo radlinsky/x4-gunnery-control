@@ -11,14 +11,13 @@ Makes the [b]Access Gunnery Control[/b] chair worth sitting in. Instead of the v
 
 [size=3][b]New features[/b][/size]
 [list]
-[*][b]All Turrets: Prefer My Target[/b] (Direct-control): every combat turret
-that can hit your selected target will do so, including turrets outside your
-checked groups. Turrets that cannot fire on that target will still engage valid
-in-range hostiles instead of sitting idle.[/*]
-[*][b]Release Other Turrets[/b]: turns off ship-wide "Prefer My Target" mode.
-Non-selected turrets return to normal behavior, and selected turrets return to
-default Direct-control behavior (they focus your chosen target and can go idle
-if that target is out of range).[/*]
+[*][b]All Turrets: Prefer My Target[/b] (Direct-control): every turret on the
+ship prefers your selected target, regardless of Mode — including Missile
+Defence, Defend, Mine and Tow turrets. Turrets that are out of range or cannot
+swing round to your target will roll to another hostile; turrets where your own
+hull is in the way will track the target and hold fire.[/*]
+[*][b]Release Other Turrets[/b]: turns off ship-wide "Prefer My Target" mode
+and returns every turret it reached to its own settings.[/*]
 [/list]
 
 [size=3][b]Bug fixes[/b][/size]
@@ -38,7 +37,7 @@ kicking you out of the session.[/*]
 
 Once you select at least one group, two buttons light up:
 
-[b]Auto-engage[/b]: does not alter turret behavior at all. Your turrets keep choosing targets by whatever settings the ship already had. This mode exists purely so you can sit and watch them work.
+[b]Auto-engage[/b]: issues no fire orders — your turrets still choose their own targets. Before entering the camera it writes your checked groups' staged console settings to the ship (so ticking a group, which sets its Mode to [b]Attack all enemies[/b], does take effect for the duration). The camera cycles only through the turrets of the checked groups, not every turret on the ship. Everything is reverted when you get up.
 
 [b]Direct-control[/b]: you tell the checked groups exactly what to shoot. The [b]Select Engagement Target[/b] menu lists the ships and stations in radar range; click one and its hull is engaged immediately, but you can instead mark a specific surface element (i.e. turret, shield, engine).
 
@@ -46,18 +45,20 @@ By default in Direct-control, your checked groups focus only your chosen target.
 If that target is out of range for some checked turrets, those turrets can sit
 idle.
 
-In Direct-control, you can also use [b]All Turrets: Prefer My Target[/b] to push
-every combat turret on the ship to prefer your target; turrets that cannot hit
-it can still shoot other valid in-range hostiles.
-Then use [b]Release Other Turrets[/b] to turn that ship-wide preference back
-off: non-selected turrets return to normal logic, and selected turrets go back
-to default Direct-control behavior (which can mean idle when your chosen target
-is out of range).
+In Direct-control, you can also use [b]Other Turrets: Prefer My Target[/b] to
+push every turret on the ship to prefer your target, whatever Mode it is in —
+no exceptions. A Missile Defence turret will shoot your chosen ship instead of
+watching for incoming missiles; a Defend turret will engage a target that is not
+attacking you; Mine and Tow turrets are included too.
+[b]Release Other Turrets[/b] is the off switch and returns everything it reached
+to its own settings.
 
 [list]
 [*][b]Auto-next Target when destroyed[/b] is checked by default: when the target dies, the turret(s) and camera automatically select the next target. Uncheck it, and the turret(s) will sit idly by until you pick the next target yourself, which is closer to actually manning the gun.[/*]
 [*][b]Next Target[/b] / [b]Previous Target[/b] step through the same candidate list without reopening the browser.[/*]
 [/list]
+Ticking a group's checkbox sets that group's Mode to [b]Attack all enemies[/b]. Everything you change in the console is temporary and undone when you press [b]Get Up[/b] — unless you press [b]Update turret behavior[/b] first, which makes the changes permanent.
+
 [size=4][b]Four viewing modes[/b][/size]
 
 [list]

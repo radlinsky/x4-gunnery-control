@@ -101,6 +101,28 @@
 - Finding: soft-target state contains a component ID and connection name;
   preserve both when restoring a target.
 
+### GetPlayerTarget returns the hard target as the string "ID: n"
+- X4: 9.00
+- Status: live-tested
+- Corroboration: the two ids were confirmed to be the same component by an
+  independent path, which is how the mismatch was caught
+- Source: live probe 2026-08-10, X4 9.00, logged alongside a component id
+  obtained from `C.GetContextByClass`
+- Live test: yes — 2026-08-10
+- Finding: `GetPlayerTarget` is a bare engine global, not a `C.` call, so it
+  needs no `cdef`. It returns the player's HARD target as a string in the form
+  `"ID: 1637331"` — with the literal `ID: ` prefix. It is NOT a bare number and
+  NOT the LuaJIT `"1637331ULL"` cdata form that the usual id-normalising helpers
+  are written to strip. Comparing it to an id from any other source without
+  stripping that prefix silently reports "different component" for two values
+  that are the same component.
+- Consequence for mods: normalise with something like
+  `tostring(v):gsub("^ID:%s*", "")` before comparing. Note the trap for test
+  doubles: a fixture stub that returns a bare number makes the comparison pass
+  offline while it fails in game, so stub the real `"ID: n"` form.
+- Limitations: read-only. No hard-target setter exists in either surface — the
+  UI FFI exposes only `SetSofttarget`, and MD has no `set_player_target` action.
+
 ### Direct surface-element IDs are an installed-mod technique
 - X4: 9.00
 - Status: third-party-technique
@@ -1153,6 +1175,73 @@ save using `pcall`.
 
   Not established by this test: the effect on cues mid-execution, on `instantiate="true"`
   instances in flight, or on newly ADDED cues rather than edited ones.
+
+## Attacker attribution and obstruction queries
+
+### GetLastAttackInfo gives attacker attribution from the victim
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/addons/ego_interactmenu/menu_interactmenu.lua:200` (declaration and LastAttackerInfo struct); call sites at `menu_interactmenu.lua:5560,5566` and `ui-9.00/ui/addons/ego_detailmonitor/menu_map.lua:21101,30732`; `props-9.00/libraries/scriptproperties.xml:187-188` (`lastattacker`/`lastattacktime` on the `destructible` datatype)
+- Live test: no — untested as of 2026-08-09
+- Finding: `LastAttackerInfo GetLastAttackInfo(UniverseID destructibleid)` returns a struct of `UniverseID attacker`, `double time`, and `const char* method`. It is queried on the VICTIM, not the shooter. The MD property docs describe `lastattacker` as "the component (not exclusive to objects) that was last registered as the attacker", which suggests it may resolve to a turret rather than a ship. However no shipped script inspects the returned component's class, so which component it actually returns (turret vs. ship) is UNRESOLVED. One live probe settles it.
+- Status of the question, 2026-08-10: **still unresolved, and deliberately not probed.** It was only ever of interest as a way to infer which turret is engaging what, in order to detect the MASKED condition. That line of work is closed: MASKED was confirmed live on 2026-08-09 to be unrecoverable (the engine's preferred-target fallback tests whether a turret can aim, not whether it can hit — see the fire-control record in md-ai.md), so no consumer for the answer remains. Do not cite this entry as evidence that the return is ship-level; nothing here establishes that.
+
+### IsObstructed cannot be used for arbitrary component pairs
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:3943-3950`
+- Live test: no — untested as of 2026-08-09
+- Finding: `IsObstructed` takes a HUD render posID owned by the target-system bracket machinery, not a component pair, and is engine-injected rather than declared in any `ffi.cdef`. A mod cannot construct a posID for a component of its choosing. Use `check_line_of_sight` from MD instead (see the MD firing-solution record in md-ai.md).
+
+## Reading a pilot's current command from UI Lua
+
+### GetComponentData(pilot, "aicommandraw") mirrors MD's $pilot.command.value
+- X4: 9.00
+- Status: live-tested
+- Corroboration: MD `debug_text` of `$ship.pilot.command.value` emitted from the same engage, one frame apart
+- Source: live probe logged as `[X4GC] DIAG pilotprobe` / `[X4GC DIAG] mdpilot` on 2026-08-10, X4 9.00, player-piloted M10; sibling key `aicommandactionraw` read by `ui-9.00/ui/addons/ego_detailmonitor/menu_map.lua:8808`
+- Live test: yes — 2026-08-10, three engages
+- Finding: `GetComponentData(assignedpilot, "aicommandraw")` returns the pilot's
+  outer command as a bare lowercase string matching the MD `command.*` lookup
+  with the prefix stripped. Three engages agreed exactly with MD's
+  `$ship.pilot.command.value` read in the same frame: `wait`/`wait` twice, then
+  `attackobject`/`attackobject` once the pilot was given an attack order. The
+  key is undocumented — no shipped Lua file reads it — but the symmetric
+  `aicommandactionraw` (which vanilla does read, comparing it to the bare string
+  `"orderfailed"`) served as the control and returned a value on every call.
+  `aicommand` and `aicommandaction` are the localised display text, not this.
+- Consequence: "does this ship's pilot have an attack order" is answerable
+  entirely in UI Lua, with no MD round trip. The order queue is not a substitute:
+  `interrupt.attacked.xml` puts a ship into `command.attackobject` without
+  touching the order queue, so `C.GetOrders`/`orderdef` misses a ship that is
+  merely being shot at while idle. Vanilla's own idiom for the same question is
+  the MD-side pair at `aiscripts/order.fight.protect.ship.xml:340`.
+- Limitations: only `wait` and `attackobject` were observed. That the mapping is
+  "command id minus the `command.` prefix" for every other command is inference
+  from two data points; confirm the specific value before branching on a third.
+
+## targetsystem.lua utility functions
+
+### GetShipOrLaserTowerSize returns a size class string
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:135`
+- Live test: no — untested as of 2026-08-09
+- Finding: `C.GetShipOrLaserTowerSize(UniverseID)` returns a size class string: one of `"xs"`, `"s"`, `"m"`, `"l"`, or `"xl"`.
+
+### IsSurfaceElement tests whether a component is a surface element
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:178`
+- Live test: no — untested as of 2026-08-09
+- Finding: `C.IsSurfaceElement(UniverseID)` returns a boolean indicating whether the component is a surface element.
+
+### targetsystem.lua uses a nil-sentinel lazy cache for expensive per-target checks
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:1568,3936-3950,4078,5384`
+- Live test: no — untested as of 2026-08-09
+- Finding: the target system stores expensive per-target check results (including the `IsObstructed` bracket results) using a nil-sentinel lazy-init pattern: a result is only computed on first access and cached in a table, then the whole cache is invalidated per frame so checks remain current without running every tick. This is the idiom to follow when adding per-target logic that is costly to evaluate each frame.
 
 ### Helper.addDelayedOneTimeCallbackOnUpdate fails silently when its deadline is never reached
 - X4: 9.00

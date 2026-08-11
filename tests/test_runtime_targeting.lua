@@ -40,23 +40,20 @@ assert(sess ~= nil, "expected a live session after onShowMenu()")
 -- through TestAPI.getSession(), then exercise the real public close callback or
 -- rendered Back-button callback for the behavior under test.
 
--- ── 10a: target_select + directSnapshots -> onCloseElement("close") ─────────
+-- ── 10a: target_select + direct controlMode -> onCloseElement("close") ──────
 -- This is the exact bug state: player pressed Esc from the target picker while
--- an engagement was in progress (directSnapshots is non-empty).
-local fakeSnapshot = { shipID = sess.shipID, kind = "group",
-    componentID = 0, contextID = 0, path = "", group = "", mode = "attack", armed = true }
+-- an engagement was in progress (controlMode is "direct").
 sess.phase = "target_select"
--- List form: directSnapshots is always a table.
-sess.directSnapshots = { fakeSnapshot }
+sess.controlMode = "direct"
 
 gcMenu.onCloseElement("close")
 local phaseAfterPickerClose = sess.phase
 assert(phaseAfterPickerClose == "console",
-    "BUG: closing target_select with directSnapshots set landed on phase='"
+    "BUG: closing target_select with controlMode=direct landed on phase='"
     .. tostring(phaseAfterPickerClose)
     .. "' instead of 'console'. The Esc cycle is still present.")
-assert(#(sess.directSnapshots or {}) == 0,
-    "directSnapshots must be released when target_select closes to console")
+assert(sess.controlMode == nil,
+    "closing target_select must clear controlMode (returnToConsole was not called)")
 
 -- ── 10b: visible target-browser Back restores Direct settings ───────────────
 -- Unlike onCloseElement above, the visible Back button owns its own callback.
@@ -74,7 +71,8 @@ local browserGroup = {
 sess.groups = { browserGroup }
 sess.phase = "target_select"
 sess.controlMode = "direct"
-sess.directSnapshots = { {
+-- committedBaseline holds the "restore on stand-up" state; this is what restoreDirect writes back.
+sess.committedBaseline = { {
     shipID = sess.shipID, kind = "group", contextID = browserGroup.contextID,
     path = browserGroup.path, group = browserGroup.group,
     mode = "attack", armed = false,
@@ -101,19 +99,22 @@ assert(browserBack10b and browserBack10b.handlers.onClick,
 browserBack10b.handlers.onClick()
 
 assert(sess.phase == "console",
-    "target-browser Back must return to the console after restoring Direct state")
-assert(#sess.directSnapshots == 0,
-    "target-browser Back must release the live Direct snapshots")
-assert(#modeWrites10b == 1 and modeWrites10b[1].mode == "attack",
-    "target-browser Back must restore the snapshotted turret mode exactly once")
-assert(#armedWrites10b == 1 and armedWrites10b[1].armed == false,
-    "target-browser Back must restore the snapshotted armed state exactly once")
+    "target-browser Back must return to the console")
+assert(sess.controlMode == nil,
+    "target-browser Back must clear controlMode via returnToConsole")
+-- Revert is bound to leaving the chair, so backing out of the target list must
+-- not put the turrets back: the player is still seated and a temporary apply
+-- lasts until stand-up. This asserted the opposite until the revert rework.
+assert(#modeWrites10b == 0,
+    "target-browser Back must not write any turret mode; revert happens on stand up")
+assert(#armedWrites10b == 0,
+    "target-browser Back must not write any armed state; revert happens on stand up")
 
 -- The same visible route is also used by the initial picker, before any Direct
 -- engagement exists. It must remain a harmless return with no turret writes.
 sess.phase = "target_select"
 sess.controlMode = "direct"
-sess.directSnapshots = {}
+sess.committedBaseline = {}
 gcMenu.display()
 local initialPickerBack10b = fix.buttonByText("text:20991:54")
 assert(initialPickerBack10b and initialPickerBack10b.handlers.onClick,
@@ -121,8 +122,9 @@ assert(initialPickerBack10b and initialPickerBack10b.handlers.onClick,
 initialPickerBack10b.handlers.onClick()
 assert(sess.phase == "console",
     "initial target-picker Back must still return to the console")
-assert(#modeWrites10b == 1 and #armedWrites10b == 1,
-    "initial target-picker Back must not write turret state without snapshots")
+-- Cumulative across both Back presses, and still zero: neither route writes.
+assert(#modeWrites10b == 0 and #armedWrites10b == 0,
+    "initial target-picker Back must not write turret state either")
 
 C.SetTurretGroupMode2 = savedSetMode10b
 C.SetTurretGroupArmed = savedSetArmed10b
@@ -135,9 +137,9 @@ gcMenu.onShowMenu()
 sess = API.getSession()
 sess.phase = "engaged"
 sess.controlMode = "direct"
-sess.directSnapshots = { { shipID = sess.shipID, kind = "group",
+sess.committedBaseline = { { shipID = sess.shipID, kind = "group",
     componentID = 0, contextID = 0, path = "", group = "", mode = "attack", armed = true } }
--- Simulate the picker opening (openTargetBrowser sets phase but keeps snapshots).
+-- Simulate the picker opening (openTargetBrowser sets phase but keeps committedBaseline).
 sess.phase = "target_select"
 
 local stepsToConsole = 0
@@ -173,7 +175,7 @@ local sess12 = API.getSession()
 assert(sess12 ~= nil, "expected a live session for watch frame test")
 sess12.phase = "engaged"
 sess12.controlMode = "auto"
-sess12.directSnapshots = {}
+sess12.committedBaseline = {}
 fix.resetLastFrameProps()
 local ok12a, err12a = pcall(function() gcMenu.display() end)
 assert(ok12a, "menu.display() raised during watch phase: " .. tostring(err12a))
@@ -209,8 +211,8 @@ assert(fix.getLastFrameProps().playerControls == true,
 -- 12b: engaged/direct (compact Engage) frame must still have standardButtons.back == true
 sess12.phase = "engaged"
 sess12.controlMode = "direct"
--- Provide minimal directSnapshots so the active= check does not crash.
-sess12.directSnapshots = { { kind = "group", contextID = 0, path = "", group = "",
+-- Provide a minimal committedBaseline so the active= check does not crash.
+sess12.committedBaseline = { { kind = "group", contextID = 0, path = "", group = "",
     shipID = sess12.shipID, mode = "attack", armed = true } }
 sess12.selectedGroupKey = nil
 fix.resetLastFrameProps()
@@ -251,7 +253,7 @@ if sess14 then
     -- confirming the applied-POV log line appears without raising.
     local okPov = pcall(function()
         sess14.engagePov = "target"
-        sess14.directSnapshots = sess14.directSnapshots or {}
+        sess14.committedBaseline = sess14.committedBaseline or {}
         -- re-render the engaged/direct panel; the POV label must reflect the flag
         povMenu.display()
     end)
@@ -296,7 +298,7 @@ local fakeGroup15 = {
 sess15.groups = { fakeGroup15 }
 sess15.phase = "engaged"
 sess15.controlMode = "direct"
-sess15.directSnapshots = { { kind = "group", contextID = 0, path = "fake", group = "grp",
+sess15.committedBaseline = { { kind = "group", contextID = 0, path = "fake", group = "grp",
     shipID = sess15.shipID, mode = "attack", armed = true, componentID = 55 } }
 sess15.selectedGroupKey = fakeGroup15.key
 sess15.selectedMemberID = 55
@@ -381,7 +383,7 @@ assert(sess16 ~= nil, "expected session for engaged frame tests")
 -- 16a: engaged/auto
 sess16.phase = "engaged"
 sess16.controlMode = "auto"
-sess16.directSnapshots = {}
+sess16.committedBaseline = {}
 fix.resetLastFrameProps()
 local ok16a, err16a = pcall(function() gcMenu.display() end)
 assert(ok16a, "display() raised in engaged/auto: " .. tostring(err16a))
@@ -392,7 +394,7 @@ assert(fix.getLastFrameProps().playerControls == true,
 -- 16b: engaged/direct
 sess16.phase = "engaged"
 sess16.controlMode = "direct"
-sess16.directSnapshots = { { kind = "group", contextID = 0, path = "", group = "",
+sess16.committedBaseline = { { kind = "group", contextID = 0, path = "", group = "",
     shipID = sess16.shipID, mode = "attack", armed = true } }
 fix.resetLastFrameProps()
 local ok16b, err16b = pcall(function() gcMenu.display() end)
@@ -413,7 +415,7 @@ local sess17 = API.getSession()
 assert(sess17 ~= nil, "expected session for onCloseElement engaged tests")
 sess17.phase = "engaged"
 sess17.controlMode = "auto"
-sess17.directSnapshots = {}
+sess17.committedBaseline = {}
 -- Matches softtargetKey() with softtargetID=0, connection="" -> "0\031"
 sess17.viewSofttargetKey = "0\031"
 local mark17 = fix.callbackCheckpoint()
@@ -471,7 +473,7 @@ local grp19a = { key = "grp19a", kind = "group", contextID = 1, path = "p", grou
 local grp19b = { key = "grp19b", kind = "group", contextID = 1, path = "p", group = "B",
     componentID = 11, members = {}, totalCount = 1, operationalCount = 1 }
 sess19.groups = { grp19a, grp19b }
-sess19.directSnapshots = {
+sess19.committedBaseline = {
     { shipID = sess19.shipID, kind = "group", contextID = 1, path = "p", group = "A",
       mode = "attack", armed = false },
     { shipID = sess19.shipID, kind = "group", contextID = 1, path = "p", group = "B",
@@ -487,13 +489,13 @@ assert(#restoreCalls19 == 2,
     "restoreDirect with 2-entry list must restore both groups; got "
     .. tostring(#restoreCalls19) .. " restore calls. "
     .. "A single-entry loop would strand the second group on autoassist.")
--- After restore, directSnapshots must be empty.
+-- After restore, committedBaseline must be empty.
 -- Session is nil after endSession; check via a fresh onShowMenu.
 gcMenu.onShowMenu()
 local sess19post = API.getSession()
 assert(sess19post ~= nil, "expected session after restore test")
-assert(#(sess19post.directSnapshots or {}) == 0,
-    "directSnapshots must be empty after session end and restore")
+assert(#(sess19post.committedBaseline or {}) == 0,
+    "committedBaseline must be empty after session end and restore")
 
 -- Restore stubs.
 C.SetTurretGroupMode2 = origSetTurretGroupMode19
@@ -532,7 +534,7 @@ sess21.groups = { grp21 }
 sess21.checkedGroupKeys = { ["grp21"] = true }
 sess21.phase = "engaged"
 sess21.controlMode = "auto"
-sess21.directSnapshots = {}
+sess21.committedBaseline = {}
 sess21.cameraMemberID = 9
 sess21.povAnchor = "turret"
 sess21.povMode = "manual"
@@ -545,7 +547,7 @@ assert(fix.getLastFrameProps().playerControls == true, "engaged/auto: playerCont
 -- 21b: direct
 sess21.phase = "engaged"
 sess21.controlMode = "direct"
-sess21.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "front",
+sess21.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "front",
     shipID = sess21.shipID, mode = "attack", armed = false } }
 fix.resetLastFrameProps()
 local ok21b, err21b = pcall(function() gcMenu.display() end)
@@ -589,7 +591,7 @@ sess23.groups = { grp23 }
 sess23.checkedGroupKeys = { ["grp23"] = true }
 sess23.phase = "engaged"
 sess23.controlMode = "auto"
-sess23.directSnapshots = {}
+sess23.committedBaseline = {}
 sess23.cameraMemberID = 20
 sess23.aimTargetID = nil
 sess23.povMode = "cinematic"
@@ -738,7 +740,7 @@ sess27.groups = { grp27 }
 sess27.checkedGroupKeys = { ["grp27"] = true }
 sess27.phase = "engaged"
 sess27.controlMode = "direct"
-sess27.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+sess27.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
     shipID = sess27.shipID, mode = "attack", armed = false } }
 sess27.cameraMemberID = 27
 sess27.targetObjectID = 500
@@ -763,7 +765,7 @@ sess28.groups = { grp27 }
 sess28.checkedGroupKeys = { ["grp27"] = true }
 sess28.phase = "engaged"
 sess28.controlMode = "auto"
-sess28.directSnapshots = {}
+sess28.committedBaseline = {}
 sess28.cameraMemberID = 27
 sess28.aimTargetID = nil
 local ok28, err28 = pcall(function() gcMenu.display() end)
@@ -812,7 +814,7 @@ sess29.groups = { grp29 }
 sess29.checkedGroupKeys = { ["grp29"] = true }
 sess29.phase = "engaged"
 sess29.controlMode = "direct"
-sess29.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+sess29.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
     shipID = sess29.shipID, mode = "attack", armed = false } }
 sess29.cameraMemberID = 27
 -- Candidate 98 is nearer (100m) so it will be first sorted; start at 98.
@@ -836,7 +838,7 @@ sess30.groups = { grp27 }
 sess30.checkedGroupKeys = { ["grp27"] = true }
 sess30.phase = "engaged"
 sess30.cameraMemberID = 27
-sess30.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+sess30.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
     shipID = sess30.shipID, mode = "attack", armed = false } }
 sess30.controlMode = "auto"
 sess30.povAnchor, sess30.povMode = "turret", "manual"
@@ -923,7 +925,7 @@ sess39.groups = { grp27 }
 sess39.checkedGroupKeys = { ["grp27"] = true }
 sess39.phase = "engaged"
 sess39.controlMode = "direct"
-sess39.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+sess39.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
     shipID = sess39.shipID, mode = "attack", armed = false } }
 sess39.cameraMemberID = 27
 sess39.targetObjectID = 500
@@ -1032,7 +1034,7 @@ sess51.groups = { grp51 }
 sess51.checkedGroupKeys = { ["grp51"] = true }
 sess51.phase = "engaged"
 sess51.controlMode = "direct"
-sess51.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+sess51.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
     shipID = sess51.shipID, mode = "attack", armed = false } }
 sess51.cameraMemberID = 27
 sess51.targetObjectID = 98
@@ -1251,9 +1253,13 @@ do
     sess54.checkedGroupKeys = { ["grp54"] = true }
     sess54.phase, sess54.controlMode = "engaged", "direct"
     sess54.aimTargetID, sess54.targetObjectID = 500, 500
-    -- The pre-engagement mode the console must put the group back into.
-    sess54.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
-        shipID = sess54.shipID, mode = "defend", armed = true } }
+    -- The override takes the DIRECTED groups off autoassist using their STAGED
+    -- mode -- what the player configured this group to be. committedBaseline is
+    -- deliberately different here: it covers every group on the ship, so driving
+    -- the override from it would stomp a temporary apply on unticked groups.
+    sess54.staged = { ["grp54"] = { mode = "defend", armed = true } }
+    sess54.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54.shipID, mode = "attack", armed = true } }
 
     assert(sess54.preferAllTurrets == false,
         "the ship-wide override must be off until the player asks for it")
@@ -1275,14 +1281,19 @@ do
 
     -- Every group the console took over goes back to its own mode, and nothing
     -- is ever written back to autoassist.
-    assert(#modeWrites54 > 0, "the override must restore the snapshot mode before issuing")
+    assert(#modeWrites54 > 0, "the override must restore the staged mode before issuing")
     for _, m in ipairs(modeWrites54) do
         assert(m ~= "autoassist",
             "the override must never leave a group on autoassist; X4 ignores supplied "
             .. "targets for that mode, so the turret would silently keep idling")
     end
     assert(modeWrites54[1] == "defend",
-        "the override must restore the pre-engagement mode; wrote " .. tostring(modeWrites54[1]))
+        "the override must write the STAGED mode, not the committedBaseline mode "
+        .. "(baseline is \"attack\" here); wrote " .. tostring(modeWrites54[1]))
+    -- One write only: the directed set is the checked mutable groups, never the
+    -- whole ship. A baseline-driven loop would also touch unticked groups.
+    assert(#modeWrites54 == 1,
+        "the override must touch only the directed groups; got " .. tostring(#modeWrites54) .. " writes")
 
     -- Raised a tick later, so the mode writes above have landed before MD reads
     -- the ship's turret modes back.
@@ -1383,10 +1394,14 @@ do
     assert(API.clearPreferAllTurrets("resume test", true) == true,
         "release with resume must report success")
     assert(#modeWrites54 == modeCount54,
-        "resuming must be deferred a tick, or MD reads autoassist back and the "
-        .. "release never reaches those turrets")
+        "resuming must be deferred a tick, or MD reads the previous directed "
+        .. "mode back and the release never reaches those turrets")
     fix.drainCallbacksSince(mark53d)
-    assert(modeWrites54[#modeWrites54] == "autoassist",
+    -- Direct-control has one mode. The old expectation here was "autoassist",
+    -- which was the fallback when no mode had been chosen; that branch was
+    -- deleted on 2026-08-10 once attackenemies was confirmed to hold a
+    -- mod-supplied target list even under a fighting pilot.
+    assert(modeWrites54[#modeWrites54] == X4GunneryState.TICK_MODE,
         "releasing from the button must put the checked groups back under "
         .. "Direct-control; wrote " .. tostring(modeWrites54[#modeWrites54]))
     assert(armedWrites54[#armedWrites54] == true,
@@ -1397,11 +1412,12 @@ do
     -- funnel every exit route uses (cease, get up, undock, target-destroyed with
     -- auto-next off), so clearing there covers all of them at once.
     sess54.preferAllTurrets = true
-    -- Closing the target browser is the one exit route that reaches
-    -- restoreDirect synchronously, which makes it the cheapest way to assert
-    -- the funnel itself releases. Every other route (cease, get up, undock)
-    -- reaches the same function.
-    sess54.phase = "target_select"
+    -- Closing from the console is a real chair exit (leaveChair -> restoreDirect),
+    -- which is what the funnel is now bound to. It used to be asserted by closing
+    -- the target browser, but that route is seated and no longer reverts: revert
+    -- happens on stand up. Every stand-up route (cease, get up, undock) lands in
+    -- the same function.
+    sess54.phase = "console"
     local countBefore53c = #evts54
     gcMenu.onCloseElement("close")
     local clearedOnExit54 = 0
@@ -1495,7 +1511,7 @@ do
     sess56.checkedGroupKeys = { ["grp56"] = true }
     sess56.phase = "engaged"
     sess56.controlMode = "direct"
-    sess56.directSnapshots = { { kind = "group", contextID = 5, path = "p", group = "g",
+    sess56.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
         shipID = sess56.shipID, mode = "attack", armed = false } }
     sess56.cameraMemberID = 27
     -- Start at hostile 300; cycle should find 400 (the friendly non-player), not 200/201.

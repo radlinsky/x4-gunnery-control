@@ -89,8 +89,9 @@ grep -Fq 'session.phase == "engaged"' "$main"
 grep -Fq 'session.controlMode' "$main"
 # New lifecycle entry point replaces beginWatch/beginDirect.
 grep -Fq 'State.beginEngaged' "$main"
-# Snapshot list; single session.directSnapshot is now session.directSnapshots.
-grep -Fq 'directSnapshots' "$main"
+# Baseline: directSnapshots renamed to committedBaseline; staged buffer added.
+grep -Fq 'committedBaseline' "$main"
+grep -Fq 'session.staged' "$main"
 # The adapter commits one atomic table. Its session half remains an encoded
 # string because raise_lua_event returns only one scalar; the paired component
 # target travels separately and is buffered before control receives an envelope.
@@ -386,14 +387,10 @@ fi
 
 grep -Fq 'SetPlayerCameraCockpitView' "$main"
 
-# Apply skips towing, mining and autoassist, so Release has nothing of ours to
-# clear on those modes and must skip them too. An unfiltered clear reaches
-# turrets the console never touched -- on a mixed ship that is someone else's
-# mining or towing job. Both loops carry the same filter; assert two of them.
-# shellcheck disable=SC2016
-if [ "$(grep -c 'weaponmode.towing) and (\$mode != weaponmode.mining) and (\$mode != weaponmode.autoassist)' md/x4_gunnery_control.xml)" -ne 2 ]; then
-  echo "PreferAllTurrets Apply and Release must both filter towing/mining/autoassist" >&2
-  exit 1
-fi
+# The mode-filter rule that used to live here was inverted on 2026-08-10: the
+# ship-wide override now reaches every turret whatever its mode. Its replacement,
+# and the per-cue split that keeps DirectFallback scoped, live in
+# tests/test_turret_targets_contract.sh, which is where every other
+# set_turret_targets structural rule already was.
 
 echo "runtime UI contract checks passed"

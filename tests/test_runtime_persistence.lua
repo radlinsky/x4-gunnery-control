@@ -69,7 +69,7 @@ local originalCamera49 = fix.C.SetPlayerCameraTargetView
 fix.C.SetPlayerCameraTargetView = function(...) cameraCalls49 = cameraCalls49 + 1; return true end
 local payload49 = X4GunneryState.encode(X4GunneryState.saveState({
     shipID = 42, shipName = "another ship", phase = "engaged", controlMode = "auto",
-    povAnchor = "turret", povMode = "manual", checkedGroupKeys = {}, groups = {}, directSnapshots = {},
+    povAnchor = "turret", povMode = "manual", checkedGroupKeys = {}, groups = {}, committedBaseline = {},
 }))
 API.onRestoreEnvelope({ generation = 1, target = 0, payload = payload49 })
 assert(API.getSession() == live49 and API.getSessionEpoch() == epoch49,
@@ -96,12 +96,12 @@ assert(API.getSession() == live49 and API.getSessionEpoch() == epoch49,
 -- rejected before candidate/session handover, camera work, persistence writes,
 -- or any turret setting write.
 local direct49 = API.getSession()
-local directSnapshots49 = { {
+local baseline49 = { {
     shipID = direct49.shipID, kind = "group", contextID = 5, path = "p", group = "g",
     mode = "defend", armed = true,
 } }
 direct49.phase, direct49.controlMode = "engaged", "direct"
-direct49.directSnapshots = directSnapshots49
+direct49.committedBaseline = baseline49
 direct49.checkedGroupKeys = { ["group:5:p:g"] = true }
 local modeWrites49, armedWrites49 = 0, 0
 local originalMode49, originalArmed49 = fix.C.SetTurretGroupMode2, fix.C.SetTurretGroupArmed
@@ -113,9 +113,9 @@ local function assertDirectRestoreRefused49(payload, label)
         label .. ": malformed restore must not throw")
     assert(API.getSession() == direct49 and API.getSessionEpoch() == epoch49,
         label .. ": malformed restore must retain the exact live Direct session and epoch")
-    assert(direct49.directSnapshots == directSnapshots49 and directSnapshots49[1].mode == "defend"
-        and directSnapshots49[1].armed == true,
-        label .. ": malformed restore must retain observable Direct snapshots")
+    assert(direct49.committedBaseline == baseline49 and baseline49[1].mode == "defend"
+        and baseline49[1].armed == true,
+        label .. ": malformed restore must retain observable Direct committedBaseline")
     assert(modeWrites49 == 0 and armedWrites49 == 0 and cameraCalls49 == 0,
         label .. ": malformed restore must not write turrets or enter a camera")
     assert(#fix.pendingCallbacks == callbacks and #fix.uiTriggeredEvents == events,
@@ -125,9 +125,9 @@ assertDirectRestoreRefused49("t=session", "truncated session")
 local invalidPhase49 = X4GunneryState.saveState(direct49)
 invalidPhase49[1].phase = "not-a-phase"
 assertDirectRestoreRefused49(X4GunneryState.encode(invalidPhase49), "invalid phase")
-local malformedSnapshot49 = X4GunneryState.saveState(direct49)
-malformedSnapshot49[2].armed = nil
-assertDirectRestoreRefused49(X4GunneryState.encode(malformedSnapshot49), "truncated snapshot")
+local malformedBaseline49 = X4GunneryState.saveState(direct49)
+malformedBaseline49[2].armed = nil
+assertDirectRestoreRefused49(X4GunneryState.encode(malformedBaseline49), "truncated baseline")
 fix.C.SetTurretGroupMode2, fix.C.SetTurretGroupArmed = originalMode49, originalArmed49
 
 local oldControl49 = fix.C.GetPlayerCurrentControlGroup
@@ -188,7 +188,7 @@ do
             source.cameraMemberID = 27
         end
         source.checkedGroupKeys = { [source.groups[1].key] = true }
-        source.directSnapshots = controlMode == "direct" and { {
+        source.committedBaseline = controlMode == "direct" and { {
             shipID = 42, kind = "group", contextID = 5, path = "p", group = "g",
             mode = "attack", armed = false,
         } } or {}
@@ -278,7 +278,7 @@ local function povFixture61()
     }
     localSession.phase, localSession.controlMode = "engaged", "auto"
     localSession.groups, localSession.checkedGroupKeys = { group }, { pov61 = true }
-    localSession.directSnapshots = {}
+    localSession.committedBaseline = {}
     localSession.cameraIndex, localSession.cameraMemberID = 2, 11
     localSession.aimTargetID, localSession.targetObjectID = 99, 99
     localFix.C.GetSofttarget2 = function()
@@ -349,7 +349,7 @@ end
 local function directOptionFixture62()
     local localFix, localSession, group = povFixture61()
     localSession.controlMode = "direct"
-    localSession.directSnapshots = { {
+    localSession.committedBaseline = { {
         kind = "group", shipID = localSession.shipID, contextID = group.contextID,
         path = group.path, group = group.group, mode = "attack", armed = false,
     } }

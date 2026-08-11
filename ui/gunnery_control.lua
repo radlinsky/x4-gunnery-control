@@ -40,7 +40,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-09-resume-repoint"
+local runtimeBuild = "2026-08-10-attackenemies-always"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -333,22 +333,37 @@ local function matchesSnapshot(group, snapshot)
         and group.path == snapshot.path and group.group == snapshot.group
 end
 
+-- A group is "directed" when the session is actively engaged in direct mode
+-- and the group is checked. In console phase controlMode is nil, so this is
+-- always false when the console rows are shown.
 local function isDirectedGroup(group)
-    if not group then return false end
-    for _, snap in ipairs(session and session.directSnapshots or {}) do
-        if matchesSnapshot(group, snap) then return true end
-    end
-    return false
+    if not group or not session then return false end
+    if session.controlMode ~= "direct" then return false end
+    return session.checkedGroupKeys and session.checkedGroupKeys[group.key] == true
 end
 
 -- Ship-wide "prefer my target" override. Tells X4 to treat the engaged target
--- as every turret's priority; a turret with no shot at it engages something
--- else in range instead of tracking a target it can never hit (live-tested
--- 2026-08-07, see md-ai.md). A turret's mode decides whether it receives the
--- instruction, not what it shoots once it has it: in that trial, missiledefence
--- turrets engaged ships. Do not describe the fallback as "its own mode".
+-- as every turret's priority, and hands over a hostile list to fall back on.
 --
--- Two details are load-bearing, both learned from the 2026-08-07 trial:
+-- What the fallback actually covers, live-tested 2026-08-09 and 2026-08-10 and
+-- recorded in md-ai.md. The engine asks whether a turret can AIM at the
+-- preferred target, not whether it can hit it:
+--   OUT OF RANGE  rolls to another hostile.
+--   OUT OF ARC    rolls to another hostile.
+--   MASKED        does not. The turret tracks the target and holds fire
+--                 indefinitely, and no mod can observe the condition to work
+--                 around it. This is the residual idle-turret case.
+-- An earlier version of this comment claimed the turret always engages
+-- something else. That was written from a 2026-08-07 trial whose
+-- set_turret_targets call threw on a null target list and applied nothing, so
+-- it never observed this feature at all; the record is retracted in md-ai.md.
+--
+-- A turret's mode decides whether it RECEIVES the instruction, not what it
+-- shoots once it has it, which is why the MD sweep excludes missiledefence and
+-- defend: feeding them a hostile ship list made "shoot only missiles" turrets
+-- fire on hulls.
+--
+-- Two details are load-bearing:
 --
 -- 1. Every group the console took over is put back into its own mode FIRST.
 --    X4 ignores supplied targets for autoassist turrets -- the shipped comment
@@ -357,8 +372,10 @@ end
 --    console's own autoassist silently does nothing and the turret keeps
 --    idling, which looks identical to success from the cockpit.
 -- 2. The event is raised a tick later, because MD reads the ship's turret
---    modes back when it runs. In the trial three of five presses still saw
---    autoassist in that read, so the mode writes above had not landed yet.
+--    modes back when it runs. In the 2026-08-07 trial three of five presses
+--    still saw autoassist in that read, so the mode writes above had not landed
+--    yet. That timing observation stands: it is about our own mode writes, not
+--    about the throwing call.
 --
 -- A group the player themselves left in autoassist stays there: that already
 -- means "shoot my target", so the override has nothing to add, and forcing it
@@ -370,22 +387,56 @@ local applyPreferAllTurrets
 -- defined below it.
 local refresh
 
+-- Give the directed groups a fallback target list for this target. The MD
+-- DirectFallback cue uses weaponmode="weaponmode.attackenemies" as its turret
+-- selector; Direct-control always arms checked groups in attackenemies
+-- (State.TICK_MODE), so the call always reaches them. Fire and forget: MD
+-- refuses a payload it cannot resolve, and the worst case of a lost event is a
+-- turret that holds fire until the next target change rather than rolling to a
+-- fallback, so there is nothing here worth a retry. The fallback is re-sent on
+-- every target change because the MD cue names a specific target and dies with
+-- it. Live-verified 2026-08-10: attackenemies honours the supplied list even
+-- when the pilot is actively fighting (aicommandraw="attackobject"); the old
+-- autoassist branch for fighting pilots is now removed.
+local function emitDirectFallback(shipID, targetID)
+    if isNullID(shipID) or isNullID(targetID) then return false end
+    if not session then return false end
+    local payload = {
+        ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
+        ["target"] = ConvertStringToLuaID(tostring(targetID)),
+    }
+    AddUITriggeredEvent("X4GunneryControl", "direct_fallback", payload)
+    -- Arm the ownership-change listener on this specific target. Each engage
+    -- resets the MD DirectWatch.OwnerWatch cue, so only one target is watched
+    -- at a time and the prior listener is cancelled automatically. The listener
+    -- signals X4GunneryControl.DirectTargetLost when the target's owner changes
+    -- to a faction the ship can no longer attack (surrender, capture).
+    -- Same payload as direct_fallback: ship+target, same transport contract.
+    -- ponytail: reuses the existing payload table; no second allocation needed.
+    AddUITriggeredEvent("X4GunneryControl", "direct_watch", payload)
+    return true
+end
+
 -- Puts the checked groups back under Direct-control after a release. The clear
 -- is ship-wide -- there is no per-group form of set_turret_targets -- so without
 -- this the groups the player is actually directing fall back to their own mode
 -- and stop shooting the engaged target, which is not what "release the others"
 -- means. Deferred a tick for the same reason the override is: MD reads the
 -- ship's turret modes back when it runs, and the release has to see each turret
--- in its own mode rather than in autoassist.
+-- in its own mode rather than in the previous directed mode.
 local function resumeDirectControl()
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not currentSession(expectedSession, expectedEpoch) then return end
         if session.phase ~= "engaged" or session.controlMode ~= "direct" then return end
-        for _, snapshot in ipairs(session.directSnapshots or {}) do
-            local group = findSnapshotGroup(snapshot)
-            if group and sameID(snapshot.shipID, session.shipID) then
-                setMode(group, "autoassist"); setArmed(group, true)
+        -- Re-arm the checked groups under direct control. committedBaseline covers
+        -- all groups at stand-up, but here we only touch the directed (checked)
+        -- ones: the others are not under our override and must not be touched.
+        -- Direct-control always uses attackenemies (live-verified 2026-08-10).
+        local mode = State.TICK_MODE
+        for _, group in ipairs(State.checkedGroups(session)) do
+            if State.canMutate(group) then
+                setMode(group, mode); setArmed(group, true)
             end
         end
         menu.display()
@@ -407,19 +458,18 @@ end
 
 local function restoreDirect(reason)
     if not session then return end
-    -- Before the early return below: the override can outlive the snapshots,
+    -- Before the early return below: the override can outlive the baseline,
     -- and leaving the chair must never leave the ship altered.
     clearPreferAllTurrets(reason)
     -- Also before the early return, and for the same reason a level up: the
-    -- parked session outlives the snapshots. An Auto-engage session has no
-    -- snapshots at all, so leaving this at the end meant its record was never
-    -- cleared and a later chair ingress would restore a session the player had
-    -- already walked away from.
+    -- parked session outlives the baseline. An Auto-engage session still has a
+    -- baseline, but its temporary apply writes staged (not direct mode changes),
+    -- so restoring it here is correct for both modes.
     clearSnapshot()
-    local snapshots = State.releaseDirect(session)
-    if #snapshots == 0 then return end
+    local baseline = State.releaseDirect(session)
+    if #baseline == 0 then return end
     local restored, missing = 0, 0
-    for _, snapshot in ipairs(snapshots) do
+    for _, snapshot in ipairs(baseline) do
         local group = findSnapshotGroup(snapshot)
         if group and sameID(snapshot.shipID, session.shipID) then
             setMode(group, snapshot.mode); setArmed(group, snapshot.armed)
@@ -431,8 +481,9 @@ local function restoreDirect(reason)
     end
     if restored > 0 then log("restored directed settings for " .. tostring(restored) .. " group(s): " .. reason) end
     if missing > 0 then log("could not resolve " .. tostring(missing) .. " directed group(s) during restore: " .. reason) end
-    -- snapshots is closed over rather than re-read off the session, because
-    -- releaseDirect has already emptied the session's own list.
+    -- baseline is closed over; committedBaseline stays on the session so any
+    -- subsequent stand-up can also revert, but the deferred check uses this
+    -- local copy to avoid re-reading after a session swap.
     local expectedSession, expectedEpoch = session, sessionEpoch
     -- Deferred rather than immediate: the engine's mode read-back lags the
     -- write, so a same-frame refresh() would re-cache the pre-restore value.
@@ -440,7 +491,7 @@ local function restoreDirect(reason)
         if not currentSession(expectedSession, expectedEpoch) then return end
         refresh()
         local mismatches = 0
-        for _, snapshot in ipairs(snapshots) do
+        for _, snapshot in ipairs(baseline) do
             local found = findSnapshotGroup(snapshot)
             local modeMismatch = found and found.mode ~= snapshot.mode
             local armedMismatch = found and found.armed ~= snapshot.armed
@@ -472,12 +523,12 @@ local function discardSession(reason)
     mapReopenFailureLogged = false
     containedShipsFailureLogged, containedStationsFailureLogged = false, false
     cutsceneNoTurretFailureLogged = false
-    -- Read directSnapshots BEFORE restoreDirect empties the list. The notify
-    -- emission below (when seatLeaving is true) depends on whether this session
-    -- actually held direct snapshots (Direct-control), not just on the reason code.
-    -- This read sits in discardSession rather than leaveChair so the
-    -- playerGetUp/playerUndock route (endForMovement -> endSession) is also covered.
-    local hadDirectSnapshots = #(session.directSnapshots or {}) > 0
+    -- Read controlMode BEFORE restoreDirect may clear it. The notify emission
+    -- below (when seatLeaving is true) depends on whether this session held an
+    -- active direct engagement, not just on the reason code. This read sits in
+    -- discardSession rather than leaveChair so the playerGetUp/playerUndock
+    -- route (endForMovement -> endSession) is also covered.
+    local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
     resumePending = false
     transitionLifecycle("ending", reason)
@@ -516,7 +567,7 @@ local function discardSession(reason)
     -- handler does NOT set seatLeaving, so it stays silent (the player has just
     -- sat down there; a popup would be wrong).
     if seatLeaving then
-        local notifyMsg = hadDirectSnapshots and text(79) or text(80)
+        local notifyMsg = hadDirectControl and text(79) or text(80)
         AddUITriggeredEvent("X4GunneryControl", "notify", { ["text"] = notifyMsg })
     end
 end
@@ -687,6 +738,14 @@ end
 
 local function startAutoEngage(groups)
     restoreDirect("auto-engage")
+    -- Temporary commit: write staged to the ship for all groups before engaging.
+    -- committedBaseline is not updated; stand-up reverts to the baseline.
+    for _, group in ipairs(session.groups or {}) do
+        local s = session.staged and session.staged[group.key]
+        if s and State.canMutate(group) then
+            setMode(group, s.mode); setArmed(group, s.armed)
+        end
+    end
     State.beginEngaged(session, groups, "auto")
     local member = cameraMember()
     if not member then State.returnToConsole(session); return false end
@@ -741,7 +800,7 @@ local function startTargetSelection(groups)
 end
 
 local function openTargetBrowser()
-    if not session or #(session.directSnapshots or {}) == 0 then return false end
+    if not session or session.controlMode ~= "direct" then return false end
     session.phase = "target_select"
     menu.display()
     return true
@@ -761,21 +820,33 @@ local function engageTarget(targetID)
     local member = cameraMember()
     if not member then return false end
     if not enterCamera(member) then return false end
-    if #(session.directSnapshots or {}) > 0 then
-        -- Snapshots already exist (re-engagement): just re-point the soft target
-        -- and set phase back to engaged without re-snapshotting.
+    if session.controlMode == "direct" then
+        -- Re-engagement: re-point the soft target and set phase back to engaged.
+        -- committedBaseline and staged are already in place.
         session.phase, session.controlMode = "engaged", "direct"
     else
-        -- First engagement: snapshot and arm every checked group we may touch.
-        -- Only mutable groups are snapshotted, because restoreDirect writes back
-        -- every snapshot it holds and a destroyed group must never be written
-        -- at all -- not even back to the value it already has.
+        -- First engagement: write staged to the ship (temporary commit point),
+        -- then arm only the checked mutable groups in attackenemies.
+        -- committedBaseline is NOT updated here — that is reserved for the
+        -- "Update turret behavior" commit.
         local orderable = {}
         for _, group in ipairs(State.checkedGroups(session)) do
             if State.canMutate(group) then orderable[#orderable + 1] = group end
         end
         State.beginEngaged(session, orderable, "direct")
-        for _, group in ipairs(orderable) do setMode(group, "autoassist"); setArmed(group, true) end
+        -- Apply the whole staged config to the ship (temp apply, all groups).
+        for _, group in ipairs(session.groups or {}) do
+            local s = session.staged and session.staged[group.key]
+            if s and State.canMutate(group) then
+                setMode(group, s.mode); setArmed(group, s.armed)
+            end
+        end
+        -- Arm the directed (checked) groups in attackenemies. Live-verified
+        -- 2026-08-10: attackenemies honours the supplied fallback list even when
+        -- the pilot is actively fighting; the mode is now a constant.
+        for _, group in ipairs(orderable) do
+            setMode(group, State.TICK_MODE); setArmed(group, true)
+        end
     end
     -- Record the chosen element and its root object. aimTargetID may be a
     -- surface element; targetObjectID is always the ship/station root so that
@@ -787,6 +858,12 @@ local function engageTarget(targetID)
     -- Previous Target, and picking a surface element), so re-issuing here is
     -- what stops the turrets falling silent the moment a target is destroyed.
     if session.preferAllTurrets then applyPreferAllTurrets() end
+    -- Hand the directed groups a fallback list for this target. The MD
+    -- DirectFallback cue uses weaponmode.attackenemies as its selector and
+    -- reaches the directed groups. A turret with no firing solution on the
+    -- preferred target rolls to the next best hostile rather than tracking in
+    -- silence (Tests B/C/D, 2026-08-09; live confirmed 2026-08-10).
+    emitDirectFallback(session.shipID, target)
     -- A target click and the replacement compact frame occur on separate UI
     -- ticks. Keep this explicit so an auto-hide or failed frame creation can
     -- restore the snapshot rather than leaving autoassist armed invisibly.
@@ -816,12 +893,23 @@ end
 applyPreferAllTurrets = function()
     if not session or session.phase ~= "engaged" then return false end
     if isNullID(session.aimTargetID) then return false end
-    for _, snapshot in ipairs(session.directSnapshots or {}) do
-        local group = findSnapshotGroup(snapshot)
-        if group and sameID(snapshot.shipID, session.shipID) then
+    -- The directed groups only, never committedBaseline. committedBaseline
+    -- covers every group on the ship; the directed (checked, mutable) groups are
+    -- the ones this session put into attackenemies. The ship-wide MD override
+    -- cannot reach a group still in that mode (the PreferAllTurrets MD cue passes
+    -- no weaponmode selector and reaches every mode, so each directed group must
+    -- be written back to its staged mode first). Writing the full baseline
+    -- instead would stomp the temporary apply on unticked groups the player never
+    -- directed.
+    for _, group in ipairs(State.checkedGroups(session)) do
+        if State.canMutate(group) then
+            -- The staged mode, not the baseline mode: staged is what the player
+            -- configured this group to be, so it is the correct answer to "what
+            -- would this group be doing if it were not directed".
+            local s = session.staged and session.staged[group.key]
             -- Mode only. The group stays armed, or it could not act on the
             -- override at all.
-            setMode(group, snapshot.mode)
+            if s then setMode(group, s.mode) end
         end
     end
     refresh()
@@ -848,6 +936,30 @@ applyPreferAllTurrets = function()
         persistSession()
     end, false, getElapsedTime() + 0.01)
     return true
+end
+
+-- "Update turret behavior" commit. Writes the staged config to every mutable
+-- group and advances committedBaseline so a later stand-up reverts to this new
+-- state rather than to what the ship looked like at sit-down. Shared verbatim by
+-- the console action row and the engaged panel: the button is a commit point by
+-- definition, so it must behave identically wherever it is pressed.
+local function commitStagedTurretBehavior()
+    if not session then return end
+    local written = 0
+    for _, group in ipairs(session.groups or {}) do
+        local s = session.staged and session.staged[group.key]
+        if s and State.canMutate(group) then
+            setMode(group, s.mode); setArmed(group, s.armed)
+            written = written + 1
+        end
+    end
+    -- The only permanent write the console makes. Worth a line: everything else
+    -- reverts on stand up, so this is the one action whose effect outlives the
+    -- session and the one to look for when a setting unexpectedly persisted.
+    log("committed turret behavior for " .. tostring(written) .. " group(s)")
+    State.commitStagedToBaseline(session)
+    persistSession()
+    menu.display()
 end
 
 local function relationLabel(component)
@@ -1033,7 +1145,8 @@ function TestAPI.getCurrentShipSweep()
 end
 
 function TestAPI.isDirectControlActive()
-    return #(session and session.directSnapshots or {}) > 0
+    return session ~= nil and session.controlMode == "direct"
+        and (session.phase == "engaged" or session.phase == "target_select")
 end
 
 function TestAPI.focusTestTurret(memberID)
@@ -1244,6 +1357,32 @@ local function onDirectTargetLost()
     logSession("engaged target lost; back to target selection")
 end
 
+-- Fired by MD (X4GunneryControl.DirectTargetLost) when the engaged target's
+-- owner changes to a faction the ship can no longer attack (surrender, capture).
+-- Distinct from onDirectTargetLost: the target still exists and the player may
+-- choose to keep tracking it -- we only need to give the directed turrets a
+-- fresh hostile list that excludes the now-friendly ship so they roll to the
+-- next hostile instead of holding fire on one they cannot engage.
+-- MD guards the raise: DirectWatch.OwnerChanged fires only when
+-- not ship.mayattack.{target}, mirroring capital.xml:1070.
+local function onDirectTargetOwnerChanged(_, param)
+    -- Silently drop stale events: a listener from a prior engagement may
+    -- arrive after session end or after a retarget.
+    if not session or not State.isOwned(session) then return end
+    if session.phase ~= "engaged" or session.controlMode ~= "direct" then return end
+    -- Verify this event is for the session's current engaged target. A stale
+    -- listener from a previous engage (before reset_cue cancelled it) could
+    -- carry a different target id. sameID normalises both the FFI uint64 form
+    -- and the Lua-number form that raise_lua_event delivers.
+    if not sameID(param, session.targetObjectID) then return end
+    -- Re-issue the directed fallback. DirectFallback's find_ship uses
+    -- relation=kill, so the now-owned target is absent from the result. The
+    -- new do_else branch in DirectFallback issues a wide call with no preferred
+    -- target, letting turrets roll freely to the next hostile.
+    log("directed target ownership changed; re-issuing fallback")
+    emitDirectFallback(session.shipID, id(session.targetObjectID))
+end
+
 -- Called from menu.onUpdate() on the 0.25 s refresh tick while phase=="engaged".
 -- Updates session.aimTargetID and restarts the cinematic when the target changes.
 local nextAimScan = 0
@@ -1369,6 +1508,14 @@ function menu.onShowMenu()
         transitionLifecycle(State.lifecycle.owned, "fresh console shown")
     end
     refresh()
+    -- Seed committedBaseline and staged from the ship's live modes at sit-down.
+    -- A restored session already carries its baseline from the payload; only a
+    -- fresh (or discarded-and-replaced) session needs seeding. Map resumes and
+    -- Test Lab reopens carry the existing session through without re-seeding.
+    if not resuming and not mapSuspendResume
+        and #(session.committedBaseline or {}) == 0 then
+        State.seedBaseline(session, session.groups)
+    end
     if resuming and session.phase ~= "console" then
         local member = cameraMember()
         if not member or not enterCamera(member) then
@@ -1497,10 +1644,19 @@ function menu.display()
             local directRow = controls:addRow("direct_actions", {})
             directRow[1]:createButton({}):setText(text(33))
             directRow[1].handlers.onClick = openTargetBrowser
-            directRow[2]:createButton({}):setText(text(13))
+            -- Same words as the console's own button (id 14), because it is now
+            -- the same action: this stands the player up. It read "Cease
+            -- Engagement" while it dropped back to the console, which it no
+            -- longer does.
+            directRow[2]:createButton({}):setText(text(14))
+            -- Cease Engagement now stands the player up rather than dropping
+            -- back to the console. Revert is bound to leaving the chair, so this
+            -- is the only seated action that can still restore the turrets --
+            -- and it reverts by definition rather than as a special case. A
+            -- seated player who wants to stand the guns down unticks and presses
+            -- "Update turret behavior" instead.
             directRow[2].handlers.onClick = function()
-                restoreDirect("compact cease button")
-                returnToConsole("engagement ceased")
+                leaveChair("compact cease button")
             end
             local canCycleTarget = hasMultipleTargets()
             local pRow4 = controls:addRow("cycle_target", {})
@@ -1537,6 +1693,13 @@ function menu.display()
                 menu.display()
             end
         end
+        -- "Update turret behavior" (id 83), same button as the console action
+        -- row. A commit point is valid in any phase: pressing it here pushes the
+        -- staged config immediately and makes it the new revert target, so the
+        -- player does not have to stand up to keep a change made mid-engagement.
+        local engagedUpdateRow = controls:addRow("update_turrets", {})
+        engagedUpdateRow[1]:setColSpan(2):createButton({ active = State.isStagedDirty(session) }):setText(text(83))
+        engagedUpdateRow[1].handlers.onClick = commitStagedTurretBehavior
         if testLabCallbacks and testLabCallbacks.open then
             local testLabRow = controls:addRow("testlab", {})
             testLabRow[1]:setColSpan(2):createButton({}):setText(text(32))
@@ -1656,8 +1819,10 @@ function menu.display()
             actions[4].handlers.onClick = openTestLab
         end
         actions[6]:setColSpan(3):createButton({}):setText(text(54))
+        -- No revert: the player is still seated, and a temporary apply now lasts
+        -- until they stand up. Backing out of the target list is a navigation
+        -- step, not a decision to put the turrets back.
         actions[6].handlers.onClick = function()
-            restoreDirect("target browser back button")
             returnToConsole("target browser back button")
         end
         frame:display()
@@ -1700,17 +1865,32 @@ function menu.display()
             local active = State.canMutate(group)
             local directed = isDirectedGroup(group)
             local checked = session.checkedGroupKeys[group.key] == true
+            -- Staged values: what the console shows and edits. Falls back to the
+            -- ship's live state if staged is somehow missing (e.g. legacy load).
+            local s = session.staged and session.staged[group.key]
+                or { mode = group.mode, armed = group.armed }
             local row = tableView:addRow(group.key, {})
             -- Checkbox: disabled when group cannot be mutated.
             row[1]:createCheckBox(checked, { width = Helper.standardTextHeight, height = Helper.standardTextHeight, active = active })
-            row[1].handlers.onClick = function() State.toggleGroup(session, group.key); menu.display() end
+            -- Pass s.armed so toggleGroup can seed a staged entry from the live
+            -- armed state when none exists yet, matching the stageMode contract.
+            row[1].handlers.onClick = function() State.toggleGroup(session, group.key, s.armed); menu.display() end
             local label = group.displayName .. (directed and (": " .. text(30)) or "")
             row[2]:setColSpan(3):createText(label, { color = active and Color["text_normal"] or Color["text_error"] })
             row[5]:createText(tostring(group.operationalCount) .. " / " .. tostring(group.totalCount))
-            row[6]:createDropDown(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key), { startOption = function() return group.mode end, active = active and not directed })
-            row[6].handlers.onDropDownConfirmed = function(_, value) setMode(group, value); refresh(); menu.display() end
-            row[7]:createButton({ active = active and not directed }):setText(group.armed and text(6) or text(7))
-            row[7].handlers.onClick = function() setArmed(group, not group.armed); refresh(); menu.display() end
+            -- Mode and armed edit the staged config, not the ship directly.
+            local stagedMode = s.mode
+            row[6]:createDropDown(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key), { startOption = function() return stagedMode end, active = active })
+            row[6].handlers.onDropDownConfirmed = function(_, value)
+                -- Pass the other field through so a group with no staged entry
+                -- yet is created from its live state, never from a constant.
+                State.stageMode(session, group.key, value, s.armed); menu.display()
+            end
+            local stagedArmed = s.armed
+            row[7]:createButton({ active = active }):setText(stagedArmed and text(6) or text(7))
+            row[7].handlers.onClick = function()
+                State.stageArmed(session, group.key, not stagedArmed, s.mode); menu.display()
+            end
             row[8]:createText("")
             -- Member rows: name + operational status only; no per-row action buttons.
             for _, member in ipairs(group.members) do
@@ -1755,6 +1935,14 @@ function menu.display()
         actions[5].handlers.onClick = function() refresh(); menu.display() end
         actions[7]:setColSpan(2):createButton({}):setText(text(14)); actions[7].handlers.onClick = function() leaveChair("get up button") end
     end
+    -- "Update turret behavior" (id 83): permanent commit. Writes staged to the
+    -- ship AND advances committedBaseline. Greyed while staged == committedBaseline;
+    -- compares against the baseline, not the ship's live state, so it stays
+    -- accurate during a temporary apply. Also available while engaged.
+    local updateRow = tableView:addRow("update_turrets", {})
+    local canUpdate = State.isStagedDirty(session)
+    updateRow[1]:setColSpan(8):createButton({ active = canUpdate }):setText(text(83))
+    updateRow[1].handlers.onClick = commitStagedTurretBehavior
     frame:display()
 end
 
@@ -1878,7 +2066,7 @@ function menu.onCloseElement(dueToClose)
         return
     end
     if session and session.phase == "target_select" then
-        restoreDirect("target browser closed")
+        -- Same as the Back button: still seated, so nothing is put back yet.
         returnToConsole("target browser closed")
         return
     end
@@ -2063,6 +2251,12 @@ local function init()
     TestAPI.hookTimeoutMessage = hookTimeoutMessage
     RegisterEvent("playerGetUp", endForMovement)
     RegisterEvent("playerUndock", endForMovement)
+    -- Ownership-change replacement for vanilla's cease_fire. MD fires this when
+    -- the engaged target's owner changes to a faction the ship can no longer
+    -- attack (capital.xml:1070 condition). The handler re-issues emitDirectFallback
+    -- so directed turrets roll to the next hostile instead of holding fire.
+    -- The handler's own guards silently drop events for stale sessions.
+    RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
@@ -2124,7 +2318,7 @@ local function init()
             -- Target selection can be entered from Direct-control. Its
             -- snapshots remain live while the browser is open, so a restore
             -- that deliberately returns to the console must release them and
-            -- clear MD first; otherwise the old autoassist override is
+            -- clear MD first; otherwise the old directed-mode override is
             -- stranded with no session left able to restore it.
             if session.controlMode == "direct" then
                 restoreDirect("restored target selection")

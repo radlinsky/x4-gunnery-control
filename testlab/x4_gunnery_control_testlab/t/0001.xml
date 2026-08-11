@@ -11,5 +11,6 @@
     <t id="22">Reload UI</t><t id="23">Reload MD</t><t id="24">Reload AI</t>
     <t id="25">Re-run current spec</t><t id="26">Despawn test scenario</t>
     <t id="27">Scenario spec</t>
+    <t id="28">Arm capture of next engaged target (10s after engage)</t>
   </page>
 </language>

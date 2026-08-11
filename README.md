@@ -19,9 +19,12 @@ ship's behaviour tab.
 
 Once you select at least one group, two buttons light up:
 
-**Auto-engage**: does not alter turret behavior at all. Your turrets keep choosing targets by
-whatever settings the ship already had. This mode exists purely so you can sit
-and watch them work.
+**Auto-engage**: issues no fire orders — your turrets still choose their own targets. Before
+entering the camera it writes your checked groups' staged console settings to the
+ship (so ticking a group, which sets its Mode to **Attack all enemies**, does take
+effect for the duration). The camera cycles only through the turrets of the
+checked groups, not every turret on the ship. Everything is reverted when you get
+up.
 
 **Direct-control**: you tell the checked groups exactly what to shoot.
 The **Select Engagement Target** menu lists the ships and stations in radar range; click
@@ -34,16 +37,27 @@ mark a specific surface element (e.g. turret, shield, engine).
   the next target yourself, which is closer to actually manning the gun.
 - **Next Target** / **Previous Target** step through the same candidate list
   without reopening the browser.
-- **All Turrets: Prefer My Target**: every turret on the ship shoots your target
-  when it can. A turret that has no shot at your target shoots something else in
-  range instead of waiting.
+- **Other Turrets: Prefer My Target**: every turret on the ship prefers your
+  target. A turret that is out of range or cannot swing round to the target will
+  roll to another hostile, but one whose own hull is in the way will track the
+  target and hold fire rather than rolling.
 
-  This affects every turret on the ship, not just the groups you checked, and
-  turrets are no longer held to their **Mode** while it is on: turrets set to
-  missile defence will fire on ships.
+  This affects every turret on the ship regardless of its Mode — no exceptions.
+  A **Missile Defence** turret will start shooting the ship you picked instead
+  of watching for incoming missiles; a **Defend** turret will engage a target
+  that is not attacking you; **Mine** and **Tow** turrets are included too.
+  **Release Other Turrets** is the off switch and reaches everything this
+  button reached.
 - **Release Other Turrets**: gives the rest of the ship back to its own
   settings. The groups you checked keep shooting your target, because you are
-  still directing them. Ceasing engagement or getting up releases everything.
+  still directing them. Getting up releases everything.
+
+A few things worth knowing up front:
+
+- **Ticking a group's checkbox sets that group's Mode to Attack all enemies.**
+- **Everything you change in the console is temporary** and is undone when you
+  press **Get Up**, unless you press **Update turret behavior** first, which
+  makes those changes permanent.
 
 **Saving and loading keeps your seat.** Save while engaged and the load puts you
 back at the same turret, watching the same target, with the same groups checked.

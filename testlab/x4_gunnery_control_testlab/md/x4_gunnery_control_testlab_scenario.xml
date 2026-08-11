@@ -116,9 +116,12 @@
 
         <!-- ScenarioGroup
              AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group",
-               {macro=, faction=, count=, distance=, spread=, behaviour=,
-                hostile=, label=})
-             One event per group in the spec.  Queued, not spawned. -->
+               {macro=, faction=, count=, distance=, spread=, x=, y=,
+                behaviour=, hostile=, label=})
+             One event per group in the spec.  Queued, not spawned.
+             x = metres right of player ship (default 0), positive = right.
+             y = metres above player ship (default 0), positive = up.
+             z (distance) = metres forward of player ship, positive = forward. -->
         <cue name="ScenarioGroup" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_group'"/>
@@ -132,6 +135,8 @@
               $count     = if @event.param3.$count     then event.param3.$count     else 1,
               $distance  = if @event.param3.$distance  then event.param3.$distance  else 5000,
               $spread    = if @event.param3.$spread    then event.param3.$spread    else 0,
+              $x         = if @event.param3.$x         then event.param3.$x         else 0,
+              $y         = if @event.param3.$y         then event.param3.$y         else 0,
               $behaviour = if @event.param3.$behaviour then event.param3.$behaviour else 'wait',
               $hostile   = @event.param3.$hostile == true
             ]"/>
@@ -170,20 +175,27 @@
               <do_if value="$Count lt 1"><set_value name="$Count" exact="1"/></do_if>
               <do_if value="$Count gt 12"><set_value name="$Count" exact="12"/></do_if>
 
+              <set_value name="$Index" exact="0"/>
               <do_all exact="$Count">
+                <set_value name="$Index" operation="add"/>
                 <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                              zone="player.zone" macro="macro.{$Def.$macro}">
                   <owner exact="$Owner"/>
                   <loadout>
                     <level exact="1.0"/>
                   </loadout>
-                  <safepos object="player.ship" z="$Def.$distance" max="$Def.$spread"/>
+                  <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
                 </create_ship>
+
+                <!-- Live tests kept failing on "which of these three identical Xenon fighters
+                     am I supposed to designate" - an explicit name makes the instruction
+                     unambiguous in the target list. -->
+                <set_object_name object="$Ship" name="$Def.$label + ' ' + $Index"/>
 
                 <!-- Where a ship actually ended up is the first thing anyone
                      asks when it cannot be found: safepos may move it, and a
                      null player.zone would place it somewhere unexpected. -->
-                <debug_text text="'[X4GC TEST SCENARIO] created ' + $Ship + ' exists=' + $Ship.exists + ' sector=' + $Ship.sector.knownname + ' dist=' + $Ship.distanceto.{player.ship} + ' playersector=' + player.sector.knownname"/>
+                <debug_text text="'[X4GC TEST SCENARIO] created ' + $Ship + ' exists=' + $Ship.exists + ' sector=' + $Ship.sector.knownname + ' dist=' + $Ship.distanceto.{player.ship} + ' playersector=' + player.sector.knownname + ' name=' + $Ship.knownname"/>
 
                 <do_if value="$Def.$hostile">
                   <add_relation_boost object="$Ship" otherobject="player.ship"
@@ -245,6 +257,57 @@
               <remove_value name="ScenarioRoot.$Spawned"/>
             </do_if>
             <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
+          </actions>
+        </cue>
+
+        <!-- ArmCapture / CaptureOnEngage
+             Automates the ownership-change leg of the Direct-control fallback
+             test.  The Test Lab menu refuses to open during an engagement, so
+             the owner cannot be flipped by hand at the moment it matters.
+             ArmCapture sets a flag instead; CaptureOnEngage then listens for
+             the same direct_watch event the main mod's DirectWatch.Arm cue
+             listens for.  That event carries the exact ship and target
+             components, and the mod only ever emits it when the directed mode
+             is attackenemies, so the trigger is self-verifying: if it fires at
+             all, the test preconditions held and no one had to check them.
+             faction.player is deliberate.  mayattack is false for the player's
+             own property absent a fire-authorisation override, which is the
+             condition the mod's OwnerChanged cue tests, and it mirrors the real
+             case: you board and capture the ship your turrets were shooting. -->
+        <cue name="ArmCapture" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'arm_capture'"/>
+          </conditions>
+          <actions>
+            <set_value name="ScenarioRoot.$CaptureArmed" exact="true"/>
+            <debug_text text="'[X4GC TEST SCENARIO] capture armed; the next Direct-control engage hands its target to the player 10s in'"/>
+          </actions>
+        </cue>
+
+        <cue name="CaptureOnEngage" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'direct_watch'"/>
+            <check_value value="ScenarioRoot.$CaptureArmed? and ScenarioRoot.$CaptureArmed"/>
+          </conditions>
+          <!-- Long enough for the turrets to visibly settle on the target, so
+               the roll-off is distinguishable from never having engaged. -->
+          <delay exact="10s"/>
+          <actions>
+            <set_value name="ScenarioRoot.$CaptureArmed" exact="false"/>
+            <!-- Same transport contract as the main mod: engine prepends $ to
+                 Lua string keys and ids may arrive as raw values. -->
+            <set_value name="$Target" exact="@event.param3.$target"/>
+            <do_if value="typeof $Target != datatype.component and $Target">
+              <set_value name="$Target" exact="component.{$Target}"/>
+            </do_if>
+            <do_if value="$Target and $Target.exists">
+              <debug_text text="'[X4GC TEST SCENARIO] capturing ' + $Target.knownname + ' ' + $Target + ' from owner ' + $Target.owner"/>
+              <set_owner object="$Target" faction="faction.player"/>
+              <debug_text text="'[X4GC TEST SCENARIO] capture done; owner=' + $Target.owner"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST SCENARIO] capture skipped; target no longer exists'"/>
+            </do_else>
           </actions>
         </cue>
 

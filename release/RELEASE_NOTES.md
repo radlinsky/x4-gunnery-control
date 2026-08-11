@@ -13,10 +13,13 @@ boring menu. This mod replaces it with a real turret console.
 - **All Turrets: Prefer My Target** Normally, only the turret group(s)
   you selected to control will try and fire at your target. If your target
   goes out of range from any of your selected turrets, those turrets will sit idle.
-  This button tells **every** turret that can hit your chosen target to do so (including
-  the turrets outside your selected group). Turrets that cannot find a firing
-  solution for your target instead find the next best enemy target in-range.
-- **Release Other Turrets** Turns off the ship-wide "Prefer my target" mode.
+  This button tells **every** turret on the ship to prefer your chosen target,
+  regardless of Mode — including Missile Defence, Defend, Mine and Tow turrets.
+  Turrets that are out of range or cannot swing round to your target will roll
+  to another hostile; turrets where your own hull is in the way will track the
+  target and hold fire.
+- **Release Other Turrets** Turns off the ship-wide "Prefer my target" mode
+  and returns every turret this button reached back to its own settings.
 
 - **Bug fixes**
 - Direct-control now works on M ships lacking a turret camera.
@@ -35,8 +38,11 @@ behaviour tab.
 
 Then two buttons light up:
 
-**Auto-engage** — changes nothing. Your turrets keep doing what they were
-already doing. This is just for sitting back and watching them work.
+**Auto-engage** — issues no fire orders. Your turrets still choose their own
+targets, but before entering the camera it writes your checked groups' staged
+console settings to the ship (so ticking a group, which sets its Mode to **Attack
+all enemies**, does take effect for the duration). The camera cycles only through
+the turrets of the checked groups. Everything is reverted when you get up.
 
 **Direct-control** — you tell the checked groups what to shoot.
 **Select Engagement Target** lists ships and stations in radar range; click one
@@ -49,6 +55,18 @@ specific surface element instead — a turret, a shield generator, an engine.
   actually manning the gun.
 - **Next Target** / **Previous Target** step through the same list without
   reopening the browser.
+- **Other Turrets: Prefer My Target** pushes every turret on the ship to prefer
+  your target, whatever Mode it is in — no exceptions. That means a Missile
+  Defence turret will shoot your chosen ship instead of watching for incoming
+  missiles, and a Defend turret will engage a target that is not attacking you.
+  Mine and Tow turrets are included too.
+- **Release Other Turrets** turns that ship-wide preference back off and
+  returns everything it reached to its own settings.
+
+A few things to know: ticking a group's checkbox sets that group's Mode to
+**Attack all enemies**. Everything you change in the console is temporary and
+undone when you press **Get Up**, unless you press **Update turret behavior**
+first, which makes the changes permanent.
 
 ## Four ways to watch
 
@@ -64,9 +82,9 @@ specific surface element instead — a turret, a shield generator, an engine.
 
 ## Leaving the seat
 
-**Cease Engagement**, **Get Up**, closing the console, undocking, or changing
-ships puts every group back exactly as you found it, and a short popup confirms
-it.
+**Get Up**, closing the console, undocking, or changing ships puts every group
+back to whatever you last made permanent with **Update turret behavior**, and a
+short popup confirms it.
 
 ## Things to know
 
