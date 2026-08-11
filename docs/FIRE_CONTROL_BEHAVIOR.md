@@ -52,11 +52,11 @@ The modes a turret group can be in. The in-game label is what X4 shows in the tu
 | In-game label | What the group does | Prefer My Target ON | Confidence |
 |---|---|---|---|
 | **Attack all enemies** | Shoots any enemy in range. This is what every ticked group is set to. | Shoots your target; behaves as Table 3 | LIVE |
-| **Defend** | Fires only when defending against a threat, not on all enemies. | Is sent your target and will treat it as an enemy to shoot | UNTESTED |
-| **Missile defence** | Shoots incoming missiles, not ships. | Is sent your target; whether it will shoot a ship is | UNTESTED |
-| **Mine** | Turret task not built for shooting ships. | Is sent your target; effect | UNKNOWN |
-| **Tow** | Turret task not built for shooting ships. | Is sent your target; effect | UNKNOWN |
-| **Hold fire** | Does not fire. | Is sent your target; whether it fires anyway is | UNKNOWN |
+| **Defend** | Fires only when defending against a threat, not on all enemies. | Shoots your target. X4's own combat AI hands Defend turrets an enemy list with a "shoot this one first" mark, exactly as Prefer My Target does | X4 CODE |
+| **Missile defence** | Shoots incoming missiles, not ships. | Is sent your target the same way Defend is. Whether it acts on a ship rather than waiting for a missile is | UNTESTED |
+| **Mine** | Turret task not built for shooting ships. | Is sent your target along with every other mode. Whether a mining turret acts on it is | UNKNOWN |
+| **Tow** | Turret task not built for shooting ships. | No effect. Tow is the one mode X4's own combat AI skips when handing out targets | INFERRED |
+| **Hold fire** | Does not fire. | Prefer My Target is the only thing that can reach a Hold fire group at all; the ordinary target command cannot address that mode. Whether the group then fires anyway is | UNKNOWN |
 | **(auto-assist)** | X4's automatic mode: the game picks the turret's target itself. No player-facing label in the turret menu; it is the game's default handling. | **Ignores the command.** It follows your *locked target*, not your selected target (see Table 6). | X4 CODE |
 
 ---
