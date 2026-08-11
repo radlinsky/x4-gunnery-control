@@ -483,6 +483,205 @@
   it. The fallback selection rule among eligible targets remains unverified; do
   not claim it is nearest-first.
 
+### The player-selectable turret mode list is eleven modes, and holdfire is not one of them
+- X4: 9.00
+- Status: shipped-source
+- Source: the dropdown model is a single literal table,
+  `ui-9.00/ui/addons/ego_detailmonitorhelper/helper.lua:12712-12724`
+  (`Helper.turretModes`), consumed by `Helper.getTurretModes` at `:12726-12734`.
+  Its three call sites are the only turret-mode pickers in the shipped UI:
+  `ui/addons/ego_detailmonitor/menu_docked.lua:850` (all turrets), `:867`
+  (single turret), `:885` (turret group), and the map-menu equivalents
+  `menu_map.lua:16092`, `:16106`, `:16126`. Selection commits through
+  `C.SetWeaponMode` / `C.SetTurretGroupMode2` (`menu_docked.lua:869`, `:887`).
+  Labels resolved from `t2-9.00/t/0001-l044.xml` (English, page 1001)
+- Live test: no — read from shipped source and text DB, untested by this project
+  as of 2026-08-11
+- Finding: in table order, with the label the player actually sees:
+  `defend` "Defend" (8613), `attackenemies` "Attack all enemies" (8614),
+  `attackcapital` "Attack only capital ships" (8634), `prefercapital`
+  "Attack capital ships first" (8637), `attackfighters` "Attack only fighters"
+  (8635), `preferfighters` "Attack fighters first" (8638), `missiledefence`
+  "Shoot only missiles" (8636), `prefermissiles` "Shoot missiles first" (8639),
+  `autoassist` "Attack my current enemy" (8617), `mining` "Mining" (8616),
+  `towing` "(Turret mode)Towing" (8633).
+- **`autoassist` IS player-selectable and IS labelled.** It is entry `[9]` with
+  `forall = true`. Any statement that autoassist is an unlabelled internal
+  default is wrong. Its in-game name, "Attack my current enemy", is also a plain
+  description of the behaviour recorded elsewhere in this file: it follows the
+  player's locked target and discards script-supplied lists.
+- **`holdfire` is absent from the entire shipped turret-mode UI.** It is not in
+  `Helper.turretModes`, and a grep for `holdfire` across
+  `ui-9.00/ui/addons/ego_detailmonitor/`, `ui/addons/ego_detailmonitorhelper/`
+  and `ui/core/` returns nothing. The only `holdfire` hits anywhere in `ui-9.00`
+  are unrelated: three in `ego_interactmenu/menu_interactmenu.lua` (`:1030`,
+  `:1103` script-parameter comments, and `:6239` the fleet order "Stop and hold
+  fire"). So a player cannot put a turret into holdfire from the turret menu;
+  only a script can, via `set_weapon_mode` (typed `extendedweaponmodelookup`).
+  A turret found in holdfire got there from a script or a fleet order.
+- Two filters decide which of the eleven a given player actually sees. `forall`
+  is false only for `towing`, so towing is offered per-turret but suppressed from
+  the "all turrets" dropdown unless the ship has only tug turrets
+  (`menu_docked.lua:850` passes `not hasonlytugturrets`). Per entry, the UI calls
+  the engine predicate `C.IsWeaponModeCompatible(turret, "", entry.id)`
+  (`helper.lua:12730`, declared `:416`), which is where hardware gating such as
+  "this is a mining laser" lives. That predicate is engine-side; its rule is not
+  readable from script and is not established here.
+- Bound on the claim: this enumerates the VANILLA UI. An installed extension can
+  add its own picker. Labels are the English text DB only.
+
+### `weaponmodelookup` has eleven members; the doc-relevant five are the capital/fighter/missile priority modes
+- X4: 9.00
+- Status: shipped-source
+- Source: `schemas-9.00/libraries/common.xsd:2334-2418` enumerated in full;
+  `extendedweaponmodelookup` at `:2420-2441`
+- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Finding: `weaponmodelookup` contains exactly, with Egosoft's own
+  `xs:documentation`: `weaponmode.any` "Any mode applies" (`:2338`),
+  `attackenemies` "Attack all enemies" (`:2345`), `attackcapital` "Attack only
+  capital ships (All ships of size class L or XL)" (`:2352`), `attackfighters`
+  "Attack only non-capital ships (All ships of size class XS, S, or M)"
+  (`:2359`), `defend` "Defend against attackers (default for non-mining
+  weapons)" (`:2366`), `mining` "Mining asteroids (default for mining weapons)"
+  (`:2373`), `missiledefence` "Attempt to shoot down missiles" (`:2380`),
+  `prefercapital` "Attack all enemies, but prioritize capital ships" (`:2387`),
+  `preferfighters` "Attack all enemies, but prioritize fighters" (`:2394`),
+  `prefermissiles` "Attack all enemies, but prioritize missiles" (`:2401`),
+  `towing` "Attempt to tow scrap" (`:2408`). `extendedweaponmodelookup` adds
+  `autoassist` "Automatically target the current target (player only)" (`:2424`)
+  and `holdfire` "Do not shoot" (`:2431`), and nothing else.
+- The distinction that matters for fire control: the three `prefer*` modes are
+  documented as "Attack all enemies, but prioritize X". They are attackenemies
+  with a sort order, NOT a target restriction — so a mod's preferred target
+  reaches them the same way it reaches attackenemies. The two `attackcapital` /
+  `attackfighters` modes ARE restrictions by size class, so a target of the wrong size
+  class is one the turret is documented not to engage.
+- Vanilla treats them exactly that way. `fight.attack.object.capital.xml:1697`
+  lists `attackenemies`, `attackcapital`, `attackfighters`, `prefercapital`,
+  `preferfighters` and `prefermissiles` together as the modes whose presence
+  makes a ship worth running the fight loop for. In the player-owned branch the
+  three `prefer*` modes each get the full target set with the ship's preferred
+  target passed straight through (`:2172` attackenemies, `:2192` prefercapital,
+  `:2208` preferfighters, `:2224` prefermissiles), while `attackcapital` (`:2240`)
+  and `attackfighters` (`:2249`) get only the size-filtered group.
+
+### Vanilla hands missiledefence and mining turrets a SHIP as preferred target
+- X4: 9.00
+- Status: shipped-source
+- Source: `aiscripts/fight.attack.object.capital.xml:2261-2267` (missiledefence)
+  and `:2270-2272` (mining), in the player-owned branch; `$preferredtarget`
+  originates at `:1979` as `@$primarytarget`. The NPC branch is stronger still:
+  `fight.attack.object.medium.xml:1372-1374` and
+  `fight.attack.object.capital.xml:2126-2128` loop `$turretmodes` and pass the
+  same hostile `$targets.list` to EVERY mode except `towing`, and `$turretmodes`
+  is built from unfiltered live `.mode` reads at `capital.xml:1683-1688`
+- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Finding: the missiledefence call at `:2267` sets `$locpreferred` to
+  `$preferredtarget` FIRST (`:2262`) and only replaces it with a random missile
+  if the preferred target is not already in the incoming-missile list (`:2263-2265`).
+  Since `$preferredtarget` descends from `$primarytarget`, the ship the pilot is
+  attacking, vanilla routinely hands a missiledefence turret a hostile SHIP as
+  its preferred target alongside a missiles-only fallback list. Directing a
+  missiledefence turret at a ship is therefore Egosoft's own behaviour, not a
+  mod-only abuse.
+- On NPC ships the same is true of `mining`: a mining-mode turret on a
+  non-player-owned ship receives the full hostile ship list with a hostile
+  preferred target, because the sweep excludes only `towing`. Vanilla's mining
+  restraint on PLAYER ships is a script-side gate, not a property of the mode —
+  `:2270` guards the asteroid call on `this.ship == player.occupiedship`, and
+  `:1903` carries the comment "turret handling for AI pilots is handled in the
+  respective mining scripts".
+- No hardware gate backs any of this up in script. `weapon.ismining` and
+  `weapon.iscombat` exist (`props-9.00/libraries/scriptproperties.xml:1450-1451`)
+  but a grep for `ismining`, `iscombat` and `isrepairing` across ALL of
+  `scripts-9.00/` (`aiscripts/` and `md/`) returns zero hits — no shipped script
+  reads them. Nothing in shipped script filters a target list by whether the
+  receiving turret is mining or combat hardware.
+- What is still NOT established: whether the ENGINE's shoot controller then acts
+  on that ship target, for either mode. Vanilla's willingness to send it is not
+  proof the turret fires. `IsWeaponModeCompatible` (`helper.lua:416`) shows
+  hardware/mode compatibility gating does exist engine-side and is unreadable
+  from script. Both rows still need a live test to settle "does it shoot".
+
+### Vanilla drops a turret target the moment it stops being attackable, and holds fire by MODE alone
+- X4: 9.00
+- Status: shipped-source
+- Source: `aiscripts/fight.attack.object.capital.xml:1057-1096`, a handler whose
+  own comment (`:1057`) reads "stop firing if a target changes ownership to less
+  than hostile"; the mirror at `fight.attack.object.medium.xml:443-446`.
+  `ClearTarget` is defined at `aiscripts/lib.target.selection.singletarget.xml:5-49`.
+  `stop_firing_at_target` is declared at `schemas-9.00/libraries/common.xsd:37511-37529`
+- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Finding: change-of-owner and relation change are handled explicitly, and the
+  handler is script-side, not engine-side. It triggers on
+  `event_object_relation_range_changed` or `event_object_changed_owner` over the
+  target groups (`:1060-1065`), gated by `check_value value="not
+  this.assignedcontrolled.mayattack.{event.object}"` (`:1070`). So the trigger is
+  the loss of `mayattack`, i.e. relation, not destruction.
+  - If the target stopped being attackable, `ClearTarget` (`:1087`) removes it
+    from every group and calls `stop_firing_at_target` on it
+    (`lib.target.selection.singletarget.xml:12`, `:27`, `:42`), then
+    `abort_called_scripts resume="Start"` (`:1095`) restarts target selection.
+  - If the FIRING ship changed owner, everything is cleared wholesale
+    (`:1075-1082`).
+  - Autoassist is handled separately at `:1088-1091`: if `player.target` is no
+    longer attackable, vanilla issues `cease_fire weaponmode="weaponmode.autoassist"`,
+    because an autoassist turret's target is engine-chosen and clearing a list
+    would not reach it.
+- Consequence for a mod: the engine does not silently drop a preferred target
+  that stops being hostile — a SCRIPT does, and that script is the ship's own
+  fight AI. A mod that keeps re-issuing a preferred target after the target
+  turns friendly is fighting the vanilla handler rather than being corrected by
+  it. `mayattack` is the operative test
+  (`props-9.00/libraries/scriptproperties.xml:119-120`, kill relation, or
+  killmilitary against a fight-purpose object, "can be overridden by fire
+  authorisation override").
+- **Do not confuse `canbeattacked` with permission.** `canbeattacked`
+  (`scriptproperties.xml:24`) is documented as "true iff the component exists in
+  the game graph, is not a wreck, and is either operational, is of real class
+  station, or is a child of a station" — pure existence and integrity. It
+  contains no relation check whatsoever. Relation lives in `mayattack` (`:119-120`)
+  and `ishostileto` (`:121-122`). Vanilla uses both, for different jobs.
+- Corroborating how binding `holdfire` is: vanilla's own stand-down path is the MODE
+  alone. `aiscripts/lib.set.weaponmode.xml:17-20` falls back to
+  `weaponmode.holdfire` when called with no mode, logging "falling back on
+  weaponmode.holdfire", and `move.flee.xml:191-196` and `order.wait.xml:206` use
+  it to make a ship stop shooting. Neither of those scripts pairs it with
+  `cease_fire` or clears turret targets — grep for `cease_fire`,
+  `set_turret_targets` and `stop_shooting` in both files returns nothing. Egosoft
+  evidently trusts the mode by itself to stop fire, with stale target lists
+  possibly still in place. That is suggestive that holdfire outranks a target
+  list, but it is NOT proof: no shipped script ever sends a target list to a
+  holdfire turret, so shipped source never exercises the conflict. The row still
+  needs a live test.
+
+### No lead, intercept, or predicted-position handling exists in shipped scripts
+- X4: 9.00
+- Status: inference
+- Bound: a negative result; the greps are the claim
+- Source: `props-9.00/libraries/scriptproperties.xml` grepped for
+  `predictedposition`, `intercept`, `leadposition`, `aimposition` — zero hits.
+  `schemas-9.00/libraries/common.xsd` grepped for `predict` and `intercept` —
+  the only hits are four unrelated enumerations (`:2505` `interceptor`, `:2550`
+  `shiptype.interceptor`, `:3602` `interception`, `:3696`
+  `assignment.interception`), all ship-role or assignment names.
+  `scripts-9.00/aiscripts/fight.attack.object.capital.xml`,
+  `fight.attack.object.medium.xml`, `fight.attack.object.bigtarget.xml` and
+  `fight.attack.object.station.xml` grepped for `velocity` — zero hits in any of
+  them
+- Live test: no — source search only, as of 2026-08-11
+- Finding: no shipped aiscript computes a firing lead, and no MD property or
+  action exposes one. The combat scripts never read a target's velocity at all.
+  Whatever ballistic lead the engine applies when a turret actually shoots is
+  entirely inside the C++ shoot controller and is invisible to and unreachable
+  from script. A script-side "is there a shot that would connect" test therefore
+  does not exist in vanilla, which is consistent with the separately recorded
+  finding that vanilla's complete firing-solution test is line of sight plus
+  range.
+- Bound restated so it is not over-read: this establishes that SCRIPTS do no lead
+  computation. It says nothing about whether the engine does. Do not cite it as
+  evidence that X4 turrets fire without lead.
+
 ### Vanilla sweeps every turret mode but towing, and feeds defend/missiledefence hostiles
 - X4: 9.00
 - Status: shipped-source
@@ -528,7 +727,14 @@
   target list on a holdfire turret, or whether "do not shoot" overrides it. That
   needs a controlled live test, and the source is silent on it. Do not assume
   either way. (Autoassist is separately known to discard the list outright —
-  record above.)
+  record above.) The closest circumstantial evidence, and it is only
+  circumstantial, is that vanilla stands ships down using the mode alone without
+  clearing targets — see the change-of-owner record above.
+- Superseded in one respect by the mode-enumeration records above: "every turret
+  mode" here means the eleven members of `weaponmodelookup`, which include
+  `attackcapital`, `attackfighters`, `prefercapital`, `preferfighters` and
+  `prefermissiles`. This entry predates that enumeration and should not be read
+  as implying the mode set is just defend/attackenemies/mining/missiledefence/towing.
 
 ### `mayattack` includes relation and fire-authorisation gates
 - X4: 9.00
