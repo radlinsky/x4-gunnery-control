@@ -17,10 +17,10 @@ These words mean one specific thing throughout this document.
 - **Your pilot** — whoever is flying your ship while you sit at the Gunnery Console. Your pilot may be **attacking** a target, or may be flying or idle.
 - **Prefer My Target** — the "Other Turrets" toggle in Direct-control. It sends your target to every turret group on the ship, not only the ticked ones.
 
-Confidence is marked on every behavior:
+Confidence is marked on every behavior, strongest first:
 
-- **LIVE** — watched happen in game.
 - **X4 CODE** — stated in Egosoft's own game scripts.
+- **LIVE** — watched happen in game.
 - **INFERRED** — worked out from the two above, not directly watched.
 - **UNTESTED** — the mod has code for this, but it has not been confirmed in game.
 - **UNKNOWN** — not known yet.
@@ -53,13 +53,13 @@ Five of these are **restrict** or **prioritise** modes. "Attack only X" means th
 
 | In-game label | What the group does | Prefer My Target ON | Confidence |
 |---|---|---|---|
-| **Defend** | Fires only when defending against a threat, not on all enemies. | Shoots your target. X4's own combat AI hands Defend turrets an enemy list with a "shoot this one first" mark, exactly as Prefer My Target does | X4 CODE |
+| **Defend** | Fires only when defending against a threat, not on all enemies. | Shoots your target.  X4's own combat AI hands Defend turrets an enemy list with a "shoot this one first" mark, exactly as Prefer My Target does | X4 CODE |
 | **Attack all enemies** | Shoots any enemy in range. This is what every ticked group is set to. | Shoots your target; behaves as Table 3 | LIVE |
 | **Attack only capital ships** | Will not engage anything smaller than a capital ship. | Shoots your target if it is a capital ship. If your target is a fighter, this is a target the mode is built not to engage | INFERRED |
 | **Attack capital ships first** | Shoots any enemy, capital ships preferred. Not a restriction. | Shoots your target | INFERRED |
 | **Attack only fighters** | Will not engage anything larger than a fighter. | Shoots your target if it is a fighter. If your target is a capital ship, this is a target the mode is built not to engage | INFERRED |
 | **Attack fighters first** | Shoots any enemy, fighters preferred. Not a restriction. | Shoots your target | INFERRED |
-| **Shoot only missiles** | Shoots incoming missiles, not ships. | Is sent your target. X4's own combat AI does the same thing: it marks the ship its pilot is attacking as "shoot this one first" for these turrets, while giving them only missiles to fall back on. Whether the turret then shoots the ship is | UNTESTED |
+| **Shoot only missiles** | Shoots incoming missiles, not ships. | Is sent your target. Whether it then shoots a ship rather than only missiles is not known | UNTESTED |
 | **Shoot missiles first** | Shoots any enemy, missiles preferred. Not a restriction. | Shoots your target | INFERRED |
 | **Attack my current enemy** | X4's automatic mode. The game picks the turret's target itself. | **Ignores the command.** It follows your *locked target*, not your selected target (see Table 6) | X4 CODE |
 | **Mining** | Turret task built for asteroids. | Is sent your target. On X4's own ships, mining turrets are handed the full enemy list exactly like every other mode; X4 only holds them to asteroids on the ship you are personally flying. Whether the turret acts on a ship is | UNTESTED |
