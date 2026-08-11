@@ -384,6 +384,11 @@ end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
+    -- A UI reload destroys this file-local state but leaves MD cue variables
+    -- alive. The new Lua instance starts OFF, so explicitly converge MD on
+    -- that state before rendering the menu; otherwise ObserveArm keeps
+    -- logging while the button says OFF.
+    if AddUITriggeredEvent then setObserving(false) end
     -- Replay the fixture spec on every UI load. This is the whole point of the
     -- design: the agent edits scenario_spec.lua, the owner clicks Reload UI
     -- once. MD refuses a spec id it has already spawned, so a Reload UI during

@@ -117,4 +117,25 @@ local before = countEvents("observe_state")
 fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
 assert(countEvents("observe_state") == before, "state pusher kept running after logging was disabled")
 
+-- A UI reload creates a fresh file-local `observing` value while MD keeps its
+-- cue variables. The new instance must explicitly turn MD off so its button
+-- and its listener cues cannot disagree. Loading the file again is the test
+-- fixture's equivalent of ScheduleReloadUI for this companion module.
+local reloadToggle = findButton(TOGGLE)
+reloadToggle.handlers.onClick() -- arm again so reload exercises stale-ON state
+assert(lastEvent("observe_toggle").params.enabled == true, "reload setup failed to arm logging")
+assert(pcall(dofile, "testlab/x4_gunnery_control_testlab/ui/testlab.lua"),
+    "reloading the Test Lab UI must succeed")
+local reloadedOff = lastEvent("observe_toggle")
+assert(reloadedOff and reloadedOff.params.enabled == false,
+    "a fresh Test Lab UI must disable the persistent MD observer")
+local reloadedMenu
+for index = #Menus, 1, -1 do
+    if Menus[index].name == "X4GunneryTestLab" then reloadedMenu = Menus[index]; break end
+end
+assert(reloadedMenu, "reloaded Test Lab menu was not registered")
+reloadedMenu.onShowMenu()
+assert(findButton(TOGGLE).text:find("OFF", 1, true),
+    "reloaded Test Lab UI must render logging OFF")
+
 print("testlab observability checks passed")

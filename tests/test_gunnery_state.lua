@@ -499,6 +499,26 @@ do
     eq(rebound.staged["group:NEW:../:" .. nasty].mode, State.TICK_MODE,
         "and its staged mode must still be the committed one")
 
+    -- Regression: a normal direct engagement saves the original baseline and
+    -- the checked group separately. Restore must rebuild the checked group's
+    -- current staged mode as TICK_MODE rather than showing the baseline mode
+    -- in the dropdown while the checkbox says it is directed.
+    local directSaved = State.newSession("443760", "gunnercontrol")
+    directSaved.groups = session.groups
+    local directKey = session.groups[1].key
+    directSaved.checkedGroupKeys[directKey] = true
+    directSaved.committedBaseline = {
+        { kind = "group", shipID = "443760", contextID = "OLD", path = "../",
+          group = nasty, mode = "defend", armed = true },
+    }
+    local directBack = State.newSession("443760", "gunnercontrol")
+    State.restoreState(directBack, State.decode(State.encode(State.saveState(directSaved))), session.groups)
+    local directRestoredKey = "group:NEW:../:" .. nasty
+    eq(directBack.checkedGroupKeys[directRestoredKey], true,
+        "a checked direct group must remain checked after restore")
+    eq(directBack.staged[directRestoredKey].mode, State.TICK_MODE,
+        "a checked direct group must restore its temporary attackenemies mode")
+
     -- The legacy single-snapshot fallback in snapshotsForSave still works.
     local legacy = State.newSession("443760", "gunnercontrol")
     legacy.phase, legacy.controlMode = "engaged", "direct"

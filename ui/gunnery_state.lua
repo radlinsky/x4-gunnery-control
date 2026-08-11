@@ -926,7 +926,14 @@ function State.restoreState(session, records, liveGroups)
     local restoredStaged = {}
     for _, entry in ipairs(baseline) do
         local stagedKey = State.baselineStagedKey(entry)
-        restoredStaged[stagedKey] = { mode = entry.mode, armed = entry.armed }
+        -- A checked group is under Direct-control, whose temporary mode is
+        -- always TICK_MODE. The checked and baseline records are independent:
+        -- baseline is the stand-up revert target, while checked describes the
+        -- current engagement. Rebuilding staged from baseline alone therefore
+        -- shows a defend/other mode while the live direct session is in
+        -- attackenemies.
+        local stagedMode = checkedGroupKeys[stagedKey] and State.TICK_MODE or entry.mode
+        restoredStaged[stagedKey] = { mode = stagedMode, armed = entry.armed }
         -- Same binding seedBaseline applies at a fresh sit-down: a group whose
         -- mode is TICK_MODE comes up ticked. It has to be re-applied here
         -- because the checkbox and the mode arrive on this path from two
