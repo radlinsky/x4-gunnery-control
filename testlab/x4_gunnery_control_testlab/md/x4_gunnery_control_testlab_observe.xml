@@ -287,6 +287,13 @@
               </conditions>
               <actions>
                 <set_value name="$Weapon" exact="@event.param3.{2}"/>
+                <!-- Every read off $Weapon and event.param is @-guarded.  A
+                     failed property lookup does not merely blank one field: MD
+                     abandons the expression and writes the debug_text SOURCE to
+                     the log instead, so a single bad read turns the line into
+                     unparseable garbage.  Seen live on missile hits, where the
+                     emitter is not in weapons.operational.list and $Weapon.mode
+                     does not resolve. -->
                 <!-- Same target precedence as Direct-control itself: the soft
                      target is what the mod aims at, and player.target is the
                      free-play fallback when no session is pushing state. -->
@@ -299,10 +306,10 @@
                 </do_elseif>
                 <debug_text text="'[X4GC TEST HIT] t=' + player.age
                   + ' weapon=' + (if $Weapon then $Weapon else 'none')
-                  + ' mode=' + (if $Weapon then $Weapon.mode else 'none')
+                  + ' mode=' + (if $Weapon then @$Weapon.mode else 'none')
                   + ' isturret=' + (if $Weapon then $Weapon.isclass.turret else false)
                   + ' hit=' + event.param
-                  + ' hitname=' + event.param.knownname
+                  + ' hitname=' + @event.param.knownname
                   + ' hitcomp=' + (if @event.param3.{1} then event.param3.{1} else 'none')
                   + ' method=' + event.param2
                   + ' aimed=' + (if $Aimed then $Aimed else 'none')

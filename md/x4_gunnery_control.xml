@@ -363,6 +363,14 @@
                    fire. -->
               <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
               <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
+              <!-- Success line, mirroring the bad-payload line below. Without it
+                   this cue is silent on the happy path, and a log that shows no
+                   turret acting on the preference cannot distinguish "the click
+                   never arrived" from "the engine ignored the order". Those need
+                   opposite fixes. Guard every read with @: a failed lookup inside
+                   debug_text makes MD write the expression SOURCE to the log
+                   instead of blanking one field, corrupting the whole line. -->
+              <debug_text text="'[X4GC] prefer_all_turrets: applied ship=' + $ship + ' target=' + $target + ' tgtname=' + @$target.knownname + ' hostiles=' + $hostiles.count + ' t=' + player.age" chance="100"/>
             </do_if>
             <do_else>
               <debug_text text="'[X4GC] prefer_all_turrets: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
