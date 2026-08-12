@@ -1559,4 +1559,128 @@ do
     C.GetSofttarget2 = savedGetSofttarget
 end
 
+-- ── 57. target browser exposes class/macro metadata and a top refresh ───────
+do
+    gcMenu.onShowMenu()
+    local sess57 = API.getSession()
+    sess57.phase = "target_select"
+    GetPlayerContextByClass = function() return 1 end
+    GetContainedShips = function() return { 570, 572, 573, 574, 575, 576 } end
+    GetContainedStations = function() return { 571 } end
+    C.GetContextByClass = function(comp) return comp end
+    local classByComponent57 = {
+        [570] = "ship_l", [573] = "ship_s", [574] = "ship_m", [575] = "ship_xl",
+        [571] = "station",
+    }
+    C.IsComponentClass = function(component, class)
+        local comp = tonumber(tostring(component))
+        return classByComponent57[comp] == class
+    end
+    C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
+    C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
+    local typeByMacro57 = {
+        ship_xen_s_fighter_01_a_macro = "N",
+        ship_xen_m_fighter_01_a_macro = "P",
+        ship_arg_l_destroyer_01_a_macro = "Behemoth Vanguard",
+        ship_arg_xl_carrier_01_a_macro = "Colossus Vanguard",
+        station_arg_defence_disc_macro = "Argon Defence Platform",
+    }
+    GetMacroData = function(macro, field)
+        return field == "name" and typeByMacro57[macro] or ""
+    end
+    GetComponentData = function(component, ...)
+        local keys, vals, comp = {...}, {}, tonumber(tostring(component))
+        for _, key in ipairs(keys) do
+            if key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "isenemy" then vals[#vals + 1] = true
+            elseif key == "ishostile" or key == "isfriend" then vals[#vals + 1] = false
+            elseif key == "isknown" or key == "isradarvisible" then vals[#vals + 1] = true
+            elseif key == "maxradarrange" then vals[#vals + 1] = 40000
+            -- Live X4 9.00 returns numeric class ids (for example 91-94 for the
+            -- four ship sizes), not the class-name strings used by the old
+            -- test double. Classification must go through IsComponentClass.
+            elseif key == "classid" then
+                vals[#vals + 1] = ({ [573] = 91, [574] = 92, [570] = 93, [575] = 94, [571] = 95 })[comp] or 96
+            elseif key == "macro" then
+                vals[#vals + 1] = ({
+                    [573] = "ship_xen_s_fighter_01_a_macro",
+                    [574] = "ship_xen_m_fighter_01_a_macro",
+                    [570] = "ship_arg_l_destroyer_01_a_macro",
+                    [575] = "ship_arg_xl_carrier_01_a_macro",
+                    [571] = "station_arg_defence_disc_macro",
+                })[comp] or (comp == 572 and "unknown_object_macro" or "")
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    local candidates57 = API.readTargetCandidates()
+    assert(#candidates57 == 7, "57: expected four ship sizes, station, and two fallback candidates")
+    local byID57 = {}
+    for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
+    assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
+    assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
+    assert(byID57["570"].typeName == "Behemoth Vanguard", "57: localized ship type missing")
+    assert(byID57["573"].class == "S Ship", "57: S ship class label missing")
+    assert(byID57["574"].class == "M Ship", "57: M ship class label missing")
+    assert(byID57["575"].class == "XL Ship", "57: XL ship class label missing")
+    assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
+    assert(byID57["572"].class == ReadText(20991, 44), "57: unknown ship class must fall back to kind")
+    assert(byID57["572"].typeName == ReadText(20991, 51), "57: unknown macro name must not expose raw macro")
+    assert(byID57["576"].typeName == ReadText(20991, 51), "57: missing macro must render Unknown Object")
+    C.GetSofttarget2 = function() return { softtargetID = 571, softtargetConnectionName = "" } end
+    local stationCurrent57 = API.readTargetCandidates()
+    local currentStation57
+    for _, candidate in ipairs(stationCurrent57) do
+        if tostring(candidate.componentID) == "571" then currentStation57 = candidate end
+    end
+    assert(currentStation57 and currentStation57.class == ReadText(20991, 45),
+        "57: current soft-target station must retain localized Station class")
+    C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
+    gcMenu.display()
+    local rendered57 = {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.row == "570" or entry.row == "573" or entry.row == "574" or entry.row == "575" then
+            rendered57[entry.row] = rendered57[entry.row] or {}
+            rendered57[entry.row][entry.column] = entry.text
+        end
+    end
+    local expectedRendered57 = {
+        ["573"] = { class = "S Ship", typeName = "N", macro = "ship_xen_s_fighter_01_a_macro" },
+        ["574"] = { class = "M Ship", typeName = "P", macro = "ship_xen_m_fighter_01_a_macro" },
+        ["570"] = { class = "L Ship", typeName = "Behemoth Vanguard", macro = "ship_arg_l_destroyer_01_a_macro" },
+        ["575"] = { class = "XL Ship", typeName = "Colossus Vanguard", macro = "ship_arg_xl_carrier_01_a_macro" },
+    }
+    for component, expected in pairs(expectedRendered57) do
+        assert(rendered57[component] and rendered57[component][3] == expected.class,
+            "57: " .. expected.class .. " must be bound to rendered column 3")
+        assert(rendered57[component][4] == expected.typeName,
+            "57: " .. expected.class .. " localized type must be bound to rendered column 4")
+    end
+    local refreshButtons57 = {}
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
+    end
+    assert(#refreshButtons57 >= 2, "57: target browser needs refresh controls at top and bottom")
+    refreshButtons57[1].handlers.onClick()
+    local refreshedButtons57 = {}
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.text == ReadText(20991, 15) then refreshedButtons57[#refreshedButtons57 + 1] = button end
+    end
+    refreshedButtons57[#refreshedButtons57].handlers.onClick()
+    local log57 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log57:find("event=target_browser action=refresh location=top", 1, true),
+        "57: top refresh click needs audit evidence")
+    assert(log57:find("event=target_browser action=refresh location=bottom", 1, true),
+        "57: bottom refresh click needs audit evidence")
+    assert(log57:find("event=target_browser action=rendered candidates=7 class_values=7 type_values=7", 1, true),
+        "57: rendered target metadata needs aggregate audit evidence")
+    for component, expected in pairs(expectedRendered57) do
+        local evidence = 'event=target_browser action=row component=' .. component
+            .. ' name="0" class="' .. expected.class .. '" type="' .. expected.typeName
+            .. '" macro="' .. expected.macro .. '"'
+        assert(log57:find(evidence, 1, true),
+            "57: rendered row audit needs exact " .. expected.class .. " component/class/macro evidence")
+    end
+end
+
 print("runtime targeting tests passed")
