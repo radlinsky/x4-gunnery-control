@@ -1565,7 +1565,7 @@ do
     local sess57 = API.getSession()
     sess57.phase = "target_select"
     GetPlayerContextByClass = function() return 1 end
-    GetContainedShips = function() return { 570, 572, 573, 574, 575 } end
+    GetContainedShips = function() return { 570, 572, 573, 574, 575, 576 } end
     GetContainedStations = function() return { 571 } end
     C.GetContextByClass = function(comp) return comp end
     local classByComponent57 = {
@@ -1578,6 +1578,16 @@ do
     end
     C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
+    local typeByMacro57 = {
+        ship_xen_s_fighter_01_a_macro = "N",
+        ship_xen_m_fighter_01_a_macro = "P",
+        ship_arg_l_destroyer_01_a_macro = "Behemoth Vanguard",
+        ship_arg_xl_carrier_01_a_macro = "Colossus Vanguard",
+        station_arg_defence_disc_macro = "Argon Defence Platform",
+    }
+    GetMacroData = function(macro, field)
+        return field == "name" and typeByMacro57[macro] or ""
+    end
     GetComponentData = function(component, ...)
         local keys, vals, comp = {...}, {}, tonumber(tostring(component))
         for _, key in ipairs(keys) do
@@ -1598,22 +1608,25 @@ do
                     [570] = "ship_arg_l_destroyer_01_a_macro",
                     [575] = "ship_arg_xl_carrier_01_a_macro",
                     [571] = "station_arg_defence_disc_macro",
-                })[comp] or "unknown_object_macro"
+                })[comp] or (comp == 572 and "unknown_object_macro" or "")
             else vals[#vals + 1] = nil end
         end
         return unpack(vals)
     end
     local candidates57 = API.readTargetCandidates()
-    assert(#candidates57 == 6, "57: expected four ship sizes, station, and fallback candidates")
+    assert(#candidates57 == 7, "57: expected four ship sizes, station, and two fallback candidates")
     local byID57 = {}
     for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
     assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
     assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
+    assert(byID57["570"].typeName == "Behemoth Vanguard", "57: localized ship type missing")
     assert(byID57["573"].class == "S Ship", "57: S ship class label missing")
     assert(byID57["574"].class == "M Ship", "57: M ship class label missing")
     assert(byID57["575"].class == "XL Ship", "57: XL ship class label missing")
     assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
     assert(byID57["572"].class == ReadText(20991, 44), "57: unknown ship class must fall back to kind")
+    assert(byID57["572"].typeName == ReadText(20991, 51), "57: unknown macro name must not expose raw macro")
+    assert(byID57["576"].typeName == ReadText(20991, 51), "57: missing macro must render Unknown Object")
     C.GetSofttarget2 = function() return { softtargetID = 571, softtargetConnectionName = "" } end
     local stationCurrent57 = API.readTargetCandidates()
     local currentStation57
@@ -1632,16 +1645,16 @@ do
         end
     end
     local expectedRendered57 = {
-        ["573"] = { class = "S Ship", macro = "ship_xen_s_fighter_01_a_macro" },
-        ["574"] = { class = "M Ship", macro = "ship_xen_m_fighter_01_a_macro" },
-        ["570"] = { class = "L Ship", macro = "ship_arg_l_destroyer_01_a_macro" },
-        ["575"] = { class = "XL Ship", macro = "ship_arg_xl_carrier_01_a_macro" },
+        ["573"] = { class = "S Ship", typeName = "N", macro = "ship_xen_s_fighter_01_a_macro" },
+        ["574"] = { class = "M Ship", typeName = "P", macro = "ship_xen_m_fighter_01_a_macro" },
+        ["570"] = { class = "L Ship", typeName = "Behemoth Vanguard", macro = "ship_arg_l_destroyer_01_a_macro" },
+        ["575"] = { class = "XL Ship", typeName = "Colossus Vanguard", macro = "ship_arg_xl_carrier_01_a_macro" },
     }
     for component, expected in pairs(expectedRendered57) do
         assert(rendered57[component] and rendered57[component][3] == expected.class,
             "57: " .. expected.class .. " must be bound to rendered column 3")
-        assert(rendered57[component][4] == expected.macro,
-            "57: " .. expected.class .. " macro must be bound to rendered column 4")
+        assert(rendered57[component][4] == expected.typeName,
+            "57: " .. expected.class .. " localized type must be bound to rendered column 4")
     end
     local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
@@ -1659,11 +1672,12 @@ do
         "57: top refresh click needs audit evidence")
     assert(log57:find("event=target_browser action=refresh location=bottom", 1, true),
         "57: bottom refresh click needs audit evidence")
-    assert(log57:find("event=target_browser action=rendered candidates=6 class_values=6 macro_values=6", 1, true),
+    assert(log57:find("event=target_browser action=rendered candidates=7 class_values=7 type_values=7", 1, true),
         "57: rendered target metadata needs aggregate audit evidence")
     for component, expected in pairs(expectedRendered57) do
         local evidence = 'event=target_browser action=row component=' .. component
-            .. ' name="0" class="' .. expected.class .. '" macro="' .. expected.macro .. '"'
+            .. ' name="0" class="' .. expected.class .. '" type="' .. expected.typeName
+            .. '" macro="' .. expected.macro .. '"'
         assert(log57:find(evidence, 1, true),
             "57: rendered row audit needs exact " .. expected.class .. " component/class/macro evidence")
     end

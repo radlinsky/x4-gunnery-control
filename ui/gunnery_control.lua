@@ -980,6 +980,12 @@ local function targetClassLabel(component, kind)
     return kind
 end
 
+local function targetTypeLabel(macro)
+    if macro == "" then return text(51) end
+    local name = tostring(GetMacroData(macro, "name") or "")
+    return name ~= "" and name or text(51)
+end
+
 targetRoot = function(component)
     local root = C.GetContextByClass(id(component), "container", true)
     return root ~= 0 and root or id(component)
@@ -1014,7 +1020,7 @@ local function readTargetCandidates()
         seen[key] = true
         candidates[#candidates + 1] = {
             componentID = object, name = str(C.GetComponentName(object)), kind = kind,
-            class = targetClassLabel(object, kind), macro = macro,
+            class = targetClassLabel(object, kind), macro = macro, typeName = targetTypeLabel(macro),
             relation = relation, priority = priority, distance = distance,
         }
     end
@@ -1827,23 +1833,23 @@ function menu.display()
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
-        header[4]:setColSpan(2):createText(text(85)); header[6]:createText(text(49))
+        header[4]:setColSpan(2):createText(text(38)); header[6]:createText(text(49))
         header[7]:createText(text(50)); header[8]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
-        local classValues, macroValues = 0, 0
+        local classValues, typeValues = 0, 0
         for _, candidate in ipairs(candidates) do
             if candidate.class and candidate.class ~= "" then classValues = classValues + 1 end
-            if candidate.macro and candidate.macro ~= "" then macroValues = macroValues + 1 end
+            if candidate.typeName and candidate.typeName ~= "" then typeValues = typeValues + 1 end
         end
         log("event=target_browser action=rendered candidates=" .. tostring(#candidates)
             .. " class_values=" .. tostring(classValues)
-            .. " macro_values=" .. tostring(macroValues))
+            .. " type_values=" .. tostring(typeValues))
         for _, candidate in ipairs(candidates) do
-            log(string.format("event=target_browser action=row component=%s name=%q class=%q macro=%q",
-                tostring(candidate.componentID), candidate.name, candidate.class, candidate.macro))
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q",
+                tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName, candidate.macro))
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
-            row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.macro ~= "" and candidate.macro or "-")
+            row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
             row[6]:createText(candidate.relation)
             row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
             row[8]:setColSpan(3):createButton({}):setText(text(52))
