@@ -1565,9 +1565,13 @@ do
     local sess57 = API.getSession()
     sess57.phase = "target_select"
     GetPlayerContextByClass = function() return 1 end
-    GetContainedShips = function() return { 570 } end
+    GetContainedShips = function() return { 570, 572 } end
     GetContainedStations = function() return { 571 } end
     C.GetContextByClass = function(comp) return comp end
+    C.IsComponentClass = function(component, class)
+        local comp = tonumber(tostring(component))
+        return (comp == 570 and class == "ship_l") or (comp == 571 and class == "station")
+    end
     C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
     GetComponentData = function(component, ...)
@@ -1578,19 +1582,25 @@ do
             elseif key == "ishostile" or key == "isfriend" then vals[#vals + 1] = false
             elseif key == "isknown" or key == "isradarvisible" then vals[#vals + 1] = true
             elseif key == "maxradarrange" then vals[#vals + 1] = 40000
-            elseif key == "classid" then vals[#vals + 1] = comp == 570 and "ship_l" or "station"
-            elseif key == "macro" then vals[#vals + 1] = comp == 570 and "ship_arg_l_destroyer_01_a_macro" or "station_arg_defence_disc_macro"
+            -- Live X4 9.00 returns numeric class ids (for example 91-94 for the
+            -- four ship sizes), not the class-name strings used by the old
+            -- test double. Classification must go through IsComponentClass.
+            elseif key == "classid" then vals[#vals + 1] = comp == 570 and 93 or 95
+            elseif key == "macro" then
+                vals[#vals + 1] = comp == 570 and "ship_arg_l_destroyer_01_a_macro"
+                    or (comp == 571 and "station_arg_defence_disc_macro" or "unknown_object_macro")
             else vals[#vals + 1] = nil end
         end
         return unpack(vals)
     end
     local candidates57 = API.readTargetCandidates()
-    assert(#candidates57 == 2, "57: expected ship and station candidates")
+    assert(#candidates57 == 3, "57: expected classified ship, station, and fallback candidates")
     local byID57 = {}
     for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
     assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
     assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
     assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
+    assert(byID57["572"].class == ReadText(20991, 44), "57: unknown ship class must fall back to kind")
     C.GetSofttarget2 = function() return { softtargetID = 571, softtargetConnectionName = "" } end
     local stationCurrent57 = API.readTargetCandidates()
     local currentStation57
@@ -1624,7 +1634,7 @@ do
         "57: top refresh click needs audit evidence")
     assert(log57:find("event=target_browser action=refresh location=bottom", 1, true),
         "57: bottom refresh click needs audit evidence")
-    assert(log57:find("event=target_browser action=rendered candidates=2 class_values=2 macro_values=2", 1, true),
+    assert(log57:find("event=target_browser action=rendered candidates=3 class_values=3 macro_values=3", 1, true),
         "57: rendered target metadata needs aggregate audit evidence")
     assert(log57:find('event=target_browser action=row component=570 name="0" class="L Ship" macro="ship_arg_l_destroyer_01_a_macro"', 1, true),
         "57: rendered row audit needs exact component/class/macro evidence")

@@ -971,13 +971,13 @@ local function relationLabel(component)
 end
 
 local function targetClassLabel(component, kind)
-    local classID = tostring(componentData(component, "classid") or "")
-    local labels = {
-        ship_s = "S Ship", ship_m = "M Ship", ship_l = "L Ship", ship_xl = "XL Ship",
-        station = text(45),
-    }
-    if kind == text(45) then return text(45) end
-    return labels[classID] or (classID ~= "" and classID or kind)
+    local object = id(component)
+    if C.IsComponentClass(object, "ship_s") then return "S Ship" end
+    if C.IsComponentClass(object, "ship_m") then return "M Ship" end
+    if C.IsComponentClass(object, "ship_l") then return "L Ship" end
+    if C.IsComponentClass(object, "ship_xl") then return "XL Ship" end
+    if C.IsComponentClass(object, "station") then return text(45) end
+    return kind
 end
 
 targetRoot = function(component)
