@@ -10,10 +10,13 @@ local function text(id) return ReadText(20992, id) end
 local function api() return X4GunneryControlAPI end
 local function safe(value) return tostring(value or ""):gsub("[^%w_.%-]", "_") end
 local function trim(value) return tostring(value or ""):match("^%s*(.-)%s*$") end
--- tostring(table) includes a per-Lua-state identity. Combined with the serial,
--- it prevents a delayed MD reply from an earlier UI lifetime satisfying a new
--- first request after Reload UI.
-local scenarioLoadNonce = safe(tostring({}))
+-- ui.xml files re-execute in the same menus Lua state on Reload UI. Retain a
+-- monotonic load generation in a dedicated global so an old MD reply can never
+-- satisfy the new instance's first request. A full game restart resets MD too.
+X4GunneryTestLabRuntime = X4GunneryTestLabRuntime or {}
+local scenarioRuntime = X4GunneryTestLabRuntime
+scenarioRuntime.loadGeneration = (tonumber(scenarioRuntime.loadGeneration) or 0) + 1
+local scenarioLoadNonce = tostring(scenarioRuntime.loadGeneration)
 
 local function log(event, fields)
     local parts = { "[X4GC TEST]", "event=" .. event }
@@ -218,6 +221,7 @@ local function resolveExactGroup()
         memberIDs = table.concat(memberIDs, ","),
         shipID = tostring(ship.id),
         groupKey = selected.key,
+        armed = selected.armed == true,
         session = session,
     }
 end
@@ -227,7 +231,7 @@ local function applyExactGroup(selection)
     local checked = {}
     for key in pairs(session.checkedGroupKeys or {}) do checked[#checked + 1] = key end
     for _, key in ipairs(checked) do X4GunneryState.toggleGroup(session, key, true) end
-    X4GunneryState.toggleGroup(session, selection.groupKey, true)
+    X4GunneryState.toggleGroup(session, selection.groupKey, selection.armed)
     session.selectedGroupKey = selection.groupKey
 end
 

@@ -203,8 +203,9 @@ to interpret raw logs. Keep owner observations experimental until reproduced.
 Lua streams flat scalar events because nested Lua tables are not a verified MD
 payload. `scenario_begin` carries the spec/request ids, each `scenario_group`
 carries one definition, and `scenario_commit` replaces then creates. MD returns
-a scalar acknowledgement containing the per-UI-load nonce, serial, spec id, and
-actual spawned count. Stale or mismatched replies are ignored. Despawn is
+a scalar acknowledgement containing the globally retained monotonic UI-load
+generation, request serial, spec id, and actual spawned count. Stale or
+mismatched replies are ignored. Despawn is
 disabled while a request is pending and defensively invalidates correlation.
 
 The spawner is XSD-validated against X4 9.00. `create_ship`, `safepos`, Wait and

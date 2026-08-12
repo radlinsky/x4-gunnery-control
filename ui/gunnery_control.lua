@@ -1130,7 +1130,7 @@ local function copyCurrentShipSweep(groups)
     local ship = session.shipID
     local result = { id = tostring(ship), name = str(C.GetComponentName(ship)), macro = componentData(ship, "macro"), groups = {} }
     for _, group in ipairs(groups or {}) do
-        local copy = { key = group.key, kind = group.kind, name = group.displayName, macro = group.macro or "", contextID = tostring(group.contextID or ""), path = group.path or "", group = group.group or "", componentID = tostring(group.componentID or ""), mutable = State.canMutate(group), members = {} }
+        local copy = { key = group.key, kind = group.kind, name = group.displayName, macro = group.macro or "", contextID = tostring(group.contextID or ""), path = group.path or "", group = group.group or "", componentID = tostring(group.componentID or ""), mutable = State.canMutate(group), armed = group.armed == true, members = {} }
         for _, member in ipairs(group.members) do
             if member.operational then
                 copy.members[#copy.members + 1] = { id = tostring(member.componentID), name = member.displayName, macro = componentData(member.componentID, "macro"), cameraSupported = member.cameraSupported }

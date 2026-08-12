@@ -354,6 +354,8 @@ do
     assert(#scenarioEvents(harness) == 0, "a disabled spec must fire nothing on load")
 
     local session = harness.openFromGunnery({ label = "console", phase = "console" })
+    local selectedKey = X4GunneryState.groupKey(5, "p", "g")
+    session.staged[selectedKey] = nil
     session.checkedGroupKeys.extra = true
     session.staged.extra = { mode = "defend", preTickMode = "attack" }
     local create = harness.fix.buttonByText(ReadText(20992, 25))
@@ -364,7 +366,6 @@ do
     assert(#events == 3 and events[1].params.force == true
             and type(requestId) == "string" and requestId:match("_1$"),
         "Create test scenario must force a correlated replacement even when the spec is disabled")
-    local selectedKey = X4GunneryState.groupKey(5, "p", "g")
     assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == true
             and session.staged.extra.mode == "defend" and session.staged.extra.preTickMode == "attack",
         "preflight must leave checked and staged state untouched before acknowledgement")
@@ -379,6 +380,29 @@ do
         "a matching complete spawn acknowledgement must return to Gunnery exactly once")
     assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == nil,
         "successful acknowledgement must leave only the exact raw group selected")
+    assert(session.staged[selectedKey] and session.staged[selectedKey].armed == false,
+        "a freshly staged selected group must preserve its live disarmed state")
+end
+
+-- Consecutive Test Lab Lua lifetimes retain and advance the load generation,
+-- so their first request IDs cannot collide.
+do
+    local function firstRequestId()
+        local harness = loadHarness({
+            id = "generation", enabled = false,
+            setup = {
+                shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+                turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+            },
+            groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+        })
+        harness.openFromGunnery({ label = "console", phase = "console" })
+        harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+        return scenarioEvents(harness)[1].params.requestId
+    end
+    local first, second = firstRequestId(), firstRequestId()
+    assert(first ~= second and first:match("_1$") and second:match("_1$"),
+        "consecutive UI lifetimes must generate distinct first-request IDs")
 end
 
 -- A preflight mismatch must not despawn the existing fixture or alter the
