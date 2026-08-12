@@ -10,13 +10,13 @@ local function text(id) return ReadText(20992, id) end
 local function api() return X4GunneryControlAPI end
 local function safe(value) return tostring(value or ""):gsub("[^%w_.%-]", "_") end
 local function trim(value) return tostring(value or ""):match("^%s*(.-)%s*$") end
--- ui.xml files re-execute in the same menus Lua state on Reload UI. Retain a
--- monotonic load generation in a dedicated global so an old MD reply can never
--- satisfy the new instance's first request. A full game restart resets MD too.
-X4GunneryTestLabRuntime = X4GunneryTestLabRuntime or {}
-local scenarioRuntime = X4GunneryTestLabRuntime
-scenarioRuntime.loadGeneration = (tonumber(scenarioRuntime.loadGeneration) or 0) + 1
-local scenarioLoadNonce = tostring(scenarioRuntime.loadGeneration)
+-- Engine real time is seconds since X4 boot and survives Reload UI. Capture it
+-- for audit and again at each click for correlation; Lua globals do not survive
+-- Reload UI and therefore cannot be used as a generation counter.
+local scenarioLoadTime = GetCurRealTime()
+local function clockToken(value)
+    return tostring(math.floor((tonumber(value) or 0) * 1000000 + 0.5))
+end
 
 local function log(event, fields)
     local parts = { "[X4GC TEST]", "event=" .. event }
@@ -256,7 +256,7 @@ local function createTestScenario()
     local expectedShips = 0
     for _, group in ipairs(scenarioSpec.groups) do expectedShips = expectedShips + group.count end
     scenarioRequestSerial = scenarioRequestSerial + 1
-    local requestId = scenarioLoadNonce .. "_" .. tostring(scenarioRequestSerial)
+    local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(scenarioRequestSerial)
     pendingScenario = {
         requestId = requestId,
         specId = scenarioSpec.id,
@@ -269,7 +269,7 @@ local function createTestScenario()
     sendScenarioSpec(true, requestId)
     log("scenario_create", {
         action = "requested", spec_id = scenarioSpec.id, expected_ships = expectedShips,
-        request_id = requestId, load_generation = scenarioRuntime.loadGeneration,
+        request_id = requestId, load_time = scenarioLoadTime,
         group = selection.rawGroup, member_ids = selection.memberIDs,
     })
     menu.display()
@@ -565,7 +565,7 @@ end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
-    log("scenario_runtime", { action = "loaded", load_generation = scenarioRuntime.loadGeneration,
+    log("scenario_runtime", { action = "loaded", load_time = scenarioLoadTime,
         spec_id = scenarioSpec and scenarioSpec.id or "none" })
     -- A UI reload destroys this file-local state but leaves MD cue variables
     -- alive. The new Lua instance starts OFF, so explicitly converge MD on

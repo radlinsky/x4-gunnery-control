@@ -170,7 +170,7 @@ single correct group, target, button, and expected result.
 
 The one-click path logs `[X4GC TEST] event=scenario_create`:
 
-- `event=scenario_runtime action=loaded`: UI-load generation and loaded spec;
+- `event=scenario_runtime action=loaded`: engine time and loaded spec;
 - `action=requested`: exact request token, spec, expected count, group, turret ids;
 - `action=ready`: the same request token, acknowledged count, selected group;
 - `action=rejected|failed|timeout`: do not continue the gameplay checklist.
@@ -212,8 +212,8 @@ cannot be logged, label it as the owner's observation rather than automation.
 Lua streams flat scalar events because nested Lua tables are not a verified MD
 payload. `scenario_begin` carries the spec/request ids, each `scenario_group`
 carries one definition, and `scenario_commit` replaces then creates. MD returns
-a scalar acknowledgement containing the globally retained monotonic UI-load
-generation, request serial, spec id, and actual spawned count. Stale or
+a scalar acknowledgement containing an engine-monotonic request timestamp,
+request serial, spec id, and actual spawned count. Stale or
 mismatched replies are ignored. Despawn is
 disabled while a request is pending and defensively invalidates correlation.
 

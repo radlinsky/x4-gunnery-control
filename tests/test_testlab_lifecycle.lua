@@ -1,12 +1,13 @@
 -- Test Lab close ownership: operator exits return to the parked Gunnery menu,
 -- while player-context/load teardown closes without resurrecting it.
 
-local function loadHarness(spec)
+local function loadHarness(spec, realTime)
     -- This file builds several isolated runtimes in one Lua process. require()
     -- otherwise retains the first fixture's ffi table, so later C write spies
     -- would observe a different table from gunnery_control.lua.
     package.loaded["ffi"] = nil
     local fix = dofile("tests/support/runtime_fixture.lua").load()
+    GetCurRealTime = function() return realTime or 0 end
     local handoffs, plainCloses = {}, {}
     local reentered = false
 
@@ -367,8 +368,8 @@ do
             and type(requestId) == "string" and requestId:match("_1$"),
         "Create test scenario must force a correlated replacement even when the spec is disabled")
     assert(harness.fix.logContains("event=scenario_runtime")
-            and harness.fix.logContains("load_generation="),
-        "each Test Lab Lua lifetime must log its auditable generation")
+            and harness.fix.logContains("load_time="),
+        "each Test Lab Lua lifetime must log its auditable engine time")
     assert(harness.fix.logContains("action=requested")
             and harness.fix.logContains("request_id=" .. requestId),
         "Create test scenario must log its exact correlated request token")
@@ -393,10 +394,10 @@ do
         "a freshly staged selected group must preserve its live disarmed state")
 end
 
--- Consecutive Test Lab Lua lifetimes retain and advance the load generation,
--- so their first request IDs cannot collide.
+-- Consecutive Test Lab Lua lifetimes may clear every Lua global. Engine real
+-- time still advances, so their first request IDs cannot collide.
 do
-    local function firstRequestId()
+    local function firstRequestId(realTime)
         local harness = loadHarness({
             id = "generation", enabled = false,
             setup = {
@@ -404,12 +405,15 @@ do
                 turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
             },
             groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
-        })
+        }, realTime)
         harness.openFromGunnery({ label = "console", phase = "console" })
         harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
         return scenarioEvents(harness)[1].params.requestId
     end
-    local first, second = firstRequestId(), firstRequestId()
+    X4GunneryTestLabRuntime = nil
+    local first = firstRequestId(100.125)
+    X4GunneryTestLabRuntime = nil
+    local second = firstRequestId(101.250)
     assert(first ~= second and first:match("_1$") and second:match("_1$"),
         "consecutive UI lifetimes must generate distinct first-request IDs")
 end
