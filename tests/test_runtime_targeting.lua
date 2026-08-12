@@ -1683,4 +1683,40 @@ do
     end
 end
 
+-- ── 58. surface type/macro filters use live operational component macros ────
+do
+    local sess57 = API.getSession()
+    sess57.phase, sess57.controlMode = "engaged", "direct"
+    sess57.targetObjectID, sess57.aimTargetID = 600, 600
+    sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = "any", "any"
+    C.IsComponentClass = function() return false end
+    GetPlayerContextByClass = function() return nil end
+    C.GetNumUpgradeSlots = function(_, _, upgrade) return upgrade == "turret" and 2 or 0 end
+    C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 700 + slot end
+    C.IsComponentOperational = function() return true end
+    GetComponentData = function(component, ...)
+        local vals = {}
+        for _, key in ipairs({...}) do
+            if key == "macro" then vals[#vals + 1] = tonumber(tostring(component)) == 701 and "turret_l" or "turret_m"
+            elseif key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = false end
+        end
+        return unpack(vals)
+    end
+    GetMacroData = function(macro, key)
+        if key == "name" then return macro == "turret_l" and "Large Turret" or "Medium Turret" end
+        return ""
+    end
+    gcMenu.display()
+    local dropdowns57 = fix.getCreatedDropDowns()
+    assert(#dropdowns57 >= 2, "57: surface panel needs type and macro dropdowns")
+    dropdowns57[1].handlers.onDropDownConfirmed(nil, "turret")
+    assert(sess57.surfaceTypeFilter == "turret" and sess57.surfaceMacroFilter == "any",
+        "57: changing type must apply it and reset macro to Any")
+    dropdowns57 = fix.getCreatedDropDowns()
+    dropdowns57[2].handlers.onDropDownConfirmed(nil, "turret_l")
+    assert(sess57.surfaceMacroFilter == "turret_l", "57: macro lock was not retained")
+end
+
 print("runtime targeting tests passed")

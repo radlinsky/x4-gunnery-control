@@ -1110,8 +1110,11 @@ local function readSurfaceTargets(container)
                 if component ~= 0 and not seen[key] and C.IsComponentOperational(component) then
                     seen[key] = true
                     local name = str(C.GetComponentName(component))
+                    local macro = tostring(componentData(component, "macro") or "")
+                    local macroLabel = macro ~= "" and tostring(GetMacroData(macro, "name") or "") or ""
                     surfaces[#surfaces + 1] = {
-                        componentID = component, kind = surfaceType.label,
+                        componentID = component, kind = surfaceType.label, kindKey = surfaceType.upgrade,
+                        macro = macro, macroLabel = macroLabel ~= "" and macroLabel or macro,
                         name = name ~= "" and name or (surfaceType.label .. " " .. tostring(slot)),
                     }
                 end
@@ -1766,13 +1769,42 @@ function menu.display()
             local tgtName = str(C.GetComponentName(id(session.targetObjectID)))
             local elemHeader = elemTable:addRow(false, { bgColor = Color["row_title_background"] })
             elemHeader[1]:setColSpan(2):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
+            local elemRefresh = elemTable:addRow("surface_refresh", {})
+            elemRefresh[1]:setColSpan(2):createButton({}):setText(text(15))
+            elemRefresh[1].handlers.onClick = function() refresh(); menu.display() end
+            local allSurfaces = readSurfaceTargets(id(session.targetObjectID))
+            local typeOptions = {
+                { id = "any", text = text(86), icon = "", displayremoveoption = false },
+                { id = "turret", text = text(46), icon = "", displayremoveoption = false },
+                { id = "shield", text = text(47), icon = "", displayremoveoption = false },
+                { id = "engine", text = text(48), icon = "", displayremoveoption = false },
+            }
+            local filterType = elemTable:addRow("surface_type_filter", {})
+            filterType[1]:createText(text(87))
+            filterType[2]:createDropDown(typeOptions, { startOption = session.surfaceTypeFilter })
+            filterType[2].handlers.onDropDownConfirmed = function(_, value)
+                session.surfaceTypeFilter, session.surfaceMacroFilter = value, "any"
+                menu.display()
+            end
+            local macroOptions = { { id = "any", text = text(86), icon = "", displayremoveoption = false } }
+            for _, option in ipairs(State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)) do
+                option.icon, option.displayremoveoption = "", false
+                macroOptions[#macroOptions + 1] = option
+            end
+            local filterMacro = elemTable:addRow("surface_macro_filter", {})
+            filterMacro[1]:createText(text(88))
+            filterMacro[2]:createDropDown(macroOptions, { startOption = session.surfaceMacroFilter })
+            filterMacro[2].handlers.onDropDownConfirmed = function(_, value)
+                session.surfaceMacroFilter = value
+                menu.display()
+            end
             -- Hull row: engage the whole ship/station.
             local hullRow = elemTable:addRow("hull", {})
             hullRow[1]:createText(text(57))
             hullRow[2]:createButton({ active = not sameID(session.aimTargetID, session.targetObjectID) }):setText(text(58))
             hullRow[2].handlers.onClick = function() engageTarget(session.targetObjectID) end
             -- Surface element rows.
-            local surfaces = readSurfaceTargets(id(session.targetObjectID))
+            local surfaces = State.filterSurfaceTargets(allSurfaces, session.surfaceTypeFilter, session.surfaceMacroFilter)
             if #surfaces > 0 then
                 for _, surface in ipairs(surfaces) do
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
