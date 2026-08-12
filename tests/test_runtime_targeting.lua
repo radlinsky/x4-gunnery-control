@@ -1683,4 +1683,98 @@ do
     end
 end
 
+-- ── 58. surface type/macro filters use live operational component macros ────
+do
+    local sess57 = API.getSession()
+    sess57.phase, sess57.controlMode = "engaged", "direct"
+    sess57.targetObjectID, sess57.aimTargetID = 600, 600
+    sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = "any", "any"
+    C.IsComponentClass = function() return false end
+    GetPlayerContextByClass = function() return nil end
+    C.GetNumUpgradeSlots = function(_, _, upgrade) return upgrade == "turret" and 2 or 0 end
+    C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 700 + slot end
+    C.IsComponentOperational = function() return true end
+    GetComponentData = function(component, ...)
+        local vals = {}
+        for _, key in ipairs({...}) do
+            if key == "macro" then vals[#vals + 1] = tonumber(tostring(component)) == 701 and "turret_l" or "turret_m"
+            elseif key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = false end
+        end
+        return unpack(vals)
+    end
+    GetMacroData = function(macro, key)
+        if key == "name" then return macro == "turret_l" and "Large Turret" or "Medium Turret" end
+        return ""
+    end
+    gcMenu.display()
+    local dropdowns57 = fix.getCreatedDropDowns()
+    assert(#dropdowns57 >= 2, "57: surface panel needs type and macro dropdowns")
+    assert(dropdowns57[1].row == "surface_type_filter" and dropdowns57[1].startOption == "any",
+        "57: surface type filter must render at Any")
+    assert(dropdowns57[2].row == "surface_macro_filter" and #dropdowns57[2].options == 3,
+        "57: surface equipment filter must offer Any plus both localized turret names")
+    dropdowns57[1].handlers.onDropDownConfirmed(nil, "turret")
+    assert(sess57.surfaceTypeFilter == "turret" and sess57.surfaceMacroFilter == "any",
+        "57: changing type must apply it and reset macro to Any")
+    dropdowns57 = fix.getCreatedDropDowns()
+    dropdowns57[2].handlers.onDropDownConfirmed(nil, "turret_l")
+    assert(sess57.surfaceMacroFilter == "turret_l", "57: macro lock was not retained")
+    local surfaceRefresh57
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.row == "surface_refresh" then surfaceRefresh57 = button end
+    end
+    assert(surfaceRefresh57, "57: top surface Refresh button missing")
+    C.GetUpgradeSlotGroup = function() return { path = "", group = "" } end
+    surfaceRefresh57.handlers.onClick()
+    local log58 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log58:find("event=surface_browser action=filter kind=type value=turret equipment_reset=any target=600", 1, true),
+        "57: type filter change needs audit evidence")
+    assert(log58:find("event=surface_browser action=filter kind=equipment value=turret_l target=600", 1, true),
+        "57: equipment filter change needs audit evidence")
+    assert(log58:find("event=surface_browser action=refresh location=top target=600", 1, true),
+        "57: surface Refresh needs audit evidence")
+    assert(log58:find("event=surface_browser action=rendered target=600 target_name=\"0\" type_filter=turret equipment_filter=turret_l all=2 visible=1 equipment_options=2", 1, true),
+        "57: filtered surface render needs exact count/filter evidence")
+    assert(log58:find('event=surface_browser action=row target=600 component=701 name="0" kind=turret equipment="Large Turret" macro="turret_l"', 1, true),
+        "57: filtered surface row needs exact localized equipment and raw-macro evidence")
+
+    GetMacroData = function() return "" end
+    sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = "any", "any"
+    gcMenu.display()
+    dropdowns57 = fix.getCreatedDropDowns()
+    local fallbackEquipment = dropdowns57[#dropdowns57]
+    assert(fallbackEquipment.row == "surface_macro_filter"
+            and #fallbackEquipment.options == 1,
+        "57: unresolved equipment names must not create indistinguishable dropdown choices")
+
+    GetMacroData = function(macro, key)
+        if key == "name" then return macro == "turret_l" and "Large Turret" or "Medium Turret" end
+        return ""
+    end
+    C.GetNumUpgradeSlots = function(destructible, _, upgrade)
+        if upgrade ~= "turret" then return 0 end
+        return tonumber(tostring(destructible):match("%d+")) == 601 and 1 or 2
+    end
+    C.GetUpgradeSlotCurrentComponent = function(destructible, _, slot)
+        return tonumber(tostring(destructible):match("%d+")) == 601 and 702 or 700 + slot
+    end
+    sess57.targetObjectID, sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = 601, "turret", "turret_l"
+    gcMenu.display()
+    assert(sess57.surfaceMacroFilter == "any",
+        "57: changing to a target without the selected equipment must reset to Any")
+
+    sess57.targetObjectID, sess57.surfaceMacroFilter = 600, "turret_l"
+    C.GetNumUpgradeSlots = function() return 0 end
+    gcMenu.display()
+    assert(sess57.surfaceMacroFilter == "any",
+        "57: disappearance of the last matching component must reset to Any")
+    log58 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log58:find("event=surface_browser action=filter_reset kind=equipment reason=unavailable previous=turret_l target=601", 1, true),
+        "57: target-change equipment reset needs exact audit evidence")
+    assert(log58:find("event=surface_browser action=filter_reset kind=equipment reason=unavailable previous=turret_l target=600", 1, true),
+        "57: component-disappearance equipment reset needs exact audit evidence")
+end
+
 print("runtime targeting tests passed")

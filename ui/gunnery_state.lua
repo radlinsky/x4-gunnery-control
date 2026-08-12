@@ -152,7 +152,44 @@ function State.newSession(shipID, controlGroup)
         staged = {},
         selectedGroupKey = nil, selectedMemberID = nil, cameraMemberID = nil,
         targetObjectID = nil, targetCandidates = {},
+        surfaceTypeFilter = "any", surfaceMacroFilter = "any",
     }
+end
+
+function State.surfaceMacroOptions(surfaces, typeFilter)
+    local options, seen = {}, {}
+    for _, surface in ipairs(surfaces or {}) do
+        if (typeFilter == "any" or surface.kindKey == typeFilter)
+                and surface.macro and surface.macro ~= ""
+                and surface.macroLabelResolved ~= false and not seen[surface.macro] then
+            seen[surface.macro] = true
+            options[#options + 1] = { id = surface.macro, text = surface.macroLabel or surface.macro }
+        end
+    end
+    table.sort(options, function(a, b)
+        if a.text ~= b.text then return a.text < b.text end
+        return a.id < b.id
+    end)
+    return options
+end
+
+function State.reconcileSurfaceMacroFilter(options, current)
+    if current == nil or current == "any" then return "any", false end
+    for _, option in ipairs(options or {}) do
+        if option.id == current then return current, false end
+    end
+    return "any", true
+end
+
+function State.filterSurfaceTargets(surfaces, typeFilter, macroFilter)
+    local filtered = {}
+    for _, surface in ipairs(surfaces or {}) do
+        if (typeFilter == "any" or surface.kindKey == typeFilter)
+                and (macroFilter == "any" or surface.macro == macroFilter) then
+            filtered[#filtered + 1] = surface
+        end
+    end
+    return filtered
 end
 
 function State.beginTargetSelection(session, group, member)

@@ -102,6 +102,8 @@ eq(s2.povMode, "manual", "newSession: povMode default manual")
 eq(s2.cameraIndex, 1, "newSession: cameraIndex default 1")
 eq(s2.aimTargetID, nil, "newSession: aimTargetID nil")
 eq(s2.autoNextTarget, true, "newSession: autoNextTarget defaults on")
+eq(s2.surfaceTypeFilter, "any", "newSession: surface type filter defaults to Any")
+eq(s2.surfaceMacroFilter, "any", "newSession: surface macro filter defaults to Any")
 -- The override reaches every turret on the ship, not just the checked groups,
 -- so it is never on by default.
 eq(s2.preferAllTurrets, false, "newSession: preferAllTurrets defaults off")
@@ -109,6 +111,36 @@ assert(s2.committedBaseline ~= nil, "newSession: committedBaseline exists")
 assert(type(s2.committedBaseline) == "table", "newSession: committedBaseline is table")
 assert(s2.staged ~= nil, "newSession: staged exists")
 assert(type(s2.staged) == "table", "newSession: staged is table")
+
+local surfaceFixture = {
+    { kindKey = "turret", macro = "turret_l", macroLabel = "Large Turret" },
+    { kindKey = "turret", macro = "turret_m", macroLabel = "Medium Turret" },
+    { kindKey = "shield", macro = "shield_l", macroLabel = "Large Shield" },
+    { kindKey = "turret", macro = "turret_l", macroLabel = "Large Turret" },
+}
+local turretMacros = State.surfaceMacroOptions(surfaceFixture, "turret")
+eq(#turretMacros, 2, "surfaceMacroOptions: unique macros within selected type")
+eq(turretMacros[1].id, "turret_l", "surfaceMacroOptions: sorted by label")
+local tiedMacros = State.surfaceMacroOptions({
+    { kindKey = "turret", macro = "z_macro", macroLabel = "Same" },
+    { kindKey = "turret", macro = "a_macro", macroLabel = "Same" },
+}, "any")
+eq(tiedMacros[1].id, "a_macro", "surfaceMacroOptions: macro id breaks equal-label ties")
+local resolvedOnly = State.surfaceMacroOptions({
+    { kindKey = "turret", macro = "known", macroLabel = "Known", macroLabelResolved = true },
+    { kindKey = "turret", macro = "hidden_a", macroLabel = "Unknown", macroLabelResolved = false },
+    { kindKey = "turret", macro = "hidden_b", macroLabel = "Unknown", macroLabelResolved = false },
+}, "turret")
+eq(#resolvedOnly, 1, "surfaceMacroOptions: unresolved macros are not indistinguishable choices")
+eq(State.reconcileSurfaceMacroFilter(resolvedOnly, "known"), "known",
+    "reconcileSurfaceMacroFilter: available selection remains active")
+local reconciled, wasReset = State.reconcileSurfaceMacroFilter(resolvedOnly, "gone")
+eq(reconciled, "any", "reconcileSurfaceMacroFilter: unavailable selection resets to Any")
+eq(wasReset, true, "reconcileSurfaceMacroFilter: unavailable reset is reported")
+eq(#State.filterSurfaceTargets(surfaceFixture, "turret", "turret_l"), 2,
+    "filterSurfaceTargets: type and macro are both applied")
+eq(#State.filterSurfaceTargets(surfaceFixture, "any", "shield_l"), 1,
+    "filterSurfaceTargets: Any type preserves macro lock")
 assert(s2.directSnapshots == nil, "newSession: no legacy directSnapshots field")
 
 -- toggleGroup on/off
