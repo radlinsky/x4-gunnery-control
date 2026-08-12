@@ -1771,7 +1771,10 @@ function menu.display()
             elemHeader[1]:setColSpan(2):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
             local elemRefresh = elemTable:addRow("surface_refresh", {})
             elemRefresh[1]:setColSpan(2):createButton({}):setText(text(15))
-            elemRefresh[1].handlers.onClick = function() refresh(); menu.display() end
+            elemRefresh[1].handlers.onClick = function()
+                log("event=surface_browser action=refresh location=top target=" .. tostring(session.targetObjectID))
+                refresh(); menu.display()
+            end
             local allSurfaces = readSurfaceTargets(id(session.targetObjectID))
             local typeOptions = {
                 { id = "any", text = text(86), icon = "", displayremoveoption = false },
@@ -1783,6 +1786,8 @@ function menu.display()
             filterType[1]:createText(text(87))
             filterType[2]:createDropDown(typeOptions, { startOption = session.surfaceTypeFilter })
             filterType[2].handlers.onDropDownConfirmed = function(_, value)
+                log("event=surface_browser action=filter kind=type value=" .. tostring(value)
+                    .. " equipment_reset=any target=" .. tostring(session.targetObjectID))
                 session.surfaceTypeFilter, session.surfaceMacroFilter = value, "any"
                 menu.display()
             end
@@ -1795,6 +1800,8 @@ function menu.display()
             filterMacro[1]:createText(text(88))
             filterMacro[2]:createDropDown(macroOptions, { startOption = session.surfaceMacroFilter })
             filterMacro[2].handlers.onDropDownConfirmed = function(_, value)
+                log("event=surface_browser action=filter kind=equipment value=" .. tostring(value)
+                    .. " target=" .. tostring(session.targetObjectID))
                 session.surfaceMacroFilter = value
                 menu.display()
             end
@@ -1805,8 +1812,18 @@ function menu.display()
             hullRow[2].handlers.onClick = function() engageTarget(session.targetObjectID) end
             -- Surface element rows.
             local surfaces = State.filterSurfaceTargets(allSurfaces, session.surfaceTypeFilter, session.surfaceMacroFilter)
+            log("event=surface_browser action=rendered target=" .. tostring(session.targetObjectID)
+                .. " target_name=" .. string.format("%q", tgtName)
+                .. " type_filter=" .. tostring(session.surfaceTypeFilter)
+                .. " equipment_filter=" .. tostring(session.surfaceMacroFilter)
+                .. " all=" .. tostring(#allSurfaces)
+                .. " visible=" .. tostring(#surfaces)
+                .. " equipment_options=" .. tostring(#macroOptions - 1))
             if #surfaces > 0 then
                 for _, surface in ipairs(surfaces) do
+                    log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s equipment=%q macro=%q",
+                        tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
+                        surface.kindKey, surface.macroLabel, surface.macro))
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
                     surfRow[1]:createText(surface.name .. ": " .. surface.kind)
                     surfRow[2]:createButton({ active = not sameID(session.aimTargetID, surface.componentID) }):setText(text(60))

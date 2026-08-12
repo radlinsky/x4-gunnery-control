@@ -1711,12 +1711,34 @@ do
     gcMenu.display()
     local dropdowns57 = fix.getCreatedDropDowns()
     assert(#dropdowns57 >= 2, "57: surface panel needs type and macro dropdowns")
+    assert(dropdowns57[1].row == "surface_type_filter" and dropdowns57[1].startOption == "any",
+        "57: surface type filter must render at Any")
+    assert(dropdowns57[2].row == "surface_macro_filter" and #dropdowns57[2].options == 3,
+        "57: surface equipment filter must offer Any plus both localized turret names")
     dropdowns57[1].handlers.onDropDownConfirmed(nil, "turret")
     assert(sess57.surfaceTypeFilter == "turret" and sess57.surfaceMacroFilter == "any",
         "57: changing type must apply it and reset macro to Any")
     dropdowns57 = fix.getCreatedDropDowns()
     dropdowns57[2].handlers.onDropDownConfirmed(nil, "turret_l")
     assert(sess57.surfaceMacroFilter == "turret_l", "57: macro lock was not retained")
+    local surfaceRefresh57
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.row == "surface_refresh" then surfaceRefresh57 = button end
+    end
+    assert(surfaceRefresh57, "57: top surface Refresh button missing")
+    C.GetUpgradeSlotGroup = function() return { path = "", group = "" } end
+    surfaceRefresh57.handlers.onClick()
+    local log58 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log58:find("event=surface_browser action=filter kind=type value=turret equipment_reset=any target=600", 1, true),
+        "57: type filter change needs audit evidence")
+    assert(log58:find("event=surface_browser action=filter kind=equipment value=turret_l target=600", 1, true),
+        "57: equipment filter change needs audit evidence")
+    assert(log58:find("event=surface_browser action=refresh location=top target=600", 1, true),
+        "57: surface Refresh needs audit evidence")
+    assert(log58:find("event=surface_browser action=rendered target=600 target_name=\"0\" type_filter=turret equipment_filter=turret_l all=2 visible=1 equipment_options=2", 1, true),
+        "57: filtered surface render needs exact count/filter evidence")
+    assert(log58:find('event=surface_browser action=row target=600 component=701 name="0" kind=turret equipment="Large Turret" macro="turret_l"', 1, true),
+        "57: filtered surface row needs exact localized equipment and raw-macro evidence")
 end
 
 print("runtime targeting tests passed")

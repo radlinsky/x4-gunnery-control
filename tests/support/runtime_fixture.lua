@@ -297,6 +297,8 @@ function M.load()
                                         local entry = {
                                             active = (bprops or {}).active,
                                             handlers = cell.handlers,
+                                            row = rowID,
+                                            column = column,
                                         }
                                         createdButtons[#createdButtons + 1] = entry
                                         return {
@@ -311,8 +313,14 @@ function M.load()
                                             handlers = cell.handlers,
                                         }
                                     end
-                                    cell.createDropDown = function()
-                                        createdDropDowns[#createdDropDowns + 1] = { handlers = cell.handlers }
+                                    cell.createDropDown = function(_, options, props)
+                                        createdDropDowns[#createdDropDowns + 1] = {
+                                            handlers = cell.handlers,
+                                            row = rowID,
+                                            column = column,
+                                            options = options,
+                                            startOption = (props or {}).startOption,
+                                        }
                                     end
                                     rawset(t, column, cell)
                                     return cell
