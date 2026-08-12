@@ -1811,7 +1811,10 @@ function menu.display()
         title[1]:setColSpan(10):createText(text(33), Helper.headerRowCenteredProperties)
         local topActions = tableView:addRow("target_refresh_top", {})
         topActions[1]:setColSpan(10):createButton({}):setText(text(15))
-        topActions[1].handlers.onClick = function() refresh(); menu.display() end
+        topActions[1].handlers.onClick = function()
+            log("event=target_browser action=refresh location=top")
+            refresh(); menu.display()
+        end
         local explanation = tableView:addRow(false, {})
         explanation[1]:setColSpan(10):createText(text(34), { wordwrap = true })
         local current = C.GetSofttarget2()
@@ -1826,6 +1829,14 @@ function menu.display()
         header[4]:setColSpan(2):createText(text(85)); header[6]:createText(text(49))
         header[7]:createText(text(50)); header[8]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
+        local classValues, macroValues = 0, 0
+        for _, candidate in ipairs(candidates) do
+            if candidate.class and candidate.class ~= "" then classValues = classValues + 1 end
+            if candidate.macro and candidate.macro ~= "" then macroValues = macroValues + 1 end
+        end
+        log("event=target_browser action=rendered candidates=" .. tostring(#candidates)
+            .. " class_values=" .. tostring(classValues)
+            .. " macro_values=" .. tostring(macroValues))
         for _, candidate in ipairs(candidates) do
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
@@ -1841,7 +1852,10 @@ function menu.display()
         end
         local actions = tableView:addRow("actions", {})
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
-        actions[1].handlers.onClick = function() refresh(); menu.display() end
+        actions[1].handlers.onClick = function()
+            log("event=target_browser action=refresh location=bottom")
+            refresh(); menu.display()
+        end
         if testLabCallbacks and testLabCallbacks.open then
             actions[4]:setColSpan(2):createButton({}):setText(text(32))
             actions[4].handlers.onClick = openTestLab

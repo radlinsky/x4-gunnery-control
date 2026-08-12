@@ -1592,11 +1592,24 @@ do
     assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
     assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
     gcMenu.display()
-    local refreshCount57 = 0
+    local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
-        if button.text == ReadText(20991, 15) then refreshCount57 = refreshCount57 + 1 end
+        if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
     end
-    assert(refreshCount57 >= 2, "57: target browser needs refresh controls at top and bottom")
+    assert(#refreshButtons57 >= 2, "57: target browser needs refresh controls at top and bottom")
+    refreshButtons57[1].handlers.onClick()
+    local refreshedButtons57 = {}
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.text == ReadText(20991, 15) then refreshedButtons57[#refreshedButtons57 + 1] = button end
+    end
+    refreshedButtons57[#refreshedButtons57].handlers.onClick()
+    local log57 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log57:find("event=target_browser action=refresh location=top", 1, true),
+        "57: top refresh click needs audit evidence")
+    assert(log57:find("event=target_browser action=refresh location=bottom", 1, true),
+        "57: bottom refresh click needs audit evidence")
+    assert(log57:find("event=target_browser action=rendered candidates=2 class_values=2 macro_values=2", 1, true),
+        "57: rendered target metadata needs aggregate audit evidence")
 end
 
 print("runtime targeting tests passed")
