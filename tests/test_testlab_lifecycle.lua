@@ -366,6 +366,12 @@ do
     assert(#events == 3 and events[1].params.force == true
             and type(requestId) == "string" and requestId:match("_1$"),
         "Create test scenario must force a correlated replacement even when the spec is disabled")
+    assert(harness.fix.logContains("event=scenario_runtime")
+            and harness.fix.logContains("load_generation="),
+        "each Test Lab Lua lifetime must log its auditable generation")
+    assert(harness.fix.logContains("action=requested")
+            and harness.fix.logContains("request_id=" .. requestId),
+        "Create test scenario must log its exact correlated request token")
     assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == true
             and session.staged.extra.mode == "defend" and session.staged.extra.preTickMode == "attack",
         "preflight must leave checked and staged state untouched before acknowledgement")
@@ -378,6 +384,9 @@ do
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:" .. requestId .. ":parked:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "a matching complete spawn acknowledgement must return to Gunnery exactly once")
+    assert(harness.fix.logContains("action=ready")
+            and harness.fix.logContains("request_id=" .. requestId),
+        "successful acknowledgement must log the same request token")
     assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == nil,
         "successful acknowledgement must leave only the exact raw group selected")
     assert(session.staged[selectedKey] and session.staged[selectedKey].armed == false,

@@ -269,6 +269,7 @@ local function createTestScenario()
     sendScenarioSpec(true, requestId)
     log("scenario_create", {
         action = "requested", spec_id = scenarioSpec.id, expected_ships = expectedShips,
+        request_id = requestId, load_generation = scenarioRuntime.loadGeneration,
         group = selection.rawGroup, member_ids = selection.memberIDs,
     })
     menu.display()
@@ -284,7 +285,8 @@ local function onScenarioReady(_, param)
     if spawned ~= request.expectedShips then
         scenarioActionStatus = "FAILED: created " .. tostring(spawned) .. " of "
             .. tostring(request.expectedShips) .. " ships; inspect debug.log"
-        log("scenario_create", { action = "failed", expected_ships = request.expectedShips, spawned_ships = spawned })
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_ships = request.expectedShips, spawned_ships = spawned })
         menu.display()
         return
     end
@@ -294,7 +296,7 @@ local function onScenarioReady(_, param)
             or selection.memberIDs ~= request.selection.memberIDs then
         reason = reason or "ship or exact turret membership changed while spawning"
         scenarioActionStatus = "FAILED: " .. reason
-        log("scenario_create", { action = "failed", reason = reason })
+        log("scenario_create", { action = "failed", request_id = request.requestId, reason = reason })
         menu.display()
         return
     end
@@ -302,7 +304,7 @@ local function onScenarioReady(_, param)
     scenarioActionStatus = "READY: " .. spawned .. " named ships created; only "
         .. selection.label .. " ticked"
     log("scenario_create", {
-        action = "ready", spawned_ships = spawned, group = selection.rawGroup,
+        action = "ready", request_id = request.requestId, spawned_ships = spawned, group = selection.rawGroup,
         member_ids = selection.memberIDs,
     })
     returnToGunnery("scenario_ready")
@@ -523,7 +525,8 @@ function menu.onUpdate()
         local request = pendingScenario
         pendingScenario = nil
         scenarioActionStatus = "FAILED: no spawn acknowledgement; inspect debug.log"
-        log("scenario_create", { action = "timeout", expected_ships = request.expectedShips })
+        log("scenario_create", { action = "timeout", request_id = request.requestId,
+            expected_ships = request.expectedShips })
         menu.display()
         return
     end
@@ -562,6 +565,8 @@ end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
+    log("scenario_runtime", { action = "loaded", load_generation = scenarioRuntime.loadGeneration,
+        spec_id = scenarioSpec and scenarioSpec.id or "none" })
     -- A UI reload destroys this file-local state but leaves MD cue variables
     -- alive. The new Lua instance starts OFF, so explicitly converge MD on
     -- that state before rendering the menu; otherwise ObserveArm keeps

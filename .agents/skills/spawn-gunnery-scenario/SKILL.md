@@ -170,13 +170,22 @@ single correct group, target, button, and expected result.
 
 The one-click path logs `[X4GC TEST] event=scenario_create`:
 
-- `action=requested`: exact spec, expected ship count, raw group, turret ids;
-- `action=ready`: acknowledged count and exact selected group;
+- `event=scenario_runtime action=loaded`: UI-load generation and loaded spec;
+- `action=requested`: exact request token, spec, expected count, group, turret ids;
+- `action=ready`: the same request token, acknowledged count, selected group;
 - `action=rejected|failed|timeout`: do not continue the gameplay checklist.
 
 MD logs `[X4GC TEST SCENARIO]` creation details and the final spawned count.
 After the owner reports completion, inspect logs yourself. Do not ask the owner
 to interpret raw logs. Keep owner observations experimental until reproduced.
+
+Before accepting, turn the operator checklist into an evidence matrix. Every
+required automated step must map to a distinct log event or correlated field.
+Count repeated actions explicitly (for example, two Create clicks require two
+different request tokens and two `ready` records). If any required record is
+missing, report the incomplete step and continue the live test; never accept a
+general “passed” report as proof of unlogged steps. If a manual visual assertion
+cannot be logged, label it as the owner's observation rather than automation.
 
 ### 8. Clean up
 
