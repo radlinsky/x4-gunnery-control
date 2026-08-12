@@ -85,6 +85,7 @@ try {
         }
     }
 
+    New-Item -ItemType Directory -Path (Join-Path $spaceRoot 'scripts') -Force | Out-Null
     foreach ($launcher in @('launch-x4-dev.bat', 'launch-x4-test-lab-dev.bat')) {
         Copy-Item -LiteralPath (Join-Path $repo "scripts/$launcher") -Destination (Join-Path $spaceRoot "scripts/$launcher")
     }
