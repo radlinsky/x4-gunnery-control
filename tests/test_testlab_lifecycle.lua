@@ -86,6 +86,7 @@ local function loadHarness(spec)
     end
     fix.C.IsComponentOperational = function() return true end
     fix.C.IsPlayerCameraTargetViewPossible = function() return true end
+    fix.C.GetComponentName = function() return "Test Ship" end
     GetComponentData = function(_, field)
         if field == "macro" then return "test_ship_macro" end
         if field == "isplayerowned" then return true end
@@ -359,19 +360,25 @@ do
     assert(create and create.handlers.onClick, "Test Lab must expose Create test scenario")
     create.handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 3 and events[1].params.force == true and events[1].params.requestId == "1",
+    local requestId = events[1].params.requestId
+    assert(#events == 3 and events[1].params.force == true
+            and type(requestId) == "string" and requestId:match("_1$"),
         "Create test scenario must force a correlated replacement even when the spec is disabled")
     local selectedKey = X4GunneryState.groupKey(5, "p", "g")
-    assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == nil,
-        "Create test scenario must leave only the exact raw group selected")
+    assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == true
+            and session.staged.extra.mode == "defend" and session.staged.extra.preTickMode == "attack",
+        "preflight must leave checked and staged state untouched before acknowledgement")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
         "Test Lab must wait for MD acknowledgement before returning")
-    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:999:1")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:stale_1:parked:1")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:" .. requestId .. ":wrong-spec:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
-        "a stale spawn acknowledgement must be ignored")
-    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:1:1")
+        "a stale-load or wrong-spec acknowledgement must be ignored")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:" .. requestId .. ":parked:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "a matching complete spawn acknowledgement must return to Gunnery exactly once")
+    assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == nil,
+        "successful acknowledgement must leave only the exact raw group selected")
 end
 
 -- A preflight mismatch must not despawn the existing fixture or alter the
@@ -380,7 +387,7 @@ do
     local harness = loadHarness({
         id = "preflight-guards", enabled = true,
         setup = {
-            shipMacro = "wrong_ship_macro", shipLabel = "Required Ship",
+            shipMacro = "test_ship_macro", shipLabel = "Required Ship",
             turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
         },
         groups = { { macro = "m", faction = "xenon", count = 2, distance = 1000 } },
@@ -393,9 +400,9 @@ do
     local before = {}
     for key, value in pairs(session.checkedGroupKeys) do before[key] = value end
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
-    assert(#scenarioEvents(harness) == 0, "wrong-ship preflight must not touch the field")
+    assert(#scenarioEvents(harness) == 0, "same-macro wrong-name preflight must not touch the field")
     for key, value in pairs(before) do
-        assert(session.checkedGroupKeys[key] == value, "wrong-ship preflight must preserve checked groups")
+        assert(session.checkedGroupKeys[key] == value, "wrong-name preflight must preserve checked groups")
     end
 end
 
@@ -408,13 +415,19 @@ do
         },
         groups = { { macro = "m", faction = "xenon", count = 2, distance = 1000 } },
     })
-    harness.openFromGunnery({ label = "console", phase = "console" })
+    local session = harness.openFromGunnery({ label = "console", phase = "console" })
+    session.checkedGroupKeys.extra = true
+    session.staged.extra = { mode = "defend", preTickMode = "attack" }
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
-    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:1:1")
+    local events = scenarioEvents(harness)
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct1:" .. events[1].params.requestId .. ":ack-count-guard:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
         "partial spawn acknowledgement must keep Test Lab open")
     assert(harness.fix.logContains("action=failed"),
         "partial spawn acknowledgement must emit a machine-readable failure")
+    assert(session.checkedGroupKeys.extra == true and session.staged.extra.mode == "defend",
+        "partial acknowledgement must preserve checked and staged state")
 end
 
 do
@@ -429,6 +442,9 @@ do
     })
     getElapsedTime = function() return now end
     harness.openFromGunnery({ label = "console", phase = "console" })
+    local session = harness.fix.API.getSession()
+    session.checkedGroupKeys.extra = true
+    session.staged.extra = { mode = "defend", preTickMode = "attack" }
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     now = 11
     harness.testMenu.onUpdate()
@@ -436,6 +452,56 @@ do
         "missing spawn acknowledgement must produce a bounded timeout")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
         "spawn timeout must keep Test Lab open for its failure message")
+    assert(session.checkedGroupKeys.extra == true and session.staged.extra.mode == "defend",
+        "spawn timeout must preserve checked and staged state")
+end
+
+-- A loadout change during MD creation invalidates the result before checkbox
+-- mutation, even when MD created the requested ship count.
+do
+    local harness = loadHarness({
+        id = "loadout-changed", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    local session = harness.openFromGunnery({ label = "console", phase = "console" })
+    session.checkedGroupKeys.extra = true
+    session.staged.extra = { mode = "defend", preTickMode = "attack" }
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local events = scenarioEvents(harness)
+    harness.fix.C.IsComponentOperational = function() return false end
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct1:" .. events[1].params.requestId .. ":loadout-changed:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "changed loadout must keep Test Lab open")
+    assert(session.checkedGroupKeys.extra == true and session.staged.extra.mode == "defend",
+        "changed loadout must preserve checked and staged state")
+end
+
+-- Despawn is disabled while pending. Defensive invocation cancels correlation,
+-- so a queued ready event cannot return the owner to an empty field.
+do
+    local harness = loadHarness({
+        id = "pending-despawn", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local events = scenarioEvents(harness)
+    local despawn = harness.fix.buttonByText(ReadText(20992, 26))
+    assert(despawn.active == false, "Despawn must be disabled while creation is pending")
+    despawn.handlers.onClick()
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct1:" .. events[1].params.requestId .. ":pending-despawn:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "ready after defensive Despawn cancellation must be ignored")
 end
 
 -- Malformed specs are caught, logged, and never raise. Test Lab must still open

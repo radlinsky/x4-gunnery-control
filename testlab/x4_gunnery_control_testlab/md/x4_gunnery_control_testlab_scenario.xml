@@ -226,7 +226,7 @@
             <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count"/>
             <do_if value="ScenarioRoot.$PendingRequestId != ''">
               <raise_lua_event name="'X4GunneryTestLab.ScenarioReady'"
-                               param="'x4gct1:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$Spawned.count"/>
+                               param="'x4gct1:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count"/>
             </do_if>
             <remove_value name="ScenarioRoot.$PendingRequestId"/>
           </actions>

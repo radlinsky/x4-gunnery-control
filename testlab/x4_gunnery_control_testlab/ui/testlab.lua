@@ -10,6 +10,10 @@ local function text(id) return ReadText(20992, id) end
 local function api() return X4GunneryControlAPI end
 local function safe(value) return tostring(value or ""):gsub("[^%w_.%-]", "_") end
 local function trim(value) return tostring(value or ""):match("^%s*(.-)%s*$") end
+-- tostring(table) includes a per-Lua-state identity. Combined with the serial,
+-- it prevents a delayed MD reply from an earlier UI lifetime satisfying a new
+-- first request after Reload UI.
+local scenarioLoadNonce = safe(tostring({}))
 
 local function log(event, fields)
     local parts = { "[X4GC TEST]", "event=" .. event }
@@ -72,6 +76,7 @@ end
 local function validateSpec(raw)
     if type(raw) ~= "table" then return nil, "spec is not a table" end
     if type(raw.id) ~= "string" or raw.id == "" then return nil, "spec.id must be a non-empty string" end
+    if raw.id:find(":", 1, true) then return nil, "spec.id must not contain ':'" end
     if raw.enabled ~= true and raw.enabled ~= false then return nil, "spec.enabled must be true or false" end
     if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
     local groups = {}
@@ -175,17 +180,17 @@ local function sendScenarioSpec(force, requestId)
     return true
 end
 
--- Resolve the exact raw group and operational-member count before touching the
--- field. A failure leaves both the previous fixture and staged checkboxes alone.
-local function prepareExactGroup()
+-- Resolve the exact named ship, raw group, and operational members without
+-- mutating the parked Gunnery session.
+local function resolveExactGroup()
     local setup, bridge = scenarioSpec and scenarioSpec.setup, api()
     if not setup then return nil, "spec has no exact setup block" end
-    if not bridge or not bridge.getCurrentShipSweep or not bridge.getSession then
+    if not bridge or not bridge.getCurrentShipSweepReadOnly or not bridge.getSession then
         return nil, "scenario setup API unavailable"
     end
-    local ship, reason = bridge.getCurrentShipSweep()
+    local ship, reason = bridge.getCurrentShipSweepReadOnly()
     if not ship then return nil, tostring(reason or "no occupied gunnery ship") end
-    if ship.macro ~= setup.shipMacro then
+    if ship.macro ~= setup.shipMacro or trim(ship.name) ~= trim(setup.shipLabel) then
         return nil, "need " .. setup.shipLabel .. " [" .. setup.shipMacro .. "], got "
             .. tostring(ship.name) .. " [" .. tostring(ship.macro) .. "]"
     end
@@ -204,12 +209,6 @@ local function prepareExactGroup()
     local session = bridge.getSession()
     if not session then return nil, "no Gunnery session" end
 
-    local checked = {}
-    for key in pairs(session.checkedGroupKeys or {}) do checked[#checked + 1] = key end
-    for _, key in ipairs(checked) do X4GunneryState.toggleGroup(session, key, true) end
-    X4GunneryState.toggleGroup(session, selected.key, true)
-    session.selectedGroupKey = selected.key
-
     local memberIDs = {}
     for _, member in ipairs(selected.members) do memberIDs[#memberIDs + 1] = tostring(member.id) end
     table.sort(memberIDs)
@@ -217,7 +216,19 @@ local function prepareExactGroup()
         label = setup.turretLabel,
         rawGroup = setup.turretGroup,
         memberIDs = table.concat(memberIDs, ","),
+        shipID = tostring(ship.id),
+        groupKey = selected.key,
+        session = session,
     }
+end
+
+local function applyExactGroup(selection)
+    local session = selection.session
+    local checked = {}
+    for key in pairs(session.checkedGroupKeys or {}) do checked[#checked + 1] = key end
+    for _, key in ipairs(checked) do X4GunneryState.toggleGroup(session, key, true) end
+    X4GunneryState.toggleGroup(session, selection.groupKey, true)
+    session.selectedGroupKey = selection.groupKey
 end
 
 local function createTestScenario()
@@ -231,7 +242,7 @@ local function createTestScenario()
         menu.display()
         return
     end
-    local selection, reason = prepareExactGroup()
+    local selection, reason = resolveExactGroup()
     if not selection then
         scenarioActionStatus = "FAILED: " .. reason
         log("scenario_create", { action = "rejected", reason = reason })
@@ -241,9 +252,10 @@ local function createTestScenario()
     local expectedShips = 0
     for _, group in ipairs(scenarioSpec.groups) do expectedShips = expectedShips + group.count end
     scenarioRequestSerial = scenarioRequestSerial + 1
-    local requestId = tostring(scenarioRequestSerial)
+    local requestId = scenarioLoadNonce .. "_" .. tostring(scenarioRequestSerial)
     pendingScenario = {
         requestId = requestId,
+        specId = scenarioSpec.id,
         expectedShips = expectedShips,
         deadline = getElapsedTime() + 10,
         selection = selection,
@@ -259,8 +271,9 @@ local function createTestScenario()
 end
 
 local function onScenarioReady(_, param)
-    local requestId, spawned = tostring(param or ""):match("^x4gct1:(%d+):(%d+)$")
-    if not pendingScenario or requestId ~= pendingScenario.requestId then return end
+    local requestId, specId, spawned = tostring(param or ""):match("^x4gct1:([^:]+):([^:]+):(%d+)$")
+    if not pendingScenario or requestId ~= pendingScenario.requestId
+            or specId ~= pendingScenario.specId then return end
     spawned = tonumber(spawned)
     local request = pendingScenario
     pendingScenario = nil
@@ -271,11 +284,22 @@ local function onScenarioReady(_, param)
         menu.display()
         return
     end
+    local selection, reason = resolveExactGroup()
+    if not selection or selection.shipID ~= request.selection.shipID
+            or selection.groupKey ~= request.selection.groupKey
+            or selection.memberIDs ~= request.selection.memberIDs then
+        reason = reason or "ship or exact turret membership changed while spawning"
+        scenarioActionStatus = "FAILED: " .. reason
+        log("scenario_create", { action = "failed", reason = reason })
+        menu.display()
+        return
+    end
+    applyExactGroup(selection)
     scenarioActionStatus = "READY: " .. spawned .. " named ships created; only "
-        .. request.selection.label .. " ticked"
+        .. selection.label .. " ticked"
     log("scenario_create", {
-        action = "ready", spawned_ships = spawned, group = request.selection.rawGroup,
-        member_ids = request.selection.memberIDs,
+        action = "ready", spawned_ships = spawned, group = selection.rawGroup,
+        member_ids = selection.memberIDs,
     })
     returnToGunnery("scenario_ready")
 end
@@ -420,9 +444,14 @@ function menu.display()
         active = scenarioSpec ~= nil and scenarioSpec.setup ~= nil and pendingScenario == nil,
     }):setText(text(25))
     scenarioRow[1].handlers.onClick = createTestScenario
-    scenarioRow[3]:setColSpan(2):createButton({}):setText(text(26)); scenarioRow[3].handlers.onClick = function()
+    scenarioRow[3]:setColSpan(2):createButton({ active = pendingScenario == nil }):setText(text(26)); scenarioRow[3].handlers.onClick = function()
+        if pendingScenario then
+            pendingScenario = nil
+            scenarioActionStatus = "CANCELLED: pending creation was invalidated"
+        end
         AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
         log("scenario", { action = "despawn" })
+        menu.display()
     end
     if scenarioActionStatus then
         local statusRow = tableView:addRow(false, {})

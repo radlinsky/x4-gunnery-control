@@ -18,7 +18,7 @@
 --   setup     table    Required for Create test scenario. Preflights the exact
 --                      ship/loadout and selects the exact turret group.
 --     shipMacro       string  Required player ship macro.
---     shipLabel       string  Human-readable required ship name.
+--     shipLabel       string  Exact visible required ship name (trimmed).
 --     turretGroup     string  Raw group id, not the display label.
 --     turretLabel     string  Human-readable group label.
 --     expectedTurrets number  Exact operational-member count.
