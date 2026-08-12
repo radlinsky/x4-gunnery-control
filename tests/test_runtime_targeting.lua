@@ -1565,12 +1565,16 @@ do
     local sess57 = API.getSession()
     sess57.phase = "target_select"
     GetPlayerContextByClass = function() return 1 end
-    GetContainedShips = function() return { 570, 572 } end
+    GetContainedShips = function() return { 570, 572, 573, 574, 575 } end
     GetContainedStations = function() return { 571 } end
     C.GetContextByClass = function(comp) return comp end
+    local classByComponent57 = {
+        [570] = "ship_l", [573] = "ship_s", [574] = "ship_m", [575] = "ship_xl",
+        [571] = "station",
+    }
     C.IsComponentClass = function(component, class)
         local comp = tonumber(tostring(component))
-        return (comp == 570 and class == "ship_l") or (comp == 571 and class == "station")
+        return classByComponent57[comp] == class
     end
     C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
@@ -1585,20 +1589,29 @@ do
             -- Live X4 9.00 returns numeric class ids (for example 91-94 for the
             -- four ship sizes), not the class-name strings used by the old
             -- test double. Classification must go through IsComponentClass.
-            elseif key == "classid" then vals[#vals + 1] = comp == 570 and 93 or 95
+            elseif key == "classid" then
+                vals[#vals + 1] = ({ [573] = 91, [574] = 92, [570] = 93, [575] = 94, [571] = 95 })[comp] or 96
             elseif key == "macro" then
-                vals[#vals + 1] = comp == 570 and "ship_arg_l_destroyer_01_a_macro"
-                    or (comp == 571 and "station_arg_defence_disc_macro" or "unknown_object_macro")
+                vals[#vals + 1] = ({
+                    [573] = "ship_xen_s_fighter_01_a_macro",
+                    [574] = "ship_xen_m_fighter_01_a_macro",
+                    [570] = "ship_arg_l_destroyer_01_a_macro",
+                    [575] = "ship_arg_xl_carrier_01_a_macro",
+                    [571] = "station_arg_defence_disc_macro",
+                })[comp] or "unknown_object_macro"
             else vals[#vals + 1] = nil end
         end
         return unpack(vals)
     end
     local candidates57 = API.readTargetCandidates()
-    assert(#candidates57 == 3, "57: expected classified ship, station, and fallback candidates")
+    assert(#candidates57 == 6, "57: expected four ship sizes, station, and fallback candidates")
     local byID57 = {}
     for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
     assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
     assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
+    assert(byID57["573"].class == "S Ship", "57: S ship class label missing")
+    assert(byID57["574"].class == "M Ship", "57: M ship class label missing")
+    assert(byID57["575"].class == "XL Ship", "57: XL ship class label missing")
     assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
     assert(byID57["572"].class == ReadText(20991, 44), "57: unknown ship class must fall back to kind")
     C.GetSofttarget2 = function() return { softtargetID = 571, softtargetConnectionName = "" } end
@@ -1613,11 +1626,23 @@ do
     gcMenu.display()
     local rendered57 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
-        if entry.row == "570" then rendered57[entry.column] = entry.text end
+        if entry.row == "570" or entry.row == "573" or entry.row == "574" or entry.row == "575" then
+            rendered57[entry.row] = rendered57[entry.row] or {}
+            rendered57[entry.row][entry.column] = entry.text
+        end
     end
-    assert(rendered57[3] == "L Ship", "57: class must be bound to rendered column 3")
-    assert(rendered57[4] == "ship_arg_l_destroyer_01_a_macro",
-        "57: macro must be bound to rendered column 4")
+    local expectedRendered57 = {
+        ["573"] = { class = "S Ship", macro = "ship_xen_s_fighter_01_a_macro" },
+        ["574"] = { class = "M Ship", macro = "ship_xen_m_fighter_01_a_macro" },
+        ["570"] = { class = "L Ship", macro = "ship_arg_l_destroyer_01_a_macro" },
+        ["575"] = { class = "XL Ship", macro = "ship_arg_xl_carrier_01_a_macro" },
+    }
+    for component, expected in pairs(expectedRendered57) do
+        assert(rendered57[component] and rendered57[component][3] == expected.class,
+            "57: " .. expected.class .. " must be bound to rendered column 3")
+        assert(rendered57[component][4] == expected.macro,
+            "57: " .. expected.class .. " macro must be bound to rendered column 4")
+    end
     local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
@@ -1634,10 +1659,14 @@ do
         "57: top refresh click needs audit evidence")
     assert(log57:find("event=target_browser action=refresh location=bottom", 1, true),
         "57: bottom refresh click needs audit evidence")
-    assert(log57:find("event=target_browser action=rendered candidates=3 class_values=3 macro_values=3", 1, true),
+    assert(log57:find("event=target_browser action=rendered candidates=6 class_values=6 macro_values=6", 1, true),
         "57: rendered target metadata needs aggregate audit evidence")
-    assert(log57:find('event=target_browser action=row component=570 name="0" class="L Ship" macro="ship_arg_l_destroyer_01_a_macro"', 1, true),
-        "57: rendered row audit needs exact component/class/macro evidence")
+    for component, expected in pairs(expectedRendered57) do
+        local evidence = 'event=target_browser action=row component=' .. component
+            .. ' name="0" class="' .. expected.class .. '" macro="' .. expected.macro .. '"'
+        assert(log57:find(evidence, 1, true),
+            "57: rendered row audit needs exact " .. expected.class .. " component/class/macro evidence")
+    end
 end
 
 print("runtime targeting tests passed")
