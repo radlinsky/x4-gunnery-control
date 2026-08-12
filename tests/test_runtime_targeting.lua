@@ -1790,6 +1790,7 @@ do
         { key = "unchecked", members = { { componentID = 103, operational = true } } },
     }
     sess57.checkedGroupKeys = { selected = true }
+    gcMenu.shown = true
     local savedAdd57, events57 = AddUITriggeredEvent, {}
     AddUITriggeredEvent = function(screen, control, params)
         events57[#events57 + 1] = { screen = screen, control = control, params = params }
@@ -1893,6 +1894,35 @@ do
     fix.drainCallbacksSince(engagedRepaintMark57)
     assert(fix.callbackCheckpoint() == engagedRepaintMark57 + 1,
         "57: Direct-control solution replies must use the same deferred repaint path")
+
+    events57 = {}
+    API.requestSolution(951)
+    local testLabNonce57 = events57[1].params.nonce
+    local testLabRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. testLabNonce57 .. ":2:3")
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.reopening)
+    gcMenu.shown = false
+    local hiddenAuditBefore57 = #fix.getCapturedLog()
+    fix.drainCallbacksSince(testLabRepaintMark57)
+    assert(#fix.getCapturedLog() == hiddenAuditBefore57,
+        "57: a deferred reply must not repaint after Test Lab takes ownership")
+
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.owned)
+    gcMenu.shown = true
+    events57 = {}
+    API.requestSolution(952)
+    local mapNonce57 = events57[1].params.nonce
+    local mapRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. mapNonce57 .. ":2:3")
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.suspendedMap)
+    gcMenu.shown = false
+    hiddenAuditBefore57 = #fix.getCapturedLog()
+    fix.drainCallbacksSince(mapRepaintMark57)
+    assert(#fix.getCapturedLog() == hiddenAuditBefore57,
+        "57: a deferred reply must not repaint while Map owns the view")
+
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.owned)
+    gcMenu.shown = true
     sess57.phase, sess57.controlMode = "target_select", nil
     getElapsedTime = savedElapsed57
     AddUITriggeredEvent = savedAdd57

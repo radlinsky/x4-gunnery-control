@@ -1074,7 +1074,7 @@ local function scheduleSolutionRepaint()
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if solutionRepaintPending ~= token then return end
         solutionRepaintPending = nil
-        if not sameSession(expectedSession, expectedEpoch) then return end
+        if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
         if session.phase == "target_select"
                 or (session.phase == "engaged" and session.controlMode == "direct") then
             menu.display()
