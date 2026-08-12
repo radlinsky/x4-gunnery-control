@@ -23,10 +23,12 @@ snapshot_player=$(printf '%s\n' "$snapshot_target" | grep -F 'player.target?' | 
 hit_aim=$(printf '%s\n' "$hit_target" | grep -F 'AimTarget? and' | cut -d: -f1)
 hit_soft=$(printf '%s\n' "$hit_target" | grep -F 'SoftTarget? and' | cut -d: -f1)
 hit_player=$(printf '%s\n' "$hit_target" | grep -F 'player.target?' | cut -d: -f1)
-[ "$snapshot_aim" -lt "$snapshot_soft" ] && [ "$snapshot_soft" -lt "$snapshot_player" ] \
-  || fail "solution snapshot target precedence is not AimTarget > soft target > player.target"
-[ "$hit_aim" -lt "$hit_soft" ] && [ "$hit_soft" -lt "$hit_player" ] \
-  || fail "HIT target precedence is not AimTarget > soft target > player.target"
+if ! [[ "$snapshot_aim" -lt "$snapshot_soft" && "$snapshot_soft" -lt "$snapshot_player" ]]; then
+  fail "solution snapshot target precedence is not AimTarget > soft target > player.target"
+fi
+if ! [[ "$hit_aim" -lt "$hit_soft" && "$hit_soft" -lt "$hit_player" ]]; then
+  fail "HIT target precedence is not AimTarget > soft target > player.target"
+fi
 
 # A selected surface component is a valid aim target. The hit event carries
 # both the victim object and the struck component; istgt must accept either
