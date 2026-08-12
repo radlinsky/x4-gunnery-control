@@ -1808,23 +1808,42 @@ do
     sess57.phase = "target_select"
     GetPlayerContextByClass = function() return nil end
     C.GetSofttarget2 = function() return { softtargetID = 0, softtargetConnectionName = "" } end
+    local firstRepaintMark57 = fix.callbackCheckpoint()
     fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce57 .. ":1:2")
     assert(pending57.pending == false and pending57.on == 1 and pending57.total == 2,
         "57: matching packed result was not accepted")
+    assert(fix.callbackCheckpoint() == firstRepaintMark57 + 1,
+        "57: the first accepted solution result must schedule one deferred repaint")
+    fix.drainCallbacksSince(firstRepaintMark57)
     events57 = {}
     assert(API.requestSolution(900) == pending57 and #events57 == 0,
         "57: a result must be cached for one second")
+
+    local savedElapsed57, clock57 = getElapsedTime, (pending57.requestedAt or 0) + 2
+    getElapsedTime = function() return clock57 end
+    events57 = {}
+    local refreshed57 = API.requestSolution(900)
+    assert(refreshed57 == pending57 and refreshed57.pending and refreshed57.on == nil,
+        "57: refreshing an expired completed result must clear its stale count; pending="
+            .. tostring(refreshed57.pending) .. " on=" .. tostring(refreshed57.on)
+            .. " requested=" .. tostring(refreshed57.requestedAt))
+    assert(API.solutionText(refreshed57) == "… / 2",
+        "57: an expired completed result must render pending, not stale ON SOLUTION text")
+    local refreshNonce57 = events57[1].params.nonce
+    local refreshRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. refreshNonce57 .. ":0:2")
+    fix.drainCallbacksSince(refreshRepaintMark57)
+
     sess57.checkedGroupKeys.unchecked = true
+    events57 = {}
     local changed57 = API.requestSolution(900)
     assert(changed57.pending and changed57.total == 3 and #events57 == 5,
         "57: checkbox membership change must invalidate cache and stream the new exact denominator")
 
-    local savedElapsed57, clock57 = getElapsedTime, 0
-    getElapsedTime = function() return clock57 end
     events57 = {}
     local timed57 = API.requestSolution(901)
     local oldNonce57 = events57[1].params.nonce
-    clock57 = 3
+    clock57 = timed57.requestedAt + 3
     events57 = {}
     assert(API.requestSolution(901) == timed57 and events57[1].params.nonce ~= oldNonce57,
         "57: a timed-out solution request must be replaced with a fresh nonce")
@@ -1832,9 +1851,49 @@ do
     fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. oldNonce57 .. ":3:3")
     assert(timed57.pending and timed57.on == nil,
         "57: a superseded solution response must not complete the replacement request")
+    local timeoutRepaintMark57 = fix.callbackCheckpoint()
     fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. newNonce57 .. ":2:3")
     assert(not timed57.pending and timed57.on == 2,
         "57: the replacement solution response must still complete normally")
+    fix.drainCallbacksSince(timeoutRepaintMark57)
+
+    local batchEvents57, batchNonces57 = {}, {}
+    events57 = batchEvents57
+    for target = 910, 945 do
+        API.requestSolution(target)
+    end
+    for _, event in ipairs(batchEvents57) do
+        if event.control == "solution_begin" then batchNonces57[#batchNonces57 + 1] = event.params.nonce end
+    end
+    assert(#batchNonces57 == 36, "57: batching fixture must model hull plus 35 surface replies")
+    local batchRepaintMark57 = fix.callbackCheckpoint()
+    local renderedBefore57 = 0
+    for _, line in ipairs(fix.getCapturedLog()) do
+        if line:find("event=target_browser action=rendered", 1, true) then renderedBefore57 = renderedBefore57 + 1 end
+    end
+    for _, nonce in ipairs(batchNonces57) do
+        fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce .. ":2:3")
+    end
+    assert(fix.callbackCheckpoint() == batchRepaintMark57 + 1,
+        "57: a burst of 36 solution replies must coalesce to one repaint callback")
+    fix.drainCallbacksSince(batchRepaintMark57)
+    local renderedAfter57 = 0
+    for _, line in ipairs(fix.getCapturedLog()) do
+        if line:find("event=target_browser action=rendered", 1, true) then renderedAfter57 = renderedAfter57 + 1 end
+    end
+    assert(renderedAfter57 == renderedBefore57 + 1,
+        "57: a burst of solution replies must produce one target-browser audit batch")
+
+    sess57.phase, sess57.controlMode, sess57.targetObjectID = "engaged", "direct", nil
+    events57 = {}
+    API.requestSolution(950)
+    local engagedNonce57 = events57[1].params.nonce
+    local engagedRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. engagedNonce57 .. ":2:3")
+    fix.drainCallbacksSince(engagedRepaintMark57)
+    assert(fix.callbackCheckpoint() == engagedRepaintMark57 + 1,
+        "57: Direct-control solution replies must use the same deferred repaint path")
+    sess57.phase, sess57.controlMode = "target_select", nil
     getElapsedTime = savedElapsed57
     AddUITriggeredEvent = savedAdd57
 end

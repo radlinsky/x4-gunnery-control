@@ -58,6 +58,7 @@ local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
 local solutionSerial, solutionCache, solutionRequests = 0, {}, {}
+local solutionRepaintSerial, solutionRepaintPending = 0, nil
 local reopenSuspendedSession
 local activeExternalMenuName
 local cameraMismatchLogged = false
@@ -117,6 +118,7 @@ end
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship)
     solutionCache, solutionRequests = {}, {}
+    solutionRepaintPending = nil
     local session = State.newSession(ship, "gunnercontrol")
     session.shipName = str(C.GetComponentName(ship))
     return session
@@ -533,6 +535,7 @@ local function discardSession(reason)
     local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
     solutionCache, solutionRequests = {}, {}
+    solutionRepaintPending = nil
     resumePending = false
     transitionLifecycle("ending", reason)
     clearOwnShipSofttarget()
@@ -1031,7 +1034,8 @@ local function requestSolution(target)
     solutionSerial = solutionSerial + 1
     local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
     cached = cached and cached.signature == signature and cached or {}
-    cached.signature, cached.requestedAt, cached.pending, cached.pendingNonce, cached.total = signature, now, true, nonce, #members
+    cached.signature, cached.requestedAt, cached.pending, cached.pendingNonce, cached.total, cached.on =
+        signature, now, true, nonce, #members, nil
     solutionCache[key] = cached
     solutionRequests[nonce] = { key = key, epoch = sessionEpoch, signature = signature }
     AddUITriggeredEvent("X4GunneryControl", "solution_begin", { nonce = nonce, target = id(target), total = #members })
@@ -1056,6 +1060,28 @@ local function solutionAudit(result)
     return "complete", result.on or 0, result.total or 0
 end
 
+-- A target/surface render can issue dozens of independent MD requests. Their
+-- replies commonly arrive in the same UI tick; rebuilding the complete menu
+-- for every reply makes enumeration and audit logging quadratic in row count.
+-- One tokenized callback repaints the whole accepted batch. A token survives
+-- stale callbacks safely when session teardown resets the pending marker.
+local function scheduleSolutionRepaint()
+    if solutionRepaintPending then return end
+    solutionRepaintSerial = solutionRepaintSerial + 1
+    local token = solutionRepaintSerial
+    solutionRepaintPending = token
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if solutionRepaintPending ~= token then return end
+        solutionRepaintPending = nil
+        if not sameSession(expectedSession, expectedEpoch) then return end
+        if session.phase == "target_select"
+                or (session.phase == "engaged" and session.controlMode == "direct") then
+            menu.display()
+        end
+    end, false, getElapsedTime() + 0.01)
+end
+
 local function onSolutionResult(_, param)
     local nonce, on, total = tostring(param or ""):match("^x4gcs1:([^:]+):(%d+):(%d+)$")
     local request = nonce and solutionRequests[nonce]
@@ -1065,7 +1091,7 @@ local function onSolutionResult(_, param)
     cached.on, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt = tonumber(on), tonumber(total), false, nil, getElapsedTime()
     solutionRequests[nonce] = nil
     if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        menu.display()
+        scheduleSolutionRepaint()
     end
 end
 
@@ -1579,6 +1605,7 @@ function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
 function TestAPI.requestSolution(target) return requestSolution(target) end
+function TestAPI.solutionText(result) return solutionText(result) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
