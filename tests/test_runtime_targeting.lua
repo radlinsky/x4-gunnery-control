@@ -1777,4 +1777,118 @@ do
         "57: component-disappearance equipment reset needs exact audit evidence")
 end
 
+-- ── 57. solution requests stream exactly the ticked operational turrets ─────
+do
+    local sess57 = API.getSession()
+    sess57.phase, sess57.controlMode = "console", nil
+    sess57.groups = {
+        { key = "selected", members = {
+            { componentID = 101, operational = true },
+            { componentID = 102, operational = true },
+            { componentID = 199, operational = false },
+        } },
+        { key = "unchecked", members = { { componentID = 103, operational = true } } },
+    }
+    sess57.checkedGroupKeys = { selected = true }
+    local savedAdd57, events57 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        events57[#events57 + 1] = { screen = screen, control = control, params = params }
+    end
+    local pending57 = API.requestSolution(900)
+    assert(pending57.pending and pending57.total == 2, "57: pending denominator must be two exact selected turrets")
+    local controls57, nonce57 = {}, nil
+    for _, event in ipairs(events57) do
+        controls57[#controls57 + 1] = event.control
+        if event.control == "solution_begin" then nonce57 = event.params.nonce end
+    end
+    assert(table.concat(controls57, ",") == "solution_begin,solution_member,solution_member,solution_commit",
+        "57: solution transport must be begin + one member per selected operational turret + commit")
+    assert(events57[2].params.weapon == 101 and events57[3].params.weapon == 102,
+        "57: unchecked or inoperable turret leaked into exact-member request")
+    sess57.phase = "target_select"
+    GetPlayerContextByClass = function() return nil end
+    C.GetSofttarget2 = function() return { softtargetID = 0, softtargetConnectionName = "" } end
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce57 .. ":1:2")
+    assert(pending57.pending == false and pending57.on == 1 and pending57.total == 2,
+        "57: matching packed result was not accepted")
+    events57 = {}
+    assert(API.requestSolution(900) == pending57 and #events57 == 0,
+        "57: a result must be cached for one second")
+    sess57.checkedGroupKeys.unchecked = true
+    local changed57 = API.requestSolution(900)
+    assert(changed57.pending and changed57.total == 3 and #events57 == 5,
+        "57: checkbox membership change must invalidate cache and stream the new exact denominator")
+    AddUITriggeredEvent = savedAdd57
+end
+
+-- ── 58. target/surface rows render and sort complete solution results ────────
+do
+    local sess58 = API.getSession()
+    sess58.phase, sess58.controlMode = "console", nil
+    sess58.checkedGroupKeys = { selected = true }
+    local savedAdd58, events58 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        events58[#events58 + 1] = { screen = screen, control = control, params = params }
+    end
+    local function seed58(target, on)
+        events58 = {}
+        local result = API.requestSolution(target)
+        local nonce
+        for _, event in ipairs(events58) do
+            if event.control == "solution_begin" then nonce = event.params.nonce end
+        end
+        fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce .. ":" .. on .. ":2")
+        return result
+    end
+    seed58(701, 2); seed58(702, 0); seed58(703, 1); seed58(704, 0)
+    AddUITriggeredEvent = savedAdd58
+
+    sess58.phase, sess58.controlMode = "engaged", "direct"
+    sess58.targetObjectID, sess58.aimTargetID = 900, 900
+    sess58.surfaceTypeFilter, sess58.surfaceMacroFilter = "any", "any"
+    GetPlayerContextByClass = function() return nil end
+    C.IsComponentClass = function() return false end
+    C.GetNumUpgradeSlots = function(_, _, upgrade)
+        if upgrade == "turret" then return 3 end
+        if upgrade == "shield" then return 1 end
+        return 0
+    end
+    C.GetUpgradeSlotCurrentComponent = function(_, upgrade, slot)
+        if upgrade == "turret" then return 700 + slot end
+        return 703
+    end
+    C.IsComponentOperational = function() return true end
+    C.GetComponentName = function(component)
+        local names = { [701] = "Alpha", [702] = "Beta", [703] = "Shield", [704] = "Gamma", [801] = "Zulu", [802] = "Alpha" }
+        return names[tonumber(tostring(component))] or "Target"
+    end
+    GetComponentData = function(_, ...)
+        local vals = {}
+        for _, key in ipairs({...}) do
+            if key == "maxradarrange" then vals[#vals + 1] = 40000
+            elseif key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "isenemy" then vals[#vals + 1] = true
+            elseif key == "isknown" or key == "isradarvisible" then vals[#vals + 1] = true
+            else vals[#vals + 1] = false end
+        end
+        return unpack(vals)
+    end
+    gcMenu.display()
+    local surfaceButton58
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.text == ReadText(20991, 60) then surfaceButton58 = button; break end
+    end
+    assert(surfaceButton58, "58: surface solution rows were not rendered")
+    surfaceButton58.handlers.onClick()
+
+    sess58.phase, sess58.controlMode = "target_select", nil
+    C.GetSofttarget2 = function() return { softtargetID = 801, softtargetConnectionName = "" } end
+    GetPlayerContextByClass = function() return 1 end
+    GetContainedShips = function() return { 801, 802 } end
+    GetContainedStations = function() return {} end
+    C.GetContextByClass = function(component) return component end
+    C.GetDistanceBetween = function() return 1000 end
+    gcMenu.display()
+end
+
 print("runtime targeting tests passed")

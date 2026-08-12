@@ -57,6 +57,7 @@ local resumePending, endingSession = false, false
 local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
+local solutionSerial, solutionCache, solutionRequests = 0, {}, {}
 local reopenSuspendedSession
 local activeExternalMenuName
 local cameraMismatchLogged = false
@@ -115,6 +116,7 @@ end
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship)
+    solutionCache, solutionRequests = {}, {}
     local session = State.newSession(ship, "gunnercontrol")
     session.shipName = str(C.GetComponentName(ship))
     return session
@@ -530,6 +532,7 @@ local function discardSession(reason)
     -- route (endForMovement -> endSession) is also covered.
     local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
+    solutionCache, solutionRequests = {}, {}
     resumePending = false
     transitionLifecycle("ending", reason)
     clearOwnShipSofttarget()
@@ -984,6 +987,76 @@ local function targetTypeLabel(macro)
     if macro == "" then return text(51) end
     local name = tostring(GetMacroData(macro, "name") or "")
     return name ~= "" and name or text(51)
+end
+
+local function checkedOperationalTurrets()
+    local members, seen = {}, {}
+    for _, group in ipairs(State.checkedGroups(session)) do
+        for _, member in ipairs(group.members or {}) do
+            local key = State.normID(member.componentID)
+            if member.operational and not seen[key] then
+                seen[key] = true
+                members[#members + 1] = member.componentID
+            end
+        end
+    end
+    table.sort(members, function(a, b) return State.normID(a) < State.normID(b) end)
+    return members
+end
+
+-- Lua owns exact checkbox membership and MD owns the raycast. Stream one flat
+-- scalar event per selected turret because AddUITriggeredEvent cannot carry a
+-- nested list. Results live for one second and include an exact-member
+-- signature, so changing a checkbox cannot reuse the previous denominator.
+local function requestSolution(target)
+    if not session or State.isNullID(target) then return nil end
+    local members, signatureParts = checkedOperationalTurrets(), {}
+    for _, member in ipairs(members) do signatureParts[#signatureParts + 1] = State.normID(member) end
+    local signature = table.concat(signatureParts, ",")
+    local key = tostring(sessionEpoch) .. ":" .. State.normID(target)
+    local now, cached = getElapsedTime(), solutionCache[key]
+    if cached and cached.signature == signature then
+        if cached.pending and now - cached.requestedAt < 2 then return cached end
+        if not cached.pending and now - cached.requestedAt < 1 then return cached end
+    end
+    if #members == 0 then
+        cached = { on = 0, total = 0, signature = signature, requestedAt = now }
+        solutionCache[key] = cached
+        return cached
+    end
+    solutionSerial = solutionSerial + 1
+    local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
+    cached = cached and cached.signature == signature and cached or {}
+    cached.signature, cached.requestedAt, cached.pending, cached.pendingNonce, cached.total = signature, now, true, nonce, #members
+    solutionCache[key] = cached
+    solutionRequests[nonce] = { key = key, epoch = sessionEpoch, signature = signature }
+    AddUITriggeredEvent("X4GunneryControl", "solution_begin", { nonce = nonce, target = id(target), total = #members })
+    for _, member in ipairs(members) do
+        AddUITriggeredEvent("X4GunneryControl", "solution_member", { nonce = nonce, weapon = id(member) })
+    end
+    AddUITriggeredEvent("X4GunneryControl", "solution_commit", { nonce = nonce })
+    return cached
+end
+
+local function solutionText(result)
+    if not result then return "-" end
+    if result.pending and result.on == nil then return "… / " .. tostring(result.total) end
+    local label = tostring(result.on or 0) .. " / " .. tostring(result.total or 0)
+    if (result.total or 0) > 0 and result.on == result.total then return label .. "  " .. text(89) end
+    return label
+end
+
+local function onSolutionResult(_, param)
+    local nonce, on, total = tostring(param or ""):match("^x4gcs1:([^:]+):(%d+):(%d+)$")
+    local request = nonce and solutionRequests[nonce]
+    if not request or not session or request.epoch ~= sessionEpoch then return end
+    local cached = solutionCache[request.key]
+    if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
+    cached.on, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt = tonumber(on), tonumber(total), false, nil, getElapsedTime()
+    solutionRequests[nonce] = nil
+    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
+        menu.display()
+    end
 end
 
 targetRoot = function(component)
@@ -1495,6 +1568,7 @@ function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
+function TestAPI.requestSolution(target) return requestSolution(target) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
@@ -1762,16 +1836,16 @@ function menu.display()
             })
             menu.elementFrame = elemFrame
             elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-            local elemTable = elemFrame:addTable(2, {
+            local elemTable = elemFrame:addTable(3, {
                 tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
             -- Header: target name (falls back to text(51) when empty).
             local tgtName = str(C.GetComponentName(id(session.targetObjectID)))
             local elemHeader = elemTable:addRow(false, { bgColor = Color["row_title_background"] })
-            elemHeader[1]:setColSpan(2):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
+            elemHeader[1]:setColSpan(3):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
             local elemRefresh = elemTable:addRow("surface_refresh", {})
-            elemRefresh[1]:setColSpan(2):createButton({}):setText(text(15))
+            elemRefresh[1]:setColSpan(3):createButton({}):setText(text(15))
             elemRefresh[1].handlers.onClick = function()
                 log("event=surface_browser action=refresh location=top target=" .. tostring(session.targetObjectID))
                 refresh(); menu.display()
@@ -1818,8 +1892,9 @@ function menu.display()
             -- Hull row: engage the whole ship/station.
             local hullRow = elemTable:addRow("hull", {})
             hullRow[1]:createText(text(57))
-            hullRow[2]:createButton({ active = not sameID(session.aimTargetID, session.targetObjectID) }):setText(text(58))
-            hullRow[2].handlers.onClick = function() engageTarget(session.targetObjectID) end
+            hullRow[2]:createText(solutionText(requestSolution(session.targetObjectID)))
+            hullRow[3]:createButton({ active = not sameID(session.aimTargetID, session.targetObjectID) }):setText(text(58))
+            hullRow[3].handlers.onClick = function() engageTarget(session.targetObjectID) end
             -- Surface element rows.
             local surfaces = State.filterSurfaceTargets(allSurfaces, session.surfaceTypeFilter, session.surfaceMacroFilter)
             log("event=surface_browser action=rendered target=" .. tostring(session.targetObjectID)
@@ -1830,18 +1905,28 @@ function menu.display()
                 .. " visible=" .. tostring(#surfaces)
                 .. " equipment_options=" .. tostring(#macroOptions - 1))
             if #surfaces > 0 then
+                for _, surface in ipairs(surfaces) do surface.solution = requestSolution(surface.componentID) end
+                table.sort(surfaces, function(a, b)
+                    local aOn = a.solution and a.solution.total > 0 and a.solution.on == a.solution.total or false
+                    local bOn = b.solution and b.solution.total > 0 and b.solution.on == b.solution.total or false
+                    if a.kind ~= b.kind then return a.kind < b.kind end
+                    if a.macro ~= b.macro then return (a.macroLabel or a.macro) < (b.macroLabel or b.macro) end
+                    if aOn ~= bOn then return aOn end
+                    return a.name < b.name
+                end)
                 for _, surface in ipairs(surfaces) do
                     log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s equipment=%q macro=%q",
                         tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
                         surface.kindKey, surface.macroLabel, surface.macro))
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
                     surfRow[1]:createText(surface.name .. ": " .. surface.kind)
-                    surfRow[2]:createButton({ active = not sameID(session.aimTargetID, surface.componentID) }):setText(text(60))
-                    surfRow[2].handlers.onClick = function() engageTarget(surface.componentID) end
+                    surfRow[2]:createText(solutionText(surface.solution))
+                    surfRow[3]:createButton({ active = not sameID(session.aimTargetID, surface.componentID) }):setText(text(60))
+                    surfRow[3].handlers.onClick = function() engageTarget(surface.componentID) end
                 end
             else
                 local noSurfRow = elemTable:addRow(false, {})
-                noSurfRow[1]:setColSpan(2):createText(text(61))
+                noSurfRow[1]:setColSpan(3):createText(text(61))
             end
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
             elemFrame:display()
@@ -1872,30 +1957,43 @@ function menu.display()
     local tableWidth = frameWidth - 2 * tablePad
 
     if session.phase == "target_select" then
-        local tableView = frame:addTable(10, { tabOrder = 1, x = tablePad, width = tableWidth })
+        local tableView = frame:addTable(12, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
-        title[1]:setColSpan(10):createText(text(33), Helper.headerRowCenteredProperties)
+        title[1]:setColSpan(12):createText(text(33), Helper.headerRowCenteredProperties)
         local topActions = tableView:addRow("target_refresh_top", {})
-        topActions[1]:setColSpan(10):createButton({}):setText(text(15))
+        topActions[1]:setColSpan(12):createButton({}):setText(text(15))
         topActions[1].handlers.onClick = function()
             log("event=target_browser action=refresh location=top")
             refresh(); menu.display()
         end
         local explanation = tableView:addRow(false, {})
-        explanation[1]:setColSpan(10):createText(text(34), { wordwrap = true })
+        explanation[1]:setColSpan(12):createText(text(34), { wordwrap = true })
         local current = C.GetSofttarget2()
         if current.softtargetID ~= 0 and isEligibleEngagementTarget(current.softtargetID) then
             local row = tableView:addRow("current", { bgColor = Color["row_background_unselectable"] })
-            row[1]:setColSpan(7):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
-            row[8]:setColSpan(3):createButton({}):setText(text(36))
-            row[8].handlers.onClick = function() engageTarget(current.softtargetID) end
+            row[1]:setColSpan(9):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
+            row[10]:setColSpan(3):createButton({}):setText(text(36))
+            row[10].handlers.onClick = function() engageTarget(current.softtargetID) end
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
         header[4]:setColSpan(2):createText(text(38)); header[6]:createText(text(49))
-        header[7]:createText(text(50)); header[8]:setColSpan(3):createText("")
+        header[7]:createText(text(50)); header[8]:setColSpan(2):createText(text(90)); header[10]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
         local classValues, typeValues = 0, 0
+        for _, candidate in ipairs(candidates) do candidate.solution = requestSolution(candidate.componentID) end
+        table.sort(candidates, function(a, b)
+            local aOn = a.solution and a.solution.total > 0 and a.solution.on == a.solution.total or false
+            local bOn = b.solution and b.solution.total > 0 and b.solution.on == b.solution.total or false
+            if aOn ~= bOn then return aOn end
+            if a.priority ~= b.priority then return a.priority < b.priority end
+            if a.distance ~= b.distance then
+                if a.distance < 0 then return false end
+                if b.distance < 0 then return true end
+                return a.distance < b.distance
+            end
+            return a.name < b.name
+        end)
         for _, candidate in ipairs(candidates) do
             if candidate.class and candidate.class ~= "" then classValues = classValues + 1 end
             if candidate.typeName and candidate.typeName ~= "" then typeValues = typeValues + 1 end
@@ -1911,12 +2009,13 @@ function menu.display()
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
             row[6]:createText(candidate.relation)
             row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
-            row[8]:setColSpan(3):createButton({}):setText(text(52))
-            row[8].handlers.onClick = function() engageTarget(candidate.componentID) end
+            row[8]:setColSpan(2):createText(solutionText(candidate.solution))
+            row[10]:setColSpan(3):createButton({}):setText(text(52))
+            row[10].handlers.onClick = function() engageTarget(candidate.componentID) end
         end
         if #candidates == 0 then
             local row = tableView:addRow(false, {})
-            row[1]:setColSpan(10):createText(text(53), { color = Color["text_error"] })
+            row[1]:setColSpan(12):createText(text(53), { color = Color["text_error"] })
         end
         local actions = tableView:addRow("actions", {})
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
@@ -1928,7 +2027,7 @@ function menu.display()
             actions[4]:setColSpan(2):createButton({}):setText(text(32))
             actions[4].handlers.onClick = openTestLab
         end
-        actions[6]:setColSpan(5):createButton({}):setText(text(54))
+        actions[6]:setColSpan(7):createButton({}):setText(text(54))
         -- No revert: the player is still seated, and a temporary apply now lasts
         -- until they stand up. Backing out of the target list is a navigation
         -- step, not a decision to put the turrets back.
@@ -2367,6 +2466,7 @@ local function init()
     -- so directed turrets roll to the next hostile instead of holding fire.
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
+    RegisterEvent("X4GunneryControl.SolutionResult", onSolutionResult)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
