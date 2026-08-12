@@ -1114,7 +1114,7 @@ local function readSurfaceTargets(container)
                     local macroLabel = macro ~= "" and tostring(GetMacroData(macro, "name") or "") or ""
                     surfaces[#surfaces + 1] = {
                         componentID = component, kind = surfaceType.label, kindKey = surfaceType.upgrade,
-                        macro = macro, macroLabel = macroLabel ~= "" and macroLabel or macro,
+                        macro = macro, macroLabel = macroLabel ~= "" and macroLabel or text(51),
                         name = name ~= "" and name or (surfaceType.label .. " " .. tostring(slot)),
                     }
                 end

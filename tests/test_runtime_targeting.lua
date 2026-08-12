@@ -1739,6 +1739,16 @@ do
         "57: filtered surface render needs exact count/filter evidence")
     assert(log58:find('event=surface_browser action=row target=600 component=701 name="0" kind=turret equipment="Large Turret" macro="turret_l"', 1, true),
         "57: filtered surface row needs exact localized equipment and raw-macro evidence")
+
+    GetMacroData = function() return "" end
+    sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = "any", "any"
+    gcMenu.display()
+    dropdowns57 = fix.getCreatedDropDowns()
+    local fallbackEquipment = dropdowns57[#dropdowns57]
+    assert(fallbackEquipment.row == "surface_macro_filter"
+            and fallbackEquipment.options[2].text == ReadText(20991, 51)
+            and fallbackEquipment.options[3].text == ReadText(20991, 51),
+        "57: unresolved equipment names must use the localized Unknown Object fallback")
 end
 
 print("runtime targeting tests passed")
