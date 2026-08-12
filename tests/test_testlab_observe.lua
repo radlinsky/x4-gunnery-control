@@ -153,38 +153,4 @@ reloadedMenu.onShowMenu()
 assert(findButton(TOGGLE).text:find("OFF", 1, true),
     "reloaded Test Lab UI must render logging OFF")
 
--- A geometry-sensitive scenario gets one fail-closed preparation button. It
--- verifies the exact hull/raw group/member count, clears every prior checkbox,
--- selects only the requested group, and arms logging. This is deliberately
--- tested through the rendered button so a dead UI handler cannot pass.
-local selectedKey, oldKey = "group:selected", "group:old"
-local setupSession = {
-    checkedGroupKeys = { [oldKey] = true },
-    staged = {
-        [oldKey] = { mode = "attackenemies", armed = true, preTickMode = "defend" },
-        [selectedKey] = { mode = "defend", armed = true },
-    },
-}
-X4GunneryControlAPI.getCurrentShipSweep = function()
-    return {
-        id = "42", name = "Ray", macro = "ship_bor_l_destroyer_01_a_macro",
-        groups = { {
-            key = selectedKey, group = " group_front_up_left ",
-            members = { { id = "101" }, { id = "102" } },
-        } },
-    }
-end
-X4GunneryControlAPI.getSession = function() return setupSession end
-local prepare = findButton("Prepare exact turret group + logging")
-assert(prepare, "scenario setup button was not rendered")
-prepare.handlers.onClick()
-assert(setupSession.checkedGroupKeys[oldKey] == nil,
-    "scenario setup left an unrelated turret group ticked")
-assert(setupSession.checkedGroupKeys[selectedKey] == true,
-    "scenario setup did not tick the exact requested turret group")
-assert(setupSession.staged[selectedKey].mode == "attackenemies",
-    "scenario setup did not apply normal tick side effects")
-assert(lastEvent("observe_toggle").params.enabled == true,
-    "scenario setup did not arm fire-control logging")
-
 print("testlab observability checks passed")

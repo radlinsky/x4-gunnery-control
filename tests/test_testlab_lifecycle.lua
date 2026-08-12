@@ -392,6 +392,14 @@ do
         "successful acknowledgement must leave only the exact raw group selected")
     assert(session.staged[selectedKey] and session.staged[selectedKey].armed == false,
         "a freshly staged selected group must preserve its live disarmed state")
+    local observingArmed = false
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_toggle" and event.params.enabled == true then
+            observingArmed = true
+        end
+    end
+    assert(observingArmed,
+        "successful one-click scenario creation must arm automatic firing-solution observation")
 end
 
 -- Consecutive Test Lab Lua lifetimes may clear every Lua global. Engine real
