@@ -15,8 +15,15 @@
 --                      a spec only once per id; leaving the id alone means a
 --                      Reload UI during an unrelated test spawns nothing twice.
 --   enabled   boolean  false leaves the spec in place but inert.
+--   setup     table    Required for Create test scenario. Preflights the exact
+--                      ship/loadout and selects the exact turret group.
+--     shipMacro       string  Required player ship macro.
+--     shipLabel       string  Human-readable required ship name.
+--     turretGroup     string  Raw group id, not the display label.
+--     turretLabel     string  Human-readable group label.
+--     expectedTurrets number  Exact operational-member count.
 --   groups    list     One entry per batch of identical ships.
---     label     string   Free text, logged only, so the owner can name "A"/"B".
+--     label     string   Spawned name prefix and log label.
 --     macro     string   Ship macro name, without the "macro." prefix.
 --     faction   string   Faction id, e.g. "player", "xenon", "argon".
 --     count     integer  How many to create (1-12).

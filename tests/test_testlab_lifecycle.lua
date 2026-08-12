@@ -284,6 +284,7 @@ do
     assert(events[1].control == "scenario_begin", "first event must be scenario_begin")
     assert(events[1].params.specId == "m6-lone-hostile", "begin must carry the spec id")
     assert(events[1].params.force == false, "the load-time send must not force a respawn")
+    assert(events[1].params.requestId == "", "load-time replay must not request an operator acknowledgement")
     assert(events[2].control == "scenario_group" and events[3].control == "scenario_group",
         "one scenario_group event per spec group")
     assert(events[2].params.macro == "ship_xen_s_fighter_01_a_macro"
@@ -337,23 +338,104 @@ do
         "omitted x/y must default to 0 in the group payload")
 end
 
--- A disabled spec is inert: it stays on disk but a Reload UI spawns nothing.
+-- A disabled spec is inert on load. The one-click action preflights the exact
+-- ship/group, replaces the fixture, selects only that group, and returns to
+-- Gunnery only after MD acknowledges the expected ship count.
 do
     local harness = loadHarness({
         id = "parked", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
         groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
     })
     assert(#scenarioEvents(harness) == 0, "a disabled spec must fire nothing on load")
 
-    -- The on-demand button forces the same spec through, so the owner can spawn
-    -- a parked fixture without the agent touching the file.
-    harness.openFromGunnery({ label = "console", phase = "console" })
-    local rerun = harness.fix.buttonByText(ReadText(20992, 25))
-    assert(rerun and rerun.handlers.onClick, "Test Lab must expose the re-run button")
-    rerun.handlers.onClick()
+    local session = harness.openFromGunnery({ label = "console", phase = "console" })
+    session.checkedGroupKeys.extra = true
+    session.staged.extra = { mode = "defend", preTickMode = "attack" }
+    local create = harness.fix.buttonByText(ReadText(20992, 25))
+    assert(create and create.handlers.onClick, "Test Lab must expose Create test scenario")
+    create.handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 3 and events[1].params.force == true,
-        "the re-run button must force the current spec even when it is disabled")
+    assert(#events == 3 and events[1].params.force == true and events[1].params.requestId == "1",
+        "Create test scenario must force a correlated replacement even when the spec is disabled")
+    local selectedKey = X4GunneryState.groupKey(5, "p", "g")
+    assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == nil,
+        "Create test scenario must leave only the exact raw group selected")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "Test Lab must wait for MD acknowledgement before returning")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:999:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "a stale spawn acknowledgement must be ignored")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "a matching complete spawn acknowledgement must return to Gunnery exactly once")
+end
+
+-- A preflight mismatch must not despawn the existing fixture or alter the
+-- operator's selection. A partial MD acknowledgement must not return to play.
+do
+    local harness = loadHarness({
+        id = "preflight-guards", enabled = true,
+        setup = {
+            shipMacro = "wrong_ship_macro", shipLabel = "Required Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 2, distance = 1000 } },
+    })
+    -- Ignore the automatic load-time replay; only the button attempt matters.
+    for index = #harness.fix.uiTriggeredEvents, 1, -1 do
+        table.remove(harness.fix.uiTriggeredEvents, index)
+    end
+    local session = harness.openFromGunnery({ label = "console", phase = "console" })
+    local before = {}
+    for key, value in pairs(session.checkedGroupKeys) do before[key] = value end
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    assert(#scenarioEvents(harness) == 0, "wrong-ship preflight must not touch the field")
+    for key, value in pairs(before) do
+        assert(session.checkedGroupKeys[key] == value, "wrong-ship preflight must preserve checked groups")
+    end
+end
+
+do
+    local harness = loadHarness({
+        id = "ack-count-guard", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 2, distance = 1000 } },
+    })
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", "x4gct1:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "partial spawn acknowledgement must keep Test Lab open")
+    assert(harness.fix.logContains("action=failed"),
+        "partial spawn acknowledgement must emit a machine-readable failure")
+end
+
+do
+    local now = 0
+    local harness = loadHarness({
+        id = "ack-timeout", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    getElapsedTime = function() return now end
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    now = 11
+    harness.testMenu.onUpdate()
+    assert(harness.fix.logContains("action=timeout"),
+        "missing spawn acknowledgement must produce a bounded timeout")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "spawn timeout must keep Test Lab open for its failure message")
 end
 
 -- Malformed specs are caught, logged, and never raise. Test Lab must still open
