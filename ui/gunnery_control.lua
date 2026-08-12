@@ -1125,13 +1125,12 @@ function TestAPI.getSessionEpoch()
     return sessionEpoch
 end
 
-function TestAPI.getCurrentShipSweep()
+local function copyCurrentShipSweep(groups)
     if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
-    refresh()
     local ship = session.shipID
     local result = { id = tostring(ship), name = str(C.GetComponentName(ship)), macro = componentData(ship, "macro"), groups = {} }
-    for _, group in ipairs(session.groups) do
-        local copy = { key = group.key, kind = group.kind, name = group.displayName, macro = group.macro or "", contextID = tostring(group.contextID or ""), path = group.path or "", group = group.group or "", componentID = tostring(group.componentID or ""), mutable = State.canMutate(group), members = {} }
+    for _, group in ipairs(groups or {}) do
+        local copy = { key = group.key, kind = group.kind, name = group.displayName, macro = group.macro or "", contextID = tostring(group.contextID or ""), path = group.path or "", group = group.group or "", componentID = tostring(group.componentID or ""), mutable = State.canMutate(group), armed = group.armed == true, members = {} }
         for _, member in ipairs(group.members) do
             if member.operational then
                 copy.members[#copy.members + 1] = { id = tostring(member.componentID), name = member.displayName, macro = componentData(member.componentID, "macro"), cameraSupported = member.cameraSupported }
@@ -1142,6 +1141,19 @@ function TestAPI.getCurrentShipSweep()
     end
     table.sort(result.groups, function(a, b) return a.key < b.key end)
     return result
+end
+
+function TestAPI.getCurrentShipSweep()
+    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    refresh()
+    return copyCurrentShipSweep(session.groups)
+end
+
+-- Fresh hardware view for scenario preflight/revalidation. Unlike refresh(),
+-- this must not reconcile or otherwise mutate the parked Gunnery session.
+function TestAPI.getCurrentShipSweepReadOnly()
+    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    return copyCurrentShipSweep(readGroups(session.shipID))
 end
 
 function TestAPI.isDirectControlActive()

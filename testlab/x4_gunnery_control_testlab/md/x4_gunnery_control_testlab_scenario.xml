@@ -4,8 +4,10 @@
   Developer-only.  Belongs in testlab, NOT in the shipped mod.
 
   Spawns the fixture described by testlab/x4_gunnery_control_testlab/ui/
-  scenario_spec.lua.  The directing agent edits that spec; the owner clicks
-  Reload UI once; testlab.lua replays the spec into this script.
+  scenario_spec.lua. The directing agent edits and installs that spec; the
+  owner presses Create test scenario after Lua preflights the exact ship and
+  turret group. MD acknowledges the actual spawned count before Test Lab
+  returns control.
 
   TRANSPORT
   Lua cannot hand MD a nested table safely: the only live-tested Lua->MD payload
@@ -14,7 +16,7 @@
   live-tested 2026-08-04).  A multi-group spec is therefore streamed as a
   sequence of flat events rather than one nested payload:
 
-    scenario_begin  {specId = "...", force = true|false}
+    scenario_begin  {specId = "...", force = true|false, requestId = "..."}
     scenario_group  {macro=, faction=, count=, distance=, spread=,
                      behaviour="wait"|"attack"|"none", hostile=true|false,
                      label=}                                  (repeated)
@@ -91,7 +93,7 @@
 
         <!-- ScenarioBegin
              AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin",
-               {specId = "...", force = true|false})
+               {specId = "...", force = true|false, requestId = "..."})
              Opens an accepting window and clears any half-built queue. -->
         <cue name="ScenarioBegin" instantiate="true">
           <conditions>
@@ -100,6 +102,7 @@
           <actions>
             <set_value name="$SpecId" exact="if @event.param3.$specId then event.param3.$specId else 'unnamed'"/>
             <set_value name="$Force" exact="@event.param3.$force == true"/>
+            <set_value name="$RequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
 
             <do_if value="(not $Force) and ScenarioRoot.$SpawnedSpecId? and ScenarioRoot.$SpawnedSpecId == $SpecId">
               <set_value name="ScenarioRoot.$Accepting" exact="false"/>
@@ -108,6 +111,7 @@
             <do_else>
               <set_value name="ScenarioRoot.$Accepting" exact="true"/>
               <set_value name="ScenarioRoot.$PendingSpecId" exact="$SpecId"/>
+              <set_value name="ScenarioRoot.$PendingRequestId" exact="$RequestId"/>
               <set_value name="ScenarioRoot.$Pending" exact="[]"/>
               <debug_text text="'[X4GC TEST SCENARIO] accepting spec id=' + $SpecId + ' force=' + $Force"/>
             </do_else>
@@ -220,6 +224,11 @@
             <set_value name="ScenarioRoot.$SpawnedSpecId" exact="ScenarioRoot.$PendingSpecId"/>
             <remove_value name="ScenarioRoot.$Pending"/>
             <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count"/>
+            <do_if value="ScenarioRoot.$PendingRequestId != ''">
+              <raise_lua_event name="'X4GunneryTestLab.ScenarioReady'"
+                               param="'x4gct1:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count"/>
+            </do_if>
+            <remove_value name="ScenarioRoot.$PendingRequestId"/>
           </actions>
         </cue>
 

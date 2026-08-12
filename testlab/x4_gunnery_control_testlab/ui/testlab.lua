@@ -3,11 +3,20 @@
 local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
 local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
-local finishGroups, emitSummary
+local scenarioActionStatus, scenarioRequestSerial, pendingScenario = nil, 0, nil
+local finishGroups, emitSummary, returnToGunnery
 
 local function text(id) return ReadText(20992, id) end
 local function api() return X4GunneryControlAPI end
 local function safe(value) return tostring(value or ""):gsub("[^%w_.%-]", "_") end
+local function trim(value) return tostring(value or ""):match("^%s*(.-)%s*$") end
+-- Engine real time is seconds since X4 boot and survives Reload UI. Capture it
+-- for audit and again at each click for correlation; Lua globals do not survive
+-- Reload UI and therefore cannot be used as a generation counter.
+local scenarioLoadTime = GetCurRealTime()
+local function clockToken(value)
+    return tostring(math.floor((tonumber(value) or 0) * 1000000 + 0.5))
+end
 
 local function log(event, fields)
     local parts = { "[X4GC TEST]", "event=" .. event }
@@ -70,6 +79,7 @@ end
 local function validateSpec(raw)
     if type(raw) ~= "table" then return nil, "spec is not a table" end
     if type(raw.id) ~= "string" or raw.id == "" then return nil, "spec.id must be a non-empty string" end
+    if raw.id:find(":", 1, true) then return nil, "spec.id must not contain ':'" end
     if raw.enabled ~= true and raw.enabled ~= false then return nil, "spec.enabled must be true or false" end
     if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
     local groups = {}
@@ -101,7 +111,26 @@ local function validateSpec(raw)
         }
     end
     if #groups == 0 then return nil, "spec.groups is empty" end
-    return { id = raw.id, enabled = raw.enabled, groups = groups }
+    local setup
+    if raw.setup ~= nil then
+        if type(raw.setup) ~= "table" then return nil, "spec.setup must be a table" end
+        for _, field in ipairs({ "shipMacro", "shipLabel", "turretGroup", "turretLabel" }) do
+            if type(raw.setup[field]) ~= "string" or raw.setup[field] == "" then
+                return nil, "spec.setup." .. field .. " must be a non-empty string"
+            end
+        end
+        if type(raw.setup.expectedTurrets) ~= "number" or raw.setup.expectedTurrets < 1 then
+            return nil, "spec.setup.expectedTurrets must be a positive number"
+        end
+        setup = {
+            shipMacro = raw.setup.shipMacro,
+            shipLabel = raw.setup.shipLabel,
+            turretGroup = raw.setup.turretGroup,
+            turretLabel = raw.setup.turretLabel,
+            expectedTurrets = math.floor(raw.setup.expectedTurrets),
+        }
+    end
+    return { id = raw.id, enabled = raw.enabled, groups = groups, setup = setup }
 end
 
 -- The spec file is a plain data literal, but it is hand-edited by an agent, so
@@ -126,7 +155,7 @@ end
 -- MD cannot be handed a nested table: the only live-tested Lua->MD payload is a
 -- flat table of scalars. The spec is therefore streamed as begin / one event per
 -- group / commit. See the transport note in the MD script.
-local function sendScenarioSpec(force)
+local function sendScenarioSpec(force, requestId)
     if scenarioSpecError then
         log("scenario_spec", { action = "rejected", reason = scenarioSpecError })
         return false
@@ -140,7 +169,7 @@ local function sendScenarioSpec(force)
         return false
     end
     AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin",
-        { specId = scenarioSpec.id, force = force == true })
+        { specId = scenarioSpec.id, force = force == true, requestId = requestId or "" })
     for _, group in ipairs(scenarioSpec.groups) do
         AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group", {
             label = group.label, macro = group.macro, faction = group.faction,
@@ -152,6 +181,133 @@ local function sendScenarioSpec(force)
     AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_commit")
     log("scenario_spec", { action = "sent", spec_id = scenarioSpec.id, groups = #scenarioSpec.groups, forced = tostring(force == true) })
     return true
+end
+
+-- Resolve the exact named ship, raw group, and operational members without
+-- mutating the parked Gunnery session.
+local function resolveExactGroup()
+    local setup, bridge = scenarioSpec and scenarioSpec.setup, api()
+    if not setup then return nil, "spec has no exact setup block" end
+    if not bridge or not bridge.getCurrentShipSweepReadOnly or not bridge.getSession then
+        return nil, "scenario setup API unavailable"
+    end
+    local ship, reason = bridge.getCurrentShipSweepReadOnly()
+    if not ship then return nil, tostring(reason or "no occupied gunnery ship") end
+    if ship.macro ~= setup.shipMacro or trim(ship.name) ~= trim(setup.shipLabel) then
+        return nil, "need " .. setup.shipLabel .. " [" .. setup.shipMacro .. "], got "
+            .. tostring(ship.name) .. " [" .. tostring(ship.macro) .. "]"
+    end
+    local selected
+    for _, group in ipairs(ship.groups or {}) do
+        if trim(group.group) == setup.turretGroup then selected = group; break end
+    end
+    if not selected then return nil, "missing raw group " .. setup.turretGroup end
+    if selected.kind ~= "group" or selected.mutable ~= true then
+        return nil, setup.turretLabel .. " is not a mutable turret group"
+    end
+    if #(selected.members or {}) ~= setup.expectedTurrets then
+        return nil, setup.turretLabel .. " needs " .. setup.expectedTurrets
+            .. " operational turrets, found " .. #(selected.members or {})
+    end
+    local session = bridge.getSession()
+    if not session then return nil, "no Gunnery session" end
+
+    local memberIDs = {}
+    for _, member in ipairs(selected.members) do memberIDs[#memberIDs + 1] = tostring(member.id) end
+    table.sort(memberIDs)
+    return {
+        label = setup.turretLabel,
+        rawGroup = setup.turretGroup,
+        memberIDs = table.concat(memberIDs, ","),
+        shipID = tostring(ship.id),
+        groupKey = selected.key,
+        armed = selected.armed == true,
+        session = session,
+    }
+end
+
+local function applyExactGroup(selection)
+    local session = selection.session
+    local checked = {}
+    for key in pairs(session.checkedGroupKeys or {}) do checked[#checked + 1] = key end
+    for _, key in ipairs(checked) do X4GunneryState.toggleGroup(session, key, true) end
+    X4GunneryState.toggleGroup(session, selection.groupKey, selection.armed)
+    session.selectedGroupKey = selection.groupKey
+end
+
+local function createTestScenario()
+    if scenarioSpecError then
+        scenarioActionStatus = "FAILED: " .. scenarioSpecError
+        menu.display()
+        return
+    end
+    if not scenarioSpec then
+        scenarioActionStatus = "FAILED: no scenario spec loaded"
+        menu.display()
+        return
+    end
+    local selection, reason = resolveExactGroup()
+    if not selection then
+        scenarioActionStatus = "FAILED: " .. reason
+        log("scenario_create", { action = "rejected", reason = reason })
+        menu.display()
+        return
+    end
+    local expectedShips = 0
+    for _, group in ipairs(scenarioSpec.groups) do expectedShips = expectedShips + group.count end
+    scenarioRequestSerial = scenarioRequestSerial + 1
+    local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(scenarioRequestSerial)
+    pendingScenario = {
+        requestId = requestId,
+        specId = scenarioSpec.id,
+        expectedShips = expectedShips,
+        deadline = getElapsedTime() + 10,
+        selection = selection,
+    }
+    scenarioActionStatus = "CREATING: replacing the previous fixture and verifying "
+        .. expectedShips .. " ships..."
+    sendScenarioSpec(true, requestId)
+    log("scenario_create", {
+        action = "requested", spec_id = scenarioSpec.id, expected_ships = expectedShips,
+        request_id = requestId, load_time = scenarioLoadTime,
+        group = selection.rawGroup, member_ids = selection.memberIDs,
+    })
+    menu.display()
+end
+
+local function onScenarioReady(_, param)
+    local requestId, specId, spawned = tostring(param or ""):match("^x4gct1:([^:]+):([^:]+):(%d+)$")
+    if not pendingScenario or requestId ~= pendingScenario.requestId
+            or specId ~= pendingScenario.specId then return end
+    spawned = tonumber(spawned)
+    local request = pendingScenario
+    pendingScenario = nil
+    if spawned ~= request.expectedShips then
+        scenarioActionStatus = "FAILED: created " .. tostring(spawned) .. " of "
+            .. tostring(request.expectedShips) .. " ships; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_ships = request.expectedShips, spawned_ships = spawned })
+        menu.display()
+        return
+    end
+    local selection, reason = resolveExactGroup()
+    if not selection or selection.shipID ~= request.selection.shipID
+            or selection.groupKey ~= request.selection.groupKey
+            or selection.memberIDs ~= request.selection.memberIDs then
+        reason = reason or "ship or exact turret membership changed while spawning"
+        scenarioActionStatus = "FAILED: " .. reason
+        log("scenario_create", { action = "failed", request_id = request.requestId, reason = reason })
+        menu.display()
+        return
+    end
+    applyExactGroup(selection)
+    scenarioActionStatus = "READY: " .. spawned .. " named ships created; only "
+        .. selection.label .. " ticked"
+    log("scenario_create", {
+        action = "ready", request_id = request.requestId, spawned_ships = spawned, group = selection.rawGroup,
+        member_ids = selection.memberIDs,
+    })
+    returnToGunnery("scenario_ready")
 end
 
 local function shipFields(item)
@@ -179,7 +335,7 @@ end
 -- main menu; a plain close leaves resumePending armed with no menu to consume
 -- it. Keep the latch set until the Test Lab is shown again so a Helper-induced
 -- re-entrant/late onCloseElement cannot request the handoff twice.
-local function returnToGunnery(reason)
+returnToGunnery = function(reason)
     if closing then return end
     closing = true
     cleanup(reason, true)
@@ -283,13 +439,29 @@ function menu.display()
     end
     local specRow = tableView:addRow(false, {})
     specRow[1]:setColSpan(4):createText(text(27) .. ": " .. scenarioSpecLabel())
-    local scenarioRow = tableView:addRow("scenario", {})
-    scenarioRow[1]:setColSpan(2):createButton({}):setText(text(25)); scenarioRow[1].handlers.onClick = function()
-        sendScenarioSpec(true)
+    if scenarioSpec and scenarioSpec.setup then
+        local setup = scenarioSpec.setup
+        local setupRow = tableView:addRow(false, {})
+        setupRow[1]:setColSpan(4):createText("One-click setup: " .. setup.shipLabel
+            .. " | only " .. setup.turretLabel .. " | " .. setup.expectedTurrets .. " operational turrets")
     end
-    scenarioRow[3]:setColSpan(2):createButton({}):setText(text(26)); scenarioRow[3].handlers.onClick = function()
+    local scenarioRow = tableView:addRow("scenario", {})
+    scenarioRow[1]:setColSpan(2):createButton({
+        active = scenarioSpec ~= nil and scenarioSpec.setup ~= nil and pendingScenario == nil,
+    }):setText(text(25))
+    scenarioRow[1].handlers.onClick = createTestScenario
+    scenarioRow[3]:setColSpan(2):createButton({ active = pendingScenario == nil }):setText(text(26)); scenarioRow[3].handlers.onClick = function()
+        if pendingScenario then
+            pendingScenario = nil
+            scenarioActionStatus = "CANCELLED: pending creation was invalidated"
+        end
         AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
         log("scenario", { action = "despawn" })
+        menu.display()
+    end
+    if scenarioActionStatus then
+        local statusRow = tableView:addRow(false, {})
+        statusRow[1]:setColSpan(4):createText(scenarioActionStatus)
     end
     -- Arms the ownership-change test. The Test Lab cannot be opened while
     -- engaged, so this cannot flip an owner on the spot; it arms MD to do it on
@@ -348,10 +520,19 @@ function menu.display()
 end
 
 function menu.onUpdate()
+    local now = getElapsedTime()
+    if pendingScenario and now >= pendingScenario.deadline then
+        local request = pendingScenario
+        pendingScenario = nil
+        scenarioActionStatus = "FAILED: no spawn acknowledgement; inspect debug.log"
+        log("scenario_create", { action = "timeout", request_id = request.requestId,
+            expected_ships = request.expectedShips })
+        menu.display()
+        return
+    end
     if not sweep or sweep.phase ~= "inspecting" then return end
     local item = State.current(sweep)
     if not item then return end
-    local now = getElapsedTime()
     if now >= nextPoll then
         if api().getCameraFocus() == item.member.id then stableSamples = stableSamples + 1 else unstableSamples = unstableSamples + 1 end
         nextPoll = now + 0.25
@@ -384,17 +565,22 @@ end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
+    log("scenario_runtime", { action = "loaded", load_time = scenarioLoadTime,
+        spec_id = scenarioSpec and scenarioSpec.id or "none" })
     -- A UI reload destroys this file-local state but leaves MD cue variables
     -- alive. The new Lua instance starts OFF, so explicitly converge MD on
     -- that state before rendering the menu; otherwise ObserveArm keeps
     -- logging while the button says OFF.
     if AddUITriggeredEvent then setObserving(false) end
-    -- Replay the fixture spec on every UI load. This is the whole point of the
-    -- design: the agent edits scenario_spec.lua, the owner clicks Reload UI
-    -- once. MD refuses a spec id it has already spawned, so a Reload UI during
-    -- an unrelated test does not stack a second copy of the same fleet.
-    if AddUITriggeredEvent then sendScenarioSpec(false) end
+    -- Exact-setup specs are deliberately inert until the owner presses Create
+    -- test scenario. That button performs the ship/loadout preflight before MD
+    -- is allowed to replace anything. Preserve load-time replay only for old
+    -- specs without setup metadata so existing ad-hoc fixtures keep working.
+    if AddUITriggeredEvent and (not scenarioSpec or not scenarioSpec.setup) then
+        sendScenarioSpec(false)
+    end
     if Helper then Helper.registerMenu(menu) end
+    RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
     if api() then
         api().registerTestLab({ open = function()
             local main = Helper.getMenu("X4GunneryMenu")
@@ -406,6 +592,7 @@ local function init()
         -- the automatic menu close must not resurrect Gunnery Control. This is
         -- reset only when a later, deliberate Test Lab opening is shown.
         suppressReopen = true
+        pendingScenario = nil
         if sweep then cleanup("player_context_changed", true) end
     end
     RegisterEvent("playerGetUp", abort)
