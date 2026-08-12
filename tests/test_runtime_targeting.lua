@@ -1591,7 +1591,23 @@ do
     assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
     assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
     assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
+    C.GetSofttarget2 = function() return { softtargetID = 571, softtargetConnectionName = "" } end
+    local stationCurrent57 = API.readTargetCandidates()
+    local currentStation57
+    for _, candidate in ipairs(stationCurrent57) do
+        if tostring(candidate.componentID) == "571" then currentStation57 = candidate end
+    end
+    assert(currentStation57 and currentStation57.class == ReadText(20991, 45),
+        "57: current soft-target station must retain localized Station class")
+    C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
     gcMenu.display()
+    local rendered57 = {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.row == "570" then rendered57[entry.column] = entry.text end
+    end
+    assert(rendered57[3] == "L Ship", "57: class must be bound to rendered column 3")
+    assert(rendered57[4] == "ship_arg_l_destroyer_01_a_macro",
+        "57: macro must be bound to rendered column 4")
     local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
@@ -1610,6 +1626,8 @@ do
         "57: bottom refresh click needs audit evidence")
     assert(log57:find("event=target_browser action=rendered candidates=2 class_values=2 macro_values=2", 1, true),
         "57: rendered target metadata needs aggregate audit evidence")
+    assert(log57:find('event=target_browser action=row component=570 name="0" class="L Ship" macro="ship_arg_l_destroyer_01_a_macro"', 1, true),
+        "57: rendered row audit needs exact component/class/macro evidence")
 end
 
 print("runtime targeting tests passed")

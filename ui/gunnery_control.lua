@@ -971,11 +971,12 @@ local function relationLabel(component)
 end
 
 local function targetClassLabel(component, kind)
-    if kind == text(45) then return text(45) end
     local classID = tostring(componentData(component, "classid") or "")
     local labels = {
         ship_s = "S Ship", ship_m = "M Ship", ship_l = "L Ship", ship_xl = "XL Ship",
+        station = text(45),
     }
+    if kind == text(45) then return text(45) end
     return labels[classID] or (classID ~= "" and classID or kind)
 end
 
@@ -1838,6 +1839,8 @@ function menu.display()
             .. " class_values=" .. tostring(classValues)
             .. " macro_values=" .. tostring(macroValues))
         for _, candidate in ipairs(candidates) do
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q macro=%q",
+                tostring(candidate.componentID), candidate.name, candidate.class, candidate.macro))
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.macro ~= "" and candidate.macro or "-")

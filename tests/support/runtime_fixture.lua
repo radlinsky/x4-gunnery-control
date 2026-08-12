@@ -196,6 +196,7 @@ function M.load()
     -- clearDataForRefresh.
     local allFrames         = {}
     local createdButtons    = {}
+    local createdTexts      = {}
     local createdCheckBoxes = {}
     local createdDropDowns  = {}
     local clearedFrames     = {}
@@ -245,6 +246,7 @@ function M.load()
             frameCount        = 0
             frameProps        = {}
             createdButtons    = {}
+            createdTexts      = {}
             createdCheckBoxes = {}
             createdDropDowns  = {}
         end,
@@ -276,7 +278,7 @@ function M.load()
                 addTable   = function()
                     addTableCalls = addTableCalls + 1
                     return {
-                        addRow = function()
+                        addRow = function(_, rowID)
                             local row = {}
                             return setmetatable(row, {
                                 -- Cache each cell. Production assigns handlers
@@ -286,7 +288,11 @@ function M.load()
                                 __index = function(t, column)
                                     local cell = { handlers = {} }
                                     cell.setColSpan = function() return cell end
-                                    cell.createText = function() end
+                                    cell.createText = function(_, label)
+                                        createdTexts[#createdTexts + 1] = {
+                                            row = rowID, column = column, text = label,
+                                        }
+                                    end
                                     cell.createButton = function(_, bprops)
                                         local entry = {
                                             active = (bprops or {}).active,
@@ -469,6 +475,7 @@ function M.load()
     exposed.getFrameCount        = function() return frameCount end
     exposed.getFrameProps        = function() return frameProps end
     exposed.getCreatedButtons    = function() return createdButtons end
+    exposed.getCreatedTexts      = function() return createdTexts end
     exposed.getCreatedCheckBoxes = function() return createdCheckBoxes end
     exposed.getCreatedDropDowns  = function() return createdDropDowns end
     exposed.getClearedFrames     = function() return clearedFrames end
