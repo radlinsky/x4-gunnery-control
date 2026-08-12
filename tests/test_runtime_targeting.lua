@@ -1559,4 +1559,44 @@ do
     C.GetSofttarget2 = savedGetSofttarget
 end
 
+-- ── 57. target browser exposes class/macro metadata and a top refresh ───────
+do
+    gcMenu.onShowMenu()
+    local sess57 = API.getSession()
+    sess57.phase = "target_select"
+    GetPlayerContextByClass = function() return 1 end
+    GetContainedShips = function() return { 570 } end
+    GetContainedStations = function() return { 571 } end
+    C.GetContextByClass = function(comp) return comp end
+    C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
+    C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
+    GetComponentData = function(component, ...)
+        local keys, vals, comp = {...}, {}, tonumber(tostring(component))
+        for _, key in ipairs(keys) do
+            if key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "isenemy" then vals[#vals + 1] = true
+            elseif key == "ishostile" or key == "isfriend" then vals[#vals + 1] = false
+            elseif key == "isknown" or key == "isradarvisible" then vals[#vals + 1] = true
+            elseif key == "maxradarrange" then vals[#vals + 1] = 40000
+            elseif key == "classid" then vals[#vals + 1] = comp == 570 and "ship_l" or "station"
+            elseif key == "macro" then vals[#vals + 1] = comp == 570 and "ship_arg_l_destroyer_01_a_macro" or "station_arg_defence_disc_macro"
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    local candidates57 = API.readTargetCandidates()
+    assert(#candidates57 == 2, "57: expected ship and station candidates")
+    local byID57 = {}
+    for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
+    assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
+    assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
+    assert(byID57["571"].class == ReadText(20991, 45), "57: station class label missing")
+    gcMenu.display()
+    local refreshCount57 = 0
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.text == ReadText(20991, 15) then refreshCount57 = refreshCount57 + 1 end
+    end
+    assert(refreshCount57 >= 2, "57: target browser needs refresh controls at top and bottom")
+end
+
 print("runtime targeting tests passed")

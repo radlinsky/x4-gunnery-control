@@ -970,6 +970,15 @@ local function relationLabel(component)
     return text(42), 3
 end
 
+local function targetClassLabel(component, kind)
+    if kind == text(45) then return text(45) end
+    local classID = tostring(componentData(component, "classid") or "")
+    local labels = {
+        ship_s = "S Ship", ship_m = "M Ship", ship_l = "L Ship", ship_xl = "XL Ship",
+    }
+    return labels[classID] or (classID ~= "" and classID or kind)
+end
+
 targetRoot = function(component)
     local root = C.GetContextByClass(id(component), "container", true)
     return root ~= 0 and root or id(component)
@@ -1000,9 +1009,11 @@ local function readTargetCandidates()
         local distance = tonumber(C.GetDistanceBetween(session.shipID, object)) or -1
         if not force and distance >= 0 and distance > radarRange then return end
         local relation, priority = relationLabel(object)
+        local macro = tostring(componentData(object, "macro") or "")
         seen[key] = true
         candidates[#candidates + 1] = {
             componentID = object, name = str(C.GetComponentName(object)), kind = kind,
+            class = targetClassLabel(object, kind), macro = macro,
             relation = relation, priority = priority, distance = distance,
         }
     end
@@ -1472,6 +1483,7 @@ end
 function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
+function TestAPI.readTargetCandidates() return readTargetCandidates() end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
@@ -1794,43 +1806,47 @@ function menu.display()
     local tableWidth = frameWidth - 2 * tablePad
 
     if session.phase == "target_select" then
-        local tableView = frame:addTable(8, { tabOrder = 1, x = tablePad, width = tableWidth })
+        local tableView = frame:addTable(10, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
-        title[1]:setColSpan(8):createText(text(33), Helper.headerRowCenteredProperties)
+        title[1]:setColSpan(10):createText(text(33), Helper.headerRowCenteredProperties)
+        local topActions = tableView:addRow("target_refresh_top", {})
+        topActions[1]:setColSpan(10):createButton({}):setText(text(15))
+        topActions[1].handlers.onClick = function() refresh(); menu.display() end
         local explanation = tableView:addRow(false, {})
-        explanation[1]:setColSpan(8):createText(text(34), { wordwrap = true })
+        explanation[1]:setColSpan(10):createText(text(34), { wordwrap = true })
         local current = C.GetSofttarget2()
         if current.softtargetID ~= 0 and isEligibleEngagementTarget(current.softtargetID) then
             local row = tableView:addRow("current", { bgColor = Color["row_background_unselectable"] })
-            row[1]:setColSpan(5):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
-            row[6]:setColSpan(3):createButton({}):setText(text(36))
-            row[6].handlers.onClick = function() engageTarget(current.softtargetID) end
+            row[1]:setColSpan(7):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
+            row[8]:setColSpan(3):createButton({}):setText(text(36))
+            row[8].handlers.onClick = function() engageTarget(current.softtargetID) end
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
-        header[1]:setColSpan(3):createText(text(37)); header[4]:createText(text(38))
-        header[5]:createText(text(49)); header[6]:createText(text(50)); header[7]:setColSpan(2):createText("")
+        header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
+        header[4]:setColSpan(2):createText(text(85)); header[6]:createText(text(49))
+        header[7]:createText(text(50)); header[8]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
         for _, candidate in ipairs(candidates) do
             local row = tableView:addRow(tostring(candidate.componentID), {})
-            row[1]:setColSpan(3):createText(candidate.name ~= "" and candidate.name or text(51))
-            row[4]:createText(candidate.kind); row[5]:createText(candidate.relation)
-            row[6]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
-            row[7]:setColSpan(2):createButton({}):setText(text(52))
-            row[7].handlers.onClick = function() engageTarget(candidate.componentID) end
+            row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
+            row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.macro ~= "" and candidate.macro or "-")
+            row[6]:createText(candidate.relation)
+            row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
+            row[8]:setColSpan(3):createButton({}):setText(text(52))
+            row[8].handlers.onClick = function() engageTarget(candidate.componentID) end
         end
         if #candidates == 0 then
             local row = tableView:addRow(false, {})
-            row[1]:setColSpan(8):createText(text(53), { color = Color["text_error"] })
+            row[1]:setColSpan(10):createText(text(53), { color = Color["text_error"] })
         end
         local actions = tableView:addRow("actions", {})
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
-        actions[1].handlers.onClick = function() menu.display() end
-        -- Columns 4-5 are the only free pair in this 8-column row.
+        actions[1].handlers.onClick = function() refresh(); menu.display() end
         if testLabCallbacks and testLabCallbacks.open then
             actions[4]:setColSpan(2):createButton({}):setText(text(32))
             actions[4].handlers.onClick = openTestLab
         end
-        actions[6]:setColSpan(3):createButton({}):setText(text(54))
+        actions[6]:setColSpan(5):createButton({}):setText(text(54))
         -- No revert: the player is still seated, and a temporary apply now lasts
         -- until they stand up. Backing out of the target list is a navigation
         -- step, not a decision to put the turrets back.
