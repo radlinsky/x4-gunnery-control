@@ -30,6 +30,7 @@ end
 -- switch, the marker, and the two facts MD cannot see for itself. Off by
 -- default, so installing the Test Lab does not flood debug.log on its own.
 local observing = false
+local lastObservedAimTarget, observedAimSince, observedAimSettled
 
 -- The engine SOFT target and the session's Prefer My Target flag are the whole
 -- reason any Lua runs here: MD has player.target but no soft-target equivalent
@@ -57,6 +58,22 @@ local function pushObserveState()
         if session.aimTargetID then payload.aimtgt = ConvertStringToLuaID(tostring(session.aimTargetID)) end
     end
     AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state", payload)
+    -- Geometry tests should not depend on the owner switching menus and
+    -- clicking Mark at the right instant. Once MD has the new aim target,
+    -- automatically request the same one-shot solution snapshot the button
+    -- would have produced. String comparison normalises ffi cdata/number forms.
+    local aimTarget = session and session.aimTargetID and tostring(session.aimTargetID) or nil
+    local now = getElapsedTime()
+    if aimTarget and aimTarget ~= lastObservedAimTarget then
+        lastObservedAimTarget = aimTarget
+        observedAimSince, observedAimSettled = now, false
+        AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
+        log("observe", { action = "auto_mark_initial", target = aimTarget })
+    elseif aimTarget and not observedAimSettled and observedAimSince and now - observedAimSince >= 20 then
+        observedAimSettled = true
+        AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
+        log("observe", { action = "auto_mark_settled", target = aimTarget, held_seconds = now - observedAimSince })
+    end
     -- Self-rescheduling at the MD sample rate, the pattern the main mod's
     -- session watchdog uses (ui/gunnery_control.lua:2224) because it runs with
     -- no displayed frame. Whether it keeps firing with every menu closed is
@@ -67,6 +84,7 @@ end
 
 local function setObserving(enabled)
     observing = enabled
+    lastObservedAimTarget, observedAimSince, observedAimSettled = nil, nil, nil
     AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_toggle", { enabled = enabled })
     log("observe", { action = enabled and "on" or "off" })
     if enabled then pushObserveState() end
@@ -307,6 +325,7 @@ local function onScenarioReady(_, param)
         action = "ready", request_id = request.requestId, spawned_ships = spawned, group = selection.rawGroup,
         member_ids = selection.memberIDs,
     })
+    setObserving(true)
     returnToGunnery("scenario_ready")
 end
 

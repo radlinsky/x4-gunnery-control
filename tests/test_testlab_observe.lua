@@ -90,11 +90,26 @@ end
 X4GunneryControlAPI.getTestSofttarget = function()
     return { id = "1637331", connection = "", name = "", macro = "" }
 end
+local observeClock = 0
+getElapsedTime = function() return observeClock end
 fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
 state = lastEvent("observe_state")
 assert(state.params.prefer == true, "prefer was not forwarded from the session")
 assert(state.params.aimtgt == 4242, "aimtgt was not forwarded from the session")
 assert(state.params.softtgt == 1637331, "softtgt was not forwarded")
+assert(countEvents("observe_mark") == 1,
+    "a new Direct-control aim target must trigger one automatic solution snapshot")
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 1,
+    "an unchanged Direct-control aim target must not trigger duplicate snapshots")
+observeClock = 21
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 2,
+    "an aim target held for 20 seconds must trigger one settled snapshot")
+observeClock = 42
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 2,
+    "a settled aim target must not trigger another delayed snapshot")
 
 -- "Nothing selected" is reported as id "0"; forwarding it would make MD prefer a
 -- dead id over player.target, so it must be dropped rather than sent.
@@ -137,5 +152,39 @@ assert(reloadedMenu, "reloaded Test Lab menu was not registered")
 reloadedMenu.onShowMenu()
 assert(findButton(TOGGLE).text:find("OFF", 1, true),
     "reloaded Test Lab UI must render logging OFF")
+
+-- A geometry-sensitive scenario gets one fail-closed preparation button. It
+-- verifies the exact hull/raw group/member count, clears every prior checkbox,
+-- selects only the requested group, and arms logging. This is deliberately
+-- tested through the rendered button so a dead UI handler cannot pass.
+local selectedKey, oldKey = "group:selected", "group:old"
+local setupSession = {
+    checkedGroupKeys = { [oldKey] = true },
+    staged = {
+        [oldKey] = { mode = "attackenemies", armed = true, preTickMode = "defend" },
+        [selectedKey] = { mode = "defend", armed = true },
+    },
+}
+X4GunneryControlAPI.getCurrentShipSweep = function()
+    return {
+        id = "42", name = "Ray", macro = "ship_bor_l_destroyer_01_a_macro",
+        groups = { {
+            key = selectedKey, group = " group_front_up_left ",
+            members = { { id = "101" }, { id = "102" } },
+        } },
+    }
+end
+X4GunneryControlAPI.getSession = function() return setupSession end
+local prepare = findButton("Prepare exact turret group + logging")
+assert(prepare, "scenario setup button was not rendered")
+prepare.handlers.onClick()
+assert(setupSession.checkedGroupKeys[oldKey] == nil,
+    "scenario setup left an unrelated turret group ticked")
+assert(setupSession.checkedGroupKeys[selectedKey] == true,
+    "scenario setup did not tick the exact requested turret group")
+assert(setupSession.staged[selectedKey].mode == "attackenemies",
+    "scenario setup did not apply normal tick side effects")
+assert(lastEvent("observe_toggle").params.enabled == true,
+    "scenario setup did not arm fire-control logging")
 
 print("testlab observability checks passed")
