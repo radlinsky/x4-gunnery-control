@@ -117,6 +117,62 @@
       </cues>
     </cue>
 
+    <!-- Exact selected-turret solution service. Lua owns checkbox membership
+         and streams component ids; MD owns the per-turret raycast and vanilla
+         range predicate. The response is packed because raise_lua_event can
+         carry only one scalar. -->
+    <cue name="SolutionService">
+      <cues>
+        <cue name="SolutionBegin" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_begin'"/>
+          </conditions>
+          <actions>
+            <set_value name="SolutionService.$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="SolutionService.$target" exact="@event.param3.$target"/>
+            <set_value name="SolutionService.$total" exact="@event.param3.$total"/>
+            <do_if value="typeof SolutionService.$target != datatype.component and SolutionService.$target">
+              <set_value name="SolutionService.$target" exact="component.{SolutionService.$target}"/>
+            </do_if>
+            <set_value name="SolutionService.$weapons" exact="[]"/>
+          </actions>
+        </cue>
+        <cue name="SolutionMember" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_member'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof $weapon != datatype.component and $weapon">
+              <set_value name="$weapon" exact="component.{$weapon}"/>
+            </do_if>
+            <do_if value="$nonce == SolutionService.$nonce and typeof $weapon == datatype.component">
+              <append_to_list name="SolutionService.$weapons" exact="$weapon"/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="SolutionCommit" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_commit'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <do_if value="$nonce == SolutionService.$nonce and typeof SolutionService.$target == datatype.component">
+              <set_value name="$on" exact="0"/>
+              <do_for_each name="$weapon" in="SolutionService.$weapons">
+                <check_line_of_sight name="$lineoffireclear" object="$weapon" target="SolutionService.$target" excludeself="true" useaimtarget="true"/>
+                <do_if value="$lineoffireclear and (($weapon.distanceto.{SolutionService.$target} + (SolutionService.$target.size / 2)) lt $weapon.maxfirerange)">
+                  <set_value name="$on" operation="add"/>
+                </do_if>
+              </do_for_each>
+              <raise_lua_event name="'X4GunneryControl.SolutionResult'" param="'x4gcs1:' + $nonce + ':' + $on + ':' + SolutionService.$total"/>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
     <!-- Cinematic aim camera: Follow_A_Lookat_B anchored between a turret and its
          target. Prototype / live-test; see docs/goals/engage-camera-aim.md. -->
     <cue name="CutsceneAim">

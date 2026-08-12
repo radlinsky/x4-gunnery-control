@@ -1777,4 +1777,256 @@ do
         "57: component-disappearance equipment reset needs exact audit evidence")
 end
 
+-- ── 57. solution requests stream exactly the ticked operational turrets ─────
+do
+    local sess57 = API.getSession()
+    sess57.phase, sess57.controlMode = "console", nil
+    sess57.groups = {
+        { key = "selected", members = {
+            { componentID = 101, operational = true },
+            { componentID = 102, operational = true },
+            { componentID = 199, operational = false },
+        } },
+        { key = "unchecked", members = { { componentID = 103, operational = true } } },
+    }
+    sess57.checkedGroupKeys = { selected = true }
+    gcMenu.shown = true
+    local savedAdd57, events57 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        events57[#events57 + 1] = { screen = screen, control = control, params = params }
+    end
+    local pending57 = API.requestSolution(900)
+    assert(pending57.pending and pending57.total == 2, "57: pending denominator must be two exact selected turrets")
+    local controls57, nonce57 = {}, nil
+    for _, event in ipairs(events57) do
+        controls57[#controls57 + 1] = event.control
+        if event.control == "solution_begin" then nonce57 = event.params.nonce end
+    end
+    assert(table.concat(controls57, ",") == "solution_begin,solution_member,solution_member,solution_commit",
+        "57: solution transport must be begin + one member per selected operational turret + commit")
+    assert(events57[2].params.weapon == 101 and events57[3].params.weapon == 102,
+        "57: unchecked or inoperable turret leaked into exact-member request")
+    sess57.phase = "target_select"
+    GetPlayerContextByClass = function() return nil end
+    C.GetSofttarget2 = function() return { softtargetID = 0, softtargetConnectionName = "" } end
+    local firstRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce57 .. ":1:2")
+    assert(pending57.pending == false and pending57.on == 1 and pending57.total == 2,
+        "57: matching packed result was not accepted")
+    assert(fix.callbackCheckpoint() == firstRepaintMark57 + 1,
+        "57: the first accepted solution result must schedule one deferred repaint")
+    fix.drainCallbacksSince(firstRepaintMark57)
+    events57 = {}
+    assert(API.requestSolution(900) == pending57 and #events57 == 0,
+        "57: a result must be cached for one second")
+
+    local savedElapsed57, clock57 = getElapsedTime, (pending57.requestedAt or 0) + 2
+    getElapsedTime = function() return clock57 end
+    events57 = {}
+    local refreshed57 = API.requestSolution(900)
+    assert(refreshed57 == pending57 and refreshed57.pending and refreshed57.on == nil,
+        "57: refreshing an expired completed result must clear its stale count; pending="
+            .. tostring(refreshed57.pending) .. " on=" .. tostring(refreshed57.on)
+            .. " requested=" .. tostring(refreshed57.requestedAt))
+    assert(API.solutionText(refreshed57) == "… / 2",
+        "57: an expired completed result must render pending, not stale ON SOLUTION text")
+    local refreshNonce57 = events57[1].params.nonce
+    local refreshRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. refreshNonce57 .. ":0:2")
+    fix.drainCallbacksSince(refreshRepaintMark57)
+
+    sess57.checkedGroupKeys.unchecked = true
+    events57 = {}
+    local changed57 = API.requestSolution(900)
+    assert(changed57.pending and changed57.total == 3 and #events57 == 5,
+        "57: checkbox membership change must invalidate cache and stream the new exact denominator")
+
+    events57 = {}
+    local timed57 = API.requestSolution(901)
+    local oldNonce57 = events57[1].params.nonce
+    clock57 = timed57.requestedAt + 3
+    events57 = {}
+    assert(API.requestSolution(901) == timed57 and events57[1].params.nonce ~= oldNonce57,
+        "57: a timed-out solution request must be replaced with a fresh nonce")
+    local newNonce57 = events57[1].params.nonce
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. oldNonce57 .. ":3:3")
+    assert(timed57.pending and timed57.on == nil,
+        "57: a superseded solution response must not complete the replacement request")
+    local timeoutRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. newNonce57 .. ":2:3")
+    assert(not timed57.pending and timed57.on == 2,
+        "57: the replacement solution response must still complete normally")
+    fix.drainCallbacksSince(timeoutRepaintMark57)
+
+    local batchEvents57, batchNonces57 = {}, {}
+    events57 = batchEvents57
+    for target = 910, 945 do
+        API.requestSolution(target)
+    end
+    for _, event in ipairs(batchEvents57) do
+        if event.control == "solution_begin" then batchNonces57[#batchNonces57 + 1] = event.params.nonce end
+    end
+    assert(#batchNonces57 == 36, "57: batching fixture must model hull plus 35 surface replies")
+    local batchRepaintMark57 = fix.callbackCheckpoint()
+    local renderedBefore57 = 0
+    for _, line in ipairs(fix.getCapturedLog()) do
+        if line:find("event=target_browser action=rendered", 1, true) then renderedBefore57 = renderedBefore57 + 1 end
+    end
+    for _, nonce in ipairs(batchNonces57) do
+        fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce .. ":2:3")
+    end
+    assert(fix.callbackCheckpoint() == batchRepaintMark57 + 1,
+        "57: a burst of 36 solution replies must coalesce to one repaint callback")
+    fix.drainCallbacksSince(batchRepaintMark57)
+    local renderedAfter57 = 0
+    for _, line in ipairs(fix.getCapturedLog()) do
+        if line:find("event=target_browser action=rendered", 1, true) then renderedAfter57 = renderedAfter57 + 1 end
+    end
+    assert(renderedAfter57 == renderedBefore57 + 1,
+        "57: a burst of solution replies must produce one target-browser audit batch")
+
+    sess57.phase, sess57.controlMode, sess57.targetObjectID = "engaged", "direct", nil
+    events57 = {}
+    API.requestSolution(950)
+    local engagedNonce57 = events57[1].params.nonce
+    local engagedRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. engagedNonce57 .. ":2:3")
+    fix.drainCallbacksSince(engagedRepaintMark57)
+    assert(fix.callbackCheckpoint() == engagedRepaintMark57 + 1,
+        "57: Direct-control solution replies must use the same deferred repaint path")
+
+    events57 = {}
+    API.requestSolution(951)
+    local testLabNonce57 = events57[1].params.nonce
+    local testLabRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. testLabNonce57 .. ":2:3")
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.reopening)
+    gcMenu.shown = false
+    local hiddenAuditBefore57 = #fix.getCapturedLog()
+    fix.drainCallbacksSince(testLabRepaintMark57)
+    assert(#fix.getCapturedLog() == hiddenAuditBefore57,
+        "57: a deferred reply must not repaint after Test Lab takes ownership")
+
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.owned)
+    gcMenu.shown = true
+    events57 = {}
+    API.requestSolution(952)
+    local mapNonce57 = events57[1].params.nonce
+    local mapRepaintMark57 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. mapNonce57 .. ":2:3")
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.suspendedMap)
+    gcMenu.shown = false
+    hiddenAuditBefore57 = #fix.getCapturedLog()
+    fix.drainCallbacksSince(mapRepaintMark57)
+    assert(#fix.getCapturedLog() == hiddenAuditBefore57,
+        "57: a deferred reply must not repaint while Map owns the view")
+
+    X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.owned)
+    gcMenu.shown = true
+    sess57.phase, sess57.controlMode = "target_select", nil
+    getElapsedTime = savedElapsed57
+    AddUITriggeredEvent = savedAdd57
+end
+
+-- ── 58. target/surface rows render and sort complete solution results ────────
+do
+    local sess58 = API.getSession()
+    sess58.phase, sess58.controlMode = "console", nil
+    sess58.checkedGroupKeys = { selected = true }
+    local savedAdd58, events58 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        events58[#events58 + 1] = { screen = screen, control = control, params = params }
+    end
+    local function seed58(target, on)
+        events58 = {}
+        local result = API.requestSolution(target)
+        local nonce
+        for _, event in ipairs(events58) do
+            if event.control == "solution_begin" then nonce = event.params.nonce end
+        end
+        fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. nonce .. ":" .. on .. ":2")
+        return result
+    end
+    seed58(701, 2); seed58(702, 0); seed58(703, 1); seed58(704, 0)
+    seed58(801, 2); seed58(802, 0)
+    AddUITriggeredEvent = savedAdd58
+
+    sess58.phase, sess58.controlMode = "engaged", "direct"
+    sess58.targetObjectID, sess58.aimTargetID = 900, 900
+    sess58.surfaceTypeFilter, sess58.surfaceMacroFilter = "any", "any"
+    GetPlayerContextByClass = function() return nil end
+    C.IsComponentClass = function() return false end
+    C.GetNumUpgradeSlots = function(_, _, upgrade)
+        if upgrade == "turret" then return 4 end
+        if upgrade == "shield" then return 1 end
+        return 0
+    end
+    C.GetUpgradeSlotCurrentComponent = function(_, upgrade, slot)
+        if upgrade == "turret" then return 700 + slot end
+        return 703
+    end
+    C.IsComponentOperational = function() return true end
+    C.GetComponentName = function(component)
+        local names = { [701] = "Alpha", [702] = "Beta", [703] = "Shield", [704] = "Gamma", [801] = "Zulu", [802] = "Alpha" }
+        return names[tonumber(tostring(component))] or "Target"
+    end
+    GetComponentData = function(_, ...)
+        local vals = {}
+        for _, key in ipairs({...}) do
+            if key == "maxradarrange" then vals[#vals + 1] = 40000
+            elseif key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "isenemy" then vals[#vals + 1] = true
+            elseif key == "isknown" or key == "isradarvisible" then vals[#vals + 1] = true
+            else vals[#vals + 1] = false end
+        end
+        return unpack(vals)
+    end
+    gcMenu.display()
+    local renderedSurfaces58 = {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.column == 2 and tonumber(tostring(entry.row)) then
+            renderedSurfaces58[tostring(entry.row)] = entry.text
+        end
+    end
+    assert(renderedSurfaces58["701"] == "2 / 2  " .. ReadText(20991, 89),
+        "58: complete surface solution must render the aggregate ON SOLUTION label")
+    assert(renderedSurfaces58["702"] == "0 / 2" and renderedSurfaces58["703"] == "1 / 2",
+        "58: incomplete surface solutions must render their exact binary counts")
+    local surfaceButton58
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.text == ReadText(20991, 60) then surfaceButton58 = button; break end
+    end
+    assert(surfaceButton58, "58: surface solution rows were not rendered")
+    surfaceButton58.handlers.onClick()
+
+    sess58.phase, sess58.controlMode = "target_select", nil
+    C.GetSofttarget2 = function() return { softtargetID = 801, softtargetConnectionName = "" } end
+    GetPlayerContextByClass = function() return 1 end
+    GetContainedShips = function() return { 801, 802 } end
+    GetContainedStations = function() return {} end
+    C.GetContextByClass = function(component) return component end
+    C.GetDistanceBetween = function() return 1000 end
+    gcMenu.display()
+    local targetOrder58, targetSolutions58 = {}, {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        local row = tostring(entry.row)
+        if (row == "801" or row == "802") and entry.column == 8 then
+            targetOrder58[#targetOrder58 + 1] = row
+            targetSolutions58[row] = entry.text
+        end
+    end
+    assert(table.concat(targetOrder58, ",") == "801,802",
+        "58: an all-on-solution target must sort before an incomplete target")
+    assert(targetSolutions58["801"] == "2 / 2  " .. ReadText(20991, 89)
+            and targetSolutions58["802"] == "0 / 2",
+        "58: target rows must bind the exact aggregate solution text to column 8")
+    local log58 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log58:find('event=surface_browser action=row target=900 component=701 name="Alpha"', 1, true)
+            and log58:find('macro="" position=1 solution_state=complete solution_on=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+        "58: surface-row audit must prove first position and the displayed complete solution")
+    assert(log58:find('event=target_browser action=row component=801 name="Zulu"', 1, true)
+            and log58:find('position=1 solution_state=complete solution_on=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+        "58: target-row audit must prove all-on-solution ordering and displayed value")
+end
+
 print("runtime targeting tests passed")

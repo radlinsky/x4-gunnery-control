@@ -93,3 +93,70 @@ X4 9.00 Steam, Windows 11 with WSL2, extension `x4_gunnery_control` build marker
 - The native "External Target View activated" notice reappears because the session is
   recreated on every Map close, which re-activates the turret camera. Suspect redundant
   camera activation before suspecting the notice itself.
+
+## Negative masking fixture 2026-08-11: port-side target did not mask port-side turrets
+
+X4 9.00, player-owned Boron Ray, Test Lab scenario
+`issue-1-on-solution-masked-clear-r1`, one session on 2026-08-11. The exact
+selected group was raw `group_front_up_left`, members `0x204df21` and
+`0x204df32`. Target A spawned 3 km forward, 1.2 km port and at hull level;
+target B used the same range/bearing at 1.2 km elevation; C was the elevated
+15 km range control.
+
+This did NOT stage MASKED. Against A, the MD predicate reported `los_ex=1` and
+`inrange=1` for both selected turrets. `0x204df21` hit A three times during the
+initial 11-second hold. `0x204df32` did not fire in that interval, but later hit
+the unchanged A when selected C was OUT OF RANGE. The late hit proves A was a
+valid shot for that turret too; the initial asymmetry was consistent with slew
+time, not masking. The owner independently reported that A was visibly not
+masked.
+
+Controls worked: both selected turrets eventually hit elevated B; both reported
+`inrange=0` against C at about 15 km and fell back to A. Do not use this run as
+evidence for or against whether `check_line_of_sight excludeself="true"`
+detects own-hull masking.
+
+Design corrections: put a candidate across the hull from the selected mounts,
+and capture a second automatic snapshot only after the same target has remained
+selected for at least 20 seconds. A short no-hit window is not a valid masking
+signal on a traversing turret.
+
+**Follow-up negative: cross-hull placement also did not mask.**
+
+The immediate follow-up in the same X4 9.00 session used scenario
+`issue-1-on-solution-cross-hull-r2`: A was moved from 1.2 km port to 1.2 km
+starboard, still 3 km forward and at hull level. This also did NOT stage
+MASKED. Immediate and settled (20-second) snapshots both reported `los_ex=1`
+and `inrange=1` for exact selected members `0x204df21` and `0x204df32`, and
+both turrets struck A roughly 15--19 seconds after designation. The owner also
+reported that A was visibly not masked.
+
+Do not infer own-hull masking from a ship-local point that merely lies across
+the hull in one projection. The next general obstruction test should use a
+separate, named capital ship centred between the firing ship and target. That
+can establish the externally blocked-line-of-fire case, but it still cannot
+answer whether `check_line_of_sight excludeself="true"` detects the firing
+ship's own hull.
+
+## Live masking fixture 2026-08-11: independent obstruction and range controls
+
+X4 9.00, player-owned Boron Ray, Test Lab scenario
+`issue-1-on-solution-blocker-r3`, one session on 2026-08-11. Exact selected
+group `group_front_up_left` contained members `0x204df21` and `0x204df32`.
+The fixture placed a player-owned Argon XL carrier 2 km forward as an
+intervening obstruction; hostile A was centred behind it at 4 km, clear-sky B
+was 4 km forward and 1.2 km up, and C was 15 km forward and 1.2 km up.
+
+Immediate and settled snapshots agreed for both selected turrets:
+
+- A: `los_ex=0`, `inrange=1` -- MASKED only.
+- B: `los_ex=1`, `inrange=1` -- clear and within weapon range. Both selected
+  turrets produced attributed hits on B.
+- C: `los_ex=1`, `inrange=0` -- OUT OF RANGE only. Although C appeared nearly
+  aligned with the carrier to the owner, the per-turret checks establish that
+  neither selected member was masked.
+
+This is live evidence that `check_line_of_sight excludeself="true"` can
+distinguish an intervening ship obstruction for each exact selected turret,
+independently of the shipped range predicate. It remains no evidence about
+masking by the firing ship's own hull.
