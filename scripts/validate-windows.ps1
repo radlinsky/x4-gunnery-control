@@ -118,3 +118,4 @@ finally {
 }
 
 Write-Host 'Windows checkout and launcher contracts passed'
+$global:LASTEXITCODE = 0
