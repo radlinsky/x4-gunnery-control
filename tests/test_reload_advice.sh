@@ -9,6 +9,16 @@ cd "$(dirname "$0")/.."
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
+# Whole-task guidance must scope the strictest-category rule to what X4 has not
+# loaded yet. Otherwise a restart-only file changed once in a PR incorrectly
+# forces another restart after every later UI-only fix in the same live session.
+grep -Fq "whole not-yet-loaded delta" AGENTS.md \
+  || fail "AGENTS.md must scope strictest reload category to the not-yet-loaded delta"
+grep -Fq "not-yet-loaded delta" docs/RELOADING.md \
+  || fail "RELOADING.md must define the loaded-baseline comparison"
+grep -Fq "compute the reset from the files changed since the exact head" .agents/skills/spawn-gunnery-scenario/SKILL.md \
+  || fail "spawn skill must distinguish repeat-run deltas from the full PR diff"
+
 expect_contains() {
   local path=$1 needle=$2
   local out

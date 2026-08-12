@@ -7,6 +7,15 @@ Every reload reads the **loose files on disk**, so `scripts/install-dev.sh` must
 run first. Without it a reload re-runs the copy the game already has and nothing
 appears to change — which looks exactly like a broken reload.
 
+Apply the table to the **not-yet-loaded delta**, not automatically to the full
+PR diff. The first test normally compares the PR with the version X4 currently
+has loaded. A repeat test after a fix compares the new installation with the
+exact head already loaded in that same X4 process. Thus an unchanged `t/`,
+`ui.xml`, or `content.xml` file that was loaded by the previous restart does not
+force another restart; a UI-only follow-up needs Reload UI. If the loaded
+baseline or intervening installation is uncertain, use the full PR diff and
+restart. The menu-breakage safety rule in `AGENTS.md` still overrides this.
+
 ## Decision table
 
 | What changed | What to do |

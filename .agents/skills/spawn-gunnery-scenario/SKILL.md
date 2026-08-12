@@ -145,6 +145,14 @@ categories requires a full restart. A scenario-spec-only edit remains governed
 by the repository hook/advice; do not carry a private exception from older
 experiments.
 
+For a repeat run, compute the reset from the files changed since the exact head
+already installed and loaded in the current X4 process—not from the PR's full
+base diff. If a prior restart already loaded an unchanged translation or
+structural file, a follow-up that changes only production/Test Lab `ui/*.lua`
+needs install + **Reload UI**, not another restart. Record the loaded head before
+iterating. If that baseline is unknown, X4 exited, another worktree was
+installed, or the gunnery menu may be broken, require the full restart.
+
 ### 6. Give a complete operator handoff
 
 The final instruction before the live run must contain all of these, in order:
