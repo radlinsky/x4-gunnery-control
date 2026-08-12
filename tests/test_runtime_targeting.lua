@@ -1746,9 +1746,35 @@ do
     dropdowns57 = fix.getCreatedDropDowns()
     local fallbackEquipment = dropdowns57[#dropdowns57]
     assert(fallbackEquipment.row == "surface_macro_filter"
-            and fallbackEquipment.options[2].text == ReadText(20991, 51)
-            and fallbackEquipment.options[3].text == ReadText(20991, 51),
-        "57: unresolved equipment names must use the localized Unknown Object fallback")
+            and #fallbackEquipment.options == 1,
+        "57: unresolved equipment names must not create indistinguishable dropdown choices")
+
+    GetMacroData = function(macro, key)
+        if key == "name" then return macro == "turret_l" and "Large Turret" or "Medium Turret" end
+        return ""
+    end
+    C.GetNumUpgradeSlots = function(destructible, _, upgrade)
+        if upgrade ~= "turret" then return 0 end
+        return tonumber(tostring(destructible):match("%d+")) == 601 and 1 or 2
+    end
+    C.GetUpgradeSlotCurrentComponent = function(destructible, _, slot)
+        return tonumber(tostring(destructible):match("%d+")) == 601 and 702 or 700 + slot
+    end
+    sess57.targetObjectID, sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = 601, "turret", "turret_l"
+    gcMenu.display()
+    assert(sess57.surfaceMacroFilter == "any",
+        "57: changing to a target without the selected equipment must reset to Any")
+
+    sess57.targetObjectID, sess57.surfaceMacroFilter = 600, "turret_l"
+    C.GetNumUpgradeSlots = function() return 0 end
+    gcMenu.display()
+    assert(sess57.surfaceMacroFilter == "any",
+        "57: disappearance of the last matching component must reset to Any")
+    log58 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log58:find("event=surface_browser action=filter_reset kind=equipment reason=unavailable previous=turret_l target=601", 1, true),
+        "57: target-change equipment reset needs exact audit evidence")
+    assert(log58:find("event=surface_browser action=filter_reset kind=equipment reason=unavailable previous=turret_l target=600", 1, true),
+        "57: component-disappearance equipment reset needs exact audit evidence")
 end
 
 print("runtime targeting tests passed")

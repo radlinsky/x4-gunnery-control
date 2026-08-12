@@ -160,7 +160,8 @@ function State.surfaceMacroOptions(surfaces, typeFilter)
     local options, seen = {}, {}
     for _, surface in ipairs(surfaces or {}) do
         if (typeFilter == "any" or surface.kindKey == typeFilter)
-                and surface.macro and surface.macro ~= "" and not seen[surface.macro] then
+                and surface.macro and surface.macro ~= ""
+                and surface.macroLabelResolved ~= false and not seen[surface.macro] then
             seen[surface.macro] = true
             options[#options + 1] = { id = surface.macro, text = surface.macroLabel or surface.macro }
         end
@@ -170,6 +171,14 @@ function State.surfaceMacroOptions(surfaces, typeFilter)
         return a.id < b.id
     end)
     return options
+end
+
+function State.reconcileSurfaceMacroFilter(options, current)
+    if current == nil or current == "any" then return "any", false end
+    for _, option in ipairs(options or {}) do
+        if option.id == current then return current, false end
+    end
+    return "any", true
 end
 
 function State.filterSurfaceTargets(surfaces, typeFilter, macroFilter)

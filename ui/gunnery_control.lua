@@ -1115,6 +1115,7 @@ local function readSurfaceTargets(container)
                     surfaces[#surfaces + 1] = {
                         componentID = component, kind = surfaceType.label, kindKey = surfaceType.upgrade,
                         macro = macro, macroLabel = macroLabel ~= "" and macroLabel or text(51),
+                        macroLabelResolved = macroLabel ~= "",
                         name = name ~= "" and name or (surfaceType.label .. " " .. tostring(slot)),
                     }
                 end
@@ -1791,8 +1792,17 @@ function menu.display()
                 session.surfaceTypeFilter, session.surfaceMacroFilter = value, "any"
                 menu.display()
             end
+            local availableMacroOptions = State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)
+            local previousMacroFilter = session.surfaceMacroFilter
+            local reconciledMacroFilter, filterReset = State.reconcileSurfaceMacroFilter(
+                availableMacroOptions, previousMacroFilter)
+            session.surfaceMacroFilter = reconciledMacroFilter
+            if filterReset then
+                log("event=surface_browser action=filter_reset kind=equipment reason=unavailable previous="
+                    .. tostring(previousMacroFilter) .. " target=" .. tostring(session.targetObjectID))
+            end
             local macroOptions = { { id = "any", text = text(86), icon = "", displayremoveoption = false } }
-            for _, option in ipairs(State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)) do
+            for _, option in ipairs(availableMacroOptions) do
                 option.icon, option.displayremoveoption = "", false
                 macroOptions[#macroOptions + 1] = option
             end

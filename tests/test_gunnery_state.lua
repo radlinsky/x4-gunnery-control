@@ -126,6 +126,17 @@ local tiedMacros = State.surfaceMacroOptions({
     { kindKey = "turret", macro = "a_macro", macroLabel = "Same" },
 }, "any")
 eq(tiedMacros[1].id, "a_macro", "surfaceMacroOptions: macro id breaks equal-label ties")
+local resolvedOnly = State.surfaceMacroOptions({
+    { kindKey = "turret", macro = "known", macroLabel = "Known", macroLabelResolved = true },
+    { kindKey = "turret", macro = "hidden_a", macroLabel = "Unknown", macroLabelResolved = false },
+    { kindKey = "turret", macro = "hidden_b", macroLabel = "Unknown", macroLabelResolved = false },
+}, "turret")
+eq(#resolvedOnly, 1, "surfaceMacroOptions: unresolved macros are not indistinguishable choices")
+eq(State.reconcileSurfaceMacroFilter(resolvedOnly, "known"), "known",
+    "reconcileSurfaceMacroFilter: available selection remains active")
+local reconciled, wasReset = State.reconcileSurfaceMacroFilter(resolvedOnly, "gone")
+eq(reconciled, "any", "reconcileSurfaceMacroFilter: unavailable selection resets to Any")
+eq(wasReset, true, "reconcileSurfaceMacroFilter: unavailable reset is reported")
 eq(#State.filterSurfaceTargets(surfaceFixture, "turret", "turret_l"), 2,
     "filterSurfaceTargets: type and macro are both applied")
 eq(#State.filterSurfaceTargets(surfaceFixture, "any", "shield_l"), 1,
