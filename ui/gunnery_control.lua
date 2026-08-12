@@ -1024,6 +1024,10 @@ local function requestSolution(target)
         solutionCache[key] = cached
         return cached
     end
+    -- A timed-out request or checkbox-signature change is superseded here.
+    -- Drop its correlation record before assigning the new nonce so repeated
+    -- MD timeouts cannot grow solutionRequests for the rest of the session.
+    if cached and cached.pendingNonce then solutionRequests[cached.pendingNonce] = nil end
     solutionSerial = solutionSerial + 1
     local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
     cached = cached and cached.signature == signature and cached or {}
@@ -1044,6 +1048,12 @@ local function solutionText(result)
     local label = tostring(result.on or 0) .. " / " .. tostring(result.total or 0)
     if (result.total or 0) > 0 and result.on == result.total then return label .. "  " .. text(89) end
     return label
+end
+
+local function solutionAudit(result)
+    if not result then return "unavailable", "-", 0 end
+    if result.pending then return "pending", "-", result.total or 0 end
+    return "complete", result.on or 0, result.total or 0
 end
 
 local function onSolutionResult(_, param)
@@ -1890,9 +1900,13 @@ function menu.display()
                 menu.display()
             end
             -- Hull row: engage the whole ship/station.
+            local hullSolution = requestSolution(session.targetObjectID)
+            local hullState, hullOn, hullTotal = solutionAudit(hullSolution)
+            log(string.format("event=surface_browser action=hull target=%s position=0 solution_state=%s solution_on=%s solution_total=%s solution_text=%q",
+                tostring(session.targetObjectID), hullState, tostring(hullOn), tostring(hullTotal), solutionText(hullSolution)))
             local hullRow = elemTable:addRow("hull", {})
             hullRow[1]:createText(text(57))
-            hullRow[2]:createText(solutionText(requestSolution(session.targetObjectID)))
+            hullRow[2]:createText(solutionText(hullSolution))
             hullRow[3]:createButton({ active = not sameID(session.aimTargetID, session.targetObjectID) }):setText(text(58))
             hullRow[3].handlers.onClick = function() engageTarget(session.targetObjectID) end
             -- Surface element rows.
@@ -1914,10 +1928,12 @@ function menu.display()
                     if aOn ~= bOn then return aOn end
                     return a.name < b.name
                 end)
-                for _, surface in ipairs(surfaces) do
-                    log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s equipment=%q macro=%q",
+                for position, surface in ipairs(surfaces) do
+                    local solutionState, solutionOn, solutionTotal = solutionAudit(surface.solution)
+                    log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s equipment=%q macro=%q position=%d solution_state=%s solution_on=%s solution_total=%s solution_text=%q",
                         tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
-                        surface.kindKey, surface.macroLabel, surface.macro))
+                        surface.kindKey, surface.macroLabel, surface.macro, position, solutionState,
+                        tostring(solutionOn), tostring(solutionTotal), solutionText(surface.solution)))
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
                     surfRow[1]:createText(surface.name .. ": " .. surface.kind)
                     surfRow[2]:createText(solutionText(surface.solution))
@@ -2001,9 +2017,11 @@ function menu.display()
         log("event=target_browser action=rendered candidates=" .. tostring(#candidates)
             .. " class_values=" .. tostring(classValues)
             .. " type_values=" .. tostring(typeValues))
-        for _, candidate in ipairs(candidates) do
-            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q",
-                tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName, candidate.macro))
+        for position, candidate in ipairs(candidates) do
+            local solutionState, solutionOn, solutionTotal = solutionAudit(candidate.solution)
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d solution_state=%s solution_on=%s solution_total=%s solution_text=%q",
+                tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName,
+                candidate.macro, position, solutionState, tostring(solutionOn), tostring(solutionTotal), solutionText(candidate.solution)))
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)

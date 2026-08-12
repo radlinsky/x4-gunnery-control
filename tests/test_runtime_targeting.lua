@@ -1818,6 +1818,24 @@ do
     local changed57 = API.requestSolution(900)
     assert(changed57.pending and changed57.total == 3 and #events57 == 5,
         "57: checkbox membership change must invalidate cache and stream the new exact denominator")
+
+    local savedElapsed57, clock57 = getElapsedTime, 0
+    getElapsedTime = function() return clock57 end
+    events57 = {}
+    local timed57 = API.requestSolution(901)
+    local oldNonce57 = events57[1].params.nonce
+    clock57 = 3
+    events57 = {}
+    assert(API.requestSolution(901) == timed57 and events57[1].params.nonce ~= oldNonce57,
+        "57: a timed-out solution request must be replaced with a fresh nonce")
+    local newNonce57 = events57[1].params.nonce
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. oldNonce57 .. ":3:3")
+    assert(timed57.pending and timed57.on == nil,
+        "57: a superseded solution response must not complete the replacement request")
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs1:" .. newNonce57 .. ":2:3")
+    assert(not timed57.pending and timed57.on == 2,
+        "57: the replacement solution response must still complete normally")
+    getElapsedTime = savedElapsed57
     AddUITriggeredEvent = savedAdd57
 end
 
@@ -1841,6 +1859,7 @@ do
         return result
     end
     seed58(701, 2); seed58(702, 0); seed58(703, 1); seed58(704, 0)
+    seed58(801, 2); seed58(802, 0)
     AddUITriggeredEvent = savedAdd58
 
     sess58.phase, sess58.controlMode = "engaged", "direct"
@@ -1849,7 +1868,7 @@ do
     GetPlayerContextByClass = function() return nil end
     C.IsComponentClass = function() return false end
     C.GetNumUpgradeSlots = function(_, _, upgrade)
-        if upgrade == "turret" then return 3 end
+        if upgrade == "turret" then return 4 end
         if upgrade == "shield" then return 1 end
         return 0
     end
@@ -1874,6 +1893,16 @@ do
         return unpack(vals)
     end
     gcMenu.display()
+    local renderedSurfaces58 = {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.column == 2 and tonumber(tostring(entry.row)) then
+            renderedSurfaces58[tostring(entry.row)] = entry.text
+        end
+    end
+    assert(renderedSurfaces58["701"] == "2 / 2  " .. ReadText(20991, 89),
+        "58: complete surface solution must render the aggregate ON SOLUTION label")
+    assert(renderedSurfaces58["702"] == "0 / 2" and renderedSurfaces58["703"] == "1 / 2",
+        "58: incomplete surface solutions must render their exact binary counts")
     local surfaceButton58
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 60) then surfaceButton58 = button; break end
@@ -1889,6 +1918,26 @@ do
     C.GetContextByClass = function(component) return component end
     C.GetDistanceBetween = function() return 1000 end
     gcMenu.display()
+    local targetOrder58, targetSolutions58 = {}, {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        local row = tostring(entry.row)
+        if (row == "801" or row == "802") and entry.column == 8 then
+            targetOrder58[#targetOrder58 + 1] = row
+            targetSolutions58[row] = entry.text
+        end
+    end
+    assert(table.concat(targetOrder58, ",") == "801,802",
+        "58: an all-on-solution target must sort before an incomplete target")
+    assert(targetSolutions58["801"] == "2 / 2  " .. ReadText(20991, 89)
+            and targetSolutions58["802"] == "0 / 2",
+        "58: target rows must bind the exact aggregate solution text to column 8")
+    local log58 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log58:find('event=surface_browser action=row target=900 component=701 name="Alpha"', 1, true)
+            and log58:find('macro="" position=1 solution_state=complete solution_on=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+        "58: surface-row audit must prove first position and the displayed complete solution")
+    assert(log58:find('event=target_browser action=row component=801 name="Zulu"', 1, true)
+            and log58:find('position=1 solution_state=complete solution_on=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+        "58: target-row audit must prove all-on-solution ordering and displayed value")
 end
 
 print("runtime targeting tests passed")
