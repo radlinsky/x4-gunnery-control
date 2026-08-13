@@ -580,6 +580,49 @@ do
         "successful one-click scenario creation must arm automatic firing-solution observation")
 end
 
+-- Replacing a fixture from an engaged session leaves its parked aim id pointing
+-- at the object MD just destroyed. READY must arm observation without sending
+-- or automatically marking that stale target; the next distinct target resumes
+-- normal capture.
+do
+    local harness = loadHarness({
+        id = "stale-observe-target", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    local session = harness.openFromGunnery({
+        label = "Direct engaged", phase = "engaged", controlMode = "direct", direct = true,
+    })
+    session.aimTargetID = 9001
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local requestId = scenarioEvents(harness)[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct1:" .. requestId .. ":stale-observe-target:1")
+
+    local staleState, staleMark = false, false
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_state" and event.params.aimtgt == 9001 then staleState = true end
+        if event.control == "observe_mark" then staleMark = true end
+    end
+    assert(not staleState and not staleMark,
+        "READY must not publish or mark the destroyed pre-replacement aim target")
+
+    session.aimTargetID = 9002
+    local callback = harness.fix.pendingCallbacks[#harness.fix.pendingCallbacks]
+    assert(callback, "arming observation must schedule its next state push")
+    harness.fix.runCallback(callback)
+    local newState, newMark = false, false
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_state" and event.params.aimtgt == 9002 then newState = true end
+        if event.control == "observe_mark" then newMark = true end
+    end
+    assert(newState and newMark,
+        "a distinct post-replacement aim target must resume state and automatic capture")
+end
+
 -- Consecutive Test Lab Lua lifetimes may clear every Lua global. Engine real
 -- time still advances, so their first request IDs cannot collide.
 do

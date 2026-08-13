@@ -31,6 +31,7 @@ end
 -- default, so installing the Test Lab does not flood debug.log on its own.
 local observing = false
 local lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled
+local suppressedObservedAimTarget
 
 -- The engine SOFT target and the session's Prefer My Target flag are the whole
 -- reason any Lua runs here: MD has player.target but no soft-target equivalent
@@ -47,24 +48,32 @@ local function pushObserveState()
     local soft = bridge.getTestSofttarget and bridge.getTestSofttarget()
     -- getTestSofttarget reports "0" for "nothing selected". Sending that would
     -- make MD prefer a dead id over player.target, so it is simply omitted.
-    if soft and soft.id and soft.id ~= "0" then
+    if soft and soft.id and soft.id ~= "0"
+            and tostring(soft.id) ~= suppressedObservedAimTarget then
         payload.softtgt = ConvertStringToLuaID(soft.id)
     end
     -- No session is the ordinary free-play case, not an error: MD then logs
     -- player.target and prefer stays false.
     local session = bridge.getSession and bridge.getSession()
+    local aimTarget = session and session.aimTargetID and tostring(session.aimTargetID) or nil
+    if suppressedObservedAimTarget and aimTarget
+            and aimTarget ~= suppressedObservedAimTarget then
+        suppressedObservedAimTarget = nil
+    end
     if session then
         payload.prefer = session.preferAllTurrets == true
-        if session.aimTargetID then payload.aimtgt = ConvertStringToLuaID(tostring(session.aimTargetID)) end
+        if aimTarget and aimTarget ~= suppressedObservedAimTarget then
+            payload.aimtgt = ConvertStringToLuaID(aimTarget)
+        end
     end
     AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state", payload)
     -- Geometry tests should not depend on the owner switching menus and
     -- clicking Mark at the right instant. Once MD has the new aim target,
     -- automatically request the same one-shot solution snapshot the button
     -- would have produced. String comparison normalises ffi cdata/number forms.
-    local aimTarget = session and session.aimTargetID and tostring(session.aimTargetID) or nil
     local now = getElapsedTime()
-    if aimTarget and aimTarget ~= lastObservedAimTarget then
+    if aimTarget and aimTarget ~= suppressedObservedAimTarget
+            and aimTarget ~= lastObservedAimTarget then
         lastObservedAimTarget = aimTarget
         observedAimActiveSeconds, observedAimLastTick, observedAimSettled = 0, now, false
         AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
@@ -88,9 +97,10 @@ local function pushObserveState()
     if Helper then Helper.addDelayedOneTimeCallbackOnUpdate(pushObserveState, false, getElapsedTime() + 1.0) end
 end
 
-local function setObserving(enabled)
+local function setObserving(enabled, suppressAimTarget)
     observing = enabled
     lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled = nil, nil, nil, nil
+    suppressedObservedAimTarget = enabled and suppressAimTarget and tostring(suppressAimTarget) or nil
     AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_toggle", { enabled = enabled })
     log("observe", { action = enabled and "on" or "off" })
     if enabled then pushObserveState() end
@@ -522,7 +532,12 @@ local function onScenarioReady(_, param)
         repair_fixtures = repairFixtures,
         member_ids = selection.memberIDs,
     })
-    setObserving(true)
+    -- An engaged session parked before scenario replacement still names the
+    -- fixture MD just destroyed. Arm the listeners, but suppress that exact
+    -- stale id until Gunnery selects a different live target; otherwise the
+    -- synchronous first state push snapshots an invalid component.
+    local currentSession = api() and api().getSession and api().getSession()
+    setObserving(true, currentSession and currentSession.aimTargetID)
     returnToGunnery("scenario_ready")
 end
 
