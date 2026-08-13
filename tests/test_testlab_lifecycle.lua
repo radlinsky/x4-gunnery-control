@@ -276,7 +276,8 @@ do
         enabled = true,
         groups = {
             { label = "hostile", macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
-              count = 1, distance = 4000, behaviour = "wait", hostile = true },
+              count = 1, distance = 4000, behaviour = "wait", hostile = true,
+              holdFire = true, stripDefenceUnits = true, repairGuard = true },
             { label = "platform", macro = "ship_arg_l_destroyer_01_a_macro", faction = "player",
               count = 2, distance = 2000, behaviour = "none" },
         },
@@ -293,16 +294,193 @@ do
         and events[2].params.faction == "xenon" and events[2].params.count == 1
         and events[2].params.distance == 4000 and events[2].params.behaviour == "wait"
         and events[2].params.hostile == true and events[2].params.spread == 0
-        and events[2].params.x == 0 and events[2].params.y == 0,
+        and events[2].params.x == 0 and events[2].params.y == 0
+        and events[2].params.holdFire == true
+        and events[2].params.stripDefenceUnits == true
+        and events[2].params.repairGuard == true,
         "group payload must carry the spec values, with spread/x/y defaulted to 0")
     assert(events[3].params.count == 2 and events[3].params.behaviour == "none"
-        and events[3].params.hostile == false,
+        and events[3].params.hostile == false and events[3].params.repairGuard == false,
         "a non-hostile group must send hostile=false rather than nil")
     for _, event in ipairs(events) do
         assert(type(event.params) ~= "table" or event.params.groups == nil,
             "no event may carry a nested table; MD only accepts flat scalars")
     end
     assert(events[4].control == "scenario_commit", "last event must be scenario_commit")
+end
+
+-- Station recipes use the same flat transport and may be the only fixture
+-- object. Readiness depends on the correlated operational component census,
+-- not merely on create_station returning a visible shell.
+do
+    local harness = loadHarness({
+        id = "station-transport",
+        enabled = true,
+        groups = {},
+        stations = {
+            { label = "Surface fixture", recipe = "xen_defence", faction = "xenon",
+              distance = 30000, expectedModules = 5, minSurfaces = 100,
+              hostile = true, holdFire = true },
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 3, "station-only spec must fire begin + station + commit; got " .. #events)
+    assert(events[2].control == "scenario_station",
+        "station recipe must use its own flat streamed event")
+    assert(events[2].params.recipe == "xen_defence"
+        and events[2].params.expectedModules == 5
+        and events[2].params.minSurfaces == 100
+        and events[2].params.distance == 30000
+        and events[2].params.x == 0 and events[2].params.y == 0
+        and events[2].params.spread == 0 and events[2].params.hostile == true
+        and events[2].params.holdFire == true,
+        "station event must carry the validated recipe, placement, and census thresholds")
+    assert(events[3].control == "scenario_commit", "station stream must end with commit")
+end
+
+local function stationScenarioHarness(id)
+    local harness = loadHarness({
+        id = id, enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = {},
+        stations = {
+            { label = "Surface fixture", recipe = "xen_defence", faction = "xenon",
+              distance = 30000, expectedModules = 5, minSurfaces = 100,
+              holdFire = true },
+        },
+    })
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    return harness, scenarioEvents(harness)[1].params.requestId
+end
+
+do
+    local harness, requestId = stationScenarioHarness("station-census-low")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct3:" .. requestId .. ":station-census-low:0:1:5:69:0:25:0:1:69:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "a station shell below the 100-surface threshold must keep Test Lab open")
+    assert(harness.fix.logContains("action=failed")
+            and harness.fix.logContains("operational_surfaces=99"),
+        "a low station census must emit the exact machine-readable surface count")
+end
+
+do
+    local harness, requestId = stationScenarioHarness("station-census-ready")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct3:" .. requestId .. ":station-census-ready:0:1:5:70:0:25:0:1:70:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "a matching station/module/surface census must return to Gunnery")
+    assert(harness.fix.logContains("action=ready")
+            and harness.fix.logContains("operational_surfaces=100")
+            and harness.fix.logContains("spawned_stations=1"),
+        "station readiness must record its correlated operational census")
+end
+
+do
+    local harness, requestId = stationScenarioHarness("station-safety-failed")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct3:" .. requestId .. ":station-safety-failed:0:1:5:70:0:25:0:1:69:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "an armed station weapon must keep Test Lab open")
+    assert(harness.fix.logContains("action=failed")
+            and harness.fix.logContains("unsafe_weapons=1"),
+        "station safety failure must record the unsafe weapon census")
+end
+
+do
+    local harness, requestId = stationScenarioHarness("station-drones-failed")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct4:" .. requestId .. ":station-drones-failed:0:1:5:70:0:25:0:1:70:0:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "a remaining defence drone must keep Test Lab open")
+    assert(harness.fix.logContains("action=failed")
+            and harness.fix.logContains("defence_units=1"),
+        "drone safety failure must record the remaining defence-unit census")
+end
+
+do
+    local harness = loadHarness({
+        id = "hostility-failed", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = {
+            { label = "Hostile target", macro = "target_macro", faction = "xenon",
+              count = 1, distance = 5000, behaviour = "wait", hostile = true,
+              holdFire = true, stripDefenceUnits = true },
+        },
+        stations = {},
+    })
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local requestId = scenarioEvents(harness)[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct5:" .. requestId .. ":hostility-failed:1:0:0:0:0:0:0:1:15:0:0:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "a neutral requested-hostile target must keep Test Lab open")
+    assert(harness.fix.logContains("action=failed")
+            and harness.fix.logContains("expected_hostiles=1")
+            and harness.fix.logContains("hostiles=0"),
+        "hostility failure must record the expected and actual attackable census")
+end
+
+-- Repair guards are acknowledged independently from HOLD FIRE. A fixture that
+-- is safe but not actually registered for post-hit repair must not start a
+-- destructive attribution run.
+do
+    local harness = loadHarness({
+        id = "repair-guard-ready", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = {
+            { label = "Repaired target", macro = "target_macro", faction = "xenon",
+              count = 1, distance = 3000, behaviour = "wait", hostile = true,
+              holdFire = true, stripDefenceUnits = true, repairGuard = true },
+        },
+        stations = {},
+    })
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local requestId = scenarioEvents(harness)[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct6:" .. requestId .. ":repair-guard-ready:1:0:0:0:0:0:0:1:15:0:0:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "an exact repair-guard census must complete scenario setup")
+    assert(harness.fix.logContains("repair_fixtures=1"),
+        "READY must record the correlated repair-guard fixture count")
+end
+
+do
+    local harness = loadHarness({
+        id = "repair-guard-missing", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = {
+            { label = "Repaired target", macro = "target_macro", faction = "xenon",
+              count = 1, distance = 3000, behaviour = "wait", hostile = true,
+              holdFire = true, stripDefenceUnits = true, repairGuard = true },
+        },
+        stations = {},
+    })
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local requestId = scenarioEvents(harness)[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct6:" .. requestId .. ":repair-guard-missing:1:0:0:0:0:0:0:1:15:0:0:1:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "a missing repair guard must keep Test Lab open")
+    assert(harness.fix.logContains("expected_repair_fixtures=1")
+            and harness.fix.logContains("repair_fixtures=0"),
+        "repair-guard failure must log expected and actual counts")
 end
 
 -- x/y bearing offsets: when set they are forwarded as scalars; when omitted
@@ -400,6 +578,49 @@ do
     end
     assert(observingArmed,
         "successful one-click scenario creation must arm automatic firing-solution observation")
+end
+
+-- Replacing a fixture from an engaged session leaves its parked aim id pointing
+-- at the object MD just destroyed. READY must arm observation without sending
+-- or automatically marking that stale target; the next distinct target resumes
+-- normal capture.
+do
+    local harness = loadHarness({
+        id = "stale-observe-target", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    local session = harness.openFromGunnery({
+        label = "Direct engaged", phase = "engaged", controlMode = "direct", direct = true,
+    })
+    session.aimTargetID = 9001
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local requestId = scenarioEvents(harness)[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct1:" .. requestId .. ":stale-observe-target:1")
+
+    local staleState, staleMark = false, false
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_state" and event.params.aimtgt == 9001 then staleState = true end
+        if event.control == "observe_mark" then staleMark = true end
+    end
+    assert(not staleState and not staleMark,
+        "READY must not publish or mark the destroyed pre-replacement aim target")
+
+    session.aimTargetID = 9002
+    local callback = harness.fix.pendingCallbacks[#harness.fix.pendingCallbacks]
+    assert(callback, "arming observation must schedule its next state push")
+    harness.fix.runCallback(callback)
+    local newState, newMark = false, false
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_state" and event.params.aimtgt == 9002 then newState = true end
+        if event.control == "observe_mark" then newMark = true end
+    end
+    assert(newState and newMark,
+        "a distinct post-replacement aim target must resume state and automatic capture")
 end
 
 -- Consecutive Test Lab Lua lifetimes may clear every Lua global. Engine real

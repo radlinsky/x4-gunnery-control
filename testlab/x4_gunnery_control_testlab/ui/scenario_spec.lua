@@ -22,6 +22,8 @@
 --     turretGroup     string  Raw group id, not the display label.
 --     turretLabel     string  Human-readable group label.
 --     expectedTurrets number  Exact operational-member count.
+--     selectAll       boolean Select every mutable turret group and verify the
+--                             aggregate member count instead of one raw group.
 --   groups    list     One entry per batch of identical ships.
 --     label     string   Spawned name prefix and log label.
 --     macro     string   Ship macro name, without the "macro." prefix.
@@ -41,6 +43,25 @@
 --                        "none"  = no order at all (default faction AI)
 --     hostile   boolean  Optional. true adds a kill-relation boost against the
 --                        player so turret autoassist will engage it.
+--     holdFire boolean   Keep every turret in HOLD FIRE and repeatedly cease
+--                        fire; READY requires the live safety census to pass.
+--     stripDefenceUnits boolean Remove all carried defence drones before the
+--                        hostile relation is applied.
+--     repairGuard boolean Restore the ship and struck component after each
+--                        player-ship hit without making either indestructible.
+--   stations  list     Deterministic equipped stations. Readiness is withheld
+--                      until MD reports the required operational census.
+--     label           string  Exact station name.
+--     recipe          string  Supported recipe; currently "xen_defence".
+--     faction         string  Owner faction id.
+--     distance/x/y    number  Player-ship-local placement in metres.
+--     spread          number  Optional safepos scatter; use 0 for fixtures.
+--     hostile         boolean Add a temporary kill-relation boost.
+--     expectedModules number  Exact operational module count required.
+--     minSurfaces     number  Minimum modules + operational turrets, missile
+--                            turrets, shields, and engines required.
+--     holdFire       boolean Keep all station weapons in HOLD FIRE and refuse
+--                            READY unless the live mode census proves it.
 --
 -- Issue #1 experiment: compare the same ticked upper turret group against a
 -- candidate MASKED by a named, player-owned capital ship, a clear-sky control,
@@ -51,37 +72,31 @@
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-1-on-solution-blocker-r3",
+    id      = "pr-2-solution-competing-osakas-r7",
     enabled = false,
     setup   = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
         shipLabel       = "Ray",
         turretGroup     = "group_front_up_left",
-        turretLabel     = "Front Upper Left",
-        expectedTurrets = 2,
+        turretLabel     = "All Turrets",
+        expectedTurrets = 14,
+        selectAll       = true,
     },
-    groups  = {
-        -- This player-owned XL ship is deliberately centred between the Ray
-        -- and A. It is a physical occluder, not a candidate: the hostile target
-        -- browser excludes player-owned ships. Do not designate it.
-        { label = "MASKING BLOCKER - DO NOT TARGET", macro = "ship_arg_xl_carrier_01_a_macro",
-          faction = "player", count = 1, distance = 2000, x = 0, y = 0,
-          spread = 0, behaviour = "wait", hostile = false },
-        -- A is directly behind the carrier's centre. The selected Ray turrets
-        -- sit only about 84m off-centre, so their rays converge through the
-        -- carrier rather than relying on uncertain Ray self-masking geometry.
-        { label = "A BLOCKED BY CARRIER - HOLD 25s", macro = "ship_xen_m_fighter_01_a_macro",
-          faction = "xenon", count = 1, distance = 4000, x = 0, y = 0,
-          spread = 0, behaviour = "wait", hostile = true },
-        -- Same range but well above the blocker: the clear line-of-fire control.
-        { label = "B CLEAR - HOLD 25s", macro = "ship_xen_m_fighter_01_a_macro",
-          faction = "xenon", count = 1, distance = 4000, x = 0, y = 1200,
-          spread = 0, behaviour = "wait", hostile = true },
-        -- Inside the console's target-browser radius but beyond ordinary
-        -- capital-turret range. It verifies the range half of the predicate.
-        { label = "C OUT OF RANGE - HOLD 25s", macro = "ship_xen_m_fighter_01_a_macro",
-          faction = "xenon", count = 1, distance = 15000, x = 0, y = 1200,
-          spread = 0, behaviour = "wait", hostile = true },
+    groups = {
+        -- Two separated, stationary capital targets distinguish shots aimed at
+        -- the selected primary from ordinary autonomous fire at a distractor.
+        -- Both remain attackable under exact-hit repair and cannot return fire.
+        { label = "PR2 PRIMARY LEFT OSAKA - REPAIRED HOLD FIRE",
+          macro = "ship_ter_l_destroyer_01_a_macro", faction = "xenon",
+          count = 1, distance = 3500, x = -900, y = 0, spread = 0,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true },
+        { label = "PR2 DISTRACTOR RIGHT OSAKA - REPAIRED HOLD FIRE",
+          macro = "ship_ter_l_destroyer_01_a_macro", faction = "xenon",
+          count = 1, distance = 3500, x = 900, y = 0, spread = 0,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true },
     },
+    stations = {},
 }
 return X4GunneryTestLabScenarioSpec

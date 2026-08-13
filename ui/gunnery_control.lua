@@ -4,6 +4,7 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
+local TurretArcLimits = X4GunneryTurretArcLimits or {}
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
@@ -16,6 +17,7 @@ UniverseID GetPlayerID(void); UniverseID GetContextByClass(UniverseID componenti
 bool IsComponentClass(UniverseID componentid, const char* classname);
 size_t GetNumUpgradeSlots(UniverseID destructibleid, const char* macroname, const char* upgradetypename);
 UniverseID GetUpgradeSlotCurrentComponent(UniverseID destructibleid, const char* upgradetypename, size_t slot);
+const char* GetUpgradeSlotCurrentMacro(UniverseID objectid, UniverseID moduleid, const char* upgradetypename, size_t slot);
 UpgradeGroup GetUpgradeSlotGroup(UniverseID destructibleid, const char* macroname, const char* upgradetypename, size_t slot);
 uint32_t GetNumUpgradeGroups(UniverseID destructibleid, const char* macroname);
 uint32_t GetUpgradeGroups2(UpgradeGroup2* result, uint32_t resultlen, UniverseID destructibleid, const char* macroname);
@@ -40,7 +42,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-12-solution-batch-1"
+local runtimeBuild = "2026-08-13-turret-arcs-2"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -59,6 +61,7 @@ local seatLeaving = false
 local sessionEpoch = 0
 local solutionSerial, solutionCache, solutionRequests = 0, {}, {}
 local solutionRepaintSerial, solutionRepaintPending = 0, nil
+local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
 local activeExternalMenuName
 local cameraMismatchLogged = false
@@ -119,9 +122,63 @@ end
 local function newSession(ship)
     solutionCache, solutionRequests = {}, {}
     solutionRepaintPending = nil
+    surfacePinnedUpdatePending = false
     local session = State.newSession(ship, "gunnercontrol")
     session.shipName = str(C.GetComponentName(ship))
     return session
+end
+
+local function roundedPercent(value)
+    value = tonumber(value) or 0
+    return math.floor(value + 0.5)
+end
+
+local function surfaceHealth(component)
+    local shieldmax, shieldpercent, hullpercent = componentData(component,
+        "shieldmax", "shieldpercent", "hullpercent")
+    return (tonumber(shieldmax) or 0) > 0, roundedPercent(shieldpercent), roundedPercent(hullpercent)
+end
+
+local function surfaceShieldText(component)
+    local shielded, shieldpercent = surfaceHealth(component)
+    return shielded
+        and (text(98) .. " " .. tostring(shieldpercent) .. "%")
+        or (text(98) .. " -")
+end
+
+local function surfaceHullText(component)
+    local _, _, hullpercent = surfaceHealth(component)
+    return text(99) .. " " .. tostring(hullpercent) .. "%"
+end
+
+local function surfaceDistance(component)
+    if not session or State.isNullID(component) then return -1 end
+    return tonumber(C.GetDistanceBetween(session.shipID, id(component))) or -1
+end
+
+local function surfaceDistanceText(distance)
+    distance = tonumber(distance)
+    if not distance or distance < 0 then return "-" end
+    return string.format("%.1f km", distance / 1000)
+end
+
+local function surfaceEquipmentSize(macro)
+    if macro == "" then return "unknown", "unavailable" end
+    local metadataSize = State.normalizeSurfaceSize(GetMacroData(macro, "size"))
+    if metadataSize ~= "unknown" then return metadataSize, "macro_metadata" end
+    -- X4 9.00 returns no `size` metadata for installed turret/shield macros.
+    -- Stock equipment identifiers carry their size as a delimited token (for
+    -- example turret_xen_l_laser... and shield_xen_m_standard...). Unlike the
+    -- localized visible name, this identifier is stable across languages.
+    local identifier = string.lower(macro)
+    local tokens = { { "xl", "XL" }, { "xs", "XS" }, { "l", "L" },
+        { "m", "M" }, { "s", "S" } }
+    for _, entry in ipairs(tokens) do
+        if string.find(identifier, "_" .. entry[1] .. "_", 1, true) then
+            return entry[2], "macro_identifier"
+        end
+    end
+    return "unknown", "unavailable"
 end
 
 local function isInGunnerChair()
@@ -254,7 +311,8 @@ local function readGroups(ship)
                 groups[#groups + 1] = entry
             end
             entry.members[#entry.members + 1] = { componentID = component, componentKey = State.memberKey(component),
-                displayName = memberName(component, #entry.members + 1), operational = C.IsComponentOperational(component), cameraSupported = C.IsPlayerCameraTargetViewPossible(component, true) }
+                macro = entry.macro or "", displayName = memberName(component, #entry.members + 1),
+                operational = C.IsComponentOperational(component), cameraSupported = C.IsPlayerCameraTargetViewPossible(component, true) }
             if entry.kind == "single" and entry.members[#entry.members].operational then entry.operationalCount = 1 end
         end
     end
@@ -859,6 +917,9 @@ local function engageTarget(targetID)
     -- cycleTarget and the element panel can identify the engaged object.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    if session.surfaceBrowser then
+        session.surfaceBrowser.pendingReason = "open"
+    end
     -- The override names one specific target, so it dies with that target.
     -- Every direct-mode target change funnels through here (auto-next, Next /
     -- Previous Target, and picking a surface element), so re-issuing here is
@@ -899,22 +960,9 @@ end
 applyPreferAllTurrets = function()
     if not session or session.phase ~= "engaged" then return false end
     if isNullID(session.aimTargetID) then return false end
-    -- The directed groups only, never committedBaseline. committedBaseline
-    -- covers every group on the ship; the directed (checked, mutable) groups are
-    -- the ones this session put into attackenemies. The ship-wide MD override
-    -- cannot reach a group still in that mode (the PreferAllTurrets MD cue passes
-    -- no weaponmode selector and reaches every mode, so each directed group must
-    -- be written back to its staged mode first). Writing the full baseline
-    -- instead would stomp the temporary apply on unticked groups the player never
-    -- directed.
     for _, group in ipairs(State.checkedGroups(session)) do
         if State.canMutate(group) then
-            -- The staged mode, not the baseline mode: staged is what the player
-            -- configured this group to be, so it is the correct answer to "what
-            -- would this group be doing if it were not directed".
             local s = session.staged and session.staged[group.key]
-            -- Mode only. The group stays armed, or it could not act on the
-            -- override at all.
             if s then setMode(group, s.mode) end
         end
     end
@@ -936,9 +984,6 @@ applyPreferAllTurrets = function()
             ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
             ["target"] = ConvertStringToLuaID(tostring(targetID)),
         })
-        -- The flag becomes durable only once the matching MD apply is emitted.
-        -- A release during this deferral clears the flag and makes the guard
-        -- above return, so a stale callback cannot re-persist the override.
         persistSession()
     end, false, getElapsedTime() + 0.01)
     return true
@@ -999,11 +1044,13 @@ local function checkedOperationalTurrets()
             local key = State.normID(member.componentID)
             if member.operational and not seen[key] then
                 seen[key] = true
-                members[#members + 1] = member.componentID
+                members[#members + 1] = member
             end
         end
     end
-    table.sort(members, function(a, b) return State.normID(a) < State.normID(b) end)
+    table.sort(members, function(a, b)
+        return State.normID(a.componentID) < State.normID(b.componentID)
+    end)
     return members
 end
 
@@ -1011,11 +1058,13 @@ end
 -- events avoid relying on unproven nested-table transport: selected turret ids
 -- are streamed once, followed by at most 20 target ids for the batch.
 local solutionBatchSize = 20
-local function requestSolutions(targets)
+local function requestSolutions(targets, purpose)
     local results = {}
     if not session then return results end
     local members, signatureParts = checkedOperationalTurrets(), {}
-    for _, member in ipairs(members) do signatureParts[#signatureParts + 1] = State.normID(member) end
+    for _, member in ipairs(members) do
+        signatureParts[#signatureParts + 1] = State.normID(member.componentID)
+    end
     local signature = table.concat(signatureParts, ",")
     local now, pending, seen = getElapsedTime(), {}, {}
     -- Normally MD follows the final result immediately with batch completion.
@@ -1055,8 +1104,8 @@ local function requestSolutions(targets)
                         end
                     end
                     cached = cached and cached.signature == signature and cached or {}
-                    cached.signature, cached.requestedAt, cached.pending, cached.total, cached.on =
-                        signature, now, true, #members, nil
+                    cached.signature, cached.requestedAt, cached.pending, cached.total,
+                        cached.on, cached.known = signature, now, true, #members, nil, nil
                     solutionCache[key] = cached
                     if not seen[targetKey] then
                         seen[targetKey] = true
@@ -1074,14 +1123,24 @@ local function requestSolutions(targets)
         local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
         local request = {
             epoch = sessionEpoch, signature = signature, selectedTotal = #members,
-            targets = {}, requested = last - first + 1,
+            targets = {}, requested = last - first + 1, purpose = purpose,
         }
         solutionRequests[nonce] = request
         AddUITriggeredEvent("X4GunneryControl", "solution_batch_begin", {
             nonce = nonce, members = #members, targets = request.requested,
         })
         for _, member in ipairs(members) do
-            AddUITriggeredEvent("X4GunneryControl", "solution_batch_member", { nonce = nonce, weapon = id(member) })
+            -- GetUpgradeGroupInfo2.currentmacro is the authoritative installed
+            -- equipment macro. Live surface components can return an empty
+            -- The component-data macro field can be blank for installed surface
+            -- components, so use that fallback only for ungrouped
+            -- singleton weapons whose group metadata has no macro.
+            local macro = tostring(member.macro or "")
+            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
+            local arc = TurretArcLimits[macro]
+            AddUITriggeredEvent("X4GunneryControl", "solution_batch_member", {
+                nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
+                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0 })
         end
         for index = first, last do
             local entry = pending[index]
@@ -1100,22 +1159,24 @@ local function requestSolutions(targets)
     return results
 end
 
-local function requestSolution(target)
-    return requestSolutions({ target })[1]
+local function requestSolution(target, purpose)
+    return requestSolutions({ target }, purpose)[1]
 end
 
 local function solutionText(result)
     if not result then return "-" end
     if result.pending and result.on == nil then return "… / " .. tostring(result.total) end
     local label = tostring(result.on or 0) .. " / " .. tostring(result.total or 0)
+    local unknown = math.max(0, (result.total or 0) - (result.known or 0))
+    if unknown > 0 then return label .. "  " .. tostring(unknown) .. " " .. text(100) end
     if (result.total or 0) > 0 and result.on == result.total then return label .. "  " .. text(89) end
     return label
 end
 
 local function solutionAudit(result)
-    if not result then return "unavailable", "-", 0 end
-    if result.pending then return "pending", "-", result.total or 0 end
-    return "complete", result.on or 0, result.total or 0
+    if not result then return "unavailable", "-", 0, 0 end
+    if result.pending then return "pending", "-", 0, result.total or 0 end
+    return "complete", result.on or 0, result.known or 0, result.total or 0
 end
 
 -- A target/surface render can issue dozens of independent MD requests. Their
@@ -1123,7 +1184,33 @@ end
 -- for every reply makes enumeration and audit logging quadratic in row count.
 -- One tokenized callback repaints the whole accepted batch. A token survives
 -- stale callbacks safely when session teardown resets the pending marker.
-local function scheduleSolutionRepaint()
+local function scheduleSolutionRepaint(purpose)
+        if purpose == "surface_pinned" then
+        if surfacePinnedUpdatePending then return end
+        surfacePinnedUpdatePending = true
+        local expectedSession, expectedEpoch = session, sessionEpoch
+        Helper.addDelayedOneTimeCallbackOnUpdate(function()
+            surfacePinnedUpdatePending = false
+            if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
+            if session.phase == "engaged" and session.controlMode == "direct" and menu.elementFrame then
+                local browser = session.surfaceBrowser
+                local pinnedID = session.aimTargetID or session.targetObjectID
+                local result = browser and browser.pinnedResult
+                local state, on, known, total = solutionAudit(result)
+                local shielded, shieldpercent, hullpercent = surfaceHealth(pinnedID)
+                log("event=surface_pinned action=refresh component=" .. tostring(pinnedID)
+                    .. " solution_state=" .. state .. " solution_on=" .. tostring(on)
+                    .. " solution_known=" .. tostring(known)
+                    .. " solution_total=" .. tostring(total)
+                    .. " distance=" .. tostring(browser and browser.pinnedDistance or -1)
+                    .. " shield_capacity=" .. tostring(shielded)
+                    .. " shield_percent=" .. tostring(shieldpercent)
+                    .. " hull_percent=" .. tostring(hullpercent))
+                menu.elementFrame:update()
+            end
+        end, false, getElapsedTime() + 0.01)
+        return
+    end
     if solutionRepaintPending then return end
     solutionRepaintSerial = solutionRepaintSerial + 1
     local token = solutionRepaintSerial
@@ -1141,20 +1228,29 @@ local function scheduleSolutionRepaint()
 end
 
 local function onSolutionResult(_, param)
-    local nonce, targetKey, on, total = tostring(param or ""):match("^x4gcs2:([^:]+):([^:]+):(%d+):(%d+)$")
+    local nonce, targetKey, on, known, total = tostring(param or ""):match(
+        "^x4gcs3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
+    if not nonce then
+        -- Accept the immediately preceding protocol during a UI-only reload;
+        -- it had no UNKNOWN state, so every returned member was implicitly known.
+        nonce, targetKey, on, total = tostring(param or ""):match(
+            "^x4gcs2:([^:]+):([^:]+):(%d+):(%d+)$")
+        known = total
+    end
     local request = nonce and solutionRequests[nonce]
     if not request or not session or request.epoch ~= sessionEpoch then return end
-    on, total = tonumber(on), tonumber(total)
-    if total ~= request.selectedTotal then return end
+    on, known, total = tonumber(on), tonumber(known), tonumber(total)
+    if total ~= request.selectedTotal or known > total or on > known then return end
     targetKey = State.normID(targetKey)
     local key = request.targets[targetKey]
     local cached = key and solutionCache[key]
     if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.on, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt = on, total, false, nil, getElapsedTime()
+    cached.on, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
+        on, known, total, false, nil, getElapsedTime()
     request.targets[targetKey] = nil
     if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
     if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        scheduleSolutionRepaint()
+        scheduleSolutionRepaint(request.purpose)
     end
 end
 
@@ -1303,13 +1399,26 @@ local function readSurfaceTargets(container)
                 if component ~= 0 and not seen[key] and C.IsComponentOperational(component) then
                     seen[key] = true
                     local name = str(C.GetComponentName(component))
-                    local macro = tostring(componentData(component, "macro") or "")
+                    local module = sameID(destructible, container) and 0 or id(destructible)
+                    -- Read the equipment installed in this exact slot. The
+                    -- component-data macro was empty on the live Xenon fixture,
+                    -- while GetSlotSize described the physical connection and
+                    -- could disagree with the equipment actually installed in
+                    -- it. Vanilla station configuration uses this API for the
+                    -- current equipment macro, whose macro metadata owns the
+                    -- equipment's actual size.
+                    local macro = str(C.GetUpgradeSlotCurrentMacro(id(container), module,
+                        surfaceType.upgrade, slot))
+                    if macro == "" then macro = tostring(componentData(component, "macro") or "") end
                     local macroLabel = macro ~= "" and tostring(GetMacroData(macro, "name") or "") or ""
+                    local size, sizeSource = surfaceEquipmentSize(macro)
                     surfaces[#surfaces + 1] = {
                         componentID = component, kind = surfaceType.label, kindKey = surfaceType.upgrade,
                         macro = macro, macroLabel = macroLabel ~= "" and macroLabel or text(51),
                         macroLabelResolved = macroLabel ~= "",
                         name = name ~= "" and name or (surfaceType.label .. " " .. tostring(slot)),
+                        size = size, sizeSource = sizeSource,
+                        distance = surfaceDistance(component),
                     }
                 end
             end
@@ -1320,6 +1429,59 @@ local function readSurfaceTargets(container)
         return a.name < b.name
     end)
     return surfaces
+end
+
+local surfaceCrossTypePolicy = "size_first"
+local function surfaceFilterSignature()
+    return tostring(session.surfaceTypeFilter) .. "\31" .. tostring(session.surfaceMacroFilter)
+end
+
+local function rebuildSurfaceSnapshot(reason)
+    local root = session.targetObjectID
+    local browser = session.surfaceBrowser
+    if not browser or not sameID(browser.rootID, root) then
+        browser = State.newSurfaceBrowser(root)
+        session.surfaceBrowser = browser
+        reason = reason or "open"
+    end
+    if not reason and browser.filterSignature ~= surfaceFilterSignature() then reason = "filter" end
+    if not reason and browser.allSurfaces then return browser end
+
+    local allSurfaces = readSurfaceTargets(id(root))
+    local pinnedID = session.aimTargetID or root
+    local alternatives = State.surfaceAlternatives(allSurfaces, pinnedID,
+        session.surfaceTypeFilter, session.surfaceMacroFilter)
+    table.sort(alternatives, function(a, b)
+        return State.surfaceMetadataLess(a, b, surfaceCrossTypePolicy)
+    end)
+    browser.generation = (browser.generation or 0) + 1
+    browser.filterSignature = surfaceFilterSignature()
+    browser.allSurfaces, browser.orderedIDs, browser.metadataByID = allSurfaces, {}, {}
+    for _, surface in ipairs(allSurfaces) do
+        browser.metadataByID[State.normID(surface.componentID)] = surface
+    end
+    for _, surface in ipairs(alternatives) do
+        browser.orderedIDs[#browser.orderedIDs + 1] = State.normID(surface.componentID)
+    end
+    browser.pageResults, browser.pinnedResult = {}, nil
+    browser.page = math.max(1, tonumber(browser.page) or 1)
+    local _, normalizedPage, pageCount = State.surfacePage(browser.orderedIDs, browser.page, browser.pageSize)
+    browser.page = normalizedPage
+    if browser.autoRefresh then browser.nextAutoRefreshAt = getElapsedTime() + 10 end
+    log("event=surface_snapshot action=create reason=" .. tostring(reason or "open")
+        .. " root=" .. tostring(root)
+        .. " generation=" .. tostring(browser.generation)
+        .. " type_filter=" .. tostring(session.surfaceTypeFilter)
+        .. " equipment_filter=" .. tostring(session.surfaceMacroFilter)
+        .. " enumerated=" .. tostring(#allSurfaces)
+        .. " eligible=" .. tostring(#browser.orderedIDs)
+        .. " pages=" .. tostring(pageCount)
+        .. " page=" .. tostring(browser.page))
+    return browser
+end
+
+local function surfaceMetadata(browser, componentID)
+    return browser and browser.metadataByID[State.normID(componentID)]
 end
 
 -- Narrow developer hook. Nothing calls or displays this API unless the separate
@@ -1398,6 +1560,13 @@ function TestAPI.getTestSofttarget()
     local targetID, connection = target.softtargetID, str(target.softtargetConnectionName)
     if targetID == 0 then return { id = "0", connection = "", name = "", macro = "" } end
     return { id = tostring(targetID), connection = connection, name = str(C.GetComponentName(targetID)), macro = componentData(targetID, "macro") }
+end
+
+-- Test Lab's automatic geometry snapshot is measured in unpaused engagement
+-- time. Keep the engine pause query behind the existing developer bridge so
+-- the companion extension does not need to duplicate this module's FFI.
+function TestAPI.isGamePaused()
+    return C.IsGamePaused()
 end
 
 function TestAPI.testCameraFailed(memberID)
@@ -1941,7 +2110,7 @@ function menu.display()
         viewFrame:display()
         -- Element panel: top-left, only for direct mode with an engaged object.
         if session.controlMode == "direct" and session.targetObjectID then
-            local elemWidth = Helper.scaleX(460)
+            local elemWidth = Helper.scaleX(680)
             local elemFrame = Helper.createFrameHandle(menu, {
                 -- Every frame registers its view as "Helper" .. layer, so a
                 -- second frame on the default layer 4 would replace the panel
@@ -1958,21 +2127,36 @@ function menu.display()
             })
             menu.elementFrame = elemFrame
             elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-            local elemTable = elemFrame:addTable(3, {
+            local elemTable = elemFrame:addTable(5, {
                 tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
             -- Header: target name (falls back to text(51) when empty).
             local tgtName = str(C.GetComponentName(id(session.targetObjectID)))
             local elemHeader = elemTable:addRow(false, { bgColor = Color["row_title_background"] })
-            elemHeader[1]:setColSpan(3):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
+            elemHeader[1]:setColSpan(5):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
             local elemRefresh = elemTable:addRow("surface_refresh", {})
-            elemRefresh[1]:setColSpan(3):createButton({}):setText(text(15))
+            elemRefresh[1]:setColSpan(5):createButton({}):setText(text(15))
             elemRefresh[1].handlers.onClick = function()
                 log("event=surface_browser action=refresh location=top target=" .. tostring(session.targetObjectID))
+                session.surfaceBrowser.pendingReason = "manual"
                 refresh(); menu.display()
             end
-            local allSurfaces = readSurfaceTargets(id(session.targetObjectID))
+            local pendingReason = session.surfaceBrowser and session.surfaceBrowser.pendingReason
+            if session.surfaceBrowser then session.surfaceBrowser.pendingReason = nil end
+            local browser = rebuildSurfaceSnapshot(pendingReason)
+            local allSurfaces = browser.allSurfaces
+            local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})
+            autoRefreshRow[1]:createCheckBox(browser.autoRefresh == true,
+                { width = Helper.standardTextHeight, height = Helper.standardTextHeight })
+            autoRefreshRow[1].handlers.onClick = function()
+                browser.autoRefresh = not browser.autoRefresh
+                browser.nextAutoRefreshAt = browser.autoRefresh and (getElapsedTime() + 10) or nil
+                log("event=surface_refresh action=toggle automatic=" .. tostring(browser.autoRefresh)
+                    .. " root=" .. tostring(session.targetObjectID))
+                menu.display()
+            end
+            autoRefreshRow[2]:setColSpan(4):createText(text(97))
             local typeOptions = {
                 { id = "any", text = text(86), icon = "", displayremoveoption = false },
                 { id = "turret", text = text(46), icon = "", displayremoveoption = false },
@@ -1981,11 +2165,12 @@ function menu.display()
             }
             local filterType = elemTable:addRow("surface_type_filter", {})
             filterType[1]:createText(text(87))
-            filterType[2]:createDropDown(typeOptions, { startOption = session.surfaceTypeFilter })
+            filterType[2]:setColSpan(4):createDropDown(typeOptions, { startOption = session.surfaceTypeFilter })
             filterType[2].handlers.onDropDownConfirmed = function(_, value)
                 log("event=surface_browser action=filter kind=type value=" .. tostring(value)
                     .. " equipment_reset=any target=" .. tostring(session.targetObjectID))
                 session.surfaceTypeFilter, session.surfaceMacroFilter = value, "any"
+                browser.page, browser.pendingReason = 1, "filter"
                 menu.display()
             end
             local availableMacroOptions = State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)
@@ -1996,68 +2181,141 @@ function menu.display()
             if filterReset then
                 log("event=surface_browser action=filter_reset kind=equipment reason=unavailable previous="
                     .. tostring(previousMacroFilter) .. " target=" .. tostring(session.targetObjectID))
+                browser.page = 1
+                browser = rebuildSurfaceSnapshot("filter")
+                allSurfaces = browser.allSurfaces
             end
             local macroOptions = { { id = "any", text = text(86), icon = "", displayremoveoption = false } }
             for _, option in ipairs(availableMacroOptions) do
                 option.icon, option.displayremoveoption = "", false
                 macroOptions[#macroOptions + 1] = option
             end
+            log("event=surface_browser action=rendered target=" .. tostring(session.targetObjectID)
+                .. " target_name=" .. string.format("%q", tgtName)
+                .. " generation=" .. tostring(browser.generation)
+                .. " type_filter=" .. tostring(session.surfaceTypeFilter)
+                .. " equipment_filter=" .. tostring(session.surfaceMacroFilter)
+                .. " all=" .. tostring(#allSurfaces)
+                .. " alternatives=" .. tostring(#browser.orderedIDs)
+                .. " equipment_options=" .. tostring(#macroOptions - 1))
             local filterMacro = elemTable:addRow("surface_macro_filter", {})
             filterMacro[1]:createText(text(88))
-            filterMacro[2]:createDropDown(macroOptions, { startOption = session.surfaceMacroFilter })
+            filterMacro[2]:setColSpan(4):createDropDown(macroOptions, { startOption = session.surfaceMacroFilter })
             filterMacro[2].handlers.onDropDownConfirmed = function(_, value)
                 log("event=surface_browser action=filter kind=equipment value=" .. tostring(value)
                     .. " target=" .. tostring(session.targetObjectID))
                 session.surfaceMacroFilter = value
+                browser.page, browser.pendingReason = 1, "filter"
                 menu.display()
             end
-            -- Hull row: engage the whole ship/station.
-            local hullSolution = requestSolution(session.targetObjectID)
-            local hullState, hullOn, hullTotal = solutionAudit(hullSolution)
-            log(string.format("event=surface_browser action=hull target=%s position=0 solution_state=%s solution_on=%s solution_total=%s solution_text=%q",
-                tostring(session.targetObjectID), hullState, tostring(hullOn), tostring(hullTotal), solutionText(hullSolution)))
-            local hullRow = elemTable:addRow("hull", {})
-            hullRow[1]:createText(text(57))
-            hullRow[2]:createText(solutionText(hullSolution))
-            hullRow[3]:createButton({ active = not sameID(session.aimTargetID, session.targetObjectID) }):setText(text(58))
-            hullRow[3].handlers.onClick = function() engageTarget(session.targetObjectID) end
-            -- Surface element rows.
-            local surfaces = State.filterSurfaceTargets(allSurfaces, session.surfaceTypeFilter, session.surfaceMacroFilter)
-            log("event=surface_browser action=rendered target=" .. tostring(session.targetObjectID)
-                .. " target_name=" .. string.format("%q", tgtName)
-                .. " type_filter=" .. tostring(session.surfaceTypeFilter)
-                .. " equipment_filter=" .. tostring(session.surfaceMacroFilter)
-                .. " all=" .. tostring(#allSurfaces)
-                .. " visible=" .. tostring(#surfaces)
-                .. " equipment_options=" .. tostring(#macroOptions - 1))
-            if #surfaces > 0 then
-                local surfaceIDs = {}
-                for _, surface in ipairs(surfaces) do surfaceIDs[#surfaceIDs + 1] = surface.componentID end
-                local surfaceSolutions = requestSolutions(surfaceIDs)
-                for index, surface in ipairs(surfaces) do surface.solution = surfaceSolutions[index] end
-                table.sort(surfaces, function(a, b)
-                    local aOn = a.solution and a.solution.total > 0 and a.solution.on == a.solution.total or false
-                    local bOn = b.solution and b.solution.total > 0 and b.solution.on == b.solution.total or false
-                    if a.kind ~= b.kind then return a.kind < b.kind end
-                    if a.macro ~= b.macro then return (a.macroLabel or a.macro) < (b.macroLabel or b.macro) end
-                    if aOn ~= bOn then return aOn end
-                    return a.name < b.name
-                end)
-                for position, surface in ipairs(surfaces) do
-                    local solutionState, solutionOn, solutionTotal = solutionAudit(surface.solution)
-                    log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s equipment=%q macro=%q position=%d solution_state=%s solution_on=%s solution_total=%s solution_text=%q",
-                        tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
-                        surface.kindKey, surface.macroLabel, surface.macro, position, solutionState,
-                        tostring(solutionOn), tostring(solutionTotal), solutionText(surface.solution)))
+            -- The current hull/surface stays pinned regardless of filters and
+            -- refreshes independently from the frozen alternative pages.
+            local pinnedID = session.aimTargetID or session.targetObjectID
+            local pinnedSurface = surfaceMetadata(browser, pinnedID)
+            if not browser.pinnedResult then
+                browser.pinnedDistance = surfaceDistance(pinnedID)
+                browser.pinnedResult = requestSolution(pinnedID, "surface_pinned")
+            end
+            local pinnedName = pinnedSurface and pinnedSurface.name or tgtName
+            local pinnedKind = pinnedSurface and pinnedSurface.kind or text(92)
+            local pinnedTitle = elemTable:addRow("surface_pinned_title", { bgColor = Color["row_title_background"] })
+            pinnedTitle[1]:setColSpan(5):createText(text(91) .. ": " .. (pinnedName ~= "" and pinnedName or text(51)))
+            local surfaceHeader = elemTable:addRow("surface_header", { bgColor = Color["row_background_unselectable"] })
+            surfaceHeader[1]:setColSpan(2):createText(text(59))
+            surfaceHeader[3]:createText(text(50))
+            surfaceHeader[4]:createText(text(89))
+            local pinnedRow = elemTable:addRow("surface_pinned", {})
+            pinnedRow[1]:setColSpan(2):createText(pinnedKind)
+            pinnedRow[3]:createText(function() return surfaceDistanceText(browser.pinnedDistance) end)
+            pinnedRow[4]:createText(function() return solutionText(browser.pinnedResult) end)
+            pinnedRow[5]:createText(function() return surfaceShieldText(pinnedID) end)
+            local pinnedHullRow = elemTable:addRow("surface_pinned_hull", {})
+            pinnedHullRow[5]:createText(function() return surfaceHullText(pinnedID) end)
+            if not sameID(pinnedID, session.targetObjectID) then
+                local parentHullRow = elemTable:addRow("surface_parent_hull", {})
+                parentHullRow[1]:setColSpan(4):createText(text(57))
+                parentHullRow[5]:createButton({}):setText(text(58))
+                parentHullRow[5].handlers.onClick = function() engageTarget(session.targetObjectID) end
+            end
+
+            local ordered = {}
+            for _, componentID in ipairs(browser.orderedIDs) do
+                ordered[#ordered + 1] = surfaceMetadata(browser, componentID)
+            end
+            local pageEntries, page, pageCount, firstIndex, lastIndex =
+                State.surfacePage(ordered, browser.page, browser.pageSize)
+            browser.page = page
+            local pageKey = State.surfacePageKey(browser.generation, pageEntries)
+            local pageCache = browser.pageResults[pageKey]
+            if not pageCache then
+                local pageIDs = {}
+                for _, surface in ipairs(pageEntries) do pageIDs[#pageIDs + 1] = surface.componentID end
+                local pageMembers, signatureParts = checkedOperationalTurrets(), {}
+                for _, member in ipairs(pageMembers) do
+                    signatureParts[#signatureParts + 1] = State.normID(member.componentID)
+                end
+                pageCache = {
+                    results = requestSolutions(pageIDs, "surface_page"), audited = false,
+                    distances = {},
+                    selectedTotal = #pageMembers, selectedSignature = table.concat(signatureParts, ","),
+                }
+                for position, surface in ipairs(pageEntries) do
+                    pageCache.distances[position] = surfaceDistance(surface.componentID)
+                end
+                browser.pageResults[pageKey] = pageCache
+                log("event=surface_page action=request generation=" .. tostring(browser.generation)
+                    .. " page=" .. tostring(page) .. " first=" .. tostring(firstIndex)
+                    .. " last=" .. tostring(lastIndex) .. " requested=" .. tostring(#pageIDs)
+                    .. " selected_total=" .. tostring(pageCache.selectedTotal)
+                    .. " selected_signature=" .. string.format("%q", pageCache.selectedSignature))
+            end
+            local pageControls = elemTable:addRow("surface_page_controls", {})
+            pageControls[1]:createButton({ active = page > 1 }):setText(text(94))
+            pageControls[1].handlers.onClick = function()
+                browser.page = page - 1
+                log("event=surface_page action=navigate direction=previous page=" .. tostring(browser.page))
+                menu.display()
+            end
+            pageControls[2]:setColSpan(3):createText(text(96) .. " " .. tostring(page) .. " / " .. tostring(pageCount), { halign = "center" })
+            pageControls[5]:createButton({ active = page < pageCount }):setText(text(95))
+            pageControls[5].handlers.onClick = function()
+                browser.page = page + 1
+                log("event=surface_page action=navigate direction=next page=" .. tostring(browser.page))
+                menu.display()
+            end
+            if #pageEntries > 0 then
+                local complete = true
+                for position, surface in ipairs(pageEntries) do
+                    local result = pageCache.results[position]
+                    if not result or result.pending then complete = false end
+                    if complete and not pageCache.audited then
+                        local solutionState, solutionOn, solutionKnown, solutionTotal = solutionAudit(result)
+                        log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s macro=%q size=%s size_source=%s distance=%s snapshot_distance=%s position=%d page=%d pinned=false solution_state=%s solution_on=%s solution_known=%s solution_total=%s solution_text=%q",
+                            tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
+                            surface.kindKey, surface.macro, surface.size, surface.sizeSource,
+                            tostring(pageCache.distances[position]),
+                            tostring(surface.distance), position, page,
+                            solutionState, tostring(solutionOn), tostring(solutionKnown),
+                            tostring(solutionTotal), solutionText(result)))
+                    end
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
-                    surfRow[1]:createText(surface.name .. ": " .. surface.kind)
-                    surfRow[2]:createText(solutionText(surface.solution))
-                    surfRow[3]:createButton({ active = not sameID(session.aimTargetID, surface.componentID) }):setText(text(60))
-                    surfRow[3].handlers.onClick = function() engageTarget(surface.componentID) end
+                    surfRow[1]:setColSpan(2):createText(surface.name)
+                    surfRow[3]:createText(surfaceDistanceText(pageCache.distances[position]))
+                    surfRow[4]:createText(solutionText(result))
+                    surfRow[5]:createButton({}):setText(text(60))
+                    surfRow[5].handlers.onClick = function() engageTarget(surface.componentID) end
+                end
+                if complete and not pageCache.audited then
+                    pageCache.audited = true
+                    log("event=surface_page action=complete generation=" .. tostring(browser.generation)
+                        .. " page=" .. tostring(page) .. " requested=" .. tostring(#pageEntries)
+                        .. " accepted=" .. tostring(#pageEntries) .. " completed=" .. tostring(#pageEntries)
+                        .. " selected_total=" .. tostring(pageCache.selectedTotal)
+                        .. " selected_signature=" .. string.format("%q", pageCache.selectedSignature))
                 end
             else
                 local noSurfRow = elemTable:addRow(false, {})
-                noSurfRow[1]:setColSpan(3):createText(text(61))
+                noSurfRow[1]:setColSpan(5):createText(text(61))
             end
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
             elemFrame:display()
@@ -2136,10 +2394,11 @@ function menu.display()
             .. " class_values=" .. tostring(classValues)
             .. " type_values=" .. tostring(typeValues))
         for position, candidate in ipairs(candidates) do
-            local solutionState, solutionOn, solutionTotal = solutionAudit(candidate.solution)
-            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d solution_state=%s solution_on=%s solution_total=%s solution_text=%q",
+            local solutionState, solutionOn, solutionKnown, solutionTotal = solutionAudit(candidate.solution)
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d solution_state=%s solution_on=%s solution_known=%s solution_total=%s solution_text=%q",
                 tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName,
-                candidate.macro, position, solutionState, tostring(solutionOn), tostring(solutionTotal), solutionText(candidate.solution)))
+                candidate.macro, position, solutionState, tostring(solutionOn), tostring(solutionKnown),
+                tostring(solutionTotal), solutionText(candidate.solution)))
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
@@ -2311,6 +2570,27 @@ function menu.onUpdate()
         return
     end
     local now = getElapsedTime()
+    -- X4 can continue delivering UI updates while simulation time is paused.
+    -- Do not let those updates turn a frozen elapsed-time deadline into a
+    -- recursive pinned-solution request/repaint loop.
+    if not C.IsGamePaused()
+            and session.phase == "engaged" and session.controlMode == "direct"
+            and session.targetObjectID and session.surfaceBrowser then
+        local browser = session.surfaceBrowser
+        if not browser.pinnedRefreshAt or now >= browser.pinnedRefreshAt then
+            browser.pinnedRefreshAt = now + 1
+            local pinnedID = session.aimTargetID or session.targetObjectID
+            browser.pinnedDistance = surfaceDistance(pinnedID)
+            browser.pinnedResult = requestSolution(pinnedID, "surface_pinned")
+        end
+        if browser.autoRefresh and browser.nextAutoRefreshAt and now >= browser.nextAutoRefreshAt then
+            browser.nextAutoRefreshAt = now + 10
+            browser.pendingReason = "automatic"
+            log("event=surface_refresh action=fire reason=automatic root=" .. tostring(session.targetObjectID)
+                .. " page=" .. tostring(browser.page))
+            menu.display()
+        end
+    end
     if now > nextRefresh then
         nextRefresh = now + 0.25; refresh()
         -- Auto-retarget runs on the same tick as the data refresh.
@@ -2350,6 +2630,7 @@ function menu.onUpdate()
         end
     end
     if menu.frame then menu.frame:update() end
+    if menu.elementFrame then menu.elementFrame:update() end
 end
 
 activeExternalMenuName = function()
