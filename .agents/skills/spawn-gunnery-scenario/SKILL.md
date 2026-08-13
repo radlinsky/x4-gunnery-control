@@ -66,6 +66,14 @@ specific predicate. Never depend on the owner flying targets into position.
 Verify every macro against the installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
 
+The proven Test Lab transport creates equipped ships. Do not treat a
+`create_station` result, construction-plan module count, or visible station
+shell as evidence of an equipped surface-targeting fixture. A station fixture
+is valid only after a correlated live census confirms the required operational
+turrets, shields, and engines. Until that capability is implemented and
+reproduced, use a known save containing a naturally equipped station and record
+its component id and operational-surface count before measuring performance.
+
 ### 3. Author the complete spec
 
 Edit only
