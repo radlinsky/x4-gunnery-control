@@ -118,28 +118,28 @@
     </cue>
 
     <!-- Exact selected-turret solution service. Lua owns checkbox membership
-         and streams component ids; MD owns the per-turret raycast and vanilla
-         range predicate. The response is packed because raise_lua_event can
-         carry only one scalar. -->
+         and streams flat component ids; MD owns the per-turret range and
+         line-of-fire checks. Each batch repeats its selected members once and
+         accepts at most the declared 20 targets. Responses are packed because
+         raise_lua_event can carry only one scalar. -->
     <cue name="SolutionService">
       <cues>
         <cue name="SolutionBegin" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_begin'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_begin'"/>
           </conditions>
           <actions>
             <set_value name="SolutionService.$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="SolutionService.$target" exact="@event.param3.$target"/>
-            <set_value name="SolutionService.$total" exact="@event.param3.$total"/>
-            <do_if value="typeof SolutionService.$target != datatype.component and SolutionService.$target">
-              <set_value name="SolutionService.$target" exact="component.{SolutionService.$target}"/>
-            </do_if>
+            <set_value name="SolutionService.$expectedmembers" exact="@event.param3.$members"/>
+            <set_value name="SolutionService.$expectedtargets" exact="[@event.param3.$targets, 20].min"/>
             <set_value name="SolutionService.$weapons" exact="[]"/>
+            <set_value name="SolutionService.$targets" exact="[]"/>
+            <set_value name="SolutionService.$targetids" exact="[]"/>
           </actions>
         </cue>
         <cue name="SolutionMember" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_member'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_member'"/>
           </conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
@@ -147,26 +147,58 @@
             <do_if value="typeof $weapon != datatype.component and $weapon">
               <set_value name="$weapon" exact="component.{$weapon}"/>
             </do_if>
-            <do_if value="$nonce == SolutionService.$nonce and typeof $weapon == datatype.component">
+            <do_if value="$nonce == SolutionService.$nonce
+                          and SolutionService.$weapons.count lt SolutionService.$expectedmembers
+                          and typeof $weapon == datatype.component
+                          and not SolutionService.$weapons.indexof.{$weapon}">
               <append_to_list name="SolutionService.$weapons" exact="$weapon"/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="SolutionTarget" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_target'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$targetid" exact="@event.param3.$target"/>
+            <set_value name="$target" exact="$targetid"/>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="$nonce == SolutionService.$nonce
+                          and SolutionService.$targets.count lt SolutionService.$expectedtargets
+                          and typeof $target == datatype.component
+                          and not SolutionService.$targets.indexof.{$target}">
+              <append_to_list name="SolutionService.$targets" exact="$target"/>
+              <append_to_list name="SolutionService.$targetids" exact="$targetid"/>
             </do_if>
           </actions>
         </cue>
         <cue name="SolutionCommit" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_commit'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_commit'"/>
           </conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <do_if value="$nonce == SolutionService.$nonce and typeof SolutionService.$target == datatype.component">
-              <set_value name="$on" exact="0"/>
-              <do_for_each name="$weapon" in="SolutionService.$weapons">
-                <check_line_of_sight name="$lineoffireclear" object="$weapon" target="SolutionService.$target" excludeself="true" useaimtarget="true"/>
-                <do_if value="$lineoffireclear and (($weapon.distanceto.{SolutionService.$target} + (SolutionService.$target.size / 2)) lt $weapon.maxfirerange)">
-                  <set_value name="$on" operation="add"/>
-                </do_if>
+            <do_if value="$nonce == SolutionService.$nonce">
+              <set_value name="$completed" exact="0"/>
+              <do_for_each name="$target" in="SolutionService.$targets" counter="$targetindex">
+                <set_value name="$on" exact="0"/>
+                <do_for_each name="$weapon" in="SolutionService.$weapons">
+                  <!-- Preserve the existing binary predicate while rejecting
+                       out-of-range pairs before the more expensive raycast. -->
+                  <do_if value="($weapon.distanceto.{$target} + ($target.size / 2)) lt $weapon.maxfirerange">
+                    <check_line_of_sight name="$lineoffireclear" object="$weapon" target="$target" excludeself="true" useaimtarget="true"/>
+                    <do_if value="$lineoffireclear">
+                      <set_value name="$on" operation="add"/>
+                    </do_if>
+                  </do_if>
+                </do_for_each>
+                <raise_lua_event name="'X4GunneryControl.SolutionResult'" param="'x4gcs2:' + $nonce + ':' + SolutionService.$targetids.{$targetindex} + ':' + $on + ':' + SolutionService.$expectedmembers"/>
+                <set_value name="$completed" operation="add"/>
               </do_for_each>
-              <raise_lua_event name="'X4GunneryControl.SolutionResult'" param="'x4gcs1:' + $nonce + ':' + $on + ':' + SolutionService.$total"/>
+              <raise_lua_event name="'X4GunneryControl.SolutionBatchComplete'" param="'x4gcs2c:' + $nonce + ':' + SolutionService.$targets.count + ':' + $completed"/>
             </do_if>
           </actions>
         </cue>

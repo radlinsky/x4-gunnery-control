@@ -40,7 +40,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-12-pr24-solution-audit"
+local runtimeBuild = "2026-08-12-solution-batch-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -1007,43 +1007,101 @@ local function checkedOperationalTurrets()
     return members
 end
 
--- Lua owns exact checkbox membership and MD owns the raycast. Stream one flat
--- scalar event per selected turret because AddUITriggeredEvent cannot carry a
--- nested list. Results live for one second and include an exact-member
--- signature, so changing a checkbox cannot reuse the previous denominator.
-local function requestSolution(target)
-    if not session or State.isNullID(target) then return nil end
+-- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
+-- events avoid relying on unproven nested-table transport: selected turret ids
+-- are streamed once, followed by at most 20 target ids for the batch.
+local solutionBatchSize = 20
+local function requestSolutions(targets)
+    local results = {}
+    if not session then return results end
     local members, signatureParts = checkedOperationalTurrets(), {}
     for _, member in ipairs(members) do signatureParts[#signatureParts + 1] = State.normID(member) end
     local signature = table.concat(signatureParts, ",")
-    local key = tostring(sessionEpoch) .. ":" .. State.normID(target)
-    local now, cached = getElapsedTime(), solutionCache[key]
-    if cached and cached.signature == signature then
-        if cached.pending and now - cached.requestedAt < 2 then return cached end
-        if not cached.pending and now - cached.requestedAt < 1 then return cached end
+    local now, pending, seen = getElapsedTime(), {}, {}
+    -- Normally MD follows the final result immediately with batch completion.
+    -- If only that aggregate event is lost, retain the empty request briefly so
+    -- a late completion can still be audited, then reclaim it before the next
+    -- completed-result cache refresh.
+    for nonce, request in pairs(solutionRequests) do
+        if request.resultsCompleteAt and now - request.resultsCompleteAt >= 1 then
+            solutionRequests[nonce] = nil
+        end
     end
-    if #members == 0 then
-        cached = { on = 0, total = 0, signature = signature, requestedAt = now }
-        solutionCache[key] = cached
-        return cached
+    for position, target in ipairs(targets or {}) do
+        if not State.isNullID(target) then
+            local targetKey = State.normID(target)
+            local key = tostring(sessionEpoch) .. ":" .. targetKey
+            local cached = solutionCache[key]
+            if cached and cached.signature == signature then
+                if cached.pending and now - cached.requestedAt < 2 then
+                    results[position] = cached
+                elseif not cached.pending and now - cached.requestedAt < 1 then
+                    results[position] = cached
+                end
+            end
+            if not results[position] then
+                if #members == 0 then
+                    cached = { on = 0, total = 0, signature = signature, requestedAt = now }
+                    solutionCache[key] = cached
+                else
+                    -- Supersede only this target in an older batch. The older
+                    -- request remains alive for its other correlated targets.
+                    if cached and cached.pendingNonce then
+                        local previousNonce = cached.pendingNonce
+                        local previous = solutionRequests[previousNonce]
+                        if previous then
+                            previous.targets[targetKey] = nil
+                            if next(previous.targets) == nil then solutionRequests[previousNonce] = nil end
+                        end
+                    end
+                    cached = cached and cached.signature == signature and cached or {}
+                    cached.signature, cached.requestedAt, cached.pending, cached.total, cached.on =
+                        signature, now, true, #members, nil
+                    solutionCache[key] = cached
+                    if not seen[targetKey] then
+                        seen[targetKey] = true
+                        pending[#pending + 1] = { target = target, targetKey = targetKey, key = key, cached = cached }
+                    end
+                end
+                results[position] = cached
+            end
+        end
     end
-    -- A timed-out request or checkbox-signature change is superseded here.
-    -- Drop its correlation record before assigning the new nonce so repeated
-    -- MD timeouts cannot grow solutionRequests for the rest of the session.
-    if cached and cached.pendingNonce then solutionRequests[cached.pendingNonce] = nil end
-    solutionSerial = solutionSerial + 1
-    local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
-    cached = cached and cached.signature == signature and cached or {}
-    cached.signature, cached.requestedAt, cached.pending, cached.pendingNonce, cached.total, cached.on =
-        signature, now, true, nonce, #members, nil
-    solutionCache[key] = cached
-    solutionRequests[nonce] = { key = key, epoch = sessionEpoch, signature = signature }
-    AddUITriggeredEvent("X4GunneryControl", "solution_begin", { nonce = nonce, target = id(target), total = #members })
-    for _, member in ipairs(members) do
-        AddUITriggeredEvent("X4GunneryControl", "solution_member", { nonce = nonce, weapon = id(member) })
+
+    for first = 1, #pending, solutionBatchSize do
+        local last = math.min(first + solutionBatchSize - 1, #pending)
+        solutionSerial = solutionSerial + 1
+        local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
+        local request = {
+            epoch = sessionEpoch, signature = signature, selectedTotal = #members,
+            targets = {}, requested = last - first + 1,
+        }
+        solutionRequests[nonce] = request
+        AddUITriggeredEvent("X4GunneryControl", "solution_batch_begin", {
+            nonce = nonce, members = #members, targets = request.requested,
+        })
+        for _, member in ipairs(members) do
+            AddUITriggeredEvent("X4GunneryControl", "solution_batch_member", { nonce = nonce, weapon = id(member) })
+        end
+        for index = first, last do
+            local entry = pending[index]
+            entry.cached.pendingNonce = nonce
+            request.targets[entry.targetKey] = entry.key
+            AddUITriggeredEvent("X4GunneryControl", "solution_batch_target", {
+                nonce = nonce, target = id(entry.target),
+            })
+        end
+        AddUITriggeredEvent("X4GunneryControl", "solution_batch_commit", { nonce = nonce })
+        log("event=solution_batch action=request nonce=" .. nonce
+            .. " requested=" .. tostring(request.requested)
+            .. " selected_total=" .. tostring(#members)
+            .. " selected_signature=" .. string.format("%q", signature))
     end
-    AddUITriggeredEvent("X4GunneryControl", "solution_commit", { nonce = nonce })
-    return cached
+    return results
+end
+
+local function requestSolution(target)
+    return requestSolutions({ target })[1]
 end
 
 local function solutionText(result)
@@ -1083,16 +1141,42 @@ local function scheduleSolutionRepaint()
 end
 
 local function onSolutionResult(_, param)
-    local nonce, on, total = tostring(param or ""):match("^x4gcs1:([^:]+):(%d+):(%d+)$")
+    local nonce, targetKey, on, total = tostring(param or ""):match("^x4gcs2:([^:]+):([^:]+):(%d+):(%d+)$")
     local request = nonce and solutionRequests[nonce]
     if not request or not session or request.epoch ~= sessionEpoch then return end
-    local cached = solutionCache[request.key]
+    on, total = tonumber(on), tonumber(total)
+    if total ~= request.selectedTotal then return end
+    targetKey = State.normID(targetKey)
+    local key = request.targets[targetKey]
+    local cached = key and solutionCache[key]
     if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.on, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt = tonumber(on), tonumber(total), false, nil, getElapsedTime()
-    solutionRequests[nonce] = nil
+    cached.on, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt = on, total, false, nil, getElapsedTime()
+    request.targets[targetKey] = nil
+    if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
     if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
         scheduleSolutionRepaint()
     end
+end
+
+
+local function onSolutionBatchComplete(_, param)
+    local nonce, accepted, completed = tostring(param or ""):match("^x4gcs2c:([^:]+):(%d+):(%d+)$")
+    local request = nonce and solutionRequests[nonce]
+    if not request or not session or request.epoch ~= sessionEpoch then return end
+    local unresolved = 0
+    for _, key in pairs(request.targets) do
+        local cached = solutionCache[key]
+        if cached and cached.signature == request.signature and cached.pendingNonce == nonce then
+            cached.pendingNonce = nil
+            unresolved = unresolved + 1
+        end
+    end
+    solutionRequests[nonce] = nil
+    log("event=solution_batch action=complete nonce=" .. nonce
+        .. " requested=" .. tostring(request.requested)
+        .. " accepted=" .. tostring(accepted)
+        .. " completed=" .. tostring(completed)
+        .. " unresolved=" .. tostring(unresolved))
 end
 
 targetRoot = function(component)
@@ -1605,6 +1689,7 @@ function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
 function TestAPI.requestSolution(target) return requestSolution(target) end
+function TestAPI.requestSolutions(targets) return requestSolutions(targets) end
 function TestAPI.solutionText(result) return solutionText(result) end
 
 function menu.onShowMenu()
@@ -1946,7 +2031,10 @@ function menu.display()
                 .. " visible=" .. tostring(#surfaces)
                 .. " equipment_options=" .. tostring(#macroOptions - 1))
             if #surfaces > 0 then
-                for _, surface in ipairs(surfaces) do surface.solution = requestSolution(surface.componentID) end
+                local surfaceIDs = {}
+                for _, surface in ipairs(surfaces) do surfaceIDs[#surfaceIDs + 1] = surface.componentID end
+                local surfaceSolutions = requestSolutions(surfaceIDs)
+                for index, surface in ipairs(surfaces) do surface.solution = surfaceSolutions[index] end
                 table.sort(surfaces, function(a, b)
                     local aOn = a.solution and a.solution.total > 0 and a.solution.on == a.solution.total or false
                     local bOn = b.solution and b.solution.total > 0 and b.solution.on == b.solution.total or false
@@ -2024,7 +2112,10 @@ function menu.display()
         header[7]:createText(text(50)); header[8]:setColSpan(2):createText(text(90)); header[10]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
         local classValues, typeValues = 0, 0
-        for _, candidate in ipairs(candidates) do candidate.solution = requestSolution(candidate.componentID) end
+        local candidateIDs = {}
+        for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
+        local candidateSolutions = requestSolutions(candidateIDs)
+        for index, candidate in ipairs(candidates) do candidate.solution = candidateSolutions[index] end
         table.sort(candidates, function(a, b)
             local aOn = a.solution and a.solution.total > 0 and a.solution.on == a.solution.total or false
             local bOn = b.solution and b.solution.total > 0 and b.solution.on == b.solution.total or false
@@ -2512,6 +2603,7 @@ local function init()
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.SolutionResult", onSolutionResult)
+    RegisterEvent("X4GunneryControl.SolutionBatchComplete", onSolutionBatchComplete)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
