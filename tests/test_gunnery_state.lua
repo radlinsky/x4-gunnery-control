@@ -104,6 +104,9 @@ eq(s2.aimTargetID, nil, "newSession: aimTargetID nil")
 eq(s2.autoNextTarget, true, "newSession: autoNextTarget defaults on")
 eq(s2.surfaceTypeFilter, "any", "newSession: surface type filter defaults to Any")
 eq(s2.surfaceMacroFilter, "any", "newSession: surface macro filter defaults to Any")
+eq(s2.surfaceBrowser.pageSize, 20, "newSession: surface browser page size is bounded to 20")
+eq(s2.surfaceBrowser.autoRefresh, false, "newSession: surface auto-refresh defaults off")
+assert(type(s2.surfaceBrowser.pageResults) == "table", "newSession: page results are session-local")
 -- The override reaches every turret on the ship, not just the checked groups,
 -- so it is never on by default.
 eq(s2.preferAllTurrets, false, "newSession: preferAllTurrets defaults off")
@@ -141,6 +144,80 @@ eq(#State.filterSurfaceTargets(surfaceFixture, "turret", "turret_l"), 2,
     "filterSurfaceTargets: type and macro are both applied")
 eq(#State.filterSurfaceTargets(surfaceFixture, "any", "shield_l"), 1,
     "filterSurfaceTargets: Any type preserves macro lock")
+eq(State.normalizeSurfaceSize(" xl "), "XL", "normalizeSurfaceSize: canonical XL")
+eq(State.normalizeSurfaceSize("xs"), "XS", "normalizeSurfaceSize: canonical XS")
+eq(State.normalizeSurfaceSize("extralarge"), "XL", "normalizeSurfaceSize: X4 extralarge API value")
+eq(State.normalizeSurfaceSize("large"), "L", "normalizeSurfaceSize: X4 large API value")
+eq(State.normalizeSurfaceSize("medium"), "M", "normalizeSurfaceSize: X4 medium API value")
+eq(State.normalizeSurfaceSize("small"), "S", "normalizeSurfaceSize: X4 small API value")
+eq(State.normalizeSurfaceSize("extra small"), "XS", "normalizeSurfaceSize: defensive extrasmall API value")
+eq(State.normalizeSurfaceSize(0), "unknown", "normalizeSurfaceSize: numeric API value is unknown")
+eq(State.normalizeSurfaceSize("capital"), "unknown", "normalizeSurfaceSize: unreported class is unknown")
+for index, size in ipairs({ "XL", "L", "M", "S", "XS", "unknown" }) do
+    eq(State.surfaceSizeRank(size), index, "surfaceSizeRank: complete priority for " .. size)
+end
+local metadataFixture = {
+    { componentID = "30ULL", kindKey = "shield", size = "XL", distance = 100 },
+    { componentID = "20ULL", kindKey = "turret", size = "L", distance = 200 },
+    { componentID = "10ULL", kindKey = "turret", size = "L", distance = 200 },
+}
+local typeFirst, sizeFirst = {}, {}
+for index, entry in ipairs(metadataFixture) do typeFirst[index], sizeFirst[index] = entry, entry end
+table.sort(typeFirst, function(a, b) return State.surfaceMetadataLess(a, b, "type_first") end)
+table.sort(sizeFirst, function(a, b) return State.surfaceMetadataLess(a, b, "size_first") end)
+eq(State.normID(typeFirst[1].componentID), "10", "surface comparator: type first, then stable ID")
+eq(State.normID(typeFirst[2].componentID), "20", "surface comparator: equal metadata ID tie-break")
+eq(State.normID(sizeFirst[1].componentID), "30", "surface comparator: size-first policy is explicit")
+local validPolicy, policyError = pcall(State.surfaceMetadataLess,
+    metadataFixture[1], metadataFixture[2], "implicit")
+eq(validPolicy, false, "surface comparator: cross-type policy must be explicit")
+assert(tostring(policyError):find("unknown surface cross%-type policy"),
+    "surface comparator: invalid policy explains the contract")
+local unknownDistance = {
+    componentID = 2, kindKey = "turret", size = "M", distance = -1,
+}
+assert(State.surfaceMetadataLess(
+    { componentID = 1, kindKey = "turret", size = "M", distance = 900 },
+    unknownDistance, "type_first"), "surface comparator: unknown distance sorts last")
+local pinnedFixture = {
+    { componentID = "1ULL", kindKey = "turret", macro = "turret_l" },
+    { componentID = "2ULL", kindKey = "shield", macro = "shield_l" },
+    { componentID = "3ULL", kindKey = "turret", macro = "turret_l" },
+}
+local alternatives = State.surfaceAlternatives(pinnedFixture, 1, "turret", "turret_l")
+eq(#alternatives, 1, "surfaceAlternatives: filters alternatives and excludes pinned")
+eq(State.normID(alternatives[1].componentID), "3", "surfaceAlternatives: keeps matching non-pinned row")
+eq(#State.surfaceAlternatives(pinnedFixture, 2, "turret", "turret_l"), 2,
+    "surfaceAlternatives: pinned filter mismatch does not alter matching alternatives")
+for _, boundary in ipairs({
+    { count = 0, pages = 1, page1 = 0 }, { count = 1, pages = 1, page1 = 1 },
+    { count = 20, pages = 1, page1 = 20 }, { count = 21, pages = 2, page1 = 20 },
+    { count = 40, pages = 2, page1 = 20 }, { count = 41, pages = 3, page1 = 20 },
+}) do
+    local entries = {}
+    for i = 1, boundary.count do entries[i] = { componentID = i } end
+    local pageEntries, page, pages, first, last = State.surfacePage(entries, 1, 20)
+    eq(#pageEntries, boundary.page1, "surfacePage: page-one count at " .. boundary.count)
+    eq(page, 1, "surfacePage: normalized page at " .. boundary.count)
+    eq(pages, boundary.pages, "surfacePage: page count at " .. boundary.count)
+    if boundary.count > 0 then eq(last - first + 1, boundary.page1, "surfacePage: exact bounds") end
+end
+local fortyOne = {}
+for i = 1, 41 do fortyOne[i] = { componentID = i } end
+local finalPage, normalizedPage, pageCount, firstIndex, lastIndex = State.surfacePage(fortyOne, 3, 20)
+eq(#finalPage, 1, "surfacePage: 41st alternative is alone on page three")
+eq(normalizedPage, 3, "surfacePage: keeps valid page")
+eq(pageCount, 3, "surfacePage: reports three pages")
+eq(firstIndex, 41, "surfacePage: final first index")
+eq(lastIndex, 41, "surfacePage: final last index")
+eq(State.surfacePageKey(7, { { componentID = "1ULL" }, { componentID = 2 } }), "7:1,2",
+    "surfacePageKey: generation and exact normalized IDs define cache identity")
+assert(State.surfacePageKey(8, { { componentID = 1 }, { componentID = 2 } })
+        ~= State.surfacePageKey(7, { { componentID = 1 }, { componentID = 2 } }),
+    "surfacePageKey: generation invalidates same page membership")
+assert(State.surfacePageKey(7, { { componentID = 2 }, { componentID = 1 } })
+        ~= State.surfacePageKey(7, { { componentID = 1 }, { componentID = 2 } }),
+    "surfacePageKey: membership order is part of cache identity")
 assert(s2.directSnapshots == nil, "newSession: no legacy directSnapshots field")
 
 -- toggleGroup on/off

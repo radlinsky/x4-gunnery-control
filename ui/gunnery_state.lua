@@ -153,6 +153,7 @@ function State.newSession(shipID, controlGroup)
         selectedGroupKey = nil, selectedMemberID = nil, cameraMemberID = nil,
         targetObjectID = nil, targetCandidates = {},
         surfaceTypeFilter = "any", surfaceMacroFilter = "any",
+        surfaceBrowser = State.newSurfaceBrowser(nil),
     }
 end
 
@@ -190,6 +191,90 @@ function State.filterSurfaceTargets(surfaces, typeFilter, macroFilter)
         end
     end
     return filtered
+end
+
+local surfaceSizePriority = { XL = 1, L = 2, M = 3, S = 4, XS = 5 }
+local surfaceTypePriority = { turret = 1, shield = 2, engine = 3 }
+local surfaceSizeAliases = {
+    XL = "XL", EXTRALARGE = "XL", EXTRA_LARGE = "XL",
+    L = "L", LARGE = "L",
+    M = "M", MEDIUM = "M",
+    S = "S", SMALL = "S",
+    XS = "XS", EXTRASMALL = "XS", EXTRA_SMALL = "XS",
+}
+
+function State.normalizeSurfaceSize(value)
+    local normalized = type(value) == "string" and string.upper(string.match(value, "^%s*(.-)%s*$")) or ""
+    normalized = string.gsub(normalized, "[%s%-]+", "_")
+    if surfaceSizeAliases[normalized] then return surfaceSizeAliases[normalized] end
+    return "unknown"
+end
+
+function State.surfaceSizeRank(value)
+    return surfaceSizePriority[State.normalizeSurfaceSize(value)] or 6
+end
+
+local function knownDistance(value)
+    value = tonumber(value)
+    if value == nil or value < 0 then return math.huge end
+    return value
+end
+
+-- Metadata is frozen when a surface-browser generation is created. The
+-- cross-type policy for the Any filter is passed explicitly because it is a
+-- player-facing choice; callers cannot accidentally inherit a hidden default.
+function State.surfaceMetadataLess(a, b, crossTypePolicy)
+    local aSize, bSize = State.surfaceSizeRank(a.size), State.surfaceSizeRank(b.size)
+    local aType = surfaceTypePriority[a.kindKey] or 4
+    local bType = surfaceTypePriority[b.kindKey] or 4
+    if crossTypePolicy == "type_first" then
+        if aType ~= bType then return aType < bType end
+        if aSize ~= bSize then return aSize < bSize end
+    elseif crossTypePolicy == "size_first" then
+        if aSize ~= bSize then return aSize < bSize end
+        if aType ~= bType then return aType < bType end
+    else
+        error("unknown surface cross-type policy: " .. tostring(crossTypePolicy))
+    end
+    local aDistance, bDistance = knownDistance(a.distance), knownDistance(b.distance)
+    if aDistance ~= bDistance then return aDistance < bDistance end
+    return normID(a.componentID) < normID(b.componentID)
+end
+
+function State.surfaceAlternatives(surfaces, pinnedID, typeFilter, macroFilter)
+    local alternatives = {}
+    for _, surface in ipairs(State.filterSurfaceTargets(surfaces, typeFilter, macroFilter)) do
+        if pinnedID == nil or normID(surface.componentID) ~= normID(pinnedID) then
+            alternatives[#alternatives + 1] = surface
+        end
+    end
+    return alternatives
+end
+
+function State.surfacePage(entries, page, pageSize)
+    pageSize = math.max(1, math.floor(tonumber(pageSize) or 20))
+    local pageCount = math.max(1, math.ceil(#(entries or {}) / pageSize))
+    page = math.max(1, math.min(math.floor(tonumber(page) or 1), pageCount))
+    local first = (page - 1) * pageSize + 1
+    local last = math.min(#(entries or {}), first + pageSize - 1)
+    local result = {}
+    for index = first, last do result[#result + 1] = entries[index] end
+    return result, page, pageCount, first, last
+end
+
+function State.surfacePageKey(generation, entries)
+    local ids = {}
+    for _, entry in ipairs(entries or {}) do ids[#ids + 1] = normID(entry.componentID) end
+    return tostring(generation or 0) .. ":" .. table.concat(ids, ",")
+end
+
+function State.newSurfaceBrowser(rootID)
+    return {
+        rootID = rootID, generation = 0, filterSignature = "",
+        autoRefresh = false, nextAutoRefreshAt = nil,
+        page = 1, pageSize = 20, orderedIDs = {}, metadataByID = {},
+        pageResults = {}, pinnedResult = nil, pinnedRefreshAt = nil,
+    }
 end
 
 function State.beginTargetSelection(session, group, member)

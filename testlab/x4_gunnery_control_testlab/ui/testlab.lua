@@ -30,7 +30,7 @@ end
 -- switch, the marker, and the two facts MD cannot see for itself. Off by
 -- default, so installing the Test Lab does not flood debug.log on its own.
 local observing = false
-local lastObservedAimTarget, observedAimSince, observedAimSettled
+local lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled
 
 -- The engine SOFT target and the session's Prefer My Target flag are the whole
 -- reason any Lua runs here: MD has player.target but no soft-target equivalent
@@ -66,13 +66,19 @@ local function pushObserveState()
     local now = getElapsedTime()
     if aimTarget and aimTarget ~= lastObservedAimTarget then
         lastObservedAimTarget = aimTarget
-        observedAimSince, observedAimSettled = now, false
+        observedAimActiveSeconds, observedAimLastTick, observedAimSettled = 0, now, false
         AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
         log("observe", { action = "auto_mark_initial", target = aimTarget })
-    elseif aimTarget and not observedAimSettled and observedAimSince and now - observedAimSince >= 20 then
-        observedAimSettled = true
-        AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
-        log("observe", { action = "auto_mark_settled", target = aimTarget, held_seconds = now - observedAimSince })
+    elseif aimTarget and not observedAimSettled and observedAimLastTick then
+        if not (bridge.isGamePaused and bridge.isGamePaused()) then
+            observedAimActiveSeconds = observedAimActiveSeconds + (now - observedAimLastTick)
+        end
+        observedAimLastTick = now
+        if observedAimActiveSeconds >= 20 then
+            observedAimSettled = true
+            AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
+            log("observe", { action = "auto_mark_settled", target = aimTarget, active_seconds = observedAimActiveSeconds })
+        end
     end
     -- Self-rescheduling at the MD sample rate, the pattern the main mod's
     -- session watchdog uses (ui/gunnery_control.lua:2224) because it runs with
@@ -84,7 +90,7 @@ end
 
 local function setObserving(enabled)
     observing = enabled
-    lastObservedAimTarget, observedAimSince, observedAimSettled = nil, nil, nil
+    lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled = nil, nil, nil, nil
     AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_toggle", { enabled = enabled })
     log("observe", { action = enabled and "on" or "off" })
     if enabled then pushObserveState() end
@@ -126,9 +132,50 @@ local function validateSpec(raw)
             y = tonumber(group.y) or 0,
             behaviour = behaviour,
             hostile = group.hostile == true,
+            holdFire = group.holdFire == true,
+            stripDefenceUnits = group.stripDefenceUnits == true,
+            repairGuard = group.repairGuard == true,
         }
     end
-    if #groups == 0 then return nil, "spec.groups is empty" end
+    local stations = {}
+    if raw.stations ~= nil and type(raw.stations) ~= "table" then
+        return nil, "spec.stations must be a list"
+    end
+    for index, station in ipairs(raw.stations or {}) do
+        local where = "stations[" .. index .. "]"
+        if type(station) ~= "table" then return nil, where .. " is not a table" end
+        if station.recipe ~= "xen_defence" then
+            return nil, where .. ".recipe must be xen_defence"
+        end
+        if type(station.faction) ~= "string" or station.faction == "" then
+            return nil, where .. ".faction must be a non-empty string"
+        end
+        if type(station.distance) ~= "number" then
+            return nil, where .. ".distance must be a number"
+        end
+        if type(station.expectedModules) ~= "number" or station.expectedModules < 1 then
+            return nil, where .. ".expectedModules must be a positive number"
+        end
+        if type(station.minSurfaces) ~= "number" or station.minSurfaces < 1 then
+            return nil, where .. ".minSurfaces must be a positive number"
+        end
+        stations[#stations + 1] = {
+            label = tostring(station.label or ("station" .. index)),
+            recipe = station.recipe,
+            faction = station.faction,
+            distance = station.distance,
+            spread = tonumber(station.spread) or 0,
+            x = tonumber(station.x) or 0,
+            y = tonumber(station.y) or 0,
+            hostile = station.hostile == true,
+            holdFire = station.holdFire == true,
+            expectedModules = math.floor(station.expectedModules),
+            minSurfaces = math.floor(station.minSurfaces),
+        }
+    end
+    if #groups == 0 and #stations == 0 then
+        return nil, "spec.groups is empty"
+    end
     local setup
     if raw.setup ~= nil then
         if type(raw.setup) ~= "table" then return nil, "spec.setup must be a table" end
@@ -146,9 +193,10 @@ local function validateSpec(raw)
             turretGroup = raw.setup.turretGroup,
             turretLabel = raw.setup.turretLabel,
             expectedTurrets = math.floor(raw.setup.expectedTurrets),
+            selectAll = raw.setup.selectAll == true,
         }
     end
-    return { id = raw.id, enabled = raw.enabled, groups = groups, setup = setup }
+    return { id = raw.id, enabled = raw.enabled, groups = groups, stations = stations, setup = setup }
 end
 
 -- The spec file is a plain data literal, but it is hand-edited by an agent, so
@@ -194,10 +242,23 @@ local function sendScenarioSpec(force, requestId)
             count = group.count, distance = group.distance, spread = group.spread,
             x = group.x, y = group.y,
             behaviour = group.behaviour, hostile = group.hostile,
+            holdFire = group.holdFire, stripDefenceUnits = group.stripDefenceUnits,
+            repairGuard = group.repairGuard,
+        })
+    end
+    for _, station in ipairs(scenarioSpec.stations) do
+        AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_station", {
+            label = station.label, recipe = station.recipe, faction = station.faction,
+            distance = station.distance, spread = station.spread,
+            x = station.x, y = station.y, hostile = station.hostile,
+            holdFire = station.holdFire,
+            expectedModules = station.expectedModules, minSurfaces = station.minSurfaces,
         })
     end
     AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_commit")
-    log("scenario_spec", { action = "sent", spec_id = scenarioSpec.id, groups = #scenarioSpec.groups, forced = tostring(force == true) })
+    log("scenario_spec", { action = "sent", spec_id = scenarioSpec.id,
+        groups = #scenarioSpec.groups, stations = #scenarioSpec.stations,
+        forced = tostring(force == true) })
     return true
 end
 
@@ -215,31 +276,47 @@ local function resolveExactGroup()
         return nil, "need " .. setup.shipLabel .. " [" .. setup.shipMacro .. "], got "
             .. tostring(ship.name) .. " [" .. tostring(ship.macro) .. "]"
     end
-    local selected
-    for _, group in ipairs(ship.groups or {}) do
-        if trim(group.group) == setup.turretGroup then selected = group; break end
-    end
-    if not selected then return nil, "missing raw group " .. setup.turretGroup end
-    if selected.kind ~= "group" or selected.mutable ~= true then
-        return nil, setup.turretLabel .. " is not a mutable turret group"
-    end
-    if #(selected.members or {}) ~= setup.expectedTurrets then
-        return nil, setup.turretLabel .. " needs " .. setup.expectedTurrets
-            .. " operational turrets, found " .. #(selected.members or {})
+    local selected, selectedGroups = nil, {}
+    if setup.selectAll then
+        for _, group in ipairs(ship.groups or {}) do
+            if group.kind == "group" and group.mutable == true then
+                selectedGroups[#selectedGroups + 1] = group
+            end
+        end
+        if #selectedGroups == 0 then return nil, "no mutable turret groups" end
+    else
+        for _, group in ipairs(ship.groups or {}) do
+            if trim(group.group) == setup.turretGroup then selected = group; break end
+        end
+        if not selected then return nil, "missing raw group " .. setup.turretGroup end
+        if selected.kind ~= "group" or selected.mutable ~= true then
+            return nil, setup.turretLabel .. " is not a mutable turret group"
+        end
+        selectedGroups[1] = selected
     end
     local session = bridge.getSession()
     if not session then return nil, "no Gunnery session" end
 
-    local memberIDs = {}
-    for _, member in ipairs(selected.members) do memberIDs[#memberIDs + 1] = tostring(member.id) end
+    local memberIDs, groupKeys = {}, {}
+    for _, group in ipairs(selectedGroups) do
+        groupKeys[#groupKeys + 1] = tostring(group.key)
+        for _, member in ipairs(group.members or {}) do memberIDs[#memberIDs + 1] = tostring(member.id) end
+    end
+    if #memberIDs ~= setup.expectedTurrets then
+        return nil, setup.turretLabel .. " needs " .. setup.expectedTurrets
+            .. " operational turrets, found " .. #memberIDs
+    end
     table.sort(memberIDs)
+    table.sort(groupKeys)
     return {
         label = setup.turretLabel,
         rawGroup = setup.turretGroup,
         memberIDs = table.concat(memberIDs, ","),
         shipID = tostring(ship.id),
-        groupKey = selected.key,
-        armed = selected.armed == true,
+        groupKey = table.concat(groupKeys, ","),
+        exactGroupKey = selected and selected.key or nil,
+        armed = selected ~= nil and selected.armed == true,
+        selectAll = setup.selectAll,
         session = session,
     }
 end
@@ -249,8 +326,13 @@ local function applyExactGroup(selection)
     local checked = {}
     for key in pairs(session.checkedGroupKeys or {}) do checked[#checked + 1] = key end
     for _, key in ipairs(checked) do X4GunneryState.toggleGroup(session, key, true) end
-    X4GunneryState.toggleGroup(session, selection.groupKey, selection.armed)
-    session.selectedGroupKey = selection.groupKey
+    if selection.selectAll then
+        X4GunneryState.toggleAllGroups(session)
+        session.selectedGroupKey = nil
+    else
+        X4GunneryState.toggleGroup(session, selection.exactGroupKey, selection.armed)
+        session.selectedGroupKey = selection.exactGroupKey
+    end
 end
 
 local function createTestScenario()
@@ -271,22 +353,44 @@ local function createTestScenario()
         menu.display()
         return
     end
-    local expectedShips = 0
-    for _, group in ipairs(scenarioSpec.groups) do expectedShips = expectedShips + group.count end
+    local expectedShips, expectedHostiles, expectedRepairFixtures = 0, 0, 0
+    for _, group in ipairs(scenarioSpec.groups) do
+        expectedShips = expectedShips + group.count
+        if group.hostile then expectedHostiles = expectedHostiles + group.count end
+        if group.repairGuard then expectedRepairFixtures = expectedRepairFixtures + group.count end
+    end
+    local expectedStations, expectedModules, minSurfaces, expectedSafeFixtures = #scenarioSpec.stations, 0, 0, 0
+    for _, group in ipairs(scenarioSpec.groups) do
+        if group.holdFire then expectedSafeFixtures = expectedSafeFixtures + group.count end
+    end
+    for _, station in ipairs(scenarioSpec.stations) do
+        expectedModules = expectedModules + station.expectedModules
+        minSurfaces = minSurfaces + station.minSurfaces
+        if station.holdFire then expectedSafeFixtures = expectedSafeFixtures + 1 end
+    end
     scenarioRequestSerial = scenarioRequestSerial + 1
     local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(scenarioRequestSerial)
     pendingScenario = {
         requestId = requestId,
         specId = scenarioSpec.id,
         expectedShips = expectedShips,
-        deadline = getElapsedTime() + 10,
+        expectedStations = expectedStations,
+        expectedModules = expectedModules,
+        minSurfaces = minSurfaces,
+        expectedSafeFixtures = expectedSafeFixtures,
+        expectedRepairFixtures = expectedRepairFixtures,
+        expectedDefenceUnits = 0,
+        expectedHostiles = expectedHostiles,
+        deadline = getElapsedTime() + (expectedStations > 0 and 20 or 10),
         selection = selection,
     }
     scenarioActionStatus = "CREATING: replacing the previous fixture and verifying "
-        .. expectedShips .. " ships..."
+        .. expectedShips .. " ships, " .. expectedStations .. " stations, and live surfaces..."
     sendScenarioSpec(true, requestId)
     log("scenario_create", {
         action = "requested", spec_id = scenarioSpec.id, expected_ships = expectedShips,
+        expected_stations = expectedStations, expected_modules = expectedModules,
+        min_surfaces = minSurfaces,
         request_id = requestId, load_time = scenarioLoadTime,
         group = selection.rawGroup, member_ids = selection.memberIDs,
     })
@@ -294,10 +398,50 @@ local function createTestScenario()
 end
 
 local function onScenarioReady(_, param)
-    local requestId, specId, spawned = tostring(param or ""):match("^x4gct1:([^:]+):([^:]+):(%d+)$")
+    local value = tostring(param or "")
+    local requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
+        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures =
+        value:match("^x4gct6:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+    if not requestId then
+        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
+            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles =
+            value:match("^x4gct5:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        repairFixtures = tostring(pendingScenario and pendingScenario.expectedRepairFixtures or 0)
+    end
+    if not requestId then
+        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
+            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits =
+        value:match("^x4gct4:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        hostiles = tostring(pendingScenario and pendingScenario.expectedHostiles or 0)
+        repairFixtures = tostring(pendingScenario and pendingScenario.expectedRepairFixtures or 0)
+    end
+    if not requestId then
+        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
+            safeFixtures, safeWeapons, unsafeWeapons =
+        value:match("^x4gct3:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        defenceUnits, hostiles = "0", tostring(pendingScenario and pendingScenario.expectedHostiles or 0)
+        repairFixtures = tostring(pendingScenario and pendingScenario.expectedRepairFixtures or 0)
+    end
+    if not requestId then
+        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines =
+            value:match("^x4gct2:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures = "0", "0", "0", "0", "0", "0"
+    end
+    if not requestId then
+        requestId, specId, spawned = value:match("^x4gct1:([^:]+):([^:]+):(%d+)$")
+        stations, modules, turrets, missileTurrets, shields, engines = "0", "0", "0", "0", "0", "0"
+        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures = "0", "0", "0", "0", "0", "0"
+    end
     if not pendingScenario or requestId ~= pendingScenario.requestId
             or specId ~= pendingScenario.specId then return end
-    spawned = tonumber(spawned)
+    spawned, stations, modules = tonumber(spawned), tonumber(stations), tonumber(modules)
+    turrets, missileTurrets = tonumber(turrets), tonumber(missileTurrets)
+    shields, engines = tonumber(shields), tonumber(engines)
+    safeFixtures, safeWeapons, unsafeWeapons = tonumber(safeFixtures), tonumber(safeWeapons), tonumber(unsafeWeapons)
+    defenceUnits = tonumber(defenceUnits)
+    hostiles = tonumber(hostiles)
+    repairFixtures = tonumber(repairFixtures)
+    local surfaces = modules + turrets + missileTurrets + shields + engines
     local request = pendingScenario
     pendingScenario = nil
     if spawned ~= request.expectedShips then
@@ -305,6 +449,51 @@ local function onScenarioReady(_, param)
             .. tostring(request.expectedShips) .. " ships; inspect debug.log"
         log("scenario_create", { action = "failed", request_id = request.requestId,
             expected_ships = request.expectedShips, spawned_ships = spawned })
+        menu.display()
+        return
+    end
+    if stations ~= request.expectedStations or modules ~= request.expectedModules
+            or surfaces < request.minSurfaces then
+        scenarioActionStatus = "FAILED: station census was " .. stations .. " stations, "
+            .. modules .. " modules, " .. surfaces .. " operational surfaces; expected "
+            .. request.expectedStations .. "/" .. request.expectedModules .. "/at least "
+            .. request.minSurfaces .. "; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_stations = request.expectedStations, spawned_stations = stations,
+            expected_modules = request.expectedModules, spawned_modules = modules,
+            min_surfaces = request.minSurfaces, operational_surfaces = surfaces,
+            turrets = turrets, missile_turrets = missileTurrets, shields = shields,
+            engines = engines })
+        menu.display()
+        return
+    end
+    if safeFixtures ~= request.expectedSafeFixtures
+            or (request.expectedSafeFixtures > 0 and (safeWeapons < 1 or unsafeWeapons ~= 0))
+            or defenceUnits ~= request.expectedDefenceUnits then
+        scenarioActionStatus = "FAILED: safety census was " .. safeFixtures
+            .. " fixtures, " .. safeWeapons .. " safe weapons, " .. unsafeWeapons
+            .. " unsafe weapons, and " .. defenceUnits .. " defence units; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_safe_fixtures = request.expectedSafeFixtures, safe_fixtures = safeFixtures,
+            safe_weapons = safeWeapons, unsafe_weapons = unsafeWeapons,
+            expected_defence_units = request.expectedDefenceUnits, defence_units = defenceUnits })
+        menu.display()
+        return
+    end
+    if hostiles ~= request.expectedHostiles then
+        scenarioActionStatus = "FAILED: hostility census was " .. hostiles
+            .. " attackable targets; expected " .. request.expectedHostiles .. "; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_hostiles = request.expectedHostiles, hostiles = hostiles })
+        menu.display()
+        return
+    end
+    if repairFixtures ~= request.expectedRepairFixtures then
+        scenarioActionStatus = "FAILED: repair census was " .. repairFixtures
+            .. " guarded fixtures; expected " .. request.expectedRepairFixtures .. "; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_repair_fixtures = request.expectedRepairFixtures,
+            repair_fixtures = repairFixtures })
         menu.display()
         return
     end
@@ -319,10 +508,18 @@ local function onScenarioReady(_, param)
         return
     end
     applyExactGroup(selection)
-    scenarioActionStatus = "READY: " .. spawned .. " named ships created; only "
+    scenarioActionStatus = "READY: " .. spawned .. " named ships, " .. stations
+        .. " named stations, and " .. surfaces .. " operational surfaces; only "
         .. selection.label .. " ticked"
     log("scenario_create", {
         action = "ready", request_id = request.requestId, spawned_ships = spawned, group = selection.rawGroup,
+        spawned_stations = stations, spawned_modules = modules,
+        operational_surfaces = surfaces, turrets = turrets,
+        missile_turrets = missileTurrets, shields = shields, engines = engines,
+        safe_fixtures = safeFixtures, safe_weapons = safeWeapons, unsafe_weapons = unsafeWeapons,
+        defence_units = defenceUnits,
+        hostiles = hostiles,
+        repair_fixtures = repairFixtures,
         member_ids = selection.memberIDs,
     })
     setObserving(true)

@@ -34,7 +34,7 @@ local startupCount = 0
 for _, line in ipairs(fix.getCapturedLog()) do
     if string.find(line, "[X4GC] UI initialized", 1, true) then
         startupCount = startupCount + 1
-        assert(line == "[X4GC] UI initialized; build=2026-08-12-solution-batch-1",
+        assert(line == "[X4GC] UI initialized; build=2026-08-13-turret-arcs-2",
             "startup line must carry the current build label; got: " .. line)
     end
 end
@@ -46,6 +46,8 @@ assert(#fix.uiTriggeredEvents >= 1
     and fix.uiTriggeredEvents[1].screen == "X4GunneryControl"
     and fix.uiTriggeredEvents[1].control == "state_request",
     "fixture must expose AddUITriggeredEvent captures")
+assert(API.isGamePaused() == false,
+    "Test Lab pause bridge must forward the engine pause state")
 
 -- ── 7. assertion 2: normal watchdog work is log-silent ──────────────────────
 -- init() ends with sessionWatchdog(), which calls

@@ -133,6 +133,9 @@
             <set_value name="SolutionService.$expectedmembers" exact="@event.param3.$members"/>
             <set_value name="SolutionService.$expectedtargets" exact="[@event.param3.$targets, 20].min"/>
             <set_value name="SolutionService.$weapons" exact="[]"/>
+            <set_value name="SolutionService.$arcknown" exact="[]"/>
+            <set_value name="SolutionService.$arcmins" exact="[]"/>
+            <set_value name="SolutionService.$arcmaxs" exact="[]"/>
             <set_value name="SolutionService.$targets" exact="[]"/>
             <set_value name="SolutionService.$targetids" exact="[]"/>
           </actions>
@@ -144,6 +147,9 @@
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
             <set_value name="$weapon" exact="@event.param3.$weapon"/>
+            <set_value name="$arcknow" exact="@event.param3.$arcknow"/>
+            <set_value name="$arcmin" exact="@event.param3.$arcmin"/>
+            <set_value name="$arcmax" exact="@event.param3.$arcmax"/>
             <do_if value="typeof $weapon != datatype.component and $weapon">
               <set_value name="$weapon" exact="component.{$weapon}"/>
             </do_if>
@@ -152,6 +158,9 @@
                           and typeof $weapon == datatype.component
                           and not SolutionService.$weapons.indexof.{$weapon}">
               <append_to_list name="SolutionService.$weapons" exact="$weapon"/>
+              <append_to_list name="SolutionService.$arcknown" exact="$arcknow"/>
+              <append_to_list name="SolutionService.$arcmins" exact="$arcmin"/>
+              <append_to_list name="SolutionService.$arcmaxs" exact="$arcmax"/>
             </do_if>
           </actions>
         </cue>
@@ -185,17 +194,28 @@
               <set_value name="$completed" exact="0"/>
               <do_for_each name="$target" in="SolutionService.$targets" counter="$targetindex">
                 <set_value name="$on" exact="0"/>
-                <do_for_each name="$weapon" in="SolutionService.$weapons">
-                  <!-- Preserve the existing binary predicate while rejecting
-                       out-of-range pairs before the more expensive raycast. -->
-                  <do_if value="($weapon.distanceto.{$target} + ($target.size / 2)) lt $weapon.maxfirerange">
-                    <check_line_of_sight name="$lineoffireclear" object="$weapon" target="$target" excludeself="true" useaimtarget="true"/>
-                    <do_if value="$lineoffireclear">
-                      <set_value name="$on" operation="add"/>
+                <set_value name="$known" exact="0"/>
+                <do_for_each name="$weapon" in="SolutionService.$weapons" counter="$weaponindex">
+                  <!-- rotation_x restrictions in shipped turret components are
+                       pitch limits in this fixed mount-local reference frame.
+                       Unknown/modded macros remain UNKNOWN rather than being
+                       falsely promoted by range + line of fire alone. -->
+                  <do_if value="SolutionService.$arcknown.{$weaponindex} == 1">
+                    <set_value name="$known" operation="add"/>
+                    <set_value name="$aimpitch" exact="$target.relativeposition.{$weapon}.rotation.pitch"/>
+                    <do_if value="$aimpitch ge (SolutionService.$arcmins.{$weaponindex} * 1deg)
+                                  and $aimpitch le (SolutionService.$arcmaxs.{$weaponindex} * 1deg)
+                                  and ($weapon.distanceto.{$target} + ($target.size / 2)) lt $weapon.maxfirerange">
+                      <!-- Start at the live muzzle and include the firing ship
+                           so its own hull can mask an otherwise clear ray. -->
+                      <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="false" useaimtarget="true"/>
+                      <do_if value="$lineoffireclear">
+                        <set_value name="$on" operation="add"/>
+                      </do_if>
                     </do_if>
                   </do_if>
                 </do_for_each>
-                <raise_lua_event name="'X4GunneryControl.SolutionResult'" param="'x4gcs2:' + $nonce + ':' + SolutionService.$targetids.{$targetindex} + ':' + $on + ':' + SolutionService.$expectedmembers"/>
+                <raise_lua_event name="'X4GunneryControl.SolutionResult'" param="'x4gcs3:' + $nonce + ':' + SolutionService.$targetids.{$targetindex} + ':' + $on + ':' + $known + ':' + SolutionService.$expectedmembers"/>
                 <set_value name="$completed" operation="add"/>
               </do_for_each>
               <raise_lua_event name="'X4GunneryControl.SolutionBatchComplete'" param="'x4gcs2c:' + $nonce + ':' + SolutionService.$targets.count + ':' + $completed"/>
@@ -443,12 +463,24 @@
                    the list, so it stays valid and the preference waits for a
                    re-selection that never comes. Live-tested 2026-08-09: turret
                    515058 held target B at los=1 solution=1 on the preferred A.
-                   The narrow call forces every turret off whatever it holds and
-                   onto $target; the wide call immediately restores the fallback
-                   set for turrets that cannot AIM at $target, without dislodging
-                   the ones that just took it. Aim, not hit: a turret whose own
-                   hull blocks the shot can aim, so it takes $target and holds
-                   fire. -->
+
+                   The narrow-then-wide pair establishes the initial
+                   preference, but a 2026-08-13 two-Osaka retarget exposed a
+                   second shoot-controller latch: changing preferredtarget from
+                   the live target A to B left every newly fired round on A even
+                   though this cue logged B. Two reset variants were live-
+                   disproved in that fixture: an empty target list did not release
+                   active guns, while cease_fire plus the empty list prevented a
+                   fresh engagement from firing at all. Do not reintroduce either
+                   here. A ship-wide HOLD FIRE mode pulse was also live-
+                   disproved: the cue received B while newly fired rounds and
+                   direct hits remained on A. The narrow call installs only
+                   $target; the wide call immediately restores the fallback set
+                   for turrets that cannot AIM at $target. Do not claim that
+                   reissuing this pair retargets a turret whose shoot controller
+                   remains latched to another still-valid hostile.
+                   Aim, not hit: a turret whose own hull blocks the shot can aim,
+                   so it takes $target and holds fire. -->
               <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
               <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
               <!-- Success line, mirroring the bad-payload line below. Without it

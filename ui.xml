@@ -4,6 +4,7 @@
     <dependency name="ego_detailmonitorhelper"/>
     <dependency name="ego_detailmonitor"/>
     <dependency name="kuertee_ui_extensions"/>
+    <file name="ui/turret_arc_limits.lua"/>
     <file name="ui/gunnery_state.lua"/>
     <file name="ui/gunnery_persistence.lua"/>
     <file name="ui/gunnery_control.lua"/>

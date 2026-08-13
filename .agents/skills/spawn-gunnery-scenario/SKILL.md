@@ -66,13 +66,26 @@ specific predicate. Never depend on the owner flying targets into position.
 Verify every macro against the installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
 
-The proven Test Lab transport creates equipped ships. Do not treat a
-`create_station` result, construction-plan module count, or visible station
-shell as evidence of an equipped surface-targeting fixture. A station fixture
-is valid only after a correlated live census confirms the required operational
-turrets, shields, and engines. Until that capability is implemented and
-reproduced, use a known save containing a naturally equipped station and record
-its component id and operational-surface count before measuring performance.
+The proven Test Lab transport creates equipped ships. For stations, a
+`create_station` result, construction-plan module count, or visible shell is
+not evidence of an equipped surface-targeting fixture. Generate a faction
+loadout for each operational module, apply it, then withhold READY until the
+correlated live census confirms the expected modules and minimum operational
+turrets, missile turrets, shields, and engines. This path is reproduced for X4
+9.00's `xen_defence` plan: five modules, 120 turrets, 60 shields, and 185 total
+module/surface entries on the live fixture tested 2026-08-13.
+
+Do not use the equipped defence station as a clean per-turret arc fixture: it
+launches defence drones and clusters many surfaces at nearly the same bearing.
+Use it for pagination/performance and broad surface-browser tests. For exact
+fire attribution, prefer one stationary capital ship with carried defence
+units removed before hostility, all weapons held fire, and an isolated surface
+candidate.
+
+`hostile = true` is a requirement, not proof. A temporary object relation boost
+did not make a Terran-owned Osaka attackable by the player in the live 9.00
+test. Prefer a naturally hostile owner such as Xenon and withhold READY unless
+`player.ship.mayattack.{$Target}` is true for every requested hostile fixture.
 
 ### 3. Author the complete spec
 
@@ -101,8 +114,11 @@ X4GunneryTestLabScenarioSpec = {
             x         = 0,
             y         = 1200,
             spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
+            behaviour         = "wait",
+            hostile           = true,
+            holdFire          = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
         },
     },
 }
@@ -112,6 +128,19 @@ return X4GunneryTestLabScenarioSpec
 
 Every spawned ship is named `<label> <index>`. Labels must state the test role,
 not merely `enemy` or `target`.
+
+For safe hostile capital targets, `holdFire=true` must add the ship to the
+persistent safety guard, set every operational turret/missile turret to HOLD
+FIRE, and repeatedly cease fire. `stripDefenceUnits=true` must remove carried
+defence units before hostility is applied. READY must report zero unsafe
+weapons, zero remaining defence units, and the expected attackable-hostile
+count.
+
+For repeated hit-attribution tests, `repairGuard=true` must keep the fixture
+attackable by repairing the victim ship and exact struck component after each
+player-ship hit. Do not substitute minimum-hull or invulnerability flags;
+vanilla target selection can exclude indestructible or invulnerable surfaces.
+READY must report the exact repair-guarded fixture count before the owner fires.
 
 Position uses ship-local axes: positive `distance` is forward, negative is
 astern, positive `x` is right, and positive `y` is up. Random spread cannot
@@ -202,6 +231,9 @@ different request tokens and two `ready` records). If any required record is
 missing, report the incomplete step and continue the live test; never accept a
 general “passed” report as proof of unlogged steps. If a manual visual assertion
 cannot be logged, label it as the owner's observation rather than automation.
+For hostile safety fixtures, also require the correlated READY fields for
+`safe_fixtures`, `safe_weapons`, `unsafe_weapons`, `defence_units`, and
+`hostiles`; a visible red/neutral label is not the primary check.
 
 ### 8. Clean up
 

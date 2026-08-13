@@ -858,18 +858,23 @@ assert(povButton(66) and povButton(66).active == false,
 assert(povButton(63) and povButton(63).active == true,
     "Turret POV manual must be clickable while the view is target cinematic")
 
--- ── 31. the element panel greys whichever element is being attacked ──────────
+-- ── 31. the element panel pins whichever element is being attacked ───────────
 sess30.controlMode = "direct"
 sess30.povAnchor, sess30.povMode = "turret", "manual"
 sess30.targetObjectID = 500
 sess30.aimTargetID = 500          -- hull is the engaged element
 gcMenu.display()
-assert(povButton(58) and povButton(58).active == false,
-    "Hull must be greyed when the hull is the engaged element")
+local function hasPinnedRow()
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.row == "surface_pinned" then return true end
+    end
+    return false
+end
+assert(hasPinnedRow(), "engaged hull must render in the fixed pinned section")
 sess30.aimTargetID = 501          -- a surface element, not the hull
+sess30.surfaceBrowser.pendingReason = "open"
 gcMenu.display()
-assert(povButton(58) and povButton(58).active == true,
-    "Hull must be clickable when something else is the engaged element")
+assert(hasPinnedRow(), "engaged surface must render in the fixed pinned section")
 
 -- ── 32. Next/Previous Target grey out with nothing to cycle to ───────────────
 -- Cycling is pointless with a single candidate, and there is no candidate list
@@ -963,13 +968,15 @@ assert(tostring(sess39.targetObjectID) == "98",
 assert(sess39.phase == "engaged",
     "auto-next must stay engaged; phase became " .. tostring(sess39.phase))
 
--- ── 40. the engaged/direct panel offers the toggle, checked by default ───────
+-- ── 40. engaged/direct session toggles have independent defaults ────────────
 gcMenu.display()
-assert(#fix.getCreatedCheckBoxes() == 1,
-    "the engaged/direct panel must offer exactly one checkbox (Auto-next Target); got "
+assert(#fix.getCreatedCheckBoxes() == 2,
+    "the engaged/direct panel must offer Auto-next and surface auto-refresh; got "
     .. tostring(#fix.getCreatedCheckBoxes()))
 assert(fix.getCreatedCheckBoxes()[1].checked == true,
     "the Auto-next Target checkbox must be checked while session.autoNextTarget is on")
+assert(fix.getCreatedCheckBoxes()[2].checked == false,
+    "surface auto-refresh must default unchecked")
 
 -- ── 41. Auto-next Target off: a dead target returns to the picker ────────────
 -- Reset the view first: one Esc's worth of state, so whatever cinematic was on
@@ -1103,7 +1110,8 @@ do
         -- Each group reports ONE representative component: 101 for ctx 10,
         -- 102 for ctx 20. The group's other turrets are not reported here.
         return { count = turretsPerGroup, currentcomponent = (tostring(ctxid) == "10") and 101 or 102,
-                 currentmacro = "", slotsize = "", total = turretsPerGroup, operational = turretsPerGroup }
+                 currentmacro = "turret_bor_m_railgun_02_mk1_macro", slotsize = "",
+                 total = turretsPerGroup, operational = turretsPerGroup }
     end
     C.GetNumUpgradeSlots             = function() return #slotComponents end
     C.GetUpgradeSlotCurrentComponent = function(ship, tag, slot) return slotComponents[slot] or 0 end
@@ -1141,6 +1149,9 @@ do
         "52a: the slot carrying group 10's representative component (101) must be listed under group 10")
     assert(hasMember(rear52a, 102),
         "52a: the slot carrying group 20's representative component (102) must be listed under group 20")
+    assert(front52a.members[1].macro == "turret_bor_m_railgun_02_mk1_macro"
+            and rear52a.members[1].macro == "turret_bor_m_railgun_02_mk1_macro",
+        "52a: every member must retain its authoritative group currentmacro for arc lookup")
     local members52a = #front52a.members + #rear52a.members
     assert(members52a == #slotComponents,
         "52a: every turret slot must appear exactly once across the groups; expected "
@@ -1693,6 +1704,10 @@ do
     GetPlayerContextByClass = function() return nil end
     C.GetNumUpgradeSlots = function(_, _, upgrade) return upgrade == "turret" and 2 or 0 end
     C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 700 + slot end
+    C.GetUpgradeSlotCurrentMacro = function(object, _, _, slot)
+        if tonumber(tostring(object):match("%d+")) == 601 then return "turret_m" end
+        return slot == 1 and "turret_l" or "turret_m"
+    end
     C.IsComponentOperational = function() return true end
     GetComponentData = function(component, ...)
         local vals = {}
@@ -1735,10 +1750,16 @@ do
         "57: equipment filter change needs audit evidence")
     assert(log58:find("event=surface_browser action=refresh location=top target=600", 1, true),
         "57: surface Refresh needs audit evidence")
-    assert(log58:find("event=surface_browser action=rendered target=600 target_name=\"0\" type_filter=turret equipment_filter=turret_l all=2 visible=1 equipment_options=2", 1, true),
+    assert(log58:find("event=surface_browser action=rendered target=600 target_name=\"0\"", 1, true)
+            and log58:find("type_filter=turret equipment_filter=turret_l all=2 alternatives=1 equipment_options=2", 1, true),
         "57: filtered surface render needs exact count/filter evidence")
-    assert(log58:find('event=surface_browser action=row target=600 component=701 name="0" kind=turret equipment="Large Turret" macro="turret_l"', 1, true),
-        "57: filtered surface row needs exact localized equipment and raw-macro evidence")
+    local sawFilteredSurface57 = false
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if tostring(entry.row) == "701" then
+            sawFilteredSurface57 = true
+        end
+    end
+    assert(sawFilteredSurface57, "57: filtered page must bind the matching equipment row")
 
     GetMacroData = function() return "" end
     sess57.surfaceTypeFilter, sess57.surfaceMacroFilter = "any", "any"
@@ -1792,6 +1813,20 @@ do
     sess57.checkedGroupKeys = { selected = true }
     gcMenu.shown = true
     local savedAdd57, events57 = AddUITriggeredEvent, {}
+    local savedComponentData57 = GetComponentData
+    GetComponentData = function(component, ...)
+        local values = {}
+        for _, key in ipairs({...}) do
+            if key == "macro" and tonumber(component) == 101 then
+                values[#values + 1] = "turret_bor_m_railgun_02_mk1_macro"
+            elseif key == "macro" then
+                values[#values + 1] = "third_party_unknown_turret_macro"
+            else
+                values[#values + 1] = false
+            end
+        end
+        return unpack(values)
+    end
     AddUITriggeredEvent = function(screen, control, params)
         events57[#events57 + 1] = { screen = screen, control = control, params = params }
     end
@@ -1806,6 +1841,11 @@ do
         "57: solution transport must stream selected members once before its target ids")
     assert(events57[2].params.weapon == 101 and events57[3].params.weapon == 102,
         "57: unchecked or inoperable turret leaked into exact-member request")
+    assert(events57[2].params.arcknow == 1 and events57[2].params.arcmin == -10
+            and events57[2].params.arcmax == 89,
+        "57: official turret member must stream its generated pitch interval")
+    assert(events57[3].params.arcknow == 0,
+        "57: an unknown third-party turret must stream UNKNOWN, not invented limits")
     assert(events57[1].params.members == 2 and events57[1].params.targets == 1
             and events57[4].params.target == 900,
         "57: batch declarations and target correlation must carry exact counts and ids")
@@ -1817,10 +1857,13 @@ do
     assert(pending57.pending and pending57.on == nil
             and fix.callbackCheckpoint() == firstRepaintMark57,
         "57: a reply for an unrequested target must not complete or repaint the batch")
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. nonce57 .. ":900:1:2")
+    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs3:" .. nonce57 .. ":900:1:1:2")
     fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. nonce57 .. ":1:1")
-    assert(pending57.pending == false and pending57.on == 1 and pending57.total == 2,
-        "57: matching packed result was not accepted")
+    assert(pending57.pending == false and pending57.on == 1 and pending57.known == 1
+            and pending57.total == 2,
+        "57: matching arc-aware packed result was not accepted")
+    assert(API.solutionText(pending57) == "1 / 2  1 " .. ReadText(20991, 100),
+        "57: unknown macro coverage must be explicit and must suppress ON SOLUTION")
     assert(fix.callbackCheckpoint() == firstRepaintMark57 + 1,
         "57: the first accepted solution result must schedule one deferred repaint")
     fix.drainCallbacksSince(firstRepaintMark57)
@@ -2004,6 +2047,7 @@ do
                 "requested=1 accepted=0 completed=0 unresolved=1", 1, true),
         "57: an incomplete batch must remain pending and emit one aggregate unresolved count")
     getElapsedTime = savedElapsed57
+    GetComponentData = savedComponentData57
     AddUITriggeredEvent = savedAdd57
 end
 
@@ -2064,7 +2108,7 @@ do
     gcMenu.display()
     local renderedSurfaces58 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
-        if entry.column == 2 and tonumber(tostring(entry.row)) then
+        if entry.column == 4 and tonumber(tostring(entry.row)) then
             renderedSurfaces58[tostring(entry.row)] = entry.text
         end
     end
@@ -2102,11 +2146,290 @@ do
         "58: target rows must bind the exact aggregate solution text to column 8")
     local log58 = table.concat(fix.getCapturedLog(), "\n")
     assert(log58:find('event=surface_browser action=row target=900 component=701 name="Alpha"', 1, true)
-            and log58:find('macro="" position=1 solution_state=complete solution_on=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+            and log58:find('macro="" position=1 solution_state=complete solution_on=2 solution_known=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
         "58: surface-row audit must prove first position and the displayed complete solution")
     assert(log58:find('event=target_browser action=row component=801 name="Zulu"', 1, true)
-            and log58:find('position=1 solution_state=complete solution_on=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+            and log58:find('position=1 solution_state=complete solution_on=2 solution_known=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
         "58: target-row audit must prove all-on-solution ordering and displayed value")
+end
+
+-- ── 59. surface browser pins health and lazily requests exact 20-row pages ──
+do
+    local sess59 = API.getSession()
+    sess59.phase, sess59.controlMode = "engaged", "direct"
+    sess59.targetObjectID, sess59.aimTargetID = 10000, 10000
+    sess59.surfaceTypeFilter, sess59.surfaceMacroFilter = "any", "any"
+    sess59.surfaceBrowser = X4GunneryState.newSurfaceBrowser(nil)
+    sess59.groups = {
+        { key = "page_group", operationalCount = 2, totalCount = 2, members = {
+            { componentID = 11001, operational = true },
+            { componentID = 11002, operational = true },
+        } },
+    }
+    sess59.checkedGroupKeys = { page_group = true }
+    C.IsComponentClass = function() return false end
+    C.GetNumUpgradeSlots = function(_, _, upgrade) return upgrade == "turret" and 41 or 0 end
+    C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 10000 + slot end
+    C.GetUpgradeSlotCurrentMacro = function(_, _, _, slot)
+        return slot >= 22 and "turret_test_l_laser_macro" or "turret_test_m_laser_macro"
+    end
+    C.IsComponentOperational = function() return true end
+    C.GetComponentName = function(component) return "Surface " .. tostring(component) end
+    local distanceOffset59 = 0
+    C.GetDistanceBetween = function(_, component)
+        return (tonumber(tostring(component)) - 10000) * 1000 + distanceOffset59
+    end
+    local shieldCapacity59, shieldPercent59, hullPercent59 = 0, 0, 73
+    GetComponentData = function(component, ...)
+        local vals = {}
+        for _, key in ipairs({...}) do
+            if key == "macro" then vals[#vals + 1] = "turret_m"
+            elseif key == "shieldmax" then vals[#vals + 1] = shieldCapacity59
+            elseif key == "shieldpercent" then vals[#vals + 1] = shieldPercent59
+            elseif key == "hullpercent" then vals[#vals + 1] = hullPercent59
+            elseif key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = false end
+        end
+        return unpack(vals)
+    end
+    GetMacroData = function(macro, key)
+        if key == "name" then return "Medium Turret" end
+        if key == "size" then return "" end
+        return ""
+    end
+    local savedAdd59, targetEvents59, activeNonce59, nonceByTarget59 = AddUITriggeredEvent, {}, nil, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        if control == "solution_batch_begin" then activeNonce59 = params.nonce end
+        if control == "solution_batch_target" then
+            local target = tostring(params.target)
+            targetEvents59[#targetEvents59 + 1] = target
+            nonceByTarget59[target] = activeNonce59
+        end
+        savedAdd59(screen, control, params)
+    end
+    gcMenu.display()
+    assert(#targetEvents59 == 21,
+        "59: initial surface render must request pinned target plus exactly 20 alternatives; got "
+            .. tostring(#targetEvents59))
+    local pageOneRows59 = {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        local row = tonumber(tostring(entry.row))
+        if row and row >= 10001 and row <= 10041 then pageOneRows59[row] = true end
+    end
+    local pageOneCount59 = 0
+    for _ in pairs(pageOneRows59) do pageOneCount59 = pageOneCount59 + 1 end
+    assert(pageOneCount59 == 20 and pageOneRows59[10022] and pageOneRows59[10041]
+            and not pageOneRows59[10001],
+        "59: page one must contain 20 installed L elements ahead of nearer M elements")
+    local pinnedDistance59, pinnedShield59, pinnedHull59, largeRow59
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.row == "surface_pinned" and entry.column == 3 then pinnedDistance59 = entry.text end
+        if entry.row == "surface_pinned" and entry.column == 5 then pinnedShield59 = entry.text end
+        if entry.row == "surface_pinned_hull" and entry.column == 5 then pinnedHull59 = entry.text end
+        if tostring(entry.row) == "10022" and entry.column == 1 then largeRow59 = entry.text end
+    end
+    assert(type(pinnedDistance59) == "function" and pinnedDistance59() == "0.0 km",
+        "59: pinned distance must be function-backed and initialized with the pinned solution")
+    assert(type(pinnedShield59) == "function" and type(pinnedHull59) == "function",
+        "59: both pinned health rows must be function-backed for in-place element-frame updates")
+    assert(pinnedShield59() == ReadText(20991, 98) .. " -"
+            and pinnedHull59() == ReadText(20991, 99) .. " 73%",
+        "59: zero shield capacity and hull percent must display on separate pinned rows")
+    shieldCapacity59, shieldPercent59, hullPercent59 = 100, 0, 41
+    assert(pinnedShield59() == ReadText(20991, 98) .. " 0%"
+            and pinnedHull59() == ReadText(20991, 99) .. " 41%",
+        "59: shielded component at zero must display Shield 0% above its exact hull percent")
+    assert(largeRow59 == "Surface 10022",
+        "59: surface rows must display only the engine-provided equipment name")
+    local pinnedRepaintMark59 = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.SolutionResult",
+        "x4gcs2:" .. nonceByTarget59["10000"] .. ":10000:1:2")
+    fix.fireEvent("X4GunneryControl.SolutionBatchComplete",
+        "x4gcs2c:" .. nonceByTarget59["10000"] .. ":1:1")
+    assert(fix.callbackCheckpoint() == pinnedRepaintMark59 + 1,
+        "59: pinned result must schedule one isolated element-frame update")
+    fix.drainCallbacksSince(pinnedRepaintMark59)
+    local log59 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log59:find("event=surface_pinned action=refresh component=10000", 1, true)
+            and log59:find("solution_on=1 solution_known=2 solution_total=2 distance=0 shield_capacity=true shield_percent=0 hull_percent=41", 1, true),
+        "59: pinned refresh audit must carry exact solution, distance, and live health values")
+
+    targetEvents59 = {}
+    local nextPage59 = fix.buttonByText(ReadText(20991, 95))
+    assert(nextPage59 and nextPage59.active, "59: Next Page must be active for 41 alternatives")
+    nextPage59.handlers.onClick()
+    assert(#targetEvents59 == 20, "59: opening page two must request only its 20 alternatives")
+    local pageTwoRows59 = {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        local row = tonumber(tostring(entry.row))
+        if row and row >= 10001 and row <= 10041 then pageTwoRows59[row] = true end
+    end
+    assert(pageTwoRows59[10001] and pageTwoRows59[10020]
+            and not pageTwoRows59[10021] and not pageTwoRows59[10022],
+        "59: page two must contain the first 20 medium slots after all large slots")
+
+    local pageTwoDistance59, mediumFallbackRow59
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if tostring(entry.row) == "10001" and entry.column == 3 then pageTwoDistance59 = entry.text end
+        if tostring(entry.row) == "10001" and entry.column == 1 then mediumFallbackRow59 = entry.text end
+    end
+    assert(pageTwoDistance59 == "1.0 km",
+        "59: alternative distance must be captured alongside that page's solution batch")
+    assert(mediumFallbackRow59 == "Surface 10001",
+        "59: medium surface rows must not append redundant type or size text")
+
+    distanceOffset59 = 5000
+    targetEvents59 = {}
+    local previousPage59 = fix.buttonByText(ReadText(20991, 94))
+    previousPage59.handlers.onClick()
+    assert(#targetEvents59 == 0, "59: returning to cached page one must issue no solution requests")
+    local cachedPageDistance59
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if tostring(entry.row) == "10022" and entry.column == 3 then cachedPageDistance59 = entry.text end
+    end
+    assert(cachedPageDistance59 == "22.0 km",
+        "59: revisiting a cached page must retain the distance captured with its solution batch")
+    local autoRefresh59
+    for _, checkbox in ipairs(fix.getCreatedCheckBoxes()) do
+        if checkbox.row == "surface_auto_refresh" then autoRefresh59 = checkbox end
+    end
+    assert(autoRefresh59 and autoRefresh59.checked == false,
+        "59: ten-second refresh must be visible and unchecked by default")
+    autoRefresh59.handlers.onClick()
+    assert(sess59.surfaceBrowser.autoRefresh == true,
+        "59: clicking ten-second refresh must enable only session browser state")
+    targetEvents59, nonceByTarget59 = {}, {}
+    C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
+    C.GetPlayerOccupiedShipID = function() return sess59.shipID end
+    clock = clock + 10
+    gcMenu.onUpdate()
+    assert(#targetEvents59 == 21,
+        "59: automatic refresh must recalculate pinned plus current 20-row page only; got "
+            .. tostring(#targetEvents59) .. " phase=" .. tostring(sess59.phase)
+            .. " next=" .. tostring(sess59.surfaceBrowser.nextAutoRefreshAt)
+            .. " now=" .. tostring(clock))
+    local refreshedPinnedDistance59, refreshedPageDistance59
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.row == "surface_pinned" and entry.column == 3 then refreshedPinnedDistance59 = entry.text end
+        if tostring(entry.row) == "10022" and entry.column == 3 then refreshedPageDistance59 = entry.text end
+    end
+    assert(type(refreshedPinnedDistance59) == "function" and refreshedPinnedDistance59() == "5.0 km",
+        "59: pinned distance must refresh on the same one-second tick as its solution")
+    assert(refreshedPageDistance59 == "27.0 km",
+        "59: automatic page refresh must recapture distance with the new 20-row solution batch")
+    log59 = table.concat(fix.getCapturedLog(), "\n")
+    assert(log59:find("event=surface_refresh action=fire reason=automatic root=10000 page=1", 1, true)
+            and log59:find("event=surface_snapshot action=create reason=automatic root=10000", 1, true),
+        "59: automatic refresh needs one firing record and one matching snapshot record")
+    assert(log59:find('event=surface_page action=request generation=', 1, true)
+            and log59:find('requested=20 selected_total=2 selected_signature="11001,11002"', 1, true),
+        "59: page request audit must identify exact bounded membership and selected turrets")
+
+    -- X4 keeps updating UI frames while the simulation is paused. A paused
+    -- elapsed clock must not repeatedly satisfy the same pinned/automatic
+    -- refresh deadline and recursively request another solution batch.
+    targetEvents59 = {}
+    C.IsGamePaused = function() return true end
+    clock = clock + 20
+    gcMenu.onUpdate()
+    assert(#targetEvents59 == 0,
+        "59: paused UI updates must issue no pinned or automatic surface requests; got "
+            .. tostring(#targetEvents59))
+    C.IsGamePaused = function() return false end
+
+    sess59.aimTargetID = 10001
+    sess59.surfaceBrowser.pendingReason = "open"
+    gcMenu.display()
+    local parentHull59
+    for _, button in ipairs(fix.getCreatedButtons()) do
+        if button.row == "surface_parent_hull" then parentHull59 = button end
+    end
+    assert(parentHull59 and parentHull59.text == ReadText(20991, 58),
+        "59: a pinned surface must retain a direct parent-hull action")
+    AddUITriggeredEvent = savedAdd59
+end
+
+-- ── 60. station surfaces resolve size from the exact installed module slot ─
+do
+    local sess60 = API.getSession()
+    sess60.phase, sess60.controlMode = "engaged", "direct"
+    sess60.targetObjectID, sess60.aimTargetID = 12000, 12000
+    sess60.surfaceTypeFilter, sess60.surfaceMacroFilter = "any", "any"
+    sess60.surfaceBrowser = X4GunneryState.newSurfaceBrowser(nil)
+    C.IsComponentClass = function(component, class)
+        return class == "station" and tonumber(tostring(component)) == 12000
+    end
+    C.GetNumStationModules = function() return 1 end
+    C.GetStationModules = function(result)
+        result[0] = 12001
+        return 1
+    end
+    C.GetNumUpgradeSlots = function(destructible, _, upgrade)
+        if tonumber(tostring(destructible)) ~= 12001 then return 0 end
+        if upgrade == "turret" then return 2 end
+        if upgrade == "shield" then return 1 end
+        return 0
+    end
+    C.GetUpgradeSlotCurrentComponent = function(_, upgrade, slot)
+        if upgrade == "turret" then return 12001 + slot end
+        return 12004
+    end
+    local installedMacroCalls60 = {}
+    C.GetUpgradeSlotCurrentMacro = function(object, module, upgrade, slot)
+        installedMacroCalls60[#installedMacroCalls60 + 1] = {
+            object = tonumber(tostring(object)), module = tonumber(tostring(module)),
+            upgrade = upgrade, slot = slot,
+        }
+        if upgrade == "shield" then return "shield_xen_l_standard_01_mk2_macro" end
+        return slot == 1 and "turret_xen_l_laser_01_mk1_macro"
+            or "turret_xen_m_laser_02_mk1_macro"
+    end
+    C.IsComponentOperational = function() return true end
+    C.GetComponentName = function(component)
+        return ({ [12002] = "XEN L Graviton Turret Mk1",
+            [12003] = "XEN M Impulse Turret Mk1",
+            [12004] = "XEN L Shield Generator Mk2" })[tonumber(tostring(component))] or "Station"
+    end
+    C.GetDistanceBetween = function() return 30000 end
+    GetMacroData = function(macro, key)
+        if key == "name" then return ({
+            turret_xen_l_laser_01_mk1_macro = "XEN L Graviton Turret Mk1",
+            turret_xen_m_laser_02_mk1_macro = "XEN M Impulse Turret Mk1",
+            shield_xen_l_standard_01_mk2_macro = "XEN L Shield Generator Mk2",
+        })[macro] or "" end
+        return ""
+    end
+    GetComponentData = function(_, ...)
+        local values = {}
+        for _, key in ipairs({...}) do
+            if key == "shieldmax" or key == "shieldpercent" then values[#values + 1] = 0
+            elseif key == "hullpercent" then values[#values + 1] = 100
+            else values[#values + 1] = false end
+        end
+        return unpack(values)
+    end
+    gcMenu.display()
+    assert(#installedMacroCalls60 == 3,
+        "60: every station surface needs one exact installed-equipment lookup")
+    for _, call in ipairs(installedMacroCalls60) do
+        assert(call.object == 12000 and call.module == 12001,
+            "60: station equipment macro lookup must identify root station and exact module")
+    end
+    local stationSurfaceLabels60, stationSurfaceOrder60 = {}, {}
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        local row = tostring(entry.row)
+        if (row == "12002" or row == "12003" or row == "12004") and entry.column == 1 then
+            stationSurfaceLabels60[row] = entry.text
+            stationSurfaceOrder60[#stationSurfaceOrder60 + 1] = row
+        end
+    end
+    assert(table.concat(stationSurfaceOrder60, ",") == "12002,12004,12003",
+        "60: installed sizes must sort L turret, L shield, then M turret")
+    assert(stationSurfaceLabels60["12002"] == "XEN L Graviton Turret Mk1"
+            and stationSurfaceLabels60["12003"] == "XEN M Impulse Turret Mk1"
+            and stationSurfaceLabels60["12004"] == "XEN L Shield Generator Mk2",
+        "60: station rows must contain only engine-provided equipment names")
 end
 
 print("runtime targeting tests passed")

@@ -111,6 +111,27 @@ fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
 assert(countEvents("observe_mark") == 2,
     "a settled aim target must not trigger another delayed snapshot")
 
+-- The 20-second settled mark measures engagement time, not wall-clock time.
+-- A long pause must not produce the same premature duplicate snapshot that
+-- invalidated the first live arc capture.
+X4GunneryControlAPI.getSession = function()
+    return { preferAllTurrets = true, aimTargetID = 4243 }
+end
+local paused = false
+X4GunneryControlAPI.isGamePaused = function() return paused end
+observeClock = 43
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 3, "a changed target must start a fresh snapshot window")
+paused, observeClock = true, 73
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 3, "paused wall-clock time must not settle the snapshot")
+paused, observeClock = false, 74
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 3, "one unpaused second must not settle the snapshot")
+observeClock = 94
+fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
+assert(countEvents("observe_mark") == 4, "20 unpaused seconds must settle the snapshot")
+
 -- "Nothing selected" is reported as id "0"; forwarding it would make MD prefer a
 -- dead id over player.target, so it must be dropped rather than sent.
 X4GunneryControlAPI.getTestSofttarget = function()

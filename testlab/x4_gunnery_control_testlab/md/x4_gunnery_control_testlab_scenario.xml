@@ -19,7 +19,11 @@
     scenario_begin  {specId = "...", force = true|false, requestId = "..."}
     scenario_group  {macro=, faction=, count=, distance=, spread=,
                      behaviour="wait"|"attack"|"none", hostile=true|false,
-                     label=}                                  (repeated)
+                     label=, holdFire=, stripDefenceUnits=,
+                     repairGuard=}                            (repeated)
+    scenario_station {recipe="xen_defence", faction=, distance=, spread=,
+                      x=, y=, hostile=, label=, expectedModules=,
+                      minSurfaces=, holdFire=}                (repeated)
     scenario_commit {}
 
   Begin decides whether this spec should spawn at all (see IDEMPOTENCY), group
@@ -113,8 +117,36 @@
               <set_value name="ScenarioRoot.$PendingSpecId" exact="$SpecId"/>
               <set_value name="ScenarioRoot.$PendingRequestId" exact="$RequestId"/>
               <set_value name="ScenarioRoot.$Pending" exact="[]"/>
+              <set_value name="ScenarioRoot.$PendingStations" exact="[]"/>
               <debug_text text="'[X4GC TEST SCENARIO] accepting spec id=' + $SpecId + ' force=' + $Force"/>
             </do_else>
+          </actions>
+        </cue>
+
+        <!-- ScenarioStation
+             Streams the one station recipe currently proven from X4's shipped
+             constructionplans.xml. The recipe name is deliberately narrow:
+             an unknown plan must fail visibly rather than create another
+             plausible-looking but unequipped shell. -->
+        <cue name="ScenarioStation" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_station'"/>
+            <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+          </conditions>
+          <actions>
+            <append_to_list name="ScenarioRoot.$PendingStations" exact="table[
+              $label           = if @event.param3.$label           then event.param3.$label           else 'station',
+              $recipe          = if @event.param3.$recipe          then event.param3.$recipe          else '',
+              $faction         = if @event.param3.$faction         then event.param3.$faction         else 'xenon',
+              $distance        = if @event.param3.$distance        then event.param3.$distance        else 30000,
+              $spread          = if @event.param3.$spread          then event.param3.$spread          else 0,
+              $x               = if @event.param3.$x               then event.param3.$x               else 0,
+              $y               = if @event.param3.$y               then event.param3.$y               else 0,
+              $hostile         = @event.param3.$hostile == true,
+              $holdfire        = @event.param3.$holdFire == true,
+              $expectedmodules = if @event.param3.$expectedModules then event.param3.$expectedModules else 0,
+              $minsurfaces      = if @event.param3.$minSurfaces     then event.param3.$minSurfaces     else 0
+            ]"/>
           </actions>
         </cue>
 
@@ -142,7 +174,10 @@
               $x         = if @event.param3.$x         then event.param3.$x         else 0,
               $y         = if @event.param3.$y         then event.param3.$y         else 0,
               $behaviour = if @event.param3.$behaviour then event.param3.$behaviour else 'wait',
-              $hostile   = @event.param3.$hostile == true
+              $hostile   = @event.param3.$hostile == true,
+              $holdfire  = @event.param3.$holdFire == true,
+              $stripdefenceunits = @event.param3.$stripDefenceUnits == true,
+              $repairguard = @event.param3.$repairGuard == true
             ]"/>
           </actions>
         </cue>
@@ -162,6 +197,21 @@
             <signal_cue_instantly cue="DespawnScenarioImpl"/>
 
             <create_group groupname="ScenarioRoot.$Spawned"/>
+            <create_group groupname="ScenarioRoot.$SpawnedStations"/>
+            <create_group groupname="ScenarioRoot.$SafeObjects"/>
+            <create_group groupname="ScenarioRoot.$RepairObjects"/>
+            <set_value name="$StationModules" exact="0"/>
+            <set_value name="$StationTurrets" exact="0"/>
+            <set_value name="$StationMissileTurrets" exact="0"/>
+            <set_value name="$StationShields" exact="0"/>
+            <set_value name="$StationEngines" exact="0"/>
+            <set_value name="$StationLoadoutFailures" exact="0"/>
+            <set_value name="$SafeObjectCount" exact="0"/>
+            <set_value name="$SafeWeapons" exact="0"/>
+            <set_value name="$UnsafeWeapons" exact="0"/>
+            <set_value name="$DefenceUnits" exact="0"/>
+            <set_value name="$Hostiles" exact="0"/>
+            <set_value name="$RepairObjectCount" exact="0"/>
             <do_for_each name="$Def" in="ScenarioRoot.$Pending">
               <do_if value="$Def.$macro == '' or not @macro.{$Def.$macro}">
                 <debug_text text="'[X4GC TEST SCENARIO] skipping group ' + $Def.$label + '; unknown macro=' + $Def.$macro"/>
@@ -196,6 +246,42 @@
                      unambiguous in the target list. -->
                 <set_object_name object="$Ship" name="$Def.$label + ' ' + $Index"/>
 
+                <!-- Remove combat drones before hostility is applied. A
+                     launched drone is another hostile target and invalidates
+                     per-surface projectile attribution even if it crosses the
+                     selected component's bearing only briefly. -->
+                <do_if value="$Def.$stripdefenceunits and $Ship.units.{unitcategory.defence}.count">
+                  <remove_units object="$Ship" category="unitcategory.defence" mk="1"
+                                exact="$Ship.units.{unitcategory.defence}.count"/>
+                </do_if>
+                <set_value name="$DefenceUnits" operation="add"
+                           exact="$Ship.units.{unitcategory.defence}.count"/>
+
+                <do_if value="$Def.$repairguard">
+                  <set_value name="$RepairObjectCount" operation="add"/>
+                  <add_to_group groupname="ScenarioRoot.$RepairObjects" object="$Ship"/>
+                </do_if>
+
+                <do_if value="$Def.$holdfire">
+                  <set_value name="$SafeObjectCount" operation="add"/>
+                  <add_to_group groupname="ScenarioRoot.$SafeObjects" object="$Ship"/>
+                  <cease_fire object="$Ship"/>
+                  <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
+                    <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                    <do_if value="$Weapon.mode == weaponmode.holdfire">
+                      <set_value name="$SafeWeapons" operation="add"/>
+                    </do_if>
+                    <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
+                  </do_for_each>
+                  <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
+                    <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                    <do_if value="$Weapon.mode == weaponmode.holdfire">
+                      <set_value name="$SafeWeapons" operation="add"/>
+                    </do_if>
+                    <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
+                  </do_for_each>
+                </do_if>
+
                 <!-- Where a ship actually ended up is the first thing anyone
                      asks when it cannot be found: safepos may move it, and a
                      null player.zone would place it somewhere unexpected. -->
@@ -205,6 +291,9 @@
                   <add_relation_boost object="$Ship" otherobject="player.ship"
                                       value="$Ship.owner.relation.kill.max"
                                       decay="1" delay="60min" silent="true"/>
+                  <do_if value="player.ship.mayattack.{$Ship}">
+                    <set_value name="$Hostiles" operation="add"/>
+                  </do_if>
                 </do_if>
 
                 <do_if value="$Def.$behaviour == 'wait'">
@@ -221,14 +310,168 @@
               <debug_text text="'[X4GC TEST SCENARIO] group ' + $Def.$label + ' macro=' + $Def.$macro + ' faction=' + $Def.$faction + ' count=' + $Count + ' distance=' + $Def.$distance + ' behaviour=' + $Def.$behaviour"/>
             </do_for_each>
 
+            <!-- A construction plan creates station modules but does not equip
+                 their surface slots. X4's schema explicitly supports applying
+                 a generated loadout to an existing station module. Generate
+                 from the same faction equipment pool used by vanilla station
+                 finalisation, apply per module, and census only OPERATIONAL
+                 components before acknowledging the fixture. -->
+            <do_for_each name="$Def" in="ScenarioRoot.$PendingStations">
+              <do_if value="$Def.$recipe != 'xen_defence'">
+                <debug_text text="'[X4GC TEST SCENARIO] skipping station ' + $Def.$label + '; unknown recipe=' + $Def.$recipe"/>
+                <continue/>
+              </do_if>
+
+              <set_value name="$Owner" exact="@faction.{$Def.$faction}"/>
+              <do_if value="not $Owner">
+                <debug_text text="'[X4GC TEST SCENARIO] unknown faction=' + $Def.$faction + ' for station ' + $Def.$label + '; using xenon'"/>
+                <set_value name="$Owner" exact="faction.xenon"/>
+              </do_if>
+
+              <create_station name="$Station" groupname="ScenarioRoot.$SpawnedStations"
+                              zone="player.zone" macro="macro.station_gen_factory_base_01_macro"
+                              constructionplan="'xen_defence'" owner="$Owner"
+                              state="componentstate.operational">
+                <safepos object="player.ship" x="$Def.$x" y="$Def.$y"
+                         z="$Def.$distance" max="$Def.$spread" includeplotbox="true"/>
+              </create_station>
+              <set_object_name object="$Station" name="$Def.$label"/>
+              <set_module_loadout_level object="$Station" exact="1.0"/>
+
+              <create_list name="$PossibleWares"/>
+              <do_if value="md.$EquipmentTable? and md.$EquipmentTable.{$Owner}?">
+                <set_value name="$PossibleWares" exact="md.$EquipmentTable.{$Owner}"/>
+              </do_if>
+              <do_if value="$PossibleWares.count" max="0">
+                <set_value name="$StationLoadoutFailures" operation="add"/>
+                <debug_text text="'[X4GC TEST SCENARIO] station loadout failed; no equipment pool owner=' + $Owner + ' name=' + $Station.knownname"/>
+              </do_if>
+              <do_else>
+                <do_for_each name="$Module" in="$Station.modules.operational.list">
+                  <generate_loadout result="$ModuleLoadouts" macro="$Station.macro"
+                                    module="$Module.macro" faction="$Owner"
+                                    wares="$PossibleWares" level="1.0" variation="0"/>
+                  <do_if value="$ModuleLoadouts.count" min="1">
+                    <apply_loadout loadout="$ModuleLoadouts.{1}" object="$Module"/>
+                  </do_if>
+                  <do_else>
+                    <set_value name="$StationLoadoutFailures" operation="add"/>
+                    <debug_text text="'[X4GC TEST SCENARIO] station module loadout empty module=' + $Module.macro + ' station=' + $Station"/>
+                  </do_else>
+                </do_for_each>
+              </do_else>
+
+              <do_if value="$Station.units.{unitcategory.defence}.count">
+                <remove_units object="$Station" category="unitcategory.defence" mk="1"
+                              exact="$Station.units.{unitcategory.defence}.count"/>
+              </do_if>
+              <set_value name="$DefenceUnits" operation="add"
+                         exact="$Station.units.{unitcategory.defence}.count"/>
+
+              <do_if value="$Def.$hostile">
+                <add_relation_boost object="$Station" otherobject="player.ship"
+                                    value="$Station.owner.relation.kill.max"
+                                    decay="1" delay="60min" silent="true"/>
+                <do_if value="player.ship.mayattack.{$Station}">
+                  <set_value name="$Hostiles" operation="add"/>
+                </do_if>
+              </do_if>
+              <signal_objects object="player.galaxy" param="'init station'" param2="$Station" param3="true"/>
+
+              <!-- A hostile surface fixture must never return fire. Keep its
+                   weapon surfaces installed for the browser/arc tests, but
+                   put every emitter in the engine's explicit HOLD FIRE mode
+                   and stop any shot already queued by station initialisation.
+                   ScenarioSafetyGuard below reasserts both constraints. -->
+              <do_if value="$Def.$holdfire">
+                <set_value name="$SafeObjectCount" operation="add"/>
+                <add_to_group groupname="ScenarioRoot.$SafeObjects" object="$Station"/>
+                <cease_fire object="$Station"/>
+                <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
+                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                  <do_if value="$Weapon.mode == weaponmode.holdfire">
+                    <set_value name="$SafeWeapons" operation="add"/>
+                  </do_if>
+                  <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
+                </do_for_each>
+                <do_for_each name="$Weapon" in="$Station.missileturrets.operational.list">
+                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                  <do_if value="$Weapon.mode == weaponmode.holdfire">
+                    <set_value name="$SafeWeapons" operation="add"/>
+                  </do_if>
+                  <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
+                </do_for_each>
+                <debug_text text="'[X4GC TEST SCENARIO] safety station=' + $Station + ' holdfire=' + $SafeWeapons + ' unsafe=' + $UnsafeWeapons"/>
+              </do_if>
+
+              <set_value name="$StationModules" operation="add" exact="$Station.modules.operational.count"/>
+              <set_value name="$StationTurrets" operation="add" exact="$Station.turrets.operational.count"/>
+              <set_value name="$StationMissileTurrets" operation="add" exact="$Station.missileturrets.operational.count"/>
+              <set_value name="$StationShields" operation="add" exact="$Station.shields.operational.count"/>
+              <set_value name="$StationEngines" operation="add" exact="$Station.engines.operational.count"/>
+              <debug_text text="'[X4GC TEST SCENARIO] created station=' + $Station + ' name=' + $Station.knownname + ' recipe=' + $Def.$recipe + ' holdfire=' + $Def.$holdfire + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count + ' dist=' + $Station.distanceto.{player.ship}"/>
+            </do_for_each>
+
             <set_value name="ScenarioRoot.$SpawnedSpecId" exact="ScenarioRoot.$PendingSpecId"/>
             <remove_value name="ScenarioRoot.$Pending"/>
-            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count"/>
+            <remove_value name="ScenarioRoot.$PendingStations"/>
+            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count + ' stations=' + ScenarioRoot.$SpawnedStations.count + ' modules=' + $StationModules + ' turrets=' + $StationTurrets + ' missile_turrets=' + $StationMissileTurrets + ' shields=' + $StationShields + ' engines=' + $StationEngines + ' safe_fixtures=' + $SafeObjectCount + ' safe_weapons=' + $SafeWeapons + ' unsafe_weapons=' + $UnsafeWeapons + ' defence_units=' + $DefenceUnits + ' hostiles=' + $Hostiles + ' repair_fixtures=' + $RepairObjectCount + ' loadout_failures=' + $StationLoadoutFailures"/>
             <do_if value="ScenarioRoot.$PendingRequestId != ''">
               <raise_lua_event name="'X4GunneryTestLab.ScenarioReady'"
-                               param="'x4gct1:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count"/>
+                               param="'x4gct6:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count + ':' + ScenarioRoot.$SpawnedStations.count + ':' + $StationModules + ':' + $StationTurrets + ':' + $StationMissileTurrets + ':' + $StationShields + ':' + $StationEngines + ':' + $SafeObjectCount + ':' + $SafeWeapons + ':' + $UnsafeWeapons + ':' + $DefenceUnits + ':' + $Hostiles + ':' + $RepairObjectCount"/>
             </do_if>
             <remove_value name="ScenarioRoot.$PendingRequestId"/>
+          </actions>
+        </cue>
+
+        <!-- Repair only after a real player-ship hit. Unlike minimum-hull or
+             invulnerability flags, this leaves the fixture attackable and its
+             surface elements eligible for the vanilla shoot controller. -->
+        <cue name="ScenarioRepairArm" checkinterval="0.1s">
+          <conditions>
+            <check_value value="ScenarioRoot.$RepairObjects? and ScenarioRoot.$RepairObjects.count"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="player.ship"/>
+            <debug_text text="'[X4GC TEST SCENARIO] repair guard armed ship=' + $Ship + ' fixtures=' + ScenarioRoot.$RepairObjects.count"/>
+          </actions>
+          <cues>
+            <cue name="ScenarioRepairHit" instantiate="true">
+              <conditions>
+                <event_object_attacked_object object="$Ship"/>
+                <check_value value="ScenarioRoot.$RepairObjects? and ScenarioRoot.$RepairObjects.indexof.{event.param}"/>
+              </conditions>
+              <actions>
+                <set_object_shield object="event.param" exact="100"/>
+                <set_object_hull object="event.param" exact="100"/>
+                <do_if value="@event.param3.{1} and event.param3.{1}.exists">
+                  <set_object_shield object="event.param3.{1}" exact="100"/>
+                  <set_object_hull object="event.param3.{1}" exact="100"/>
+                </do_if>
+              </actions>
+            </cue>
+          </cues>
+        </cue>
+
+        <!-- Belt-and-braces safety for hostile live-fire fixtures. Station AI
+             may revisit weapon modes after initialisation, so Test Lab owns the
+             invariant for as long as the spawned station exists. -->
+        <cue name="ScenarioSafetyGuard" instantiate="true" checkinterval="1s">
+          <conditions>
+            <check_value value="ScenarioRoot.$SafeObjects? and ScenarioRoot.$SafeObjects.count"/>
+          </conditions>
+          <actions>
+            <do_for_each name="$Object" in="ScenarioRoot.$SafeObjects">
+              <do_if value="$Object.exists">
+                <cease_fire object="$Object"/>
+                <do_for_each name="$Weapon" in="$Object.turrets.operational.list">
+                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                </do_for_each>
+                <do_for_each name="$Weapon" in="$Object.missileturrets.operational.list">
+                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                </do_for_each>
+              </do_if>
+            </do_for_each>
           </actions>
         </cue>
 
@@ -265,6 +508,21 @@
               </do_for_each>
               <remove_value name="ScenarioRoot.$Spawned"/>
             </do_if>
+            <do_if value="ScenarioRoot.$SpawnedStations?">
+              <do_for_each name="$Station" in="ScenarioRoot.$SpawnedStations">
+                <do_if value="$Station.exists">
+                  <destroy_object object="$Station" explosion="false"/>
+                </do_if>
+              </do_for_each>
+              <remove_value name="ScenarioRoot.$SpawnedStations"/>
+            </do_if>
+            <do_if value="ScenarioRoot.$SafeObjects?">
+              <remove_value name="ScenarioRoot.$SafeObjects"/>
+            </do_if>
+            <do_if value="ScenarioRoot.$RepairObjects?">
+              <remove_value name="ScenarioRoot.$RepairObjects"/>
+            </do_if>
+            <reset_cue cue="ScenarioRepairArm"/>
             <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
           </actions>
         </cue>
