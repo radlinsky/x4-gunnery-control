@@ -413,6 +413,96 @@ if [ -n "$last_station_release_line" ] && { [ -z "$first_settt_line" ] || [ "$la
   note "station hierarchy release (last at line $last_station_release_line) must precede the first replacement set_turret_targets (line $first_settt_line)"
 fi
 
+# 9. Task 3E: bounded release-transition diagnostic.
+#    PreferAllTurrets.Apply must emit exactly one release-transition diagnostic
+#    line per Apply invocation for a meaningful preferred-target change, regardless
+#    of how many hierarchy members are released. The old separate "released
+#    previous" marker is removed so a normal switch does not produce two
+#    competing release-specific lines.
+#
+#    9a. Exactly one release-transition marker exists in Apply.
+rel_count=$(printf '%s\n' "$apply_body" | grep -c 'prefer_all_turrets: release transition')
+if [ "$rel_count" -ne 1 ]; then
+  note "Apply must contain exactly one 'release transition' diagnostic; found $rel_count"
+fi
+# 9b. The marker includes ship, previous, previousroot, replacement target, and
+#     release scope.
+rel_line_content=$(printf '%s\n' "$apply_body" | grep -F 'prefer_all_turrets: release transition')
+if [ -z "$rel_line_content" ]; then
+  note "Apply must contain a 'release transition' diagnostic"
+else
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
+  for token in '$ship' '$previous' '$prevrootlog' '$target' 'releasescope'; do
+    if ! printf '%s\n' "$rel_line_content" | grep -qF "$token"; then
+      note "release transition diagnostic must include $token; found: $rel_line_content"
+    fi
+  done
+fi
+# 9c. The diagnostic is gated on a meaningful transition ($previous exists as a
+#     payload value and differs from $target), but does NOT require
+#     $previous.exists. Verify the enclosing do_if condition.
+rel_line_num=$(printf '%s\n' "$apply_body" | grep -nF 'prefer_all_turrets: release transition' | head -1 | cut -d: -f1)
+if [ -n "$rel_line_num" ]; then
+  # Count do_if nesting at this line to confirm it is gated.
+  nesting=$(printf '%s\n' "$apply_body" | head -"$rel_line_num" | awk '
+    /<do_if value=/ { depth++ }
+    />/ && depth > 0 {
+      tmp=$0; n=gsub(/<\/do_if>/, "</do_if>", tmp); depth -= n
+    }
+    END { print depth }
+  ')
+  if [ "$nesting" -eq 0 ]; then
+    note "release transition diagnostic must be inside a do_if gate"
+  fi
+  # Extract the innermost enclosing do_if condition.
+  enclosing=$(printf '%s\n' "$apply_body" | head -"$rel_line_num" | awk '
+    /<do_if value=/ { depth++; cond[depth] = $0 }
+    />/ && depth > 0 {
+      tmp=$0; n=gsub(/<\/do_if>/, "</do_if>", tmp); depth -= n
+      if (depth == 0) delete cond
+    }
+    END { if (depth > 0) print cond[depth] }
+  ')
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
+  if ! printf '%s\n' "$enclosing" | grep -qF '$previous != $target'; then
+    note "release transition diagnostic must be gated on \$previous != \$target"
+  fi
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
+  if printf '%s\n' "$enclosing" | grep -qF '$previous.exists'; then
+    note "release transition diagnostic must not require \$previous.exists"
+  fi
+fi
+# 9d. The diagnostic occurs after the complete hierarchy release phase and
+#     before the first replacement set_turret_targets call.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+last_stop_line=$(printf '%s\n' "$apply_body" | grep -nF 'stop_firing_at_target object="$ship"' | tail -1 | cut -d: -f1)
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+first_settt_line=$(printf '%s\n' "$apply_body" | grep -nF '<set_turret_targets object="$ship"' | head -1 | cut -d: -f1)
+if [ -n "$rel_line_num" ] && [ -n "$last_stop_line" ] && [ -n "$first_settt_line" ]; then
+  if [ "$last_stop_line" -ge "$rel_line_num" ]; then
+    note "release transition (line $rel_line_num) must occur after the last hierarchy release (line $last_stop_line)"
+  fi
+  if [ "$rel_line_num" -ge "$first_settt_line" ]; then
+    note "release transition (line $rel_line_num) must occur before the first replacement set_turret_targets (line $first_settt_line)"
+  fi
+fi
+# 9e. The diagnostic is not inside any hierarchy do_for_each loop.
+if [ -n "$rel_line_num" ]; then
+  dfe_opens=$(printf '%s\n' "$apply_body" | head -"$rel_line_num" | grep -c '<do_for_each')
+  dfe_closes=$(printf '%s\n' "$apply_body" | head -"$rel_line_num" | grep -c '</do_for_each>')
+  if [ "$dfe_opens" -ne "$dfe_closes" ]; then
+    note "release transition diagnostic must not be inside a do_for_each block (open=$dfe_opens close=$dfe_closes at line $rel_line_num)"
+  fi
+fi
+# 9f. The old separate 'released previous' marker is absent.
+if printf '%s\n' "$apply_body" | grep -q 'prefer_all_turrets: released previous'; then
+  note "old 'released previous' diagnostic must be removed"
+fi
+# 9g. The existing 'applied' diagnostic remains present.
+if ! printf '%s\n' "$apply_body" | grep -q 'prefer_all_turrets: applied'; then
+  note "existing 'applied' diagnostic must remain"
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

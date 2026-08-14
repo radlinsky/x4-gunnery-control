@@ -439,6 +439,7 @@
               <do_if value="not $hostiles.indexof.{$target}">
                 <append_to_list name="$hostiles" exact="$target"/>
               </do_if>
+              <set_value name="$releasescope" exact="'component'"/>
               <!-- No weaponmode, deliberately. The attribute is optional and
                    "defaults to any" (common.xsd:36223), so leaving it off is
                    what makes this button mean every turret on the ship. It is
@@ -499,7 +500,6 @@
                    so it takes $target and holds fire. -->
               <do_if value="$previous and $previous != $target and $previous.exists">
                 <stop_firing_at_target object="$ship" target="$previous"/>
-                <debug_text text="'[X4GC] prefer_all_turrets: released previous ship=' + $ship + ' previous=' + $previous + ' replacement=' + $target + ' t=' + player.age" chance="100"/>
               </do_if>
               <!-- Capital-ship hierarchy release. When the previous target's
                    root is a present, existing L or XL ship, release firing at
@@ -514,6 +514,7 @@
                    avoided by skipping any hierarchy member that equals $previous,
                    which was already released above. -->
               <do_if value="$previousroot and $previousroot.exists and $previousroot.isclass.[class.ship_l, class.ship_xl]">
+                <set_value name="$releasescope" exact="'capital'"/>
                 <!-- Release the capital root itself, unless it is the same
                      component as $previous (which was already released above). -->
                 <do_if value="not $previous or $previous != $previousroot">
@@ -575,6 +576,7 @@
                    any hierarchy member that equals $previous, which was
                    already released above. -->
               <do_if value="$previousroot and $previousroot.exists and $previousroot.isclass.station">
+                <set_value name="$releasescope" exact="'station'"/>
                 <!-- Release the station root itself, unless it is the same
                      component as $previous (which was already released above). -->
                 <do_if value="not $previous or $previous != $previousroot">
@@ -623,6 +625,13 @@
                     <stop_firing_at_target object="$ship" target="$loctengine2"/>
                   </do_if>
                 </do_for_each>
+              </do_if>
+              <do_if value="$previous and $previous != $target">
+                <set_value name="$prevrootlog" exact="@$previousroot"/>
+                <do_if value="not $prevrootlog">
+                  <set_value name="$prevrootlog" exact="'none'"/>
+                </do_if>
+                <debug_text text="'[X4GC] prefer_all_turrets: release transition ship=' + $ship + ' previous=' + $previous + ' previousroot=' + $prevrootlog + ' replacement=' + $target + ' scope=' + $releasescope + ' t=' + player.age" chance="100"/>
               </do_if>
               <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
               <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
