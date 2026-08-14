@@ -73,7 +73,7 @@
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
     id      = "pr-3-preferred-target-aba-r1",
-    enabled = true,
+    enabled = false,
     setup   = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
         shipLabel       = "Ray",
