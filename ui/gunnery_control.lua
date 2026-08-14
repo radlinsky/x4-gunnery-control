@@ -932,7 +932,16 @@ local function engageTarget(targetID)
     -- Every direct-mode target change funnels through here (auto-next, Next /
     -- Previous Target, and picking a surface element), so re-issuing here is
     -- what stops the turrets falling silent the moment a target is destroyed.
-    if session.preferAllTurrets then applyPreferAllTurrets(previousTarget, previousRoot) end
+    if session.preferAllTurrets then
+        applyPreferAllTurrets(previousTarget, previousRoot)
+    elseif not isNullID(previousTarget) and not sameID(previousTarget, target) then
+        -- Retain transition context for a future first-enable of Prefer. The UI
+        -- button calls applyPreferAllTurrets() with no arguments; without this
+        -- retention the first enable on B would carry no previous identity even
+        -- though an ordinary Direct A→B change just happened.
+        session.transitionPreviousTarget = previousTarget
+        session.transitionPreviousRoot = previousRoot
+    end
     -- Hand the directed groups a fallback list for this target. The MD
     -- DirectFallback cue uses weaponmode.attackenemies as its selector and
     -- reaches the directed groups. A turret with no firing solution on the
@@ -980,6 +989,16 @@ applyPreferAllTurrets = function(previousTargetID, previousRootID)
     local shipID, targetID = session.shipID, session.aimTargetID
     local previousID = previousTargetID
     local previousRootID_local = previousRootID
+    -- When the UI button calls applyPreferAllTurrets() with no arguments, check
+    -- for retained transition context from a prior ordinary Direct target change
+    -- that happened while Prefer was OFF. Consume it so a later release/re-enable
+    -- on the same target cannot replay stale context.
+    if isNullID(previousID) and not isNullID(session.transitionPreviousTarget) then
+        previousID = session.transitionPreviousTarget
+        previousRootID_local = session.transitionPreviousRoot
+        session.transitionPreviousTarget = nil
+        session.transitionPreviousRoot = nil
+    end
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not currentSession(expectedSession, expectedEpoch) then return end
         -- Anything that happened inside the deferral window wins. A release

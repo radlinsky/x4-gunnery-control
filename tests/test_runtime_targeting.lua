@@ -1746,6 +1746,251 @@ do
     AddUITriggeredEvent = savedAdd54c
 end
 
+-- ── 54d. first-enable Prefer after ordinary Direct target change carries retained transition context ──
+-- Regression: when Prefer is OFF and Direct changes A → B, the UI button path
+-- (applyPreferAllTurrets with no arguments) must still carry previous=A and
+-- previousroot=root(A) on first enable. The same-session release/re-enable must
+-- not replay stale context, and A→B→C while Prefer stays off must yield B/root(B)
+-- on first enable at C.
+do
+    gcMenu.onShowMenu()
+    local sess54d = API.getSession()
+    assert(sess54d ~= nil, "expected session for first-enable transition test")
+    local grp54d = { key = "grp54d", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 53, displayName = "G54d", totalCount = 1, operationalCount = 1,
+        mode = "autoassist", armed = true, members = {
+            { componentID = 53, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "53" }
+        } }
+    sess54d.groups = { grp54d }
+    sess54d.checkedGroupKeys = { ["grp54d"] = true }
+    sess54d.phase, sess54d.controlMode = "engaged", "direct"
+    -- aimTargetID is the selected component; targetObjectID is its root.
+    sess54d.aimTargetID, sess54d.targetObjectID = 500, 900
+    sess54d.cameraMemberID = 53
+    sess54d.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess54d.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54d.shipID, mode = "attack", armed = true } }
+    assert(sess54d.preferAllTurrets == false,
+        "the session must start with preferAllTurrets off")
+
+    -- Stub the engine APIs so engageTarget can resolve eligibility, set soft
+    -- target, and pass the camera gate on the first try.
+    local savedGetContextByClass54d = C.GetContextByClass
+    local savedGetComponentData54d = GetComponentData
+    local savedSetSofttarget54d = C.SetSofttarget
+    local savedGetExternalTargetView54d = C.GetExternalTargetViewComponent
+    local savedIsComponentOperational54d = C.IsComponentOperational
+    local savedIsPlayerCameraTargetViewPossible54d = C.IsPlayerCameraTargetViewPossible
+    local savedGetNumUpgradeGroups54d = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups254d = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo254d = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots54d = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent54d = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup54d = C.GetUpgradeSlotGroup
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or ((tostring(comp) == "502") and 902 or comp)) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "ishostile" then vals[#vals + 1] = false
+            elseif k == "isfriend" then vals[#vals + 1] = false
+            elseif k == "isknown" then vals[#vals + 1] = true
+            elseif k == "isradarvisible" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil
+            end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    local groupBuffer54d = {}
+    groupBuffer54d[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return groupBuffer54d end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    local evts54d = {}
+    local savedAdd54d = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54d[#evts54d + 1] = { screen = screen, control = control, params = params }
+    end
+
+    -- 54d-1: first-ever enable without prior distinct target has no previous fields.
+    local mark54d1 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "first apply must succeed")
+    fix.drainCallbacksSince(mark54d1)
+    local firstEvent54d = nil
+    for _, e in ipairs(evts54d) do
+        if e.control == "prefer_all_turrets" then firstEvent54d = e; break end
+    end
+    assert(firstEvent54d ~= nil, "first apply must emit prefer_all_turrets")
+    assert(firstEvent54d.params["previous"] == nil,
+        "first-ever enable without prior distinct target must not carry previous; got " .. tostring(firstEvent54d.params["previous"]))
+    assert(firstEvent54d.params["previousroot"] == nil,
+        "first-ever enable without prior distinct target must not carry previousroot; got " .. tostring(firstEvent54d.params["previousroot"]))
+    assert(tostring(firstEvent54d.params["target"]) == "luaid:500",
+        "first apply target must be the current aimTargetID; got " .. tostring(firstEvent54d.params["target"]))
+
+    -- Release Prefer back to OFF so the A→B transition happens with Prefer off.
+    assert(API.clearPreferAllTurrets("reset for transition test", false) == true,
+        "release must succeed")
+    assert(sess54d.preferAllTurrets == false, "session must be back to Prefer off")
+
+    -- 54d-2: A → B while Prefer is OFF must NOT emit prefer_all_turrets and must
+    -- retain transition context for a later first enable.
+    local countBefore54d2 = #evts54d
+    assert(API.engageTarget(501) == true, "A→B engagement must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    local engageEvent54d2 = nil
+    for i = countBefore54d2 + 1, #evts54d do
+        if evts54d[i].control == "prefer_all_turrets" then engageEvent54d2 = evts54d[i]; break end
+    end
+    assert(engageEvent54d2 == nil,
+        "A→B while Prefer is OFF must not emit prefer_all_turrets; got " .. tostring(engageEvent54d2))
+    assert(tostring(sess54d.aimTargetID) == "501",
+        "after A→B aimTargetID must be 501; got " .. tostring(sess54d.aimTargetID))
+    assert(tostring(sess54d.targetObjectID) == "901",
+        "after A→B targetObjectID must be 901; got " .. tostring(sess54d.targetObjectID))
+    assert(tostring(sess54d.transitionPreviousTarget) == "500",
+        "A→B while Prefer is OFF must retain transitionPreviousTarget=500; got " .. tostring(sess54d.transitionPreviousTarget))
+    assert(tostring(sess54d.transitionPreviousRoot) == "900",
+        "A→B while Prefer is OFF must retain transitionPreviousRoot=900; got " .. tostring(sess54d.transitionPreviousRoot))
+
+    -- 54d-3: first-enable Prefer on B after the A→B transition must carry
+    -- previous=500 and previousroot=900 through the no-argument production path.
+    local countBefore54d3 = #evts54d
+    local mark54d3 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "first-enable Prefer on B must succeed")
+    fix.drainCallbacksSince(mark54d3)
+    local firstEnableEvent54d = nil
+    for i = countBefore54d3 + 1, #evts54d do
+        if evts54d[i].control == "prefer_all_turrets" then firstEnableEvent54d = evts54d[i]; break end
+    end
+    assert(firstEnableEvent54d ~= nil,
+        "first-enable Prefer on B must emit prefer_all_turrets; got none")
+    assert(tostring(firstEnableEvent54d.params["target"]) == "luaid:501",
+        "first-enable target must be B (501); got " .. tostring(firstEnableEvent54d.params["target"]))
+    assert(tostring(firstEnableEvent54d.params["previous"]) == "luaid:500",
+        "first-enable previous must be A (500); got " .. tostring(firstEnableEvent54d.params["previous"]))
+    assert(tostring(firstEnableEvent54d.params["previousroot"]) == "luaid:900",
+        "first-enable previousroot must be root(A) (900); got " .. tostring(firstEnableEvent54d.params["previousroot"]))
+    -- Transition context must be consumed.
+    assert(sess54d.transitionPreviousTarget == nil,
+        "first-enable must consume transition context; got " .. tostring(sess54d.transitionPreviousTarget))
+
+    -- 54d-4: release/re-enable on the same B without another Direct change must
+    -- NOT replay stale A/root(A) context.
+    local countBefore54d4 = #evts54d
+    assert(API.clearPreferAllTurrets("release test", false) == true, "release must succeed")
+    assert(sess54d.preferAllTurrets == false, "release must clear the flag")
+    local mark54d4 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "re-enable on same B must succeed")
+    fix.drainCallbacksSince(mark54d4)
+    local reenableEvent54d = nil
+    for i = countBefore54d4 + 1, #evts54d do
+        if evts54d[i].control == "prefer_all_turrets" then reenableEvent54d = evts54d[i]; break end
+    end
+    assert(reenableEvent54d ~= nil, "re-enable must emit prefer_all_turrets")
+    assert(reenableEvent54d.params["previous"] == nil,
+        "release/re-enable on same B must not replay stale previous; got " .. tostring(reenableEvent54d.params["previous"]))
+    assert(reenableEvent54d.params["previousroot"] == nil,
+        "release/re-enable on same B must not replay stale previousroot; got " .. tostring(reenableEvent54d.params["previousroot"]))
+
+    -- 54d-5: A → B → C while Prefer is OFF must yield previous=B/root(B) on
+    -- first enable at C. First reset: start fresh with Prefer off at A.
+    gcMenu.onShowMenu()
+    local sess54d5 = API.getSession()
+    assert(sess54d5 ~= nil, "expected session for A→B→C test")
+    sess54d5.groups = { grp54d }
+    sess54d5.checkedGroupKeys = { ["grp54d"] = true }
+    sess54d5.phase, sess54d5.controlMode = "engaged", "direct"
+    sess54d5.aimTargetID, sess54d5.targetObjectID = 500, 900
+    sess54d5.cameraMemberID = 53
+    sess54d5.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess54d5.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54d5.shipID, mode = "attack", armed = true } }
+    assert(sess54d5.preferAllTurrets == false, "A→B→C test must start with Prefer off")
+
+    local evts54d5 = {}
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54d5[#evts54d5 + 1] = { screen = screen, control = control, params = params }
+    end
+
+    assert(API.engageTarget(501) == true, "A→B must succeed")
+    assert(API.engageTarget(502) == true, "B→C must succeed")
+    local countBefore54d5 = #evts54d5
+    local mark54d5 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "first-enable on C must succeed")
+    fix.drainCallbacksSince(mark54d5)
+    local firstEnableCEvent54d = nil
+    for i = countBefore54d5 + 1, #evts54d5 do
+        if evts54d5[i].control == "prefer_all_turrets" then firstEnableCEvent54d = evts54d5[i]; break end
+    end
+    assert(firstEnableCEvent54d ~= nil, "first-enable on C must emit prefer_all_turrets")
+    assert(tostring(firstEnableCEvent54d.params["target"]) == "luaid:502",
+        "first-enable target must be C (502); got " .. tostring(firstEnableCEvent54d.params["target"]))
+    assert(tostring(firstEnableCEvent54d.params["previous"]) == "luaid:501",
+        "first-enable on C must carry previous=B (501), not A; got " .. tostring(firstEnableCEvent54d.params["previous"]))
+    assert(tostring(firstEnableCEvent54d.params["previousroot"]) == "luaid:901",
+        "first-enable on C must carry previousroot=root(B) (901), not root(A); got " .. tostring(firstEnableCEvent54d.params["previousroot"]))
+
+    -- 54d-6: existing Prefer-ON A → B regression still passes.
+    local countBefore54d6 = #evts54d5
+    sess54d5.preferAllTurrets = true
+    local mark54d6 = fix.callbackCheckpoint()
+    assert(API.engageTarget(503) == true, "Prefer-ON A→B must succeed")
+    fix.drainCallbacksSince(mark54d6)
+    local preferOnEvent54d = nil
+    for i = countBefore54d6 + 1, #evts54d5 do
+        if evts54d5[i].control == "prefer_all_turrets" then preferOnEvent54d = evts54d5[i]; break end
+    end
+    assert(preferOnEvent54d ~= nil, "Prefer-ON target change must emit prefer_all_turrets")
+    assert(tostring(preferOnEvent54d.params["previous"]) == "luaid:502",
+        "Prefer-ON A→B must carry previous=502; got " .. tostring(preferOnEvent54d.params["previous"]))
+    assert(tostring(preferOnEvent54d.params["previousroot"]) == "luaid:902",
+        "Prefer-ON A→B must carry previousroot=902; got " .. tostring(preferOnEvent54d.params["previousroot"]))
+
+    -- 54d-7: exact-same-component re-engagement while Prefer is OFF must not
+    -- create a false transition context.
+    local countBefore54d7 = #evts54d5
+    assert(API.engageTarget(503) == true, "same-component reengagement must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    -- No prefer_all_turrets event should be emitted for same-component while Prefer is OFF.
+    local sameCompEvent54d7 = nil
+    for i = countBefore54d7 + 1, #evts54d5 do
+        if evts54d5[i].control == "prefer_all_turrets" then sameCompEvent54d7 = evts54d5[i]; break end
+    end
+    assert(sameCompEvent54d7 == nil,
+        "exact-same-component reengagement while Prefer is OFF must not emit prefer_all_turrets")
+    -- And no transition context should have been stored either.
+    assert(sess54d5.transitionPreviousTarget == nil,
+        "same-component reengagement must not store transition context; got " .. tostring(sess54d5.transitionPreviousTarget))
+
+    C.GetContextByClass = savedGetContextByClass54d
+    GetComponentData = savedGetComponentData54d
+    C.SetSofttarget = savedSetSofttarget54d
+    C.GetExternalTargetViewComponent = savedGetExternalTargetView54d
+    C.IsComponentOperational = savedIsComponentOperational54d
+    C.IsPlayerCameraTargetViewPossible = savedIsPlayerCameraTargetViewPossible54d
+    C.GetNumUpgradeGroups = savedGetNumUpgradeGroups54d
+    C.GetUpgradeGroups2 = savedGetUpgradeGroups254d
+    C.GetUpgradeGroupInfo2 = savedGetUpgradeGroupInfo254d
+    C.GetNumUpgradeSlots = savedGetNumUpgradeSlots54d
+    C.GetUpgradeSlotCurrentComponent = savedGetUpgradeSlotCurrentComponent54d
+    C.GetUpgradeSlotGroup = savedGetUpgradeSlotGroup54d
+    AddUITriggeredEvent = savedAdd54d
+end
+
 -- ── 56. player-faction objects are never offered as engagement targets ─────────
 -- Player-owned ships and stations must be excluded from readTargetCandidates()
 -- regardless of whether they arrive via the sector sweep or as the current soft
