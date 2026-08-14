@@ -1597,6 +1597,155 @@ do
     AddUITriggeredEvent = savedAdd54b
 end
 
+-- ── 54c. engageTarget real-path regression: different component and root IDs ──
+-- Regression test that reaches the actual engageTarget() production path rather
+-- than manually reproducing its capture ordering. Uses deliberately different
+-- identities for the previous selected component (500) and its root (900), and
+-- for the new selected component (501) and its root (901). Asserts that after
+-- the real A → B engagement the payload carries the correct previous and
+-- previousroot, the session state describes the new target exactly, first Apply
+-- emits neither field, and exact-same-component reapplication stays suppressed.
+do
+    gcMenu.onShowMenu()
+    local sess54c = API.getSession()
+    assert(sess54c ~= nil, "expected session for engageTarget regression test")
+    local grp54c = { key = "grp54c", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 53, displayName = "G54c", totalCount = 1, operationalCount = 1,
+        mode = "autoassist", armed = true, members = {
+            { componentID = 53, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "53" }
+        } }
+    sess54c.groups = { grp54c }
+    sess54c.checkedGroupKeys = { ["grp54c"] = true }
+    sess54c.phase, sess54c.controlMode = "engaged", "direct"
+    sess54c.aimTargetID, sess54c.targetObjectID = 500, 900
+    sess54c.cameraMemberID = 53
+    sess54c.staged = { ["grp54c"] = { mode = "defend", armed = true } }
+    sess54c.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54c.shipID, mode = "attack", armed = true } }
+
+    -- Stub the engine APIs so engageTarget can resolve eligibility, set soft
+    -- target, and pass the camera gate on the first try.
+    local savedGetContextByClass54c = C.GetContextByClass
+    local savedGetComponentData54c = GetComponentData
+    local savedSetSofttarget54c = C.SetSofttarget
+    local savedGetExternalTargetView54c = C.GetExternalTargetViewComponent
+    local savedIsComponentOperational54c = C.IsComponentOperational
+    local savedIsPlayerCameraTargetViewPossible54c = C.IsPlayerCameraTargetViewPossible
+    local savedGetNumUpgradeGroups54c = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups254c = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo254c = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots54c = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent54c = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup54c = C.GetUpgradeSlotGroup
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or comp) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "ishostile" then vals[#vals + 1] = false
+            elseif k == "isfriend" then vals[#vals + 1] = false
+            elseif k == "isknown" then vals[#vals + 1] = true
+            elseif k == "isradarvisible" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil
+            end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    local groupBuffer54c = {}
+    groupBuffer54c[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return groupBuffer54c end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    local evts54c = {}
+    local savedAdd54c = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54c[#evts54c + 1] = { screen = screen, control = control, params = params }
+    end
+
+    -- 54c-1: First Apply through engageTarget must not invent previous/previousroot.
+    assert(API.engageTarget(500) == true, "first engagement must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    local firstEngageEvent54c = nil
+    for _, e in ipairs(evts54c) do
+        if e.control == "prefer_all_turrets" then firstEngageEvent54c = e; break end
+    end
+    -- First engagement: preferAllTurrets is false, so no event is emitted.
+    assert(firstEngageEvent54c == nil,
+        "first engagement with preferAllTurrets=false must not emit prefer_all_turrets")
+    assert(tostring(sess54c.aimTargetID) == "500",
+        "after first engagement aimTargetID must be 500; got " .. tostring(sess54c.aimTargetID))
+    assert(tostring(sess54c.targetObjectID) == "900",
+        "after first engagement targetObjectID must be 900; got " .. tostring(sess54c.targetObjectID))
+
+    -- 54c-2: Enable the override, then engage a different target through the real
+    -- engageTarget path. The payload must carry previous=500 and previousroot=900.
+    sess54c.preferAllTurrets = true
+    local countBefore54c2 = #evts54c
+    local mark54c2 = fix.callbackCheckpoint()
+    assert(API.engageTarget(501) == true, "second engagement must succeed")
+    fix.drainCallbacksSince(mark54c2)
+    local reissuedEngageEvent54c = nil
+    for i = countBefore54c2 + 1, #evts54c do
+        if evts54c[i].control == "prefer_all_turrets" then reissuedEngageEvent54c = evts54c[i]; break end
+    end
+    assert(reissuedEngageEvent54c ~= nil, "target change via engageTarget must emit prefer_all_turrets")
+    assert(tostring(reissuedEngageEvent54c.params["previous"]) == "luaid:500",
+        "payload previous must be the exact previous selected component (500); got " .. tostring(reissuedEngageEvent54c.params["previous"]))
+    assert(tostring(reissuedEngageEvent54c.params["previousroot"]) == "luaid:900",
+        "payload previousroot must be the exact previous root (900), not 500 or 901; got " .. tostring(reissuedEngageEvent54c.params["previousroot"]))
+    -- Final session state must describe the new target exactly.
+    assert(tostring(sess54c.aimTargetID) == "501",
+        "after second engagement aimTargetID must be 501; got " .. tostring(sess54c.aimTargetID))
+    assert(tostring(sess54c.targetObjectID) == "901",
+        "after second engagement targetObjectID must be 901; got " .. tostring(sess54c.targetObjectID))
+
+    -- 54c-3: Exact-same-component reapplication through engageTarget preserves
+    -- suppression/no-release behavior. Re-engaging 501 may still emit the override
+    -- refresh, but it must not carry previous/previousroot.
+    local countBefore54c3 = #evts54c
+    local mark54c3 = fix.callbackCheckpoint()
+    assert(API.engageTarget(501) == true, "same-component reengagement must succeed")
+    fix.drainCallbacksSince(mark54c3)
+    local sameCompEvent54c3 = nil
+    for i = countBefore54c3 + 1, #evts54c do
+        if evts54c[i].control == "prefer_all_turrets" then sameCompEvent54c3 = evts54c[i]; break end
+    end
+    -- The override refresh may fire; what matters is no previous/previousroot.
+    if sameCompEvent54c3 ~= nil then
+        assert(sameCompEvent54c3.params["previous"] == nil,
+            "same-component reengagement must not carry previous; got " .. tostring(sameCompEvent54c3.params["previous"]))
+        assert(sameCompEvent54c3.params["previousroot"] == nil,
+            "same-component reengagement must not carry previousroot; got " .. tostring(sameCompEvent54c3.params["previousroot"]))
+    end
+
+    C.GetContextByClass = savedGetContextByClass54c
+    GetComponentData = savedGetComponentData54c
+    C.SetSofttarget = savedSetSofttarget54c
+    C.GetExternalTargetViewComponent = savedGetExternalTargetView54c
+    C.IsComponentOperational = savedIsComponentOperational54c
+    C.IsPlayerCameraTargetViewPossible = savedIsPlayerCameraTargetViewPossible54c
+    C.GetNumUpgradeGroups = savedGetNumUpgradeGroups54c
+    C.GetUpgradeGroups2 = savedGetUpgradeGroups254c
+    C.GetUpgradeGroupInfo2 = savedGetUpgradeGroupInfo254c
+    C.GetNumUpgradeSlots = savedGetNumUpgradeSlots54c
+    C.GetUpgradeSlotCurrentComponent = savedGetUpgradeSlotCurrentComponent54c
+    C.GetUpgradeSlotGroup = savedGetUpgradeSlotGroup54c
+    AddUITriggeredEvent = savedAdd54c
+end
+
 -- ── 56. player-faction objects are never offered as engagement targets ─────────
 -- Player-owned ships and stations must be excluded from readTargetCandidates()
 -- regardless of whether they arrive via the sector sweep or as the current soft
