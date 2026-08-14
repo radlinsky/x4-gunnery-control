@@ -308,11 +308,21 @@ if [ -n "$station_raw" ] && ! printf '%s\n' "$station_raw" | grep -q 'stop_firin
 fi
 # 8c. The station-root duplicate suppression is present: a do_if guarding the
 #     root release against $previous exists inside station_raw.
+#     Must match $previous as an exact variable token, not as the prefix of
+#     $previousroot. Use a boundary check so \$previousroot does not satisfy
+#     the regex. Because the <do_if guard precedes the stop_firing_at_target
+#     line in the XML, we track the most recent enclosing do_if and check it
+#     when we encounter the target line.
 # shellcheck disable=SC2016 # MD variables are literal XML text.
 if [ -n "$station_raw" ] && ! printf '%s\n' "$station_raw" | awk '
-  /stop_firing_at_target object="\$ship" target="\$previousroot"/ { found=1 }
-  found && /\$previous/ { print; exit }
-  /<\/do_if>/ { if (found) exit }
+  /<do_if.*value=/ { guard=$0 }
+  /stop_firing_at_target object="\$ship" target="\$previousroot"/ {
+    # Require $previous as a standalone token: not followed by [a-zA-Z0-9_].
+    if (guard ~ /[^a-zA-Z0-9_]\$previous[^a-zA-Z0-9_]/ || guard ~ /^\$previous[^a-zA-Z0-9_]/) {
+      print; exit
+    }
+  }
+  /<\/do_if>/ { exit }
 ' | grep -q .; then
   note "station root release must be guarded against \$previous for duplicate suppression"
 fi
