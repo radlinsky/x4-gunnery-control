@@ -526,6 +526,18 @@
                     <stop_firing_at_target object="$ship" target="$locturret"/>
                   </do_if>
                 </do_for_each>
+                <!-- Enumerate and release every direct installed missile
+                     turret on the capital root. `turrets.<state>.list` and
+                     `missileturrets.<state>.list` are separate
+                     (scriptproperties.xml:539 vs :542-545);
+                     `missileturret` derives from `turret` (:1463).
+                     Omitting this list silently skips an entire class of
+                     weapon emitter with no error and no log line. -->
+                <do_for_each name="$locmissile" in="$previousroot.missileturrets.operational.list">
+                  <do_if value="$locmissile.exists and (not $previous or $locmissile != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locmissile"/>
+                  </do_if>
+                </do_for_each>
                 <!-- Enumerate and release every direct installed shield
                      generator on the capital root. -->
                 <do_for_each name="$locshield" in="$previousroot.shields.operational.list">

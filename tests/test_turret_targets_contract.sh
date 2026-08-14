@@ -176,20 +176,23 @@ fi
 if ! printf '%s\n' "$apply_raw" | grep -q 'stop_firing_at_target object="\$ship" target="\$previousroot"'; then
   note "Apply must release the previous capital root with stop_firing_at_target"
 fi
-# 7c. The three required surface-component lists are enumerated via do_for_each.
+# 7c. The four required surface-component lists are enumerated via do_for_each.
 #     These property paths are shipped-source verified (scriptproperties.xml
-#     :539, :251, :533). A grep for the bare words would be too loose; require
-#     the full property path inside a do_for_each context.
-for prop in 'turrets.operational.list' 'shields.operational.list' 'engines.operational.list'; do
+#     :539, :543, :251, :533). `turrets.<state>.list` and
+#     `missileturrets.<state>.list` are separate (scriptproperties.xml:539 vs
+#     :542-545); `missileturret` derives from `turret` (:1463). A grep for the
+#     bare words would be too loose; require the full property path inside a
+#     do_for_each context.
+for prop in 'turrets.operational.list' 'missileturrets.operational.list' 'shields.operational.list' 'engines.operational.list'; do
   if ! printf '%s\n' "$apply_raw" | grep -q "do_for_each.*in=.*\$previousroot\.${prop}"; then
     note "Apply must enumerate \$previousroot.${prop} via do_for_each"
   fi
 done
 # 7d. Each enumerated hierarchy member is released with stop_firing_at_target.
 #     Require the action inside a do_for_each block that iterates one of the
-#     three verified lists; this ties the release to the enumeration rather
+#     four verified lists; this ties the release to the enumeration rather
 #     than to an unrelated call elsewhere in the file.
-for prop in 'turrets.operational.list' 'shields.operational.list' 'engines.operational.list'; do
+for prop in 'turrets.operational.list' 'missileturrets.operational.list' 'shields.operational.list' 'engines.operational.list'; do
   # Use a two-pass approach: first find the do_for_each line for this prop,
   # then scan forward until </do_for_each> for a stop_firing_at_target call.
   if ! printf '%s\n' "$apply_raw" | awk -v p="$prop" '
@@ -208,6 +211,14 @@ first_settt_line=$(printf '%s\n' "$apply_body" | grep -F '<set_turret_targets ob
 prevroot_release_line=$(printf '%s\n' "$apply_body" | grep -F 'stop_firing_at_target object="$ship" target="$previousroot"' | head -1 | cut -d: -f1)
 if [ -n "$prevroot_release_line" ] && { [ -z "$first_settt_line" ] || [ "$prevroot_release_line" -ge "$first_settt_line" ]; }; then
   note "capital hierarchy root release (line $prevroot_release_line) must precede the first replacement set_turret_targets (line $first_settt_line)"
+fi
+# 7f-pre. The missile-turret release also must precede the first replacement
+#     set_turret_targets. A migration that adds missileturrets after the
+#     narrow-then-wide pair would satisfy 7c/7d but break the contract.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+missile_release_line=$(printf '%s\n' "$apply_body" | grep -F 'stop_firing_at_target object="$ship" target="$locmissile"' | head -1 | cut -d: -f1)
+if [ -n "$missile_release_line" ] && { [ -z "$first_settt_line" ] || [ "$missile_release_line" -ge "$first_settt_line" ]; }; then
+  note "missile-turret release (line $missile_release_line) must precede the first replacement set_turret_targets (line $first_settt_line)"
 fi
 # 7f. Existing exact $previous release is preserved (re-check, rule 3).
 #     Already covered by rule 3; assert it is still present after 3C edits.
