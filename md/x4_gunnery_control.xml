@@ -501,6 +501,46 @@
                 <stop_firing_at_target object="$ship" target="$previous"/>
                 <debug_text text="'[X4GC] prefer_all_turrets: released previous ship=' + $ship + ' previous=' + $previous + ' replacement=' + $target + ' t=' + player.age" chance="100"/>
               </do_if>
+              <!-- Capital-ship hierarchy release. When the previous target's
+                   root is a present, existing L or XL ship, release firing at
+                   the root itself and at every direct installed turret,
+                   shield, and engine surface component before applying the
+                   replacement. Station roots do not enter this branch.
+                   Shipped-source class idiom: isclass.[class.ship_l, class.ship_xl]
+                   (e.g. move.attack.object.capital.xml, interrupt.restock.xml).
+                   Shipped-source property paths: turrets.operational.list
+                   (scriptproperties.xml:539), shields.operational.list (:533),
+                   engines.operational.list (:251). Duplicate releases are
+                   avoided by skipping any hierarchy member that equals $previous,
+                   which was already released above. -->
+              <do_if value="$previousroot and $previousroot.exists and $previousroot.isclass.[class.ship_l, class.ship_xl]">
+                <!-- Release the capital root itself, unless it is the same
+                     component as $previous (which was already released above). -->
+                <do_if value="not $previous or $previous != $previousroot">
+                  <stop_firing_at_target object="$ship" target="$previousroot"/>
+                </do_if>
+                <!-- Enumerate and release every direct installed turret on
+                     the capital root. -->
+                <do_for_each name="$locturret" in="$previousroot.turrets.operational.list">
+                  <do_if value="$locturret.exists and (not $previous or $locturret != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locturret"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed shield
+                     generator on the capital root. -->
+                <do_for_each name="$locshield" in="$previousroot.shields.operational.list">
+                  <do_if value="$locshield.exists and (not $previous or $locshield != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locshield"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed engine on
+                     the capital root. -->
+                <do_for_each name="$loctengine" in="$previousroot.engines.operational.list">
+                  <do_if value="$loctengine.exists and (not $previous or $loctengine != $previous)">
+                    <stop_firing_at_target object="$ship" target="$loctengine"/>
+                  </do_if>
+                </do_for_each>
+              </do_if>
               <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
               <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
               <!-- Success line, mirroring the bad-payload line below. Without it
