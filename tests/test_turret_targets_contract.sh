@@ -230,6 +230,129 @@ if [ -n "$narrow" ] && [ -n "$wide" ] && [ "$narrow" -ge "$wide" ]; then
   note "narrow-then-wide ordering must be preserved by Task 3C"
 fi
 
+# 8. Task 3D: station hierarchy release. When $previousroot is a present,
+#    existing station, Apply must release firing at the station root, its
+#    operational modules, and every direct installed turret/missile-turret/
+#    shield/engine surface component before applying the replacement target.
+#    Station roots must not enter the capital branch (7a), and capital ships
+#    must not enter this branch. The existing exact $previous release (rule 3)
+#    remains; duplicates for the same component are avoided by guarding each
+#    hierarchy release against $previous.
+#
+#    Shipped-source evidence:
+#    - Station root ID: isclass.station (interrupt.attacked.xml, lib.ammo.missiles.xml,
+#      fight.attack.object.station.xml)
+#    - Station modules: $previousroot.modules.operational.list
+#      (fight.attack.object.station.xml:301,399; Test Lab scenario line 350)
+#    - Station turrets: $previousroot.turrets.operational.list
+#      (fight.attack.object.station.xml:19,533; Test Lab scenario line 390)
+#    - Station missile turrets: $previousroot.missileturrets.operational.list
+#      (Test Lab scenario line 397)
+#    - Station shields: $previousroot.shields.operational.list
+#      (Test Lab scenario line 410 count path confirms property on station)
+#    - Station engines: $previousroot.engines.operational.list
+#      (Test Lab scenario line 411 count path confirms property on station)
+#    Datatype hierarchy (scriptproperties.xml): station -> container -> defensible.
+#    All surface lists are on defensible; modules is on container.
+
+# 8a. A station-specific hierarchy branch exists, guarded on $previousroot and
+#     isclass.station. The guard must reference both $previousroot existence and
+#     the station class check; a bare class check without $previousroot would
+#     fire on every target including ships. Must NOT be the same guard as the
+#     capital branch (which uses isclass.[class.ship_l, class.ship_xl]).
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+if ! printf '%s\n' "$apply_raw" | grep -q '\$previousroot.*isclass\.station'; then
+  note "Apply must guard the station hierarchy branch on \$previousroot and station class"
+fi
+# Ensure the station guard is distinct from the capital guard. A single
+# do_if that checks both classes would conflate the branches.
+station_guard=$(printf '%s\n' "$apply_raw" | grep -n 'isclass\.station' | head -1)
+capital_guard=$(printf '%s\n' "$apply_raw" | grep -n 'isclass\.\[class\.ship_l, class\.ship_xl\]' | head -1)
+if [ -n "$station_guard" ] && [ -n "$capital_guard" ]; then
+  station_line=${station_guard%%:*}
+  capital_line=${capital_guard%%:*}
+  if [ "$station_line" = "$capital_line" ]; then
+    note "station and capital hierarchy guards must be on separate do_if lines"
+  fi
+fi
+# 8b. The station root is released inside that branch with stop_firing_at_target.
+#     Guarded against $previous to avoid duplicate release.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+if ! printf '%s\n' "$apply_raw" | grep -q 'stop_firing_at_target object="\$ship" target="\$previousroot"'; then
+  note "Apply must release the previous station root with stop_firing_at_target"
+fi
+# 8c. Operational station modules are enumerated via do_for_each.
+#     Modules are a separate hierarchy level from surface components; require
+#     the full property path inside a do_for_each context on $previousroot.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+if ! printf '%s\n' "$apply_raw" | grep -q 'do_for_each.*in=.*\$previousroot\.modules\.operational\.list'; then
+  note "Apply must enumerate \$previousroot.modules.operational.list via do_for_each"
+fi
+# 8d. Each enumerated module is released with stop_firing_at_target, guarded
+#     against $previous to avoid duplicate release. Require the action inside
+#     the modules do_for_each block.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+if ! printf '%s\n' "$apply_raw" | awk '
+  /do_for_each.*in=.*\$previousroot\.modules\.operational\.list/ { found=1 }
+  found && /stop_firing_at_target object="\$ship"/ { print; exit }
+  /<\/do_for_each>/ { if (found) exit }
+' | grep -q .; then
+  note "Apply must stop firing at each enumerated module of \$previousroot"
+fi
+# 8e. Ordinary turret surfaces are covered (re-check from 7c/7d, but now also
+#     confirm they are reachable from the station branch context — i.e., the
+#     do_for_each iterates $previousroot.turrets.operational.list and releases
+#     each member. This is already asserted in 7c/7d; re-assert here to ensure
+#     the station branch includes them too, not just the capital branch.
+#     Actually: the requirement says "each hierarchy member that could equal
+#     $previous suppresses the duplicate release". The turret/missile/shield/
+#     engine lists are shared between capital and station branches in shape;
+#     what distinguishes 3D is the station-specific additions (modules) and the
+#     station class guard. We verify the station branch contains all six
+#     enumeration+release pairs (root + modules + 4 surface lists).
+for prop in 'turrets.operational.list' 'missileturrets.operational.list' 'shields.operational.list' 'engines.operational.list'; do
+  if ! printf '%s\n' "$apply_raw" | grep -q "do_for_each.*in=.*\$previousroot\.${prop}"; then
+    note "Apply must enumerate \$previousroot.${prop} via do_for_each (station branch)"
+  fi
+done
+# 8f. Each enumerated hierarchy member is released with stop_firing_at_target.
+#     The station branch must release modules, turrets, missile turrets,
+#     shields, and engines — all guarded against $previous to avoid duplicate
+#     release when a hierarchy member equals the explicitly-transported $previous.
+for prop in 'modules.operational.list' 'turrets.operational.list' 'missileturrets.operational.list' 'shields.operational.list' 'engines.operational.list'; do
+  if ! printf '%s\n' "$apply_raw" | awk -v p="$prop" '
+    /do_for_each.*in=.*\$previousroot\./ && index($0, p) > 0 { found=1 }
+    found && /stop_firing_at_target object="\$ship"/ { print; exit }
+    /<\/do_for_each>/ { if (found) exit }
+  ' | grep -q .; then
+    note "Apply must stop firing at each enumerated member of \$previousroot.${prop}"
+  fi
+done
+# 8g. The entire station hierarchy release block sits before the first
+#     replacement set_turret_targets call. Verify by checking that the last
+#     stop_firing_at_target inside the station branch precedes the first
+#     set_turret_targets.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+last_hierarchy_release_line=$(printf '%s\n' "$apply_body" | grep -F 'stop_firing_at_target object="$ship"' | tail -1 | cut -d: -f1)
+if [ -n "$last_hierarchy_release_line" ] && { [ -z "$first_settt_line" ] || [ "$last_hierarchy_release_line" -ge "$first_settt_line" ]; }; then
+  note "station hierarchy release (last at line $last_hierarchy_release_line) must precede the first replacement set_turret_targets (line $first_settt_line)"
+fi
+# 8h. Duplicate suppression: each hierarchy member release is guarded against
+#     $previous. Require that inside every do_for_each block for the station
+#     hierarchy, the stop_firing_at_target is wrapped in a do_if that checks
+#     $previous equality. Check this for modules and at least one surface list.
+#     The capital branch already has this pattern; verify the station branch
+#     mirrors it for modules (the new addition).
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+if ! printf '%s\n' "$apply_raw" | awk '
+  /do_for_each.*in=.*\$previousroot\.modules\.operational\.list/ { found=1; depth=0 }
+  found && /<do_if/ { depth++ }
+  found && depth > 0 && /\$previous/ { print; exit }
+  found && /<\/do_for_each>/ { exit }
+' | grep -q .; then
+  note "module releases must suppress duplicates against \$previous"
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

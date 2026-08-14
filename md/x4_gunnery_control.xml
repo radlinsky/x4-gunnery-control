@@ -553,6 +553,77 @@
                   </do_if>
                 </do_for_each>
               </do_if>
+              <!-- Station hierarchy release. When the previous target's root
+                   is a present, existing station, release firing at the root,
+                   its operational modules, and every direct installed turret,
+                   missile-turret, shield, and engine surface component before
+                   applying the replacement. Capital ships do not enter this
+                   branch. Shipped-source class idiom: isclass.station
+                   (e.g. interrupt.attacked.xml, lib.ammo.missiles.xml,
+                   fight.attack.object.station.xml). Shipped-source property
+                   paths: modules.operational.list
+                   (fight.attack.object.station.xml:301,399; Test Lab scenario
+                   line 350), turrets.operational.list
+                   (fight.attack.object.station.xml:19,533; Test Lab scenario
+                   line 390), missileturrets.operational.list (Test Lab
+                   scenario line 397), shields.operational.list and
+                   engines.operational.list (Test Lab scenario lines 410-411
+                   count paths confirm properties on station root). Datatype
+                   hierarchy (scriptproperties.xml): station -> container ->
+                   defensible; all surface lists are on defensible, modules
+                   is on container. Duplicate releases are avoided by skipping
+                   any hierarchy member that equals $previous, which was
+                   already released above. -->
+              <do_if value="$previousroot and $previousroot.exists and $previousroot.isclass.station">
+                <!-- Release the station root itself, unless it is the same
+                     component as $previous (which was already released above). -->
+                <do_if value="not $previous or $previous != $previousroot">
+                  <stop_firing_at_target object="$ship" target="$previousroot"/>
+                </do_if>
+                <!-- Enumerate and release every operational station module.
+                     Modules are a separate hierarchy level from surface
+                     components; shipped source enumerates them via
+                     this.station.modules.operational.list
+                     (fight.attack.object.station.xml:301,399). -->
+                <do_for_each name="$locmodule" in="$previousroot.modules.operational.list">
+                  <do_if value="$locmodule.exists and (not $previous or $locmodule != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locmodule"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed turret on
+                     the station root. -->
+                <do_for_each name="$locturret2" in="$previousroot.turrets.operational.list">
+                  <do_if value="$locturret2.exists and (not $previous or $locturret2 != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locturret2"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed missile
+                     turret on the station root. `turrets.<state>.list` and
+                     `missileturrets.<state>.list` are separate
+                     (scriptproperties.xml:539 vs :542-545); omitting this
+                     list silently skips an entire class of weapon emitter.
+                     Station missile turrets use weaponmode.attackcapital by
+                     default (fight.attack.object.station.xml:887). -->
+                <do_for_each name="$locmissile2" in="$previousroot.missileturrets.operational.list">
+                  <do_if value="$locmissile2.exists and (not $previous or $locmissile2 != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locmissile2"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed shield
+                     generator on the station root. -->
+                <do_for_each name="$locshield2" in="$previousroot.shields.operational.list">
+                  <do_if value="$locshield2.exists and (not $previous or $locshield2 != $previous)">
+                    <stop_firing_at_target object="$ship" target="$locshield2"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed engine on
+                     the station root. -->
+                <do_for_each name="$loctengine2" in="$previousroot.engines.operational.list">
+                  <do_if value="$loctengine2.exists and (not $previous or $loctengine2 != $previous)">
+                    <stop_firing_at_target object="$ship" target="$loctengine2"/>
+                  </do_if>
+                </do_for_each>
+              </do_if>
               <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
               <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
               <!-- Success line, mirroring the bad-payload line below. Without it
