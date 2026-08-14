@@ -110,6 +110,12 @@
         <set_value name="$Enabled" exact="false"/>
         <set_value name="$MarkCount" exact="0"/>
         <set_value name="$Prefer" exact="false"/>
+        <!-- Monotonic selected-target epochs delimit reciprocal A -> B -> A
+             evidence. Every FIRED/HIT record also carries elapsed engine time
+             so rounds launched before a switch can be excluded after a
+             controlled settle/flight window. -->
+        <set_value name="$AimEpoch" exact="0"/>
+        <set_value name="$AimChangedAt" exact="player.age"/>
         <!-- Seeded so the census time guard has something to compare against on
              its very first check.  Derived from player.age rather than written
              as a bare -1 so it carries the time datatype: player.age is a time
@@ -306,8 +312,18 @@
             <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_state'"/>
           </conditions>
           <actions>
+            <set_value name="$NextAimTarget" exact="@event.param3.$aimtgt"/>
+            <do_if value="$NextAimTarget and (not ObserveRoot.$AimTarget? or ObserveRoot.$AimTarget != $NextAimTarget)">
+              <set_value name="ObserveRoot.$AimEpoch" exact="ObserveRoot.$AimEpoch + 1"/>
+              <set_value name="ObserveRoot.$AimChangedAt" exact="player.age"/>
+              <debug_text text="'[X4GC TEST SWITCH] epoch=' + ObserveRoot.$AimEpoch
+                + ' from=' + (if ObserveRoot.$AimTarget? then @ObserveRoot.$AimTarget else 'none')
+                + ' to=' + $NextAimTarget
+                + ' prefer=' + (@event.param3.$prefer == true)
+                + ' t=' + player.age"/>
+            </do_if>
             <set_value name="ObserveRoot.$SoftTarget" exact="@event.param3.$softtgt"/>
-            <set_value name="ObserveRoot.$AimTarget" exact="@event.param3.$aimtgt"/>
+            <set_value name="ObserveRoot.$AimTarget" exact="$NextAimTarget"/>
             <set_value name="ObserveRoot.$Prefer" exact="@event.param3.$prefer == true"/>
           </actions>
         </cue>
@@ -338,6 +354,15 @@
           </conditions>
           <actions>
             <set_value name="$Ship" exact="player.ship"/>
+            <!-- A save can already contain a completed ObserveRoot from before
+                 these fields existed, so its root actions will not rerun after
+                 an extension update. Initialize lazily when observation arms. -->
+            <do_if value="not ObserveRoot.$AimEpoch?">
+              <set_value name="ObserveRoot.$AimEpoch" exact="0"/>
+            </do_if>
+            <do_if value="not ObserveRoot.$AimChangedAt?">
+              <set_value name="ObserveRoot.$AimChangedAt" exact="player.age"/>
+            </do_if>
             <create_group groupname="$FiringWeapons"/>
             <add_to_group groupname="$FiringWeapons" list="$Ship.weapons.operational.list"/>
             <add_to_group groupname="$FiringWeapons" list="$Ship.missileturrets.operational.list"/>
@@ -366,6 +391,8 @@
                 </do_elseif>
                 <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
                 <debug_text text="'[X4GC TEST FIRED] t=' + player.age
+                  + ' epoch=' + ObserveRoot.$AimEpoch
+                  + ' since_switch=' + (player.age - ObserveRoot.$AimChangedAt)
                   + ' weapon=' + event.object
                   + ' macro=' + event.object.macro
                   + ' mode=' + event.object.mode
@@ -422,6 +449,8 @@
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
                 <debug_text text="'[X4GC TEST HIT] t=' + player.age
+                  + ' epoch=' + ObserveRoot.$AimEpoch
+                  + ' since_switch=' + (player.age - ObserveRoot.$AimChangedAt)
                   + ' weapon=' + (if $Weapon then $Weapon else 'none')
                   + ' mode=' + (if $Weapon then @$Weapon.mode else 'none')
                   + ' isturret=' + (if $Weapon then $Weapon.isclass.turret else false)

@@ -1329,14 +1329,19 @@ do
     local countBefore54 = #evts54
     local mark53b = fix.callbackCheckpoint()
     sess54.aimTargetID = 501
-    assert(API.applyPreferAllTurrets() == true, "re-issuing the override must succeed")
+    assert(API.applyPreferAllTurrets(500) == true, "re-issuing the override must succeed")
     fix.drainCallbacksSince(mark53b)
-    local reissued54 = 0
+    local reissued54, reissuedEvent54 = 0, nil
     for i = countBefore54 + 1, #evts54 do
-        if evts54[i].control == "prefer_all_turrets" then reissued54 = reissued54 + 1 end
+        if evts54[i].control == "prefer_all_turrets" then
+            reissued54 = reissued54 + 1
+            reissuedEvent54 = evts54[i]
+        end
     end
     assert(reissued54 == 1,
         "a target change must re-issue the override exactly once; got " .. tostring(reissued54))
+    assert(reissuedEvent54.params["previous"] ~= nil,
+        "a target change must carry the previous target explicitly; instantiated MD Apply state is not durable")
 
     -- A release inside the one-tick deferral window wins. Emitting anyway would
     -- leave MD applied with the session flag already false, and every teardown

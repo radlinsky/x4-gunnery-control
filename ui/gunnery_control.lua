@@ -873,6 +873,10 @@ end
 local function engageTarget(targetID)
     if targetID == nil then return false end
     local target = id(targetID)
+    -- Lua owns the authoritative session target. Preserve it before replacing
+    -- aimTargetID so MD can release the exact old shoot-controller assignment
+    -- without relying on state shared between instantiated Apply cues.
+    local previousTarget = session and session.aimTargetID or nil
     if target == 0 or not isEligibleEngagementTarget(target) then
         log("refused ineligible engagement target (own ship or player-owned) " .. tostring(targetID))
         return false
@@ -924,7 +928,7 @@ local function engageTarget(targetID)
     -- Every direct-mode target change funnels through here (auto-next, Next /
     -- Previous Target, and picking a surface element), so re-issuing here is
     -- what stops the turrets falling silent the moment a target is destroyed.
-    if session.preferAllTurrets then applyPreferAllTurrets() end
+    if session.preferAllTurrets then applyPreferAllTurrets(previousTarget) end
     -- Hand the directed groups a fallback list for this target. The MD
     -- DirectFallback cue uses weaponmode.attackenemies as its selector and
     -- reaches the directed groups. A turret with no firing solution on the
@@ -957,7 +961,7 @@ refresh = function()
 end
 
 -- Forward-declared above restoreDirect; see the contract comment there.
-applyPreferAllTurrets = function()
+applyPreferAllTurrets = function(previousTargetID)
     if not session or session.phase ~= "engaged" then return false end
     if isNullID(session.aimTargetID) then return false end
     for _, group in ipairs(State.checkedGroups(session)) do
@@ -970,6 +974,7 @@ applyPreferAllTurrets = function()
     session.preferAllTurrets = true
     local expectedSession, expectedEpoch = session, sessionEpoch
     local shipID, targetID = session.shipID, session.aimTargetID
+    local previousID = previousTargetID
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not currentSession(expectedSession, expectedEpoch) then return end
         -- Anything that happened inside the deferral window wins. A release
@@ -980,10 +985,14 @@ applyPreferAllTurrets = function()
         if not session.preferAllTurrets or not sameID(session.aimTargetID, targetID) then
             return
         end
-        AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
+        local payload = {
             ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
             ["target"] = ConvertStringToLuaID(tostring(targetID)),
-        })
+        }
+        if not isNullID(previousID) and not sameID(previousID, targetID) then
+            payload["previous"] = ConvertStringToLuaID(tostring(previousID))
+        end
+        AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", payload)
         persistSession()
     end, false, getElapsedTime() + 0.01)
     return true
@@ -1633,7 +1642,7 @@ local function sendCutsceneAimStart(pov)
     cutsceneNoTurretFailureLogged = false
 end
 
-function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
+function TestAPI.applyPreferAllTurrets(previousTargetID) return applyPreferAllTurrets(previousTargetID) end
 function TestAPI.clearPreferAllTurrets(reason, resume) return clearPreferAllTurrets(reason, resume) end
 
 function TestAPI.sendCutsceneAimStart(pov) sendCutsceneAimStart(pov) end

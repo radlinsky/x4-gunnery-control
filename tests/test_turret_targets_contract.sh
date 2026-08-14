@@ -74,12 +74,34 @@ for required in Apply Release DirectFallback; do
   fi
 done
 
-# 3. Apply issues the narrow call before the wide one. stopshootingold only drops
-#    targets absent from the new list, so a list containing the turret's current
-#    target can never dislodge it: the narrow list of one forces the switch, and
-#    the wide list restores a fallback for turrets with no shot at the preferred
-#    target. Order is the whole point; reversed, the narrow call wins and the
-#    fallback is lost.
+# 3. A changed ship-wide preference explicitly releases the previous target
+#    before applying the replacement. X4's shoot controller can remain latched
+#    to a still-valid old hostile even after the narrow-then-wide pair is
+#    reissued. Vanilla uses stop_firing_at_target when it removes one target;
+#    unlike cease_fire, this leaves other firing and every turret mode intact.
+apply_body=$(awk '
+  /<cue name="Apply" / { inside=1 }
+  /<cue name="Release" / { inside=0 }
+  inside { print NR ":" $0 }
+' "$md")
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+stop_old=$(printf '%s\n' "$apply_body" | grep -F 'stop_firing_at_target object="$ship" target="$previous"' | cut -d: -f1)
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+first_apply=$(printf '%s\n' "$apply_body" | grep -F '<set_turret_targets object="$ship"' | head -1 | cut -d: -f1)
+if [ -z "$stop_old" ]; then
+  note "Apply must stop firing at the previous preferred target before retargeting"
+elif [ -z "$first_apply" ] || [ "$stop_old" -ge "$first_apply" ]; then
+  note "previous-target stop (line $stop_old) must precede the replacement target calls"
+fi
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+printf '%s\n' "$apply_body" | grep -Fq 'event.param3.$previous' \
+  || note "Apply must read the previous target explicitly from Lua"
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+printf '%s\n' "$apply_body" | grep -Fq '$previous != $target' \
+  || note "previous-target stop must run only when the preferred target changes"
+
+# 4. Apply still issues the narrow call before the wide one. The first call
+#    establishes the requested target; the second restores the fallback set.
 # shellcheck disable=SC2016 # $target and $hostiles are MD variable names in the
 # XML being searched, not shell expansions.
 narrow=$(grep -n 'target="\[\$target\]"' "$md" | head -1 | cut -d: -f1)
@@ -89,6 +111,16 @@ if [ -z "$narrow" ] || [ -z "$wide" ]; then
   note "Apply must issue both a narrow (target=[\$target]) and a wide (target=\$hostiles) call"
 elif [ "$narrow" -ge "$wide" ]; then
   note "narrow call (line $narrow) must precede the wide call (line $wide)"
+fi
+
+# 5. Apply and Release remain free of broad cease-fire/mode mutations.
+release_body=$(awk '
+  /<cue name="Release" / { inside=1 }
+  /<cue name="DirectFallback" / { inside=0 }
+  inside { print }
+' "$md")
+if printf '%s\n' "$apply_body$release_body" | grep -Eq '<cease_fire|<set_weapon_mode'; then
+  note "preferred-target switching must not use cease_fire or mutate turret modes"
 fi
 
 if [ "$fail" -ne 0 ]; then

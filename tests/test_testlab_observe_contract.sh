@@ -43,6 +43,20 @@ grep -Fq "name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposit
 grep -Fq "' aim_error_yaw='" "$md" || fail "FIRED observer does not log target yaw error"
 grep -Fq "' aim_error_pitch='" "$md" || fail "FIRED observer does not log target pitch error"
 
+# Reciprocal preferred-target tests need an automatic A -> B -> A boundary.
+# Every selected-target change receives a monotonic epoch and an engine-time
+# origin; FIRED and HIT records carry both so pre-switch rounds can be excluded
+# from the settled post-switch evidence window.
+grep -Fq "name=\"ObserveRoot.\$AimEpoch\" exact=\"ObserveRoot.\$AimEpoch + 1\"" "$md" \
+  || fail "observer does not increment a target-switch epoch"
+grep -Fq "'[X4GC TEST SWITCH] epoch='" "$md" \
+  || fail "observer does not log target-switch boundaries"
+grep -Fq "' epoch=' + ObserveRoot.\$AimEpoch" "$md" \
+  || fail "observer fire/hit records do not carry the current switch epoch"
+epoch_consumers=$(grep -Fc "' since_switch=' + (player.age - ObserveRoot.\$AimChangedAt)" "$md")
+[[ "$epoch_consumers" -eq 2 ]] \
+  || fail "expected FIRED and HIT to carry time since switch, found $epoch_consumers consumers"
+
 # The candidate mechanical-arc bearing uses the target's weapon-consistent aim
 # point in the turret mount's local frame; keep it diagnostic until live proof.
 aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")

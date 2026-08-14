@@ -72,8 +72,8 @@
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "pr-2-solution-competing-osakas-r7",
-    enabled = false,
+    id      = "pr-3-preferred-target-aba-r1",
+    enabled = true,
     setup   = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
         shipLabel       = "Ray",
@@ -83,15 +83,15 @@ X4GunneryTestLabScenarioSpec = {
         selectAll       = true,
     },
     groups = {
-        -- Two separated, stationary capital targets distinguish shots aimed at
-        -- the selected primary from ordinary autonomous fire at a distractor.
-        -- Both remain attackable under exact-hit repair and cannot return fire.
-        { label = "PR2 PRIMARY LEFT OSAKA - REPAIRED HOLD FIRE",
+        -- Two separated, stationary capital targets make A -> B -> A assignment
+        -- observable from projectile direction and exact attributed hits. Both
+        -- remain attackable under exact-hit repair and cannot return fire.
+        { label = "PR3 TARGET A LEFT OSAKA - REPAIRED HOLD FIRE",
           macro = "ship_ter_l_destroyer_01_a_macro", faction = "xenon",
           count = 1, distance = 3500, x = -900, y = 0, spread = 0,
           behaviour = "wait", hostile = true, holdFire = true,
           stripDefenceUnits = true, repairGuard = true },
-        { label = "PR2 DISTRACTOR RIGHT OSAKA - REPAIRED HOLD FIRE",
+        { label = "PR3 TARGET B RIGHT OSAKA - REPAIRED HOLD FIRE",
           macro = "ship_ter_l_destroyer_01_a_macro", faction = "xenon",
           count = 1, distance = 3500, x = 900, y = 0, spread = 0,
           behaviour = "wait", hostile = true, holdFire = true,

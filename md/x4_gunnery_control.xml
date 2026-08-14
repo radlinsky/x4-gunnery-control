@@ -408,11 +408,15 @@
                  prepends $ to Lua string keys, ids arrive as components. -->
             <set_value name="$ship" exact="@event.param3.$ship"/>
             <set_value name="$target" exact="@event.param3.$target"/>
+            <set_value name="$previous" exact="@event.param3.$previous"/>
             <do_if value="typeof $ship != datatype.component and $ship">
               <set_value name="$ship" exact="component.{$ship}"/>
             </do_if>
             <do_if value="typeof $target != datatype.component and $target">
               <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="typeof $previous != datatype.component and $previous">
+              <set_value name="$previous" exact="component.{$previous}"/>
             </do_if>
             <do_if value="$ship and $target">
               <!-- target is not optional in practice. Without it the action
@@ -464,23 +468,35 @@
                    re-selection that never comes. Live-tested 2026-08-09: turret
                    515058 held target B at los=1 solution=1 on the preferred A.
 
-                   The narrow-then-wide pair establishes the initial
-                   preference, but a 2026-08-13 two-Osaka retarget exposed a
-                   second shoot-controller latch: changing preferredtarget from
-                   the live target A to B left every newly fired round on A even
-                   though this cue logged B. Two reset variants were live-
-                   disproved in that fixture: an empty target list did not release
-                   active guns, while cease_fire plus the empty list prevented a
-                   fresh engagement from firing at all. Do not reintroduce either
-                   here. A ship-wide HOLD FIRE mode pulse was also live-
-                   disproved: the cue received B while newly fired rounds and
-                   direct hits remained on A. The narrow call installs only
-                   $target; the wide call immediately restores the fallback set
-                   for turrets that cannot AIM at $target. Do not claim that
-                   reissuing this pair retargets a turret whose shoot controller
-                   remains latched to another still-valid hostile.
+                   The narrow-then-wide pair establishes the initial preference,
+                   but a 2026-08-13 two-Osaka retarget exposed a second shoot-
+                   controller latch: changing preferredtarget from live target A
+                   to B left every newly fired round on A even though this cue
+                   logged B. Three broader reset variants were live-disproved:
+                   an empty target list did not release active guns; cease_fire
+                   plus the empty list prevented a fresh engagement; and a ship-
+                   wide HOLD FIRE mode pulse still left new rounds on A. Do not
+                   reintroduce any of them.
+
+                   stop_firing_at_target is the evidence-backed narrow release.
+                   common.xsd:37511 documents it as stopping fire at one target,
+                   and vanilla ClearTarget uses it whenever removing a still-live
+                   target (lib.target.selection.singletarget.xml:5-49). Apply it
+                   only to the previous target carried explicitly by the Lua
+                   session, before sending the replacement. Do not retain that
+                   value on this parent cue: the first PR 3 live run proved that
+                   state was absent in the next instantiated Apply. The explicit
+                   payload keeps target-change ordering in the layer that owns
+                   aimTargetID. This action does not alter group modes, armed
+                   state, or fire directed at any other object. The following
+                   pair then installs $target and restores the fallback set for
+                   turrets that cannot AIM at it.
                    Aim, not hit: a turret whose own hull blocks the shot can aim,
                    so it takes $target and holds fire. -->
+              <do_if value="$previous and $previous != $target and $previous.exists">
+                <stop_firing_at_target object="$ship" target="$previous"/>
+                <debug_text text="'[X4GC] prefer_all_turrets: released previous ship=' + $ship + ' previous=' + $previous + ' replacement=' + $target + ' t=' + player.age" chance="100"/>
+              </do_if>
               <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
               <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
               <!-- Success line, mirroring the bad-payload line below. Without it
