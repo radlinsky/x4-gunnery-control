@@ -313,12 +313,19 @@ fi
 #     the regex. Because the <do_if guard precedes the stop_firing_at_target
 #     line in the XML, we track the most recent enclosing do_if and check it
 #     when we encounter the target line.
+#     Must prove actual duplicate-suppression semantics: the guard must contain
+#     both $previous and $previousroot with an inequality/comparison so that
+#     malformed guards like "$previous" or "$previous != $target" (which do not
+#     suppress release when $previous == $previousroot) are rejected.
 # shellcheck disable=SC2016 # MD variables are literal XML text.
 if [ -n "$station_raw" ] && ! printf '%s\n' "$station_raw" | awk '
   /<do_if.*value=/ { guard=$0 }
   /stop_firing_at_target object="\$ship" target="\$previousroot"/ {
-    # Require $previous as a standalone token: not followed by [a-zA-Z0-9_].
-    if (guard ~ /[^a-zA-Z0-9_]\$previous[^a-zA-Z0-9_]/ || guard ~ /^\$previous[^a-zA-Z0-9_]/) {
+    # Require the actual duplicate-suppression guard: both $previous and
+    # $previousroot present with an inequality that suppresses release when
+    # they are equal. Accept the exact production expression or any equivalent
+    # that contains both variables and a != comparison.
+    if (guard ~ /[^a-zA-Z0-9_]\$previous[^a-zA-Z0-9_]/ && guard ~ /[^a-zA-Z0-9_]\$previousroot[^a-zA-Z0-9_]/ && guard ~ /!=/) {
       print; exit
     }
   }
