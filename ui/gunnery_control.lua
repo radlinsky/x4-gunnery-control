@@ -852,6 +852,11 @@ local function startTargetSelection(groups)
     if not member then return false end
     restoreDirect("new engagement")
     State.beginTargetSelection(session, group, member)
+    -- A new Direct engagement boundary invalidates retained transition context
+    -- from the prior targeting sequence. Clear it here so a stale aimTargetID
+    -- whose targetObjectID was just cleared cannot leak into a later first-enable.
+    session.transitionPreviousTarget = nil
+    session.transitionPreviousRoot = nil
     -- Losing the camera must not cost the player target selection: log it and
     -- keep the browser open instead of bouncing back to the console.
     local cameraOptions = { onFailure = function() log("target selection continues without a camera") end }
@@ -934,11 +939,14 @@ local function engageTarget(targetID)
     -- what stops the turrets falling silent the moment a target is destroyed.
     if session.preferAllTurrets then
         applyPreferAllTurrets(previousTarget, previousRoot)
-    elseif not isNullID(previousTarget) and not sameID(previousTarget, target) then
+    elseif not isNullID(previousTarget) and not sameID(previousTarget, target)
+        and not isNullID(previousRoot) then
         -- Retain transition context for a future first-enable of Prefer. The UI
         -- button calls applyPreferAllTurrets() with no arguments; without this
         -- retention the first enable on B would carry no previous identity even
-        -- though an ordinary Direct A→B change just happened.
+        -- though an ordinary Direct A→B change just happened. Skip retention when
+        -- previousRoot is nil (new-engagement boundary cleared targetObjectID) so
+        -- a stale aimTargetID cannot create a transition with a missing hierarchy root.
         session.transitionPreviousTarget = previousTarget
         session.transitionPreviousRoot = previousRoot
     end

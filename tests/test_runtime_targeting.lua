@@ -1976,6 +1976,207 @@ do
     assert(sess54d5.transitionPreviousTarget == nil,
         "same-component reengagement must not store transition context; got " .. tostring(sess54d5.transitionPreviousTarget))
 
+    -- 54d-8: CASE A — stale replay across a new-engagement boundary.
+    -- Retained A/root(A) must be invalidated when startTargetSelection begins a
+    -- fresh Direct engagement, so re-engaging B and first-enabling Prefer does
+    -- not replay the stale prior context.
+    gcMenu.onShowMenu()
+    local sess54d8 = API.getSession()
+    assert(sess54d8 ~= nil, "expected session for CASE A boundary test")
+    sess54d8.groups = { grp54d }
+    sess54d8.checkedGroupKeys = { ["grp54d"] = true }
+    sess54d8.phase, sess54d8.controlMode = "engaged", "direct"
+    sess54d8.aimTargetID, sess54d8.targetObjectID = 500, 900
+    sess54d8.cameraMemberID = 53
+    sess54d8.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess54d8.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54d8.shipID, mode = "attack", armed = true } }
+    assert(sess54d8.preferAllTurrets == false, "CASE A must start with Prefer off")
+
+    local savedGetContextByClass54d8 = C.GetContextByClass
+    local savedGetComponentData54d8 = GetComponentData
+    local savedSetSofttarget54d8 = C.SetSofttarget
+    local savedGetExternalTargetView54d8 = C.GetExternalTargetViewComponent
+    local savedIsComponentOperational54d8 = C.IsComponentOperational
+    local savedIsPlayerCameraTargetViewPossible54d8 = C.IsPlayerCameraTargetViewPossible
+    local savedGetNumUpgradeGroups54d8 = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups254d8 = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo254d8 = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots54d8 = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent54d8 = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup54d8 = C.GetUpgradeSlotGroup
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or comp) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    local groupBuffer54d8 = {}
+    groupBuffer54d8[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return groupBuffer54d8 end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    local evts54d8 = {}
+    local savedAdd54d8 = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54d8[#evts54d8 + 1] = { screen = screen, control = control, params = params }
+    end
+
+    -- A → B while Prefer is OFF: retain transition context.
+    assert(API.engageTarget(501) == true, "CASE A A→B must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    assert(tostring(sess54d8.transitionPreviousTarget) == "500",
+        "CASE A A→B must retain transitionPreviousTarget=500; got " .. tostring(sess54d8.transitionPreviousTarget))
+    assert(tostring(sess54d8.transitionPreviousRoot) == "900",
+        "CASE A A→B must retain transitionPreviousRoot=900; got " .. tostring(sess54d8.transitionPreviousRoot))
+
+    -- Exercise the production new-engagement boundary.
+    local mark54d8 = fix.callbackCheckpoint()
+    assert(API.startTargetSelection(X4GunneryState.checkedGroups(sess54d8)) == true,
+        "CASE A startTargetSelection must succeed")
+    fix.drainCallbacksSince(mark54d8)
+    -- Transition context must be invalidated at the boundary.
+    assert(sess54d8.transitionPreviousTarget == nil,
+        "CASE A new-engagement boundary must clear transitionPreviousTarget; got " .. tostring(sess54d8.transitionPreviousTarget))
+    assert(sess54d8.transitionPreviousRoot == nil,
+        "CASE A new-engagement boundary must clear transitionPreviousRoot; got " .. tostring(sess54d8.transitionPreviousRoot))
+
+    -- Re-engage B and first-enable Prefer: must NOT replay stale A/root(A).
+    assert(API.engageTarget(501) == true, "CASE A re-engage B must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    local countBefore54d8 = #evts54d8
+    local mark54d8b = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "CASE A first-enable on B must succeed")
+    fix.drainCallbacksSince(mark54d8b)
+    local caseAEvent = nil
+    for i = countBefore54d8 + 1, #evts54d8 do
+        if evts54d8[i].control == "prefer_all_turrets" then caseAEvent = evts54d8[i]; break end
+    end
+    assert(caseAEvent ~= nil, "CASE A first-enable must emit prefer_all_turrets")
+    assert(caseAEvent.params["previous"] == nil,
+        "CASE A re-engage B then enable must not carry stale previous; got " .. tostring(caseAEvent.params["previous"]))
+    assert(caseAEvent.params["previousroot"] == nil,
+        "CASE A re-engage B then enable must not carry stale previousroot; got " .. tostring(caseAEvent.params["previousroot"]))
+
+    -- 54d-9: CASE B — missing-root replacement across a new-engagement boundary.
+    -- After the boundary, engaging C must NOT create a transition with a missing
+    -- previousroot from the stale aimTargetID. First-enable on C must have no
+    -- previous fields (no hierarchy transition exists for a genuinely new engagement).
+    gcMenu.onShowMenu()
+    local sess54d9 = API.getSession()
+    assert(sess54d9 ~= nil, "expected session for CASE B boundary test")
+    sess54d9.groups = { grp54d }
+    sess54d9.checkedGroupKeys = { ["grp54d"] = true }
+    sess54d9.phase, sess54d9.controlMode = "engaged", "direct"
+    sess54d9.aimTargetID, sess54d9.targetObjectID = 500, 900
+    sess54d9.cameraMemberID = 53
+    sess54d9.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess54d9.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54d9.shipID, mode = "attack", armed = true } }
+    assert(sess54d9.preferAllTurrets == false, "CASE B must start with Prefer off")
+
+    local savedGetContextByClass54d9 = C.GetContextByClass
+    local savedGetComponentData54d9 = GetComponentData
+    local savedSetSofttarget54d9 = C.SetSofttarget
+    local savedGetExternalTargetView54d9 = C.GetExternalTargetViewComponent
+    local savedIsComponentOperational54d9 = C.IsComponentOperational
+    local savedIsPlayerCameraTargetViewPossible54d9 = C.IsPlayerCameraTargetViewPossible
+    local savedGetNumUpgradeGroups54d9 = C.GetNumUpgradeGroups
+    local savedGetUpgradeGroups254d9 = C.GetUpgradeGroups2
+    local savedGetUpgradeGroupInfo254d9 = C.GetUpgradeGroupInfo2
+    local savedGetNumUpgradeSlots54d9 = C.GetNumUpgradeSlots
+    local savedGetUpgradeSlotCurrentComponent54d9 = C.GetUpgradeSlotCurrentComponent
+    local savedGetUpgradeSlotGroup54d9 = C.GetUpgradeSlotGroup
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or ((tostring(comp) == "502") and 902 or comp)) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    local groupBuffer54d9 = {}
+    groupBuffer54d9[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return groupBuffer54d9 end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    local evts54d9 = {}
+    local savedAdd54d9 = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54d9[#evts54d9 + 1] = { screen = screen, control = control, params = params }
+    end
+
+    -- A → B while Prefer is OFF: retain transition context.
+    assert(API.engageTarget(501) == true, "CASE B A→B must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    assert(tostring(sess54d9.transitionPreviousTarget) == "500",
+        "CASE B A→B must retain transitionPreviousTarget=500; got " .. tostring(sess54d9.transitionPreviousTarget))
+    assert(tostring(sess54d9.transitionPreviousRoot) == "900",
+        "CASE B A→B must retain transitionPreviousRoot=900; got " .. tostring(sess54d9.transitionPreviousRoot))
+
+    -- Exercise the production new-engagement boundary.
+    local mark54d9 = fix.callbackCheckpoint()
+    assert(API.startTargetSelection(X4GunneryState.checkedGroups(sess54d9)) == true,
+        "CASE B startTargetSelection must succeed")
+    fix.drainCallbacksSince(mark54d9)
+    -- Transition context must be invalidated at the boundary.
+    assert(sess54d9.transitionPreviousTarget == nil,
+        "CASE B new-engagement boundary must clear transitionPreviousTarget; got " .. tostring(sess54d9.transitionPreviousTarget))
+    assert(sess54d9.transitionPreviousRoot == nil,
+        "CASE B new-engagement boundary must clear transitionPreviousRoot; got " .. tostring(sess54d9.transitionPreviousRoot))
+
+    -- Engage C: must NOT create a stale transition with missing previousroot.
+    assert(API.engageTarget(502) == true, "CASE B B→C must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    -- No transition context should have been stored (previousRoot was nil at boundary).
+    assert(sess54d9.transitionPreviousTarget == nil,
+        "CASE B engage C after boundary must not store stale transition; got " .. tostring(sess54d9.transitionPreviousTarget))
+    assert(sess54d9.transitionPreviousRoot == nil,
+        "CASE B engage C after boundary must not store stale previousroot; got " .. tostring(sess54d9.transitionPreviousRoot))
+
+    -- First-enable Prefer on C: must have no previous fields.
+    local countBefore54d9 = #evts54d9
+    local mark54d9b = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "CASE B first-enable on C must succeed")
+    fix.drainCallbacksSince(mark54d9b)
+    local caseBEvent = nil
+    for i = countBefore54d9 + 1, #evts54d9 do
+        if evts54d9[i].control == "prefer_all_turrets" then caseBEvent = evts54d9[i]; break end
+    end
+    assert(caseBEvent ~= nil, "CASE B first-enable must emit prefer_all_turrets")
+    assert(caseBEvent.params["previous"] == nil,
+        "CASE B first-enable on C must not carry stale previous=B; got " .. tostring(caseBEvent.params["previous"]))
+    assert(caseBEvent.params["previousroot"] == nil,
+        "CASE B first-enable on C must not carry absent previousroot; got " .. tostring(caseBEvent.params["previousroot"]))
+
     C.GetContextByClass = savedGetContextByClass54d
     GetComponentData = savedGetComponentData54d
     C.SetSofttarget = savedSetSofttarget54d
