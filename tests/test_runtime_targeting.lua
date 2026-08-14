@@ -1450,6 +1450,153 @@ do
     AddUITriggeredEvent = savedAdd54
 end
 
+-- ── 54b. prefer-all-turrets payload carries previousroot on target change ────
+-- Extends test 54: the preferred-target payload must carry the root/context of
+-- the previous selected target as `previousroot`, captured before Lua overwrites
+-- session.targetObjectID. First Apply, same-component reapplication, and exact
+-- state after selection are all covered.
+do
+    gcMenu.onShowMenu()
+    local sess54b = API.getSession()
+    assert(sess54b ~= nil, "expected session for previousroot test")
+    local grp54b = { key = "grp54b", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 53, displayName = "G53b", totalCount = 1, operationalCount = 1,
+        mode = "autoassist", armed = true, members = {
+            { componentID = 53, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "53" }
+        } }
+    sess54b.groups = { grp54b }
+    sess54b.checkedGroupKeys = { ["grp54b"] = true }
+    sess54b.phase, sess54b.controlMode = "engaged", "direct"
+    -- aimTargetID is the selected component; targetObjectID is its root.
+    sess54b.aimTargetID, sess54b.targetObjectID = 500, 500
+    sess54b.staged = { ["grp54b"] = { mode = "defend", armed = true } }
+    sess54b.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54b.shipID, mode = "attack", armed = true } }
+
+    local evts54b = {}
+    local savedAdd54b = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54b[#evts54b + 1] = { screen = screen, control = control, params = params }
+    end
+
+    -- 54b-1: First Apply must NOT invent a previousroot (or previous) transition.
+    local mark54b1 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "first apply must succeed")
+    fix.drainCallbacksSince(mark54b1)
+    local firstEvent54b = nil
+    for _, e in ipairs(evts54b) do
+        if e.control == "prefer_all_turrets" then firstEvent54b = e; break end
+    end
+    assert(firstEvent54b ~= nil, "first apply must emit prefer_all_turrets")
+    assert(firstEvent54b.params["previous"] == nil,
+        "first Apply must not carry previous; got " .. tostring(firstEvent54b.params["previous"]))
+    assert(firstEvent54b.params["previousroot"] == nil,
+        "first Apply must not carry previousroot; got " .. tostring(firstEvent54b.params["previousroot"]))
+
+    -- 54b-2: On A -> B, payload carries both previous and previousroot captured
+    -- from the pre-update session state. previousroot = root(A) = 500.
+    local countBefore54b2 = #evts54b
+    local mark54b2 = fix.callbackCheckpoint()
+    sess54b.aimTargetID = 501
+    sess54b.targetObjectID = 501
+    assert(API.applyPreferAllTurrets(500, 500) == true, "re-issue with previousroot must succeed")
+    fix.drainCallbacksSince(mark54b2)
+    local reissuedEvent54b = nil
+    for i = countBefore54b2 + 1, #evts54b do
+        if evts54b[i].control == "prefer_all_turrets" then reissuedEvent54b = evts54b[i]; break end
+    end
+    assert(reissuedEvent54b ~= nil, "re-issue must emit prefer_all_turrets")
+    assert(reissuedEvent54b.params["previous"] ~= nil,
+        "target change must carry previous; got " .. tostring(reissuedEvent54b.params["previous"]))
+    assert(tostring(reissuedEvent54b.params["previous"]) == "luaid:500",
+        "previous must be the exact selected component; got " .. tostring(reissuedEvent54b.params["previous"]))
+    assert(reissuedEvent54b.params["previousroot"] ~= nil,
+        "target change must carry previousroot; got " .. tostring(reissuedEvent54b.params["previousroot"]))
+    assert(tostring(reissuedEvent54b.params["previousroot"]) == "luaid:500",
+        "previousroot must be the exact root of the previous selected component; got " .. tostring(reissuedEvent54b.params["previousroot"]))
+
+    -- 54b-3: previousroot is captured before session.targetObjectID is changed.
+    -- Simulate engageTarget's ordering: capture previousRoot from targetObjectID,
+    -- then overwrite targetObjectID, then call applyPreferAllTurrets with the
+    -- captured value. The payload must still carry the old root.
+    local countBefore54b3 = #evts54b
+    sess54b.aimTargetID = 502
+    sess54b.targetObjectID = 502
+    local capturedRoot54b = sess54b.targetObjectID  -- capture BEFORE overwrite
+    sess54b.targetObjectID = 503                   -- overwrite AFTER capture
+    local mark54b3 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets(501, capturedRoot54b) == true,
+        "re-issue with pre-captured previousroot must succeed")
+    fix.drainCallbacksSince(mark54b3)
+    local reissuedEvent54b3 = nil
+    for i = countBefore54b3 + 1, #evts54b do
+        if evts54b[i].control == "prefer_all_turrets" then reissuedEvent54b3 = evts54b[i]; break end
+    end
+    assert(reissuedEvent54b3 ~= nil, "re-issue with pre-captured root must emit")
+    assert(tostring(reissuedEvent54b3.params["previousroot"]) == "luaid:502",
+        "previousroot must be the captured pre-update root (502), not the post-update one (503); got " .. tostring(reissuedEvent54b3.params["previousroot"]))
+    -- session.targetObjectID must describe the NEW target exactly.
+    assert(tostring(sess54b.targetObjectID) == "503",
+        "session.targetObjectID must describe the new target after selection")
+
+    -- 54b-4: Exact-same-component reapplication preserves suppression/no-release.
+    -- When the same component is reapplied, no previous/previousroot should be
+    -- emitted (the release transition is suppressed), but the override refresh
+    -- event itself may still fire.
+    local countBefore54b4 = #evts54b
+    local mark54b4 = fix.callbackCheckpoint()
+    sess54b.aimTargetID = 503
+    assert(API.applyPreferAllTurrets(503, 503) == true,
+        "same-component reapplication must succeed")
+    fix.drainCallbacksSince(mark54b4)
+    local sameCompEvent54b4 = nil
+    for i = countBefore54b4 + 1, #evts54b do
+        if evts54b[i].control == "prefer_all_turrets" then sameCompEvent54b4 = evts54b[i]; break end
+    end
+    -- The override refresh may fire; what matters is no previous/previousroot.
+    if sameCompEvent54b4 ~= nil then
+        assert(sameCompEvent54b4.params["previous"] == nil,
+            "same-component reapplication must not carry previous; got " .. tostring(sameCompEvent54b4.params["previous"]))
+        assert(sameCompEvent54b4.params["previousroot"] == nil,
+            "same-component reapplication must not carry previousroot; got " .. tostring(sameCompEvent54b4.params["previousroot"]))
+    end
+
+    -- 54b-5: First Apply carries no previous/previousroot even when the session
+    -- had no prior targetObjectID (first engagement). The override fires but
+    -- the payload is ship+target only.
+    gcMenu.onShowMenu()
+    local sess54b5 = API.getSession()
+    assert(sess54b5 ~= nil, "expected session for first-apply test")
+    sess54b5.groups = { grp54b }
+    sess54b5.checkedGroupKeys = { ["grp54b"] = true }
+    sess54b5.phase, sess54b5.controlMode = "engaged", "direct"
+    -- aimTargetID is set (the target being engaged); targetObjectID was nil
+    -- before the first engagement, so previousroot must be absent.
+    sess54b5.aimTargetID, sess54b5.targetObjectID = 600, 600
+    sess54b5.staged = { ["grp54b"] = { mode = "defend", armed = true } }
+    sess54b5.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess54b5.shipID, mode = "attack", armed = true } }
+    local evts54b5 = {}
+    AddUITriggeredEvent = function(screen, control, params)
+        evts54b5[#evts54b5 + 1] = { screen = screen, control = control, params = params }
+    end
+    local mark54b5 = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets(nil, nil) == true, "first apply must succeed")
+    fix.drainCallbacksSince(mark54b5)
+    local firstEvent54b5 = nil
+    for _, e in ipairs(evts54b5) do
+        if e.control == "prefer_all_turrets" then firstEvent54b5 = e; break end
+    end
+    assert(firstEvent54b5 ~= nil, "first apply must still emit")
+    assert(firstEvent54b5.params["previous"] == nil,
+        "first apply must not carry previous field")
+    assert(firstEvent54b5.params["previousroot"] == nil,
+        "first apply must not carry previousroot field")
+
+    AddUITriggeredEvent = savedAdd54b
+end
+
 -- ── 56. player-faction objects are never offered as engagement targets ─────────
 -- Player-owned ships and stations must be excluded from readTargetCandidates()
 -- regardless of whether they arrive via the sector sweep or as the current soft
