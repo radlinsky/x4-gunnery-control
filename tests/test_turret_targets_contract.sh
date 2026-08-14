@@ -123,6 +123,30 @@ if printf '%s\n' "$apply_body$release_body" | grep -Eq '<cease_fire|<set_weapon_
   note "preferred-target switching must not use cease_fire or mutate turret modes"
 fi
 
+# 6. Apply reads and normalizes the optional previous-root field from Lua.
+#    Task 3B: the Lua payload carries $previousroot alongside $previous so that
+#    later hierarchy-release work can release the root without re-resolving it.
+#    The MD cue must parse it here, using the same guarded component-conversion
+#    pattern already used for $ship, $target, and $previous. No hierarchy walk
+#    or additional stop_firing_at_target is required in this task — only safe
+#    normalization of the incoming field.
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+printf '%s\n' "$apply_body" | grep -Fq 'event.param3.$previousroot' \
+  || note "Apply must read the previous-root field explicitly from Lua"
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+printf '%s\n' "$apply_body" | grep -Fq 'typeof $previousroot != datatype.component and $previousroot' \
+  || note "Apply must normalize a non-component previous-root with component.{}"
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+printf '%s\n' "$apply_body" | grep -Fq 'component.{$previousroot}' \
+  || note "Apply must convert previous-root to component when needed"
+# The normalization block must sit in the payload-parsing section, before any
+# target-application work (stop_firing_at_target or set_turret_targets).
+# shellcheck disable=SC2016 # MD variables are literal XML text.
+prevroot_norm_line=$(printf '%s\n' "$apply_body" | grep -F 'component.{$previousroot}' | head -1 | cut -d: -f1)
+if [ -n "$prevroot_norm_line" ] && { [ -z "$stop_old" ] || [ "$prevroot_norm_line" -ge "$stop_old" ]; }; then
+  note "previous-root normalization must precede the previous-target stop"
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

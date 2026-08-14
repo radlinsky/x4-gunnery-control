@@ -409,6 +409,7 @@
             <set_value name="$ship" exact="@event.param3.$ship"/>
             <set_value name="$target" exact="@event.param3.$target"/>
             <set_value name="$previous" exact="@event.param3.$previous"/>
+            <set_value name="$previousroot" exact="@event.param3.$previousroot"/>
             <do_if value="typeof $ship != datatype.component and $ship">
               <set_value name="$ship" exact="component.{$ship}"/>
             </do_if>
@@ -417,6 +418,9 @@
             </do_if>
             <do_if value="typeof $previous != datatype.component and $previous">
               <set_value name="$previous" exact="component.{$previous}"/>
+            </do_if>
+            <do_if value="typeof $previousroot != datatype.component and $previousroot">
+              <set_value name="$previousroot" exact="component.{$previousroot}"/>
             </do_if>
             <do_if value="$ship and $target">
               <!-- target is not optional in practice. Without it the action
