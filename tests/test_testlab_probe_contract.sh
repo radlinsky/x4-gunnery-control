@@ -308,7 +308,41 @@ else
   fi
 fi
 
-# 16. The diagnostic route cannot call production Prefer behavior.
+# 16. Test Lab → Probe navigation uses established closeMenuAndOpenNewMenu contract.
+#     The currently open Test Lab `menu` must be the first argument, not a retrieved menu object.
+if [ ! -f "$testlab" ]; then
+  note "testlab.lua not found"
+else
+  # Must use: Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLabProbe", ...)
+  if ! grep -q 'Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLabProbe"' "$testlab"; then
+    note "testlab.lua must call closeMenuAndOpenNewMenu(menu, \"X4GunneryTestLabProbe\", ...)"
+  fi
+  # Must NOT use Helper.getMenu as first argument.
+  if grep -q 'Helper.getMenu("X4GunneryTestLabProbe")' "$testlab"; then
+    note "testlab.lua must not pass Helper.getMenu(\"X4GunneryTestLabProbe\") as first argument"
+  fi
+fi
+
+# 17. Probe → Test Lab navigation uses established closeMenuAndOpenNewMenu contract.
+#     The currently open probe `menu` must be the first argument in both Return button and onCloseElement.
+if [ ! -f "$lua" ]; then
+  note "probe.lua not found at $lua"
+else
+  # Return button: must use Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab", ...)
+  if ! grep -q 'Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab"' "$lua"; then
+    note "probe.lua Return button must call closeMenuAndOpenNewMenu(menu, \"X4GunneryTestLab\", ...)"
+  fi
+  # Must NOT use Helper.getMenu as first argument in Return button.
+  if grep -q 'Helper.getMenu("X4GunneryTestLab")' "$lua"; then
+    note "probe.lua must not pass Helper.getMenu(\"X4GunneryTestLab\") as first argument"
+  fi
+  # onCloseElement: must use Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab", ...)
+  if ! grep -A2 'function menu.onCloseElement' "$lua" | grep -q 'Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab"'; then
+    note "probe.lua onCloseElement must call closeMenuAndOpenNewMenu(menu, \"X4GunneryTestLab\", ...)"
+  fi
+fi
+
+# 18. The diagnostic route cannot call production Prefer behavior.
 #     Verify that probe_invoke does not emit prefer_all_turrets or prefer_all_turrets_clear.
 if grep -q 'prefer_all_turrets' "$md"; then
   note "probe MD must not reference production prefer_all_turrets events"

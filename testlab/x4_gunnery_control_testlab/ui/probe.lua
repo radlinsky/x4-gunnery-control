@@ -186,10 +186,7 @@ function menu.display()
     local backRow = tableView:addRow("back", {})
     backRow[1]:setColSpan(4):createButton({}):setText(text(9) .. " (return to Test Lab)")
     backRow[1].handlers.onClick = function()
-        local main = Helper.getMenu("X4GunneryTestLab")
-        if main then
-            Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab", { 0, 0 }, true)
-        end
+        Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab", { 0, 0 }, true)
     end
 
     frame:display()
@@ -200,12 +197,7 @@ function menu.onShowMenu()
 end
 
 function menu.onCloseElement(dueToClose)
-    local main = Helper.getMenu("X4GunneryTestLab")
-    if main then
-        Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab", { 0, 0 }, true)
-    else
-        Helper.closeMenu(menu, dueToClose, nil, false)
-    end
+    Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab", { 0, 0 }, true)
 end
 
 local function init()

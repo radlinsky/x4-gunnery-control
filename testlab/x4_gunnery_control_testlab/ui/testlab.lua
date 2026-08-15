@@ -720,10 +720,7 @@ function menu.display()
     local probeRow = tableView:addRow("probe", {})
     probeRow[1]:setColSpan(4):createButton({}):setText(text(31))
     probeRow[1].handlers.onClick = function()
-        local probeMenu = Helper.getMenu("X4GunneryTestLabProbe")
-        if probeMenu then
-            Helper.closeMenuAndOpenNewMenu(probeMenu, "X4GunneryTestLabProbe", { 0, 0 }, true)
-        end
+        Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLabProbe", { 0, 0 }, true)
     end
     if not sweep then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(4):createText(text(12))
