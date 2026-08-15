@@ -34,3 +34,7 @@ command, improve the skill's concise workflow, focused references, scripts,
 or regression tests within the task's write authority. Iterate on these
 improvements, validate every skill change, and keep uncertain findings
 classified as inference or experimental.
+
+# Other rules
+
+When a shell contract test searches literal X4 MD $Variable syntax, encode literal dollar signs as [$] in regex patterns (or use grep -F with escaped dollars for fixed strings). Do not add per-line SC2016 suppressions.
