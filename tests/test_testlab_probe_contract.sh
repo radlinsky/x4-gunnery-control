@@ -348,6 +348,53 @@ if grep -q 'prefer_all_turrets' "$md"; then
   note "probe MD must not reference production prefer_all_turrets events"
 fi
 
+# 19. probe.lua must NOT call find_object (unsupported UI-side world search).
+#     The target resolution must use the scenario-MD-backed request/response path.
+if grep -q 'find_object' "$lua"; then
+  note "probe.lua must not call find_object (use scenario MD label lookup instead)"
+fi
+
+# 20. probe.lua must request probe target resolution from scenario MD.
+if ! grep -q 'probe_target_resolve' "$lua"; then
+  note "probe.lua must send probe_target_resolve event to scenario MD"
+fi
+if ! grep -q 'X4GunneryTestLab.ProbeTargetsReady' "$lua"; then
+  note "probe.lua must register for X4GunneryTestLab.ProbeTargetsReady event"
+fi
+if ! grep -q 'onProbeTargetsReady' "$lua"; then
+  note "probe.lua must define onProbeTargetsReady handler"
+fi
+if ! grep -q 'requestProbeTargetResolution' "$lua"; then
+  note "probe.lua must define requestProbeTargetResolution function"
+fi
+
+# 21. Scenario MD must handle probe_target_resolve and return resolved IDs.
+scenario_md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
+if ! grep -q 'probe_target_resolve' "$scenario_md"; then
+  note "scenario MD must handle probe_target_resolve event"
+fi
+if ! grep -q 'X4GunneryTestLab.ProbeTargetsReady' "$scenario_md"; then
+  note "scenario MD must raise X4GunneryTestLab.ProbeTargetsReady event"
+fi
+if ! grep -q 'ProbeTargetResolve' "$scenario_md"; then
+  note "scenario MD must have ProbeTargetResolve cue"
+fi
+
+# 22. probe.lua must gate invocation on successful target resolution.
+#     invokeProbe must check resolveProbeTargets() and fail closed if nil.
+if ! grep -q 'resolveProbeTargets' "$lua"; then
+  note "probe.lua must call resolveProbeTargets before invocation"
+fi
+# The menu must show resolving/unresolved status when targets are pending.
+if ! grep -q 'resolving' "$lua" && ! grep -q 'unresolved' "$lua"; then
+  note "probe.lua menu must show resolving or unresolved status when targets pending"
+fi
+
+# 23. Scenario MD must clear probe-resolved state on despawn.
+if ! grep -q '\$ProbeResolvedA\|\$ProbeResolvedB' "$scenario_md"; then
+  note "scenario MD must clear ProbeResolvedA/B on despawn to prevent stale references"
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

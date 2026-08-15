@@ -522,8 +522,47 @@
             <do_if value="ScenarioRoot.$RepairObjects?">
               <remove_value name="ScenarioRoot.$RepairObjects"/>
             </do_if>
+            <remove_value name="ScenarioRoot.$ProbeResolvedA"/>
+            <remove_value name="ScenarioRoot.$ProbeResolvedB"/>
             <reset_cue cue="ScenarioRepairArm"/>
             <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
+          </actions>
+        </cue>
+
+        <!-- ProbeTargetResolve
+             AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
+               {requestId = ..., labels = {"label1", "label2", ...}})
+             Resolves spawned fixture labels to live component IDs and returns them
+             via X4GunneryTestLab.ProbeTargetsReady so probe.lua can display them.
+             Uses requestId to discard stale responses from earlier fixture generations.
+        -->
+        <cue name="ProbeTargetResolve" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'probe_target_resolve'"/>
+          </conditions>
+          <actions>
+            <set_value name="$RequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
+            <create_list name="$Labels"/>
+            <do_if value="@event.param3.$labels?">
+              <do_for_each name="$LocLabel" in="event.param3.$labels">
+                <append_to_list name="$Labels" exact="$LocLabel"/>
+              </do_for_each>
+            </do_if>
+            <create_list name="$Resolved"/>
+            <do_for_each name="$Label" in="$Labels">
+              <do_for_each name="$Obj" in="ScenarioRoot.$Spawned">
+                <do_if value="$Obj.exists and $Obj.knownname == $Label">
+                  <append_to_list name="$Resolved" exact="$Obj"/>
+                </do_if>
+              </do_for_each>
+            </do_for_each>
+            <do_if value="$RequestId != ''">
+              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetsReady'"
+                               param="'$RequestId:' + $Resolved.count + ':'
+                                 + (if $Resolved.{1} then $Resolved.{1} else '')
+                                 + ':'
+                                 + (if $Resolved.{2} then $Resolved.{2} else '')"/>
+            </do_if>
           </actions>
         </cue>
 

@@ -23,9 +23,16 @@
 -- PROBE INPUTS
 -- Uses existing PR3 fixture identities resolved from the live scenario:
 --   - player ship (from getCurrentShipSweepReadOnly)
---   - A = PR3 TARGET A LEFT OSAKA (first hostile group in spec)
---   - B = PR3 TARGET B RIGHT OSAKA (second hostile group in spec)
--- Actual component IDs resolved from live fixture; never hard-coded.
+--   - A and B resolved asynchronously by the scenario MD via exact-label lookup
+--     against ScenarioRoot.$Spawned, returned through X4GunneryTestLab.ProbeTargetsReady
+--
+-- TARGET RESOLUTION
+-- probe.lua requests resolution by sending:
+--   AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
+--     {requestId = ..., labels = {labelA, labelB}})
+-- The scenario MD resolves labels against spawned objects and returns:
+--   X4GunneryTestLab.ProbeTargetsReady with param="<requestId>:<count>:<a_id>:<b_id>"
+-- A request token guards against stale responses from prior fixture generations.
 --
 -- LOGGING
 -- Immediately before executing each probe, emits one clear boundary:
@@ -41,6 +48,8 @@ local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLabProbe", uixID = "x4_gunnery_control_testlab" }
 local scenarioActionStatus, pendingScenario = nil, nil
 local scenarioLoadTime = GetCurRealTime()
+local probeResolvedTargets, probePendingRequestId = nil, nil
+local probeRequestSerial = 0
 
 local function text(id) return ReadText(20992, id) end
 local function safe(value) return tostring(value or ""):gsub("[^%w_.%-]", "_") end
@@ -63,12 +72,9 @@ local PROBE_OPS = {
     "wide_attackenemies_b",
 }
 
--- Resolve the player ship and the two PR3 fixture targets (A and B) from the
--- live scenario. Returns {ship=component, a=component, b=component} or nil.
+-- Resolve the player ship (synchronous) and request A/B from scenario MD.
+-- Returns {ship=component, a=component, b=component} or nil if not yet resolved.
 local function resolveProbeTargets()
-    local setup = X4GunneryTestLabScenarioSpec and X4GunneryTestLabScenarioSpec.setup
-    if not setup then return nil end
-
     -- Get player ship.
     local bridge = X4GunneryControlAPI
     if not bridge or not bridge.getCurrentShipSweepReadOnly then
@@ -77,45 +83,65 @@ local function resolveProbeTargets()
     local ship, reason = bridge.getCurrentShipSweepReadOnly()
     if not ship then return nil end
 
-    -- Find A and B from the scenario spec groups. The spec defines exactly two
-    -- hostile OSAKA ships: A (left, x=-900) and B (right, x=+900).
-    local groups = X4GunneryTestLabScenarioSpec.groups or {}
-    local targetA, targetB = nil, nil
-    for _, group in ipairs(groups) do
-        if group.hostile == true and group.macro and group.macro:find("osaka", 1, true) then
-            if not targetA then
-                targetA = { label = group.label, x = tonumber(group.x) or 0 }
-            else
-                targetB = { label = group.label, x = tonumber(group.x) or 0 }
-            end
+    -- A/B must have been resolved asynchronously by the scenario MD.
+    if not probeResolvedTargets then return nil end
+
+    return { ship = ConvertStringToLuaID(tostring(ship.id)),
+             a = probeResolvedTargets.a, b = probeResolvedTargets.b }
+end
+
+-- Request the scenario MD to resolve A/B labels to live component IDs.
+local function requestProbeTargetResolution()
+    if not X4GunneryTestLabScenarioSpec or not X4GunneryTestLabScenarioSpec.groups then
+        log("probe_resolve", { action = "skipped", reason = "no spec groups" })
+        return
+    end
+    -- Collect exact labels from hostile groups in spec order.
+    local labels = {}
+    for _, group in ipairs(X4GunneryTestLabScenarioSpec.groups) do
+        if group.hostile == true and group.label then
+            table.insert(labels, trim(group.label))
         end
     end
+    if #labels < 2 then
+        log("probe_resolve", { action = "skipped", reason = "need at least 2 hostile labels", count = #labels })
+        return
+    end
+    probeRequestSerial = probeRequestSerial + 1
+    local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(probeRequestSerial)
+    probePendingRequestId = requestId
+    probeResolvedTargets = nil
+    log("probe_resolve", { action = "requested", request_id = requestId, labels = table.concat(labels, ",") })
+    AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
+        { requestId = requestId, labels = labels })
+end
 
-    -- Resolve actual component IDs from live sector.
-    local shipComp = ConvertStringToLuaID(tostring(ship.id))
+-- Handle the scenario MD's response with resolved A/B component IDs.
+local function onProbeTargetsReady(_, param)
+    local value = tostring(param or "")
+    local requestId, count, aId, bId = value:match("^([^:]+):(%d+):([^:]*):([^:]*)$")
+    if not requestId then
+        -- Try without trailing colons for backward compat.
+        requestId, count, aId, bId = value:match("^([^:]+):(%d+):([^:]*)$")
+        bId = ""
+    end
+    if not probePendingRequestId or requestId ~= probePendingRequestId then
+        log("probe_resolve", { action = "stale_response", received = requestId, pending = probePendingRequestId })
+        return
+    end
+    probePendingRequestId = nil
     local aComp, bComp = nil, nil
-
-    -- Search for ships matching the spec labels in the player sector.
-    local searchResult = find_object("player.sector", "objecttype.ship", "multiple")
-    if searchResult then
-        for _, obj in ipairs(searchResult) do
-            if obj.exists and obj.knownname then
-                local name = trim(obj.knownname)
-                if targetA and name:find(trim(targetA.label), 1, true) and not aComp then
-                    aComp = ConvertStringToLuaID(tostring(obj.id))
-                end
-                if targetB and name:find(trim(targetB.label), 1, true) and not bComp then
-                    bComp = ConvertStringToLuaID(tostring(obj.id))
-                end
-            end
-        end
+    if aId and aId ~= "" then aComp = ConvertStringToLuaID(tostring(aId)) end
+    if bId and bId ~= "" then bComp = ConvertStringToLuaID(tostring(bId)) end
+    if count == "2" and aComp and bComp then
+        probeResolvedTargets = { a = aComp, b = bComp }
+        log("probe_resolve", { action = "resolved", a = tostring(aComp), b = tostring(bComp) })
+        menu.display()
+    else
+        log("probe_resolve", { action = "failed", count = count, a_id = tostring(aId), b_id = tostring(bId) })
+        scenarioActionStatus = "FAILED: could not resolve probe targets A/B from scenario"
+        menu.display()
     end
-
-    if not aComp or not bComp then
-        return nil
-    end
-
-    return { ship = shipComp, a = aComp, b = bComp }
 end
 
 -- Invoke exactly one probe operation. Logs boundary, then sends the MD event.
@@ -143,6 +169,11 @@ local function invokeProbe(op)
     menu.display()
 end
 
+-- Clock token for unique request IDs.
+local function clockToken(value)
+    return tostring(math.floor((tonumber(value) or 0) * 1000000 + 0.5))
+end
+
 -- Menu display: probe buttons + status.
 function menu.display()
     Helper.clearMenu(menu)
@@ -157,7 +188,11 @@ function menu.display()
     if targets then
         infoRow[1]:setColSpan(4):createText("ship=" .. tostring(targets.ship) .. " a=" .. tostring(targets.a) .. " b=" .. tostring(targets.b))
     else
-        infoRow[1]:setColSpan(4):createText("Targets: unresolved (open Gunnery menu on PR3 fixture ship)")
+        if probePendingRequestId then
+            infoRow[1]:setColSpan(4):createText("Targets: resolving...")
+        else
+            infoRow[1]:setColSpan(4):createText("Targets: unresolved (create PR3 scenario first)")
+        end
     end
 
     -- Six probe buttons, each invoking exactly one isolated operation.
@@ -204,5 +239,6 @@ local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     log("loaded")
     if Helper then Helper.registerMenu(menu) end
+    RegisterEvent("X4GunneryTestLab.ProbeTargetsReady", onProbeTargetsReady)
 end
 init()
