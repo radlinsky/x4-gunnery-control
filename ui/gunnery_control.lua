@@ -1006,6 +1006,13 @@ applyPreferAllTurrets = function(previousTargetID, previousRootID)
         previousRootID_local = session.transitionPreviousRoot
         session.transitionPreviousTarget = nil
         session.transitionPreviousRoot = nil
+        -- Reissue a fresh DirectFallback on the current target before the
+        -- deferred Prefer Apply. The Prefer-ON target-change path already gets
+        -- this sequencing because engageTarget() calls applyPreferAllTurrets()
+        -- and then emitDirectFallback(). Without it, the first-enable path only
+        -- defers the ship-wide Prefer event; the directed controller can lose
+        -- the fresh B-directed priming that DirectFallback provides.
+        emitDirectFallback(session.shipID, targetID)
     end
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not currentSession(expectedSession, expectedEpoch) then return end

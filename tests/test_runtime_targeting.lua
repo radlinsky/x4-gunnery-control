@@ -2190,6 +2190,356 @@ do
     C.GetUpgradeSlotCurrentComponent = savedGetUpgradeSlotCurrentComponent54d
     C.GetUpgradeSlotGroup = savedGetUpgradeSlotGroup54d
     AddUITriggeredEvent = savedAdd54d
+
+    -- 54d-10: retained A→B, first-enable Prefer must emit fresh direct_fallback(B)
+    -- and direct_watch(B) BEFORE the deferred prefer_all_turrets event.
+    gcMenu.onShowMenu()
+    local sess = API.getSession()
+    assert(sess ~= nil, "expected session for 54d-10 sequencing test")
+    sess.groups = { grp54d }
+    sess.checkedGroupKeys = { ["grp54d"] = true }
+    sess.phase, sess.controlMode = "engaged", "direct"
+    sess.aimTargetID, sess.targetObjectID = 500, 900
+    sess.cameraMemberID = 53
+    sess.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess.shipID, mode = "attack", armed = true } }
+    assert(sess.preferAllTurrets == false, "54d-10 must start with Prefer off")
+
+    local saved = { C.GetContextByClass, GetComponentData, C.SetSofttarget,
+        C.GetExternalTargetViewComponent, C.IsComponentOperational,
+        C.IsPlayerCameraTargetViewPossible, C.GetNumUpgradeGroups,
+        C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2, C.GetNumUpgradeSlots,
+        C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup }
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or comp) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    local gb = {}
+    gb[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return gb end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    local evts = {}
+    local savedAdd = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts[#evts + 1] = { screen = screen, control = control, params = params }
+    end
+
+    assert(API.engageTarget(501) == true, "54d-10 A→B must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    assert(tostring(sess.transitionPreviousTarget) == "500", "54d-10 A→B must retain transitionPreviousTarget=500")
+    assert(tostring(sess.transitionPreviousRoot) == "900", "54d-10 A→B must retain transitionPreviousRoot=900")
+
+    local cb = #evts
+    local mark = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "54d-10 first-enable on B must succeed")
+    local dfb, dw = nil, nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "direct_fallback" and dfb == nil then dfb = evts[i] end
+        if evts[i].control == "direct_watch" and dw == nil then dw = evts[i] end
+    end
+    assert(dfb ~= nil, "54d-10 first-enable must emit direct_fallback(B) before draining deferred Prefer")
+    assert(tostring(dfb.params["target"]) == "luaid:501", "54d-10 direct_fallback target must be B (501)")
+    assert(dw ~= nil, "54d-10 first-enable must emit direct_watch(B) before draining deferred Prefer")
+    assert(tostring(dw.params["target"]) == "luaid:501", "54d-10 direct_watch target must be B (501)")
+
+    fix.drainCallbacksSince(mark)
+    local pref = nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "prefer_all_turrets" then pref = evts[i]; break end
+    end
+    assert(pref ~= nil, "54d-10 first-enable must emit prefer_all_turrets")
+    local fI, wI = nil, nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "direct_fallback" and fI == nil then fI = i end
+        if evts[i].control == "direct_watch" and wI == nil then wI = i end
+    end
+    for i = cb + 1, #evts do
+        if evts[i].control == "prefer_all_turrets" then
+            assert(i > fI, "54d-10 prefer_all_turrets must follow direct_fallback")
+            assert(i > wI, "54d-10 prefer_all_turrets must follow direct_watch")
+            break
+        end
+    end
+    assert(tostring(pref.params["target"]) == "luaid:501", "54d-10 prefer target must be B (501)")
+    assert(tostring(pref.params["previous"]) == "luaid:500", "54d-10 prefer previous must be A (500)")
+    assert(tostring(pref.params["previousroot"]) == "luaid:900", "54d-10 prefer previousroot must be root(A) (900)")
+
+    C.GetContextByClass, GetComponentData, C.SetSofttarget = saved[1], saved[2], saved[3]
+    C.GetExternalTargetViewComponent, C.IsComponentOperational, C.IsPlayerCameraTargetViewPossible = saved[4], saved[5], saved[6]
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2 = saved[7], saved[8], saved[9]
+    C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup = saved[10], saved[11], saved[12]
+    AddUITriggeredEvent = savedAdd
+
+    -- 54d-11: first-ever Prefer with no retained transition must NOT emit an extra DirectFallback.
+    gcMenu.onShowMenu()
+    sess = API.getSession()
+    assert(sess ~= nil, "expected session for 54d-11 negative control")
+    sess.groups = { grp54d }
+    sess.checkedGroupKeys = { ["grp54d"] = true }
+    sess.phase, sess.controlMode = "engaged", "direct"
+    sess.aimTargetID, sess.targetObjectID = 500, 900
+    sess.cameraMemberID = 53
+    sess.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess.shipID, mode = "attack", armed = true } }
+    assert(sess.preferAllTurrets == false, "54d-11 must start with Prefer off")
+    assert(sess.transitionPreviousTarget == nil, "54d-11 must start with no retained transition")
+
+    saved = { C.GetContextByClass, GetComponentData, C.SetSofttarget,
+        C.GetExternalTargetViewComponent, C.IsComponentOperational,
+        C.IsPlayerCameraTargetViewPossible, C.GetNumUpgradeGroups,
+        C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2, C.GetNumUpgradeSlots,
+        C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup }
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or comp end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    gb = {}
+    gb[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return gb end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    evts = {}
+    savedAdd = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts[#evts + 1] = { screen = screen, control = control, params = params }
+    end
+
+    mark = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "54d-11 first-ever apply must succeed")
+    fix.drainCallbacksSince(mark)
+    local fc = 0
+    for _, e in ipairs(evts) do
+        if e.control == "direct_fallback" then fc = fc + 1 end
+    end
+    assert(fc == 0, "54d-11 first-ever Prefer with no retained transition must not emit direct_fallback; got " .. tostring(fc))
+
+    C.GetContextByClass, GetComponentData, C.SetSofttarget = saved[1], saved[2], saved[3]
+    C.GetExternalTargetViewComponent, C.IsComponentOperational, C.IsPlayerCameraTargetViewPossible = saved[4], saved[5], saved[6]
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2 = saved[7], saved[8], saved[9]
+    C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup = saved[10], saved[11], saved[12]
+    AddUITriggeredEvent = savedAdd
+
+    -- 54d-12: release/re-enable on same B after retained context consumed must NOT replay extra DirectFallback.
+    gcMenu.onShowMenu()
+    sess = API.getSession()
+    assert(sess ~= nil, "expected session for 54d-12 negative control")
+    sess.groups = { grp54d }
+    sess.checkedGroupKeys = { ["grp54d"] = true }
+    sess.phase, sess.controlMode = "engaged", "direct"
+    sess.aimTargetID, sess.targetObjectID = 500, 900
+    sess.cameraMemberID = 53
+    sess.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess.shipID, mode = "attack", armed = true } }
+    assert(sess.preferAllTurrets == false, "54d-12 must start with Prefer off")
+
+    saved = { C.GetContextByClass, GetComponentData, C.SetSofttarget,
+        C.GetExternalTargetViewComponent, C.IsComponentOperational,
+        C.IsPlayerCameraTargetViewPossible, C.GetNumUpgradeGroups,
+        C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2, C.GetNumUpgradeSlots,
+        C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup }
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or comp) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    gb = {}
+    gb[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return gb end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    evts = {}
+    savedAdd = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts[#evts + 1] = { screen = screen, control = control, params = params }
+    end
+
+    assert(API.engageTarget(501) == true, "54d-12 A→B must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    assert(tostring(sess.transitionPreviousTarget) == "500", "54d-12 A→B must retain transitionPreviousTarget=500")
+
+    mark = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "54d-12 first-enable on B must succeed")
+    fix.drainCallbacksSince(mark)
+    assert(sess.transitionPreviousTarget == nil, "54d-12 first-enable must consume transition context")
+
+    assert(API.clearPreferAllTurrets("release test", false) == true, "54d-12 release must succeed")
+    assert(sess.preferAllTurrets == false, "54d-12 release must clear the flag")
+
+    cb = #evts
+    mark = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "54d-12 re-enable on same B must succeed")
+    fix.drainCallbacksSince(mark)
+    fc = 0
+    for i = cb + 1, #evts do
+        if evts[i].control == "direct_fallback" then fc = fc + 1 end
+    end
+    assert(fc == 0, "54d-12 release/re-enable on same B must not replay DirectFallback; got " .. tostring(fc))
+    pref = nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "prefer_all_turrets" then pref = evts[i]; break end
+    end
+    assert(pref ~= nil, "54d-12 re-enable must emit prefer_all_turrets")
+    assert(pref.params["previous"] == nil, "54d-12 release/re-enable on same B must not carry stale previous")
+
+    C.GetContextByClass, GetComponentData, C.SetSofttarget = saved[1], saved[2], saved[3]
+    C.GetExternalTargetViewComponent, C.IsComponentOperational, C.IsPlayerCameraTargetViewPossible = saved[4], saved[5], saved[6]
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2 = saved[7], saved[8], saved[9]
+    C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup = saved[10], saved[11], saved[12]
+    AddUITriggeredEvent = savedAdd
+
+    -- 54d-13: A → B → C while Prefer is OFF, first-enable on C must emit exactly
+    -- one fresh direct_fallback(C)/direct_watch(C) before deferred prefer_all_turrets.
+    gcMenu.onShowMenu()
+    sess = API.getSession()
+    assert(sess ~= nil, "expected session for 54d-13 sequencing test")
+    sess.groups = { grp54d }
+    sess.checkedGroupKeys = { ["grp54d"] = true }
+    sess.phase, sess.controlMode = "engaged", "direct"
+    sess.aimTargetID, sess.targetObjectID = 500, 900
+    sess.cameraMemberID = 53
+    sess.staged = { ["grp54d"] = { mode = "defend", armed = true } }
+    sess.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess.shipID, mode = "attack", armed = true } }
+    assert(sess.preferAllTurrets == false, "54d-13 must start with Prefer off")
+
+    saved = { C.GetContextByClass, GetComponentData, C.SetSofttarget,
+        C.GetExternalTargetViewComponent, C.IsComponentOperational,
+        C.IsPlayerCameraTargetViewPossible, C.GetNumUpgradeGroups,
+        C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2, C.GetNumUpgradeSlots,
+        C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup }
+    C.GetContextByClass = function(comp, cls, self_) return (tostring(comp) == "500") and 900 or ((tostring(comp) == "501") and 901 or ((tostring(comp) == "502") and 902 or comp)) end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        local comp = tonumber(tostring(component)) or 0
+        for _, k in ipairs(keys) do
+            if k == "isplayerowned" then vals[#vals + 1] = false
+            elseif k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            else vals[#vals + 1] = nil end
+        end
+        return unpack(vals)
+    end
+    C.SetSofttarget = function() return true end
+    C.GetExternalTargetViewComponent = function() return 53 end
+    C.IsComponentOperational = function(id) return id == 53 end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetNumUpgradeGroups = function() return 1 end
+    gb = {}
+    gb[0] = { path = "p", group = "g", contextid = 5 }
+    fix.ffiStub.new = function() return gb end
+    C.GetUpgradeGroups2 = function() return 1 end
+    C.GetUpgradeGroupInfo2 = function() return { count = 1, currentcomponent = 53, currentmacro = "", slotsize = "", total = 1, operational = 1 } end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 53 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+
+    evts = {}
+    savedAdd = AddUITriggeredEvent
+    AddUITriggeredEvent = function(screen, control, params)
+        evts[#evts + 1] = { screen = screen, control = control, params = params }
+    end
+
+    assert(API.engageTarget(501) == true, "54d-13 A→B must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    assert(API.engageTarget(502) == true, "54d-13 B→C must succeed")
+    fix.drainCallbacksSince(fix.callbackCheckpoint())
+    assert(tostring(sess.transitionPreviousTarget) == "501", "54d-13 B→C must retain transitionPreviousTarget=501")
+    assert(tostring(sess.transitionPreviousRoot) == "901", "54d-13 B→C must retain transitionPreviousRoot=901")
+
+    cb = #evts
+    mark = fix.callbackCheckpoint()
+    assert(API.applyPreferAllTurrets() == true, "54d-13 first-enable on C must succeed")
+    dfb, dw = nil, nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "direct_fallback" and dfb == nil then dfb = evts[i] end
+        if evts[i].control == "direct_watch" and dw == nil then dw = evts[i] end
+    end
+    assert(dfb ~= nil, "54d-13 first-enable on C must emit direct_fallback(C) before draining deferred Prefer")
+    assert(tostring(dfb.params["target"]) == "luaid:502", "54d-13 direct_fallback target must be C (502)")
+    assert(dw ~= nil, "54d-13 first-enable on C must emit direct_watch(C) before draining deferred Prefer")
+    assert(tostring(dw.params["target"]) == "luaid:502", "54d-13 direct_watch target must be C (502)")
+
+    fix.drainCallbacksSince(mark)
+    pref = nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "prefer_all_turrets" then pref = evts[i]; break end
+    end
+    assert(pref ~= nil, "54d-13 first-enable on C must emit prefer_all_turrets")
+    fI, wI = nil, nil
+    for i = cb + 1, #evts do
+        if evts[i].control == "direct_fallback" and fI == nil then fI = i end
+        if evts[i].control == "direct_watch" and wI == nil then wI = i end
+    end
+    for i = cb + 1, #evts do
+        if evts[i].control == "prefer_all_turrets" then
+            assert(i > fI, "54d-13 prefer_all_turrets must follow direct_fallback")
+            assert(i > wI, "54d-13 prefer_all_turrets must follow direct_watch")
+            break
+        end
+    end
+    assert(tostring(pref.params["target"]) == "luaid:502", "54d-13 prefer target must be C (502)")
+    assert(tostring(pref.params["previous"]) == "luaid:501", "54d-13 prefer previous must be B (501)")
+    assert(tostring(pref.params["previousroot"]) == "luaid:901", "54d-13 prefer previousroot must be root(B) (901)")
+
+    C.GetContextByClass, GetComponentData, C.SetSofttarget = saved[1], saved[2], saved[3]
+    C.GetExternalTargetViewComponent, C.IsComponentOperational, C.IsPlayerCameraTargetViewPossible = saved[4], saved[5], saved[6]
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2, C.GetUpgradeGroupInfo2 = saved[7], saved[8], saved[9]
+    C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup = saved[10], saved[11], saved[12]
+    AddUITriggeredEvent = savedAdd
 end
 
 -- ── 56. player-faction objects are never offered as engagement targets ─────────
