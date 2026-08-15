@@ -496,14 +496,17 @@ if [ -f "$scenario_md" ]; then
     note "scenario MD must not use ProbeLabels.\{\$LabelA\} associative access; iterate registry entries instead"
   fi
   # Must iterate the registry with do_for_each over $Entry and compare $Entry.\$label.
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
   if ! grep -A50 'ProbeTargetResolve' "$scenario_md" | grep -q 'do_for_each.*\$Entry.*in=.*ScenarioRoot\.\$ProbeLabels'; then
     note "scenario MD ProbeTargetResolve must iterate ScenarioRoot.\$ProbeLabels with do_for_each"
   fi
   # Must compare each entry's stored exact label against $LabelA / $LabelB.
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
   if ! grep -A50 'ProbeTargetResolve' "$scenario_md" | grep -q '\$Entry\.\$label == \$LabelA'; then
     note "scenario MD ProbeTargetResolve must compare \$Entry.\$label against \$LabelA"
   fi
   # Registry append must store fixed-shape entries with $label and $object keys.
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
   if ! grep -q 'append_to_list.*ScenarioRoot\.\$ProbeLabels.*exact=.*table\[\$label.*\$object' "$scenario_md"; then
     note "scenario MD must append fixed-shape table[\$label, \$object] entries to ScenarioRoot.\$ProbeLabels"
   fi
@@ -589,9 +592,11 @@ fi
 # 32. [STRENGTHENED] MD must enforce exact-one registry match for A and B.
 #     Defect D: currently stores only the first match via 'not $CompA' / 'not $CompB'.
 if [ -f "$scenario_md" ]; then
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
   if ! grep -q '\$MatchesA' "$scenario_md"; then
     note "scenario MD ProbeTargetResolve must count A matches with \$MatchesA"
   fi
+  # shellcheck disable=SC2016 # MD variables are literal XML text.
   if ! grep -q '\$MatchesB' "$scenario_md"; then
     note "scenario MD ProbeTargetResolve must count B matches with \$MatchesB"
   fi
@@ -600,20 +605,25 @@ if [ -f "$scenario_md" ]; then
   if [ -z "$probe_resolve_section" ]; then
     note "scenario MD ProbeTargetResolve cue must exist"
   else
+    # shellcheck disable=SC2016 # MD variables are literal XML text.
     if ! printf '%s\n' "$probe_resolve_section" | grep -q 'operation="add".*\$MatchesA\|\$MatchesA.*operation="add"'; then
       note "scenario MD must increment \$MatchesA inside the registry iteration loop"
     fi
+    # shellcheck disable=SC2016 # MD variables are literal XML text.
     if ! printf '%s\n' "$probe_resolve_section" | grep -q 'operation="add".*\$MatchesB\|\$MatchesB.*operation="add"'; then
       note "scenario MD must increment \$MatchesB inside the registry iteration loop"
     fi
     # Must require exactly one match for each side.
+    # shellcheck disable=SC2016 # MD variables are literal XML text.
     if ! printf '%s\n' "$probe_resolve_section" | grep -q '\$MatchesA == 1'; then
       note "scenario MD must require \$MatchesA == 1 for exact-one A resolution"
     fi
+    # shellcheck disable=SC2016 # MD variables are literal XML text.
     if ! printf '%s\n' "$probe_resolve_section" | grep -q '\$MatchesB == 1'; then
       note "scenario MD must require \$MatchesB == 1 for exact-one B resolution"
     fi
     # Must ensure A and B are distinct.
+    # shellcheck disable=SC2016 # MD variables are literal XML text.
     if ! printf '%s\n' "$probe_resolve_section" | grep -q '\$CompA != \$CompB'; then
       note "scenario MD must require \$CompA != \$CompB (distinct components)"
     fi
@@ -631,6 +641,74 @@ if [ -f "$scenario_md" ]; then
     # The spec-mismatch <continue/> must not appear before the registry loop.
     if printf '%s\n' "$pre_loop" | grep -q '<continue/>'; then
       note "scenario MD ProbeTargetResolve must not use <continue/> for spec-mismatch exit; use do_if/do_else branches instead"
+    fi
+  fi
+fi
+
+# 34. [STRENGTHENED] probe.lua must parse as valid Lua 5.1.
+#     The Starting SHA contains `local function init():` which is invalid syntax.
+if [ -f "$lua" ]; then
+  if ! luac5.1 -p "$lua" >/dev/null 2>&1; then
+    note "probe.lua must parse as valid Lua 5.1 (luac5.1 syntax validation)"
+  fi
+fi
+
+# 35. [STRENGTHENED] onProbeTargetResolved must be lexically bound before the
+#     dynamic callbacks in requestProbeTargetResolution reference it.
+if [ -f "$lua" ]; then
+  req_line=$(grep -n 'local function requestProbeTargetResolution' "$lua" | head -1 | cut -d: -f1)
+  handler_def_line=$(grep -n 'local function onProbeTargetResolved' "$lua" | head -1 | cut -d: -f1)
+  fwd_decl_line=$(grep -n '^local onProbeTargetResolved' "$lua" | head -1 | cut -d: -f1 || true)
+  if [ -z "$req_line" ]; then
+    note "requestProbeTargetResolution function not found in probe.lua"
+  elif [ -z "$handler_def_line" ]; then
+    note "onProbeTargetResolved local function not found in probe.lua"
+  else
+    handler_ok=0
+    if [ -n "$fwd_decl_line" ] && [ "$fwd_decl_line" -lt "$req_line" ]; then
+      handler_ok=1
+    fi
+    if [ "$handler_def_line" -lt "$req_line" ]; then
+      handler_ok=1
+    fi
+    if [ "$handler_ok" -ne 1 ]; then
+      note "probe.lua onProbeTargetResolved must be lexically bound before requestProbeTargetResolution references it (forward-declare or define earlier)"
+    fi
+  fi
+fi
+
+# 36. [STRENGTHENED] ProbeTargetResolve must raise failure responses when exact-one
+#     resolution yields zero matches, duplicate matches, or same-component match.
+if [ -f "$scenario_md" ]; then
+  probe_resolve_section=$(awk '/<cue name="ProbeTargetResolve"/,/<\/cue>/' "$scenario_md")
+  if [ -z "$probe_resolve_section" ]; then
+    note "scenario MD ProbeTargetResolve cue must exist"
+  else
+    # Extract from the success do_if through its closing </do_else> so we can
+    # verify the failure-response sibling branch sends param=0 for both sides.
+    failure_path=$(printf '%s\n' "$probe_resolve_section" | awk '
+      /<do_if value=".*\$MatchesA == 1.*\$MatchesB == 1.*\$CompA != \$CompB/ { found=1; depth=1 }
+      found {
+        print
+        line=$0
+        n = gsub(/<do_if/, "<do_if", line); depth += n
+        n = gsub(/<do_elseif/, "<do_elseif", line); depth += n
+        n = gsub(/<do_all/, "<do_all", line); depth += n
+        n = gsub(/<\/do_if>/, "/do_if>", line); depth -= n
+        n = gsub(/<\/do_elseif>/, "/do_elseif>", line); depth -= n
+        n = gsub(/<\/do_all>/, "/do_all>", line); depth -= n
+        if (depth == 0) exit
+      }
+    ')
+    if ! printf '%s\n' "$failure_path" | grep -q '<do_else>'; then
+      note "scenario MD ProbeTargetResolve must have do_else for exact-one failure path (zero/duplicate/non-distinct matches)"
+    fi
+    # The name and param are on separate XML lines, so check separately within the block.
+    if ! printf '%s\n' "$failure_path" | grep -q 'X4GunneryTestLab.ProbeTargetResolvedA'; then
+      note "scenario MD ProbeTargetResolve failure path must raise X4GunneryTestLab.ProbeTargetResolvedA"
+    fi
+    if ! printf '%s\n' "$failure_path" | grep -q 'param="0"'; then
+      note "scenario MD ProbeTargetResolve failure path must raise with param=0"
     fi
   fi
 fi

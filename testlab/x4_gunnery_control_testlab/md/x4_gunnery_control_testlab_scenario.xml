@@ -602,6 +602,15 @@
                 <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId"
                                  param="$CompB"/>
               </do_if>
+              <do_else>
+                <!-- Exact-one resolution failed (zero matches, duplicate matches,
+                     or same-component for A and B). Send failure responses so
+                 probe.lua leaves pending state and displays a clear error. -->
+                <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedA.' + $RequestId"
+                                 param="0"/>
+                <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId"
+                                 param="0"/>
+              </do_else>
             </do_else>
           </actions>
         </cue>

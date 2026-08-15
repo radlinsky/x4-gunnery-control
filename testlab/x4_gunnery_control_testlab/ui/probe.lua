@@ -106,6 +106,7 @@ local function clockToken(value)
 end
 
 -- Request the scenario MD to resolve A/B labels to live component IDs.
+local onProbeTargetResolved
 local function requestProbeTargetResolution()
     if not X4GunneryTestLabScenarioSpec or not X4GunneryTestLabScenarioSpec.groups then
         log("probe_resolve", { action = "skipped", reason = "no spec groups" })
@@ -275,7 +276,7 @@ function menu.onCloseElement(dueToClose)
     Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab", { 0, 0 }, true)
 end
 
-local function init():
+local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     log("loaded")
     if Helper then Helper.registerMenu(menu) end
