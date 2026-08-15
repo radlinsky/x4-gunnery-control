@@ -253,7 +253,7 @@
                 <set_object_name object="$Ship" name="$Def.$label + ' ' + $Index"/>
                 <!-- Register the exact spawn label so the probe resolver can find this
                      component without reconstructing identity from knownname. -->
-                <append_to_list name="ScenarioRoot.$ProbeLabels" exact="table[$Def.$label = $Ship]"/>
+                <append_to_list name="ScenarioRoot.$ProbeLabels" exact="table[$label = $Def.$label, $object = $Ship]"/>
 
                 <!-- Remove combat drones before hostility is applied. A
                      launched drone is another hostile target and invalidates
@@ -542,9 +542,21 @@
                {specId = ..., requestId = ..., labelA = ..., labelB = ...})
              Resolves spawned fixture labels to live component IDs via the
              ScenarioRoot.$ProbeLabels registry (built at spawn time) and returns
-             them via X4GunneryTestLab.ProbeTargetsReady so probe.lua can display
-             them.  Validates specId to reject requests from a different fixture.
-             Uses requestId to discard stale responses from earlier generations.
+             them as raw MD component params so probe.lua can convert with
+             ConvertStringToLuaID.  Validates specId to reject requests from a
+             different fixture.  Uses requestId in event names for request
+             correlation and stale-response rejection.
+
+             Transport evidence (OFFLINE):
+             - md/x4_gunnery_control.xml:103 raises a component directly via
+               raise_lua_event param="State.$target";
+               ui/gunnery_persistence.lua:52 receives it as a raw value.
+             - research KB "An MD cue variable holding a component survives a
+               save/load and returns to Lua remapped": MD raises a component and
+               Lua receives type=number, which ConvertStringToLuaID(tostring(n))
+               reverses into a live component.  The same applies when the
+               component is concatenated into a string in MD — the numeric ID
+               survives the round-trip.
         -->
         <cue name="ProbeTargetResolve" instantiate="true">
           <conditions>
@@ -557,22 +569,32 @@
             <set_value name="$LabelB" exact="if @event.param3.$labelB then event.param3.$labelB else ''"/>
             <!-- Fail closed: reject if spec does not match the currently spawned fixture. -->
             <do_if value="ScenarioRoot.$SpawnedSpecId? and ScenarioRoot.$SpawnedSpecId != $ReqSpecId">
-              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetsReady'"
-                               param="$RequestId + ':0::'"/>
+              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedA.' + $RequestId" param="0"/>
+              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId" param="0"/>
               <continue/>
             </do_if>
-            <!-- Look up each label in the spawn registry, not by knownname. -->
-            <set_value name="$CompA" exact="if ScenarioRoot.$ProbeLabels? and ScenarioRoot.$ProbeLabels.{$LabelA} then ScenarioRoot.$ProbeLabels.{$LabelA} else null"/>
-            <set_value name="$CompB" exact="if ScenarioRoot.$ProbeLabels? and ScenarioRoot.$ProbeLabels.{$LabelB} then ScenarioRoot.$ProbeLabels.{$LabelB} else null"/>
-            <set_value name="$Count" exact="0"/>
-            <do_if value="$CompA and $CompA.exists"> <set_value name="$Count" operation="add" exact="1"/> </do_if>
-            <do_if value="$CompB and $CompB.exists"> <set_value name="$Count" operation="add" exact="1"/> </do_if>
+            <!-- Iterate the spawn-label registry to find exact label matches.
+                 The registry is a list of table entries [label, object]; we
+                 must iterate with do_for_each (append_to_list adds positional
+                 elements, not merged keys), not direct-key lookup. -->
+            <set_value name="$CompA" exact="null"/>
+            <set_value name="$CompB" exact="null"/>
+            <do_for_each name="$Entry" in="ScenarioRoot.$ProbeLabels">
+              <do_if value="$Entry.$label == $LabelA and $Entry.$object.exists and not $CompA">
+                <set_value name="$CompA" exact="$Entry.$object"/>
+              </do_if>
+              <do_if value="$Entry.$label == $LabelB and $Entry.$object.exists and not $CompB">
+                <set_value name="$CompB" exact="$Entry.$object"/>
+              </do_if>
+            </do_for_each>
+            <!-- Raise two raw-component events keyed by requestId so Lua
+                 receives actual component objects (type=number) and can
+                 reverse them with ConvertStringToLuaID(tostring(n)). -->
             <do_if value="$RequestId != ''">
-              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetsReady'"
-                               param="$RequestId + ':' + $Count + ':'
-                                 + (if $CompA and $CompA.exists then $CompA else '')
-                                 + ':'
-                                 + (if $CompB and $CompB.exists then $CompB else '')"/>
+              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedA.' + $RequestId"
+                               param="if $CompA and $CompA.exists then $CompA else 0"/>
+              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId"
+                               param="if $CompB and $CompB.exists then $CompB else 0"/>
             </do_if>
           </actions>
         </cue>

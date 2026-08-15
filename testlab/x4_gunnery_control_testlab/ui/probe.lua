@@ -24,16 +24,23 @@
 -- Uses existing PR3 fixture identities resolved from the live scenario:
 --   - player ship (from getCurrentShipSweepReadOnly)
 --   - A and B resolved asynchronously by the scenario MD via exact-label lookup
---     against ScenarioRoot.$Spawned, returned through X4GunneryTestLab.ProbeTargetsReady
+--     against ScenarioRoot.$ProbeLabels, returned as two raw-component events
+--     (X4GunneryTestLab.ProbeTargetResolvedA.<requestId>,
+--      X4GunneryTestLab.ProbeTargetResolvedB.<requestId>)
 --
 -- TARGET RESOLUTION
 -- probe.lua requests resolution by sending flat scalar keys (Lua→MD proven
 -- transport contract):
 --   AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
 --     {specId = ..., requestId = ..., labelA = ..., labelB = ...})
--- The scenario MD resolves labels via its spawn-label registry and returns:
---   X4GunneryTestLab.ProbeTargetsReady with param="<requestId>:<count>:<a_id>:<b_id>"
--- A request token guards against stale responses from prior fixture generations.
+-- The scenario MD resolves labels via its spawn-label registry and returns two
+-- raw-component events keyed by requestId:
+--   X4GunneryTestLab.ProbeTargetResolvedA.<requestId> param=<component>
+--   X4GunneryTestLab.ProbeTargetResolvedB.<requestId> param=<component>
+-- Lua receives the component as a number (MD→Lua component transport, proven in
+-- research KB and ui/gunnery_persistence.lua:52). ConvertStringToLuaID(tostring(n))
+-- reverses it back to a live component. A request token guards against stale
+-- responses from prior fixture generations.
 --
 -- LOGGING
 -- Immediately before executing each probe, emits one clear boundary:
@@ -50,6 +57,8 @@ local menu = { name = "X4GunneryTestLabProbe", uixID = "x4_gunnery_control_testl
 local scenarioActionStatus, pendingScenario = nil, nil
 local scenarioLoadTime = GetCurRealTime()
 local probeResolvedTargets, probePendingRequestId = nil, nil
+local probeReceivedA, probeReceivedB = false, false
+local probeResolvedA, probeResolvedB = nil, nil
 local probeRequestSerial = 0
 
 local function text(id) return ReadText(20992, id) end
@@ -125,32 +134,41 @@ local function requestProbeTargetResolution()
           labelA = labelA, labelB = labelB })
 end
 
--- Handle the scenario MD's response with resolved A/B component IDs.
-local function onProbeTargetsReady(_, param)
-    local value = tostring(param or "")
-    local requestId, count, aId, bId = value:match("^([^:]+):(%d+):([^:]*):([^:]*)$")
-    if not requestId then
-        -- Try without trailing colons for backward compat.
-        requestId, count, aId, bId = value:match("^([^:]+):(%d+):([^:]*)$")
-        bId = ""
-    end
+-- Handle one raw-component response (A or B). Both must arrive before the
+-- pending requestId expires.  MD raises components as Lua numbers; reverse
+-- with ConvertStringToLuaID(tostring(n)).  param=0 signals "not found".
+local function onProbeTargetResolved(_, eventName, value)
+    local _, _, requestId = string.match(eventName, "^([^%.]+)%.(%w+)%.(.+)$")
     if not probePendingRequestId or requestId ~= probePendingRequestId then
         log("probe_resolve", { action = "stale_response", received = requestId, pending = probePendingRequestId })
         return
     end
+    local comp = ConvertStringToLuaID(tostring(value))
+    if string.find(eventName, "ProbeTargetResolvedA") then
+        probeReceivedA = true
+        probeResolvedA = comp
+    else
+        probeReceivedB = true
+        probeResolvedB = comp
+    end
+    log("probe_resolve", { action = "received_" .. (string.find(eventName, "ProbeTargetResolvedA") and "A" or "B"), request_id = requestId, value = tostring(comp) })
+    if not (probeReceivedA and probeReceivedB) then return end
+    -- Both halves arrived for this requestId — finalize.
     probePendingRequestId = nil
-    local aComp, bComp = nil, nil
-    if aId and aId ~= "" then aComp = ConvertStringToLuaID(tostring(aId)) end
-    if bId and bId ~= "" then bComp = ConvertStringToLuaID(tostring(bId)) end
-    if count == "2" and aComp and bComp then
-        probeResolvedTargets = { a = aComp, b = bComp }
-        log("probe_resolve", { action = "resolved", a = tostring(aComp), b = tostring(bComp) })
+    local aValid = probeResolvedA and probeResolvedA.exists
+    local bValid = probeResolvedB and probeResolvedB.exists
+    if aValid and bValid and probeResolvedA ~= probeResolvedB then
+        probeResolvedTargets = { a = probeResolvedA, b = probeResolvedB }
+        log("probe_resolve", { action = "resolved", a = tostring(probeResolvedA), b = tostring(probeResolvedB) })
         menu.display()
     else
-        log("probe_resolve", { action = "failed", count = count, a_id = tostring(aId), b_id = tostring(bId) })
+        local count = (aValid and 1 or 0) + (bValid and 1 or 0)
+        log("probe_resolve", { action = "failed", count = count, a_exists = aValid, b_exists = bValid })
         scenarioActionStatus = "FAILED: could not resolve probe targets A/B from scenario"
         menu.display()
     end
+    probeReceivedA, probeReceivedB = false, false
+    probeResolvedA, probeResolvedB = nil, nil
 end
 
 -- Invoke exactly one probe operation. Logs boundary, then sends the MD event.
@@ -244,6 +262,7 @@ local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     log("loaded")
     if Helper then Helper.registerMenu(menu) end
-    RegisterEvent("X4GunneryTestLab.ProbeTargetsReady", onProbeTargetsReady)
+    RegisterEvent("X4GunneryTestLab.ProbeTargetResolvedA", onProbeTargetResolved)
+    RegisterEvent("X4GunneryTestLab.ProbeTargetResolvedB", onProbeTargetResolved)
 end
 init()

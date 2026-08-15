@@ -358,11 +358,16 @@ fi
 if ! grep -q 'probe_target_resolve' "$lua"; then
   note "probe.lua must send probe_target_resolve event to scenario MD"
 fi
-if ! grep -q 'X4GunneryTestLab.ProbeTargetsReady' "$lua"; then
-  note "probe.lua must register for X4GunneryTestLab.ProbeTargetsReady event"
+# Shell-proven transport: MD raises two raw-component events (A and B)
+# per request so Lua receives actual component objects, not packed strings.
+if ! grep -q 'X4GunneryTestLab.ProbeTargetResolvedA' "$lua"; then
+  note "probe.lua must register for X4GunneryTestLab.ProbeTargetResolvedA event"
 fi
-if ! grep -q 'onProbeTargetsReady' "$lua"; then
-  note "probe.lua must define onProbeTargetsReady handler"
+if ! grep -q 'X4GunneryTestLab.ProbeTargetResolvedB' "$lua"; then
+  note "probe.lua must register for X4GunneryTestLab.ProbeTargetResolvedB event"
+fi
+if ! grep -q 'onProbeTargetResolved' "$lua"; then
+  note "probe.lua must define onProbeTargetResolved handler"
 fi
 if ! grep -q 'requestProbeTargetResolution' "$lua"; then
   note "probe.lua must define requestProbeTargetResolution function"
@@ -373,8 +378,12 @@ scenario_md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_sce
 if ! grep -q 'probe_target_resolve' "$scenario_md"; then
   note "scenario MD must handle probe_target_resolve event"
 fi
-if ! grep -q 'X4GunneryTestLab.ProbeTargetsReady' "$scenario_md"; then
-  note "scenario MD must raise X4GunneryTestLab.ProbeTargetsReady event"
+# MD raises two raw-component events keyed by requestId for request correlation.
+if ! grep -q 'X4GunneryTestLab.ProbeTargetResolvedA' "$scenario_md"; then
+  note "scenario MD must raise X4GunneryTestLab.ProbeTargetResolvedA event"
+fi
+if ! grep -q 'X4GunneryTestLab.ProbeTargetResolvedB' "$scenario_md"; then
+  note "scenario MD must raise X4GunneryTestLab.ProbeTargetResolvedB event"
 fi
 if ! grep -q 'ProbeTargetResolve' "$scenario_md"; then
   note "scenario MD must have ProbeTargetResolve cue"
@@ -427,9 +436,25 @@ if [ -f "$lua" ]; then
   fi
 fi
 
-# 25. [STRENGTHENED] Menu must call requestProbeTargetResolution on show.
+# 25. [STRENGTHENED] Menu onShowMenu body must call requestProbeTargetResolution.
 if [ -f "$lua" ]; then
-  if ! grep -q 'requestProbeTargetResolution' "$lua"; then
+  # Extract the menu.onShowMenu function body and verify it calls the resolver.
+  show_body=$(awk '/function menu\.onShowMenu\(\)/ { found=1; depth=1; print; next }
+    found { line=$0; n=gsub(/<do_if/,"<do_if",line); depth+=n
+            n=gsub(/<do_elseif/,"<do_elseif",line); depth+=n
+            n=gsub(/<do_all/,"<do_all",line); depth+=n
+            print; n=gsub(/\/do_if>/,"/do_if>",line); depth-=n
+            n=gsub(/\/do_elseif>/,"/do_elseif>",line); depth-=n
+            n=gsub(/\/do_all>/,"/do_all>",line); depth-=n
+            if (depth==0) exit }' "$lua")
+  # For Lua files, use a simpler extractor.
+  if ! grep -q '^function menu.onShowMenu()' "$lua"; then
+    show_body=$(awk '/^function menu\.onShowMenu\(\)/ { found=1; depth=1; print; next }
+      found { line=$0; n=gsub(/function/,"function",line); depth+=n
+              n=gsub(/end/,"end",line); depth-=n
+              print; if (depth==0) exit }' "$lua")
+  fi
+  if ! printf '%s\n' "$show_body" | grep -q 'requestProbeTargetResolution'; then
     note "probe.lua menu.onShowMenu must call requestProbeTargetResolution"
   fi
 fi
@@ -452,11 +477,11 @@ if [ -f "$scenario_md" ]; then
   fi
 fi
 
-# 27. [STRENGTHENED] MD must use spawn-label registry, not knownname comparison.
+# 27. [STRENGTHENED] MD must use spawn-label registry with iteration, not associative access.
 if [ -f "$scenario_md" ]; then
   # Must NOT compare knownname against label (that was the broken approach).
   # shellcheck disable=SC2016
-  if grep -A30 'ProbeTargetResolve' "$scenario_md" | grep -q '\$Obj\.knownname == \$Label'; then
+  if grep -A50 'ProbeTargetResolve' "$scenario_md" | grep -q '\$Obj\.knownname == \$Label'; then
     note "scenario MD ProbeTargetResolve must not use knownname comparison; use spawn registry"
   fi
   # Must use the spawn-label registry.
@@ -464,9 +489,23 @@ if [ -f "$scenario_md" ]; then
   if ! grep -q 'ScenarioRoot\.\$ProbeLabels' "$scenario_md"; then
     note "scenario MD must create and use ScenarioRoot.\$ProbeLabels registry"
   fi
-  # Must look up by label key in the registry (e.g., $ProbeLabels.{$LabelA}).
-  if ! grep -q 'ProbeLabels.{' "$scenario_md"; then
-    note "scenario MD must look up labels in ScenarioRoot.\$ProbeLabels registry"
+  # Must NOT use associative table access on the list (the Starting SHA treated
+  # a list-of-tables as an associative map, which is structurally invalid).
+  # shellcheck disable=SC2016
+  if grep -q 'ProbeLabels\.{' "$scenario_md"; then
+    note "scenario MD must not use ProbeLabels.\{\$LabelA\} associative access; iterate registry entries instead"
+  fi
+  # Must iterate the registry with do_for_each over $Entry and compare $Entry.\$label.
+  if ! grep -A50 'ProbeTargetResolve' "$scenario_md" | grep -q 'do_for_each.*\$Entry.*in=.*ScenarioRoot\.\$ProbeLabels'; then
+    note "scenario MD ProbeTargetResolve must iterate ScenarioRoot.\$ProbeLabels with do_for_each"
+  fi
+  # Must compare each entry's stored exact label against $LabelA / $LabelB.
+  if ! grep -A50 'ProbeTargetResolve' "$scenario_md" | grep -q '\$Entry\.\$label == \$LabelA'; then
+    note "scenario MD ProbeTargetResolve must compare \$Entry.\$label against \$LabelA"
+  fi
+  # Registry append must store fixed-shape entries with $label and $object keys.
+  if ! grep -q 'append_to_list.*ScenarioRoot\.\$ProbeLabels.*exact=.*table\[\$label.*\$object' "$scenario_md"; then
+    note "scenario MD must append fixed-shape table[\$label, \$object] entries to ScenarioRoot.\$ProbeLabels"
   fi
 fi
 
