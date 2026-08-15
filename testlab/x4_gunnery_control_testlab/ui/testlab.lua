@@ -714,6 +714,17 @@ function menu.display()
         AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
         log("observe", { action = "mark" })
     end
+    -- PR3 diagnostic probe harness. Opens the six separately invokable probes
+    -- so the human tester can causally bisect which engine-facing operation
+    -- first changes a working Direct-B controller back toward A.
+    local probeRow = tableView:addRow("probe", {})
+    probeRow[1]:setColSpan(4):createButton({}):setText(text(31))
+    probeRow[1].handlers.onClick = function()
+        local probeMenu = Helper.getMenu("X4GunneryTestLabProbe")
+        if probeMenu then
+            Helper.closeMenuAndOpenNewMenu(probeMenu, "X4GunneryTestLabProbe", { 0, 0 }, true)
+        end
+    end
     if not sweep then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(4):createText(text(12))
         local start = tableView:addRow("start", {}); start[1]:setColSpan(4):createButton({}):setText(text(2)); start[1].handlers.onClick = function() startSweep(); menu.display() end

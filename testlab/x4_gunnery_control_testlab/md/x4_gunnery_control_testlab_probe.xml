@@ -105,8 +105,92 @@
               <!-- RELEASE_A: execute ONLY the exact production previous-target/
                    capital-hierarchy stop_firing_at_target release operations for A/root(A).
                    Mirror the exact release behavior from md/x4_gunnery_control.xml Apply cue.
-                   No set_turret_targets. -->
-              <signal_cue_instantly cue="ProbeReleaseA"/>
+                   No set_turret_targets.
+
+                   Inlined here (no ProbeRoot handoff) so $Ship/$A/$B are resolved
+                   by the same invocation that dispatches this branch. -->
+              <!-- Stop firing at A once. For the Osaka fixture A == root(A), so the
+                   capital-branch below must skip the root to avoid a double-release. -->
+              <do_if value="$A and $A.exists">
+                <stop_firing_at_target object="$Ship" target="$A"/>
+                <debug_text text="'[X4GC TEST PROBE] release_a: stopped firing at A=' + $A + ' t=' + player.age"/>
+              </do_if>
+
+              <!-- Capital-ship hierarchy release (mirroring production). -->
+              <do_if value="$A and $A.exists and $A.isclass.[class.ship_l, class.ship_xl]">
+                <!-- Release the capital root itself, unless it is the same component
+                     as $A (which was already released above). -->
+                <do_if value="not $A or $A != $A">
+                  <stop_firing_at_target object="$Ship" target="$A"/>
+                </do_if>
+                <!-- Enumerate and release every direct installed turret. -->
+                <do_for_each name="$LocTurret" in="$A.turrets.operational.list">
+                  <do_if value="$LocTurret.exists and $LocTurret != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocTurret"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed missile turret. -->
+                <do_for_each name="$LocMissile" in="$A.missileturrets.operational.list">
+                  <do_if value="$LocMissile.exists and $LocMissile != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocMissile"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed shield. -->
+                <do_for_each name="$LocShield" in="$A.shields.operational.list">
+                  <do_if value="$LocShield.exists and $LocShield != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocShield"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed engine. -->
+                <do_for_each name="$LocEngine" in="$A.engines.operational.list">
+                  <do_if value="$LocEngine.exists and $LocEngine != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocEngine"/>
+                  </do_if>
+                </do_for_each>
+                <debug_text text="'[X4GC TEST PROBE] release_a: capital hierarchy released ship=' + $Ship + ' a=' + $A + ' t=' + player.age"/>
+              </do_if>
+
+              <!-- Station hierarchy release (mirroring production). -->
+              <do_if value="$A and $A.exists and $A.isclass.station">
+                <!-- Release the station root itself, unless it is the same component
+                     as $A (which was already released above). -->
+                <do_if value="not $A or $A != $A">
+                  <stop_firing_at_target object="$Ship" target="$A"/>
+                </do_if>
+                <!-- Enumerate and release every operational station module. -->
+                <do_for_each name="$LocModule" in="$A.modules.operational.list">
+                  <do_if value="$LocModule.exists and $LocModule != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocModule"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed turret. -->
+                <do_for_each name="$LocTurret2" in="$A.turrets.operational.list">
+                  <do_if value="$LocTurret2.exists and $LocTurret2 != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocTurret2"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed missile turret. -->
+                <do_for_each name="$LocMissile2" in="$A.missileturrets.operational.list">
+                  <do_if value="$LocMissile2.exists and $LocMissile2 != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocMissile2"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed shield. -->
+                <do_for_each name="$LocShield2" in="$A.shields.operational.list">
+                  <do_if value="$LocShield2.exists and $LocShield2 != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocShield2"/>
+                  </do_if>
+                </do_for_each>
+                <!-- Enumerate and release every direct installed engine. -->
+                <do_for_each name="$LocEngine2" in="$A.engines.operational.list">
+                  <do_if value="$LocEngine2.exists and $LocEngine2 != $A">
+                    <stop_firing_at_target object="$Ship" target="$LocEngine2"/>
+                  </do_if>
+                </do_for_each>
+                <debug_text text="'[X4GC TEST PROBE] release_a: station hierarchy released ship=' + $Ship + ' a=' + $A + ' t=' + player.age"/>
+              </do_if>
+
+              <debug_text text="'[X4GC TEST PROBE] release_a complete ship=' + $Ship + ' t=' + player.age"/>
             </do_elseif>
             <do_elseif value="$Op == 'narrow_any_b'">
               <!-- NARROW_ANY_B: ONLY set_turret_targets object=ship target=[B] preferredtarget=B -->
@@ -117,15 +201,15 @@
             </do_elseif>
             <do_elseif value="$Op == 'wide_any_b'">
               <!-- WIDE_ANY_B: ONLY set_turret_targets object=ship target=$hostiles preferredtarget=B -->
-              <!-- Build hostiles using same semantics as production: sector scan with kill relation filter. -->
+              <!-- Build hostiles using same semantics as production Prefer Apply path:
+                   sector scan with kill relation filter, then append B if absent.
+                   No fire-authorisation guard here — that belongs to DirectFallback. -->
               <do_if value="$Ship and $B">
                 <find_ship name="$Hostiles" space="$Ship.sector" masstraffic="false" multiple="true">
                   <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
                 </find_ship>
                 <do_if value="not $Hostiles.indexof.{$B}">
-                  <do_if value="$Ship.mayattack.{$B}">
-                    <append_to_list name="$Hostiles" exact="$B"/>
-                  </do_if>
+                  <append_to_list name="$Hostiles" exact="$B"/>
                 </do_if>
                 <set_turret_targets object="$Ship" target="$Hostiles" preferredtarget="$B"/>
                 <debug_text text="'[X4GC TEST PROBE] wide_any_b applied ship=' + $Ship + ' b=' + $B + ' hostiles=' + $Hostiles.count + ' t=' + player.age"/>
@@ -140,14 +224,15 @@
             </do_elseif>
             <do_elseif value="$Op == 'wide_attackenemies_b'">
               <!-- WIDE_ATTACKENEMIES_B: ONLY set_turret_targets object=ship target=$hostiles preferredtarget=B weaponmode=weaponmode.attackenemies -->
+              <!-- Build hostiles using same semantics as production Prefer Apply path:
+                   sector scan with kill relation filter, then append B if absent.
+                   No fire-authorisation guard here — that belongs to DirectFallback. -->
               <do_if value="$Ship and $B">
                 <find_ship name="$Hostiles" space="$Ship.sector" masstraffic="false" multiple="true">
                   <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
                 </find_ship>
                 <do_if value="not $Hostiles.indexof.{$B}">
-                  <do_if value="$Ship.mayattack.{$B}">
-                    <append_to_list name="$Hostiles" exact="$B"/>
-                  </do_if>
+                  <append_to_list name="$Hostiles" exact="$B"/>
                 </do_if>
                 <set_turret_targets object="$Ship" target="$Hostiles" preferredtarget="$B" weaponmode="weaponmode.attackenemies"/>
                 <debug_text text="'[X4GC TEST PROBE] wide_attackenemies_b applied ship=' + $Ship + ' b=' + $B + ' hostiles=' + $Hostiles.count + ' t=' + player.age"/>
@@ -161,96 +246,7 @@
           </actions>
         </cue>
 
-        <!-- ProbeReleaseA
-             Mirrors the exact production release behavior from md/x4_gunnery_control.xml
-             Apply cue for the previous-target and capital-hierarchy release.
-             This is RELEASE_A: ONLY stop_firing_at_target operations, no set_turret_targets. -->
-        <cue name="ProbeReleaseA" instantiate="true">
-          <conditions>
-            <event_cue_signalled/>
-          </conditions>
-          <actions>
-            <set_value name="$Ship" exact="ProbeRoot.$ProbeShip"/>
-            <set_value name="$A" exact="ProbeRoot.$ProbeA"/>
-            <set_value name="$B" exact="ProbeRoot.$ProbeB"/>
 
-            <!-- Exact production release: stop firing at previous target (A). -->
-            <do_if value="$A and $A.exists">
-              <stop_firing_at_target object="$Ship" target="$A"/>
-              <debug_text text="'[X4GC TEST PROBE] release_a: stopped firing at A=' + $A + ' t=' + player.age"/>
-            </do_if>
-
-            <!-- Capital-ship hierarchy release (mirroring production). -->
-            <do_if value="$A and $A.exists and $A.isclass.[class.ship_l, class.ship_xl]">
-              <!-- Release the capital root itself. -->
-              <stop_firing_at_target object="$Ship" target="$A"/>
-              <!-- Enumerate and release every direct installed turret. -->
-              <do_for_each name="$LocTurret" in="$A.turrets.operational.list">
-                <do_if value="$LocTurret.exists and $LocTurret != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocTurret"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed missile turret. -->
-              <do_for_each name="$LocMissile" in="$A.missileturrets.operational.list">
-                <do_if value="$LocMissile.exists and $LocMissile != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocMissile"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed shield. -->
-              <do_for_each name="$LocShield" in="$A.shields.operational.list">
-                <do_if value="$LocShield.exists and $LocShield != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocShield"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed engine. -->
-              <do_for_each name="$LocEngine" in="$A.engines.operational.list">
-                <do_if value="$LocEngine.exists and $LocEngine != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocEngine"/>
-                </do_if>
-              </do_for_each>
-              <debug_text text="'[X4GC TEST PROBE] release_a: capital hierarchy released ship=' + $Ship + ' a=' + $A + ' t=' + player.age"/>
-            </do_if>
-
-            <!-- Station hierarchy release (mirroring production). -->
-            <do_if value="$A and $A.exists and $A.isclass.station">
-              <!-- Release the station root. -->
-              <stop_firing_at_target object="$Ship" target="$A"/>
-              <!-- Enumerate and release every operational station module. -->
-              <do_for_each name="$LocModule" in="$A.modules.operational.list">
-                <do_if value="$LocModule.exists and $LocModule != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocModule"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed turret. -->
-              <do_for_each name="$LocTurret2" in="$A.turrets.operational.list">
-                <do_if value="$LocTurret2.exists and $LocTurret2 != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocTurret2"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed missile turret. -->
-              <do_for_each name="$LocMissile2" in="$A.missileturrets.operational.list">
-                <do_if value="$LocMissile2.exists and $LocMissile2 != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocMissile2"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed shield. -->
-              <do_for_each name="$LocShield2" in="$A.shields.operational.list">
-                <do_if value="$LocShield2.exists and $LocShield2 != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocShield2"/>
-                </do_if>
-              </do_for_each>
-              <!-- Enumerate and release every direct installed engine. -->
-              <do_for_each name="$LocEngine2" in="$A.engines.operational.list">
-                <do_if value="$LocEngine2.exists and $LocEngine2 != $A">
-                  <stop_firing_at_target object="$Ship" target="$LocEngine2"/>
-                </do_if>
-              </do_for_each>
-              <debug_text text="'[X4GC TEST PROBE] release_a: station hierarchy released ship=' + $Ship + ' a=' + $A + ' t=' + player.age"/>
-            </do_if>
-
-            <debug_text text="'[X4GC TEST PROBE] release_a complete ship=' + $Ship + ' t=' + player.age"/>
-          </actions>
-        </cue>
 
       </cues>
     </cue>
