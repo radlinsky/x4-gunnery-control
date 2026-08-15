@@ -654,25 +654,44 @@ if [ -f "$lua" ]; then
 fi
 
 # 35. [STRENGTHENED] onProbeTargetResolved must be lexically bound before the
-#     dynamic callbacks in requestProbeTargetResolution reference it.
+#     dynamic callbacks in requestProbeTargetResolution reference it, and must
+#     NOT be shadowed by a later local redeclaration.
+#
+# Two valid layouts:
+#   (a) Complete local function defined BEFORE requestProbeTargetResolution:
+#       local function onProbeTargetResolved(...) ... end
+#       local function requestProbeTargetResolution() ... end
+#   (b) Forward declaration followed by bare assignment (no 'local' keyword):
+#       local onProbeTargetResolved
+#       local function requestProbeTargetResolution() ... end
+#       onProbeTargetResolved = function(...) ... end
+#
+# Invalid (shadowing bug): forward decl + later local redeclaration:
+#   local onProbeTargetResolved
+#   local function requestProbeTargetResolution()
+#     ... onProbeTargetResolved(...)  -- captures nil!
+#   end
+#   local function onProbeTargetResolved(...) ... end  -- shadows the forward decl
 if [ -f "$lua" ]; then
   req_line=$(grep -n 'local function requestProbeTargetResolution' "$lua" | head -1 | cut -d: -f1)
-  handler_def_line=$(grep -n 'local function onProbeTargetResolved' "$lua" | head -1 | cut -d: -f1)
-  fwd_decl_line=$(grep -n '^local onProbeTargetResolved' "$lua" | head -1 | cut -d: -f1 || true)
+  fwd_decl_line=$(grep -n '^local onProbeTargetResolved$' "$lua" | head -1 | cut -d: -f1 || true)
+  handler_local_def_line=$(grep -n 'local function onProbeTargetResolved' "$lua" | head -1 | cut -d: -f1 || true)
+  handler_assign_line=$(grep -n '^onProbeTargetResolved = function' "$lua" | head -1 | cut -d: -f1 || true)
   if [ -z "$req_line" ]; then
     note "requestProbeTargetResolution function not found in probe.lua"
-  elif [ -z "$handler_def_line" ]; then
-    note "onProbeTargetResolved local function not found in probe.lua"
   else
-    handler_ok=0
-    if [ -n "$fwd_decl_line" ] && [ "$fwd_decl_line" -lt "$req_line" ]; then
-      handler_ok=1
+    # Case (a): complete local function precedes requestProbeTargetResolution.
+    if [ -n "$handler_local_def_line" ] && [ "$handler_local_def_line" -lt "$req_line" ]; then
+      : # OK — no forward decl needed; handler is defined first.
+    # Case (b): forward declaration + bare assignment (preferred minimal form).
+    elif [ -n "$fwd_decl_line" ] && [ -n "$handler_assign_line" ] && [ "$fwd_decl_line" -lt "$req_line" ] && [ "$handler_assign_line" -gt "$req_line" ]; then
+      : # OK — forward decl assigned via bare function literal.
+    else
+      note "probe.lua onProbeTargetResolved must be lexically bound before requestProbeTargetResolution references it; if using a forward declaration, assign with 'onProbeTargetResolved = function(...)' not 'local function onProbeTargetResolved(...)')"
     fi
-    if [ "$handler_def_line" -lt "$req_line" ]; then
-      handler_ok=1
-    fi
-    if [ "$handler_ok" -ne 1 ]; then
-      note "probe.lua onProbeTargetResolved must be lexically bound before requestProbeTargetResolution references it (forward-declare or define earlier)"
+    # Reject the shadowing bug: forward decl + later local redeclaration.
+    if [ -n "$fwd_decl_line" ] && [ -n "$handler_local_def_line" ] && [ "$handler_local_def_line" -gt "$req_line" ]; then
+      note "probe.lua onProbeTargetResolved is forward-declared but later redeclared with 'local function', which shadows the forward decl and leaves callbacks invoking nil"
     fi
   fi
 fi

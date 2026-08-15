@@ -154,7 +154,7 @@ end
 -- with ConvertStringToLuaID(tostring(n)).  param=0 signals "not found".
 -- The requestId and side are captured from the per-registration closure, not
 -- parsed from a third callback argument.
-local function onProbeTargetResolved(requestId, side, value)
+onProbeTargetResolved = function(requestId, side, value)
     if not probePendingRequestId or requestId ~= probePendingRequestId then
         log("probe_resolve", { action = "stale_response", received = requestId, pending = probePendingRequestId })
         return
