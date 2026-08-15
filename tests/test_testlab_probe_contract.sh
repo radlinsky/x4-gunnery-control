@@ -390,9 +390,92 @@ if ! grep -q 'resolving' "$lua" && ! grep -q 'unresolved' "$lua"; then
   note "probe.lua menu must show resolving or unresolved status when targets pending"
 fi
 
-# 23. Scenario MD must clear probe-resolved state on despawn.
-if ! grep -q '\$ProbeResolvedA\|\$ProbeResolvedB' "$scenario_md"; then
-  note "scenario MD must clear ProbeResolvedA/B on despawn to prevent stale references"
+# 23. Scenario MD must clear probe-label registry on despawn.
+# shellcheck disable=SC2016
+if ! grep -q 'ScenarioRoot\.\$ProbeLabels' "$scenario_md"; then
+  note "scenario MD must create and manage ScenarioRoot.\$ProbeLabels registry"
+fi
+# Must NOT still reference dead ProbeResolvedA/B variables.
+# shellcheck disable=SC2016
+if grep -q '\$ProbeResolvedA\|\$ProbeResolvedB' "$scenario_md"; then
+  note "scenario MD must not reference dead ProbeResolvedA/B variables"
+fi
+# Must clear $ProbeLabels on despawn (not just leave dangling references).
+# shellcheck disable=SC2016
+if ! grep -q 'remove_value.*ScenarioRoot\.\$ProbeLabels' "$scenario_md"; then
+  note "scenario MD must remove ScenarioRoot.\$ProbeLabels on despawn"
+fi
+
+# 24. [STRENGTHENED] Lua→MD request must use flat scalar keys, not nested tables.
+#     The proven contract is: specId, requestId, labelA, labelB as separate flat keys.
+if [ -f "$lua" ]; then
+  # Extract the AddUITriggeredEvent call for probe_target_resolve and check it.
+  probe_event_call=$(awk '/AddUITriggeredEvent.*probe_target_resolve/ { found=1 } found { print } /end$/ && found { exit }' "$lua")
+  # Must NOT send a nested labels table in the event call.
+  if printf '%s\n' "$probe_event_call" | grep -q 'labels = '; then
+    note "probe.lua must not send nested labels table in probe_target_resolve event; use flat scalar keys (labelA, labelB)"
+  fi
+  # Must send flat scalar keys: specId, requestId, labelA, labelB.
+  if ! printf '%s\n' "$probe_event_call" | grep -q 'specId'; then
+    note "probe.lua must send specId as a flat scalar in the resolution request"
+  fi
+  if ! printf '%s\n' "$probe_event_call" | grep -q 'labelA'; then
+    note "probe.lua must send labelA as a flat scalar in the resolution request"
+  fi
+  if ! printf '%s\n' "$probe_event_call" | grep -q 'labelB'; then
+    note "probe.lua must send labelB as a flat scalar in the resolution request"
+  fi
+fi
+
+# 25. [STRENGTHENED] Menu must call requestProbeTargetResolution on show.
+if [ -f "$lua" ]; then
+  if ! grep -q 'requestProbeTargetResolution' "$lua"; then
+    note "probe.lua menu.onShowMenu must call requestProbeTargetResolution"
+  fi
+fi
+
+# 26. [STRENGTHENED] MD must read flat scalar label fields, not a nested labels list.
+if [ -f "$scenario_md" ]; then
+  # Must read $labelA and $labelB from event.param3.
+  # shellcheck disable=SC2016
+  if ! grep -q 'event\.param3\.\$labelA' "$scenario_md"; then
+    note "scenario MD must read labelA flat scalar from event.param3"
+  fi
+  # shellcheck disable=SC2016
+  if ! grep -q 'event\.param3\.\$labelB' "$scenario_md"; then
+    note "scenario MD must read labelB flat scalar from event.param3"
+  fi
+  # Must NOT still use nested $labels list.
+  # shellcheck disable=SC2016
+  if grep -q 'event\.param3\.\$labels' "$scenario_md"; then
+    note "scenario MD must not read nested labels list from event.param3"
+  fi
+fi
+
+# 27. [STRENGTHENED] MD must use spawn-label registry, not knownname comparison.
+if [ -f "$scenario_md" ]; then
+  # Must NOT compare knownname against label (that was the broken approach).
+  # shellcheck disable=SC2016
+  if grep -A30 'ProbeTargetResolve' "$scenario_md" | grep -q '\$Obj\.knownname == \$Label'; then
+    note "scenario MD ProbeTargetResolve must not use knownname comparison; use spawn registry"
+  fi
+  # Must use the spawn-label registry.
+  # shellcheck disable=SC2016
+  if ! grep -q 'ScenarioRoot\.\$ProbeLabels' "$scenario_md"; then
+    note "scenario MD must create and use ScenarioRoot.\$ProbeLabels registry"
+  fi
+  # Must look up by label key in the registry (e.g., $ProbeLabels.{$LabelA}).
+  if ! grep -q 'ProbeLabels.{' "$scenario_md"; then
+    note "scenario MD must look up labels in ScenarioRoot.\$ProbeLabels registry"
+  fi
+fi
+
+# 28. [STRENGTHENED] MD must validate specId to reject stale requests.
+if [ -f "$scenario_md" ]; then
+  # shellcheck disable=SC2016
+  if ! grep -A40 'ProbeTargetResolve' "$scenario_md" | grep -q '\$SpawnedSpecId'; then
+    note "scenario MD ProbeTargetResolve must validate specId against ScenarioRoot.\$SpawnedSpecId"
+  fi
 fi
 
 if [ "$fail" -ne 0 ]; then

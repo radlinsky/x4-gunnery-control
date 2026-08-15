@@ -212,6 +212,12 @@
             <set_value name="$DefenceUnits" exact="0"/>
             <set_value name="$Hostiles" exact="0"/>
             <set_value name="$RepairObjectCount" exact="0"/>
+            <!-- Spawn-label registry: maps each exact scenario group label to the
+                 actual component created for that label.  Ships are named
+                 '$Def.$label + ' ' + $Index' so knownname cannot be used for
+                 resolution; this registry is built at creation time and looked
+                 up by the probe resolver. -->
+            <create_list name="ScenarioRoot.$ProbeLabels"/>
             <do_for_each name="$Def" in="ScenarioRoot.$Pending">
               <do_if value="$Def.$macro == '' or not @macro.{$Def.$macro}">
                 <debug_text text="'[X4GC TEST SCENARIO] skipping group ' + $Def.$label + '; unknown macro=' + $Def.$macro"/>
@@ -245,6 +251,9 @@
                      am I supposed to designate" - an explicit name makes the instruction
                      unambiguous in the target list. -->
                 <set_object_name object="$Ship" name="$Def.$label + ' ' + $Index"/>
+                <!-- Register the exact spawn label so the probe resolver can find this
+                     component without reconstructing identity from knownname. -->
+                <append_to_list name="ScenarioRoot.$ProbeLabels" exact="table[$Def.$label = $Ship]"/>
 
                 <!-- Remove combat drones before hostility is applied. A
                      launched drone is another hostile target and invalidates
@@ -522,8 +531,7 @@
             <do_if value="ScenarioRoot.$RepairObjects?">
               <remove_value name="ScenarioRoot.$RepairObjects"/>
             </do_if>
-            <remove_value name="ScenarioRoot.$ProbeResolvedA"/>
-            <remove_value name="ScenarioRoot.$ProbeResolvedB"/>
+            <remove_value name="ScenarioRoot.$ProbeLabels"/>
             <reset_cue cue="ScenarioRepairArm"/>
             <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
           </actions>
@@ -531,10 +539,12 @@
 
         <!-- ProbeTargetResolve
              AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
-               {requestId = ..., labels = {"label1", "label2", ...}})
-             Resolves spawned fixture labels to live component IDs and returns them
-             via X4GunneryTestLab.ProbeTargetsReady so probe.lua can display them.
-             Uses requestId to discard stale responses from earlier fixture generations.
+               {specId = ..., requestId = ..., labelA = ..., labelB = ...})
+             Resolves spawned fixture labels to live component IDs via the
+             ScenarioRoot.$ProbeLabels registry (built at spawn time) and returns
+             them via X4GunneryTestLab.ProbeTargetsReady so probe.lua can display
+             them.  Validates specId to reject requests from a different fixture.
+             Uses requestId to discard stale responses from earlier generations.
         -->
         <cue name="ProbeTargetResolve" instantiate="true">
           <conditions>
@@ -542,26 +552,27 @@
           </conditions>
           <actions>
             <set_value name="$RequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
-            <create_list name="$Labels"/>
-            <do_if value="@event.param3.$labels?">
-              <do_for_each name="$LocLabel" in="event.param3.$labels">
-                <append_to_list name="$Labels" exact="$LocLabel"/>
-              </do_for_each>
+            <set_value name="$ReqSpecId" exact="if @event.param3.$specId then event.param3.$specId else ''"/>
+            <set_value name="$LabelA" exact="if @event.param3.$labelA then event.param3.$labelA else ''"/>
+            <set_value name="$LabelB" exact="if @event.param3.$labelB then event.param3.$labelB else ''"/>
+            <!-- Fail closed: reject if spec does not match the currently spawned fixture. -->
+            <do_if value="ScenarioRoot.$SpawnedSpecId? and ScenarioRoot.$SpawnedSpecId != $ReqSpecId">
+              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetsReady'"
+                               param="$RequestId + ':0::'"/>
+              <continue/>
             </do_if>
-            <create_list name="$Resolved"/>
-            <do_for_each name="$Label" in="$Labels">
-              <do_for_each name="$Obj" in="ScenarioRoot.$Spawned">
-                <do_if value="$Obj.exists and $Obj.knownname == $Label">
-                  <append_to_list name="$Resolved" exact="$Obj"/>
-                </do_if>
-              </do_for_each>
-            </do_for_each>
+            <!-- Look up each label in the spawn registry, not by knownname. -->
+            <set_value name="$CompA" exact="if ScenarioRoot.$ProbeLabels? and ScenarioRoot.$ProbeLabels.{$LabelA} then ScenarioRoot.$ProbeLabels.{$LabelA} else null"/>
+            <set_value name="$CompB" exact="if ScenarioRoot.$ProbeLabels? and ScenarioRoot.$ProbeLabels.{$LabelB} then ScenarioRoot.$ProbeLabels.{$LabelB} else null"/>
+            <set_value name="$Count" exact="0"/>
+            <do_if value="$CompA and $CompA.exists"> <set_value name="$Count" operation="add" exact="1"/> </do_if>
+            <do_if value="$CompB and $CompB.exists"> <set_value name="$Count" operation="add" exact="1"/> </do_if>
             <do_if value="$RequestId != ''">
               <raise_lua_event name="'X4GunneryTestLab.ProbeTargetsReady'"
-                               param="'$RequestId:' + $Resolved.count + ':'
-                                 + (if $Resolved.{1} then $Resolved.{1} else '')
+                               param="$RequestId + ':' + $Count + ':'
+                                 + (if $CompA and $CompA.exists then $CompA else '')
                                  + ':'
-                                 + (if $Resolved.{2} then $Resolved.{2} else '')"/>
+                                 + (if $CompB and $CompB.exists then $CompB else '')"/>
             </do_if>
           </actions>
         </cue>

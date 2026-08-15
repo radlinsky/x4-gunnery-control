@@ -27,10 +27,11 @@
 --     against ScenarioRoot.$Spawned, returned through X4GunneryTestLab.ProbeTargetsReady
 --
 -- TARGET RESOLUTION
--- probe.lua requests resolution by sending:
+-- probe.lua requests resolution by sending flat scalar keys (Lua→MD proven
+-- transport contract):
 --   AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
---     {requestId = ..., labels = {labelA, labelB}})
--- The scenario MD resolves labels against spawned objects and returns:
+--     {specId = ..., requestId = ..., labelA = ..., labelB = ...})
+-- The scenario MD resolves labels via its spawn-label registry and returns:
 --   X4GunneryTestLab.ProbeTargetsReady with param="<requestId>:<count>:<a_id>:<b_id>"
 -- A request token guards against stale responses from prior fixture generations.
 --
@@ -90,6 +91,11 @@ local function resolveProbeTargets()
              a = probeResolvedTargets.a, b = probeResolvedTargets.b }
 end
 
+-- Clock token for unique request IDs.
+local function clockToken(value)
+    return tostring(math.floor((tonumber(value) or 0) * 1000000 + 0.5))
+end
+
 -- Request the scenario MD to resolve A/B labels to live component IDs.
 local function requestProbeTargetResolution()
     if not X4GunneryTestLabScenarioSpec or not X4GunneryTestLabScenarioSpec.groups then
@@ -97,23 +103,26 @@ local function requestProbeTargetResolution()
         return
     end
     -- Collect exact labels from hostile groups in spec order.
-    local labels = {}
+    local labelA, labelB = nil, nil
     for _, group in ipairs(X4GunneryTestLabScenarioSpec.groups) do
-        if group.hostile == true and group.label then
-            table.insert(labels, trim(group.label))
+        if group.hostile == true and group.label and not labelA then
+            labelA = trim(group.label)
+        elseif group.hostile == true and group.label and labelA and not labelB then
+            labelB = trim(group.label)
         end
     end
-    if #labels < 2 then
-        log("probe_resolve", { action = "skipped", reason = "need at least 2 hostile labels", count = #labels })
+    if not labelA or not labelB then
+        log("probe_resolve", { action = "skipped", reason = "need at least 2 hostile labels", count = (labelA and 1 or 0) + (labelB and 1 or 0) })
         return
     end
     probeRequestSerial = probeRequestSerial + 1
     local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(probeRequestSerial)
     probePendingRequestId = requestId
     probeResolvedTargets = nil
-    log("probe_resolve", { action = "requested", request_id = requestId, labels = table.concat(labels, ",") })
+    log("probe_resolve", { action = "requested", request_id = requestId, label_a = labelA, label_b = labelB })
     AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
-        { requestId = requestId, labels = labels })
+        { specId = X4GunneryTestLabScenarioSpec.id, requestId = requestId,
+          labelA = labelA, labelB = labelB })
 end
 
 -- Handle the scenario MD's response with resolved A/B component IDs.
@@ -167,11 +176,6 @@ local function invokeProbe(op)
 
     scenarioActionStatus = "PROBE: " .. op .. " invoked at t=" .. getElapsedTime()
     menu.display()
-end
-
--- Clock token for unique request IDs.
-local function clockToken(value)
-    return tostring(math.floor((tonumber(value) or 0) * 1000000 + 0.5))
 end
 
 -- Menu display: probe buttons + status.
@@ -228,6 +232,7 @@ function menu.display()
 end
 
 function menu.onShowMenu()
+    requestProbeTargetResolution()
     menu.display()
 end
 
