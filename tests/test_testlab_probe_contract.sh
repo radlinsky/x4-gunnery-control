@@ -732,6 +732,26 @@ if [ -f "$scenario_md" ]; then
   fi
 fi
 
+# 37. [STRENGTHENED] Every row containing createButton() in probe.lua must be selectable.
+#     X4 rejects buttons defined in an unselectable row (addRow(false, ...)).
+#     Text-only rows (title, info, status) may remain non-selectable.
+if [ -f "$lua" ]; then
+  # For each 'local <var> = tableView:addRow(...)' declaration, check whether that
+  # variable is later used with createButton. If so, the addRow must not use false.
+  while IFS= read -r match; do
+    var=$(echo "$match" | sed 's/^\s*local //; s/ = .*//')
+    if echo "$match" | grep -q 'addRow(false'; then
+      # Variable declared with addRow(false, ...) — check if it ever gets a button.
+      if awk -v v="$var" '
+        $0 ~ "local " v " = tableView:addRow" { found=1; next }
+        found && $0 ~ v "\\[1\\].*:.*createButton" { print; exit }
+      ' "$lua" | grep -q .; then
+        note "probe.lua: row variable '$var' declares createButton but uses addRow(false, ...) — X4 rejects buttons in unselectable rows; use addRow(\"key\", ...) instead"
+      fi
+    fi
+  done < <(grep -E 'local [a-zA-Z_][a-zA-Z0-9_]* = tableView:addRow' "$lua")
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi

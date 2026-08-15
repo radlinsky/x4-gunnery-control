@@ -246,7 +246,7 @@ function menu.display()
     }
 
     for _, probe in ipairs(probeLabels) do
-        local row = tableView:addRow(false, {})
+        local row = tableView:addRow("probe_" .. probe.op, {})
         row[1]:setColSpan(4):createButton({}):setText(probe.label)
         row[1].handlers.onClick = function() invokeProbe(probe.op) end
     end
