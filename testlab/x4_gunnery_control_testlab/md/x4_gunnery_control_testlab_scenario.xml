@@ -567,35 +567,42 @@
             <set_value name="$ReqSpecId" exact="if @event.param3.$specId then event.param3.$specId else ''"/>
             <set_value name="$LabelA" exact="if @event.param3.$labelA then event.param3.$labelA else ''"/>
             <set_value name="$LabelB" exact="if @event.param3.$labelB then event.param3.$labelB else ''"/>
-            <!-- Fail closed: reject if spec does not match the currently spawned fixture. -->
+            <!-- Fail closed: reject if spec does not match the currently spawned fixture.
+                 Use ordinary do_if / do_else branches (not <continue/>) so control
+                 flow remains explicit and follows established MD patterns. -->
             <do_if value="ScenarioRoot.$SpawnedSpecId? and ScenarioRoot.$SpawnedSpecId != $ReqSpecId">
               <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedA.' + $RequestId" param="0"/>
               <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId" param="0"/>
-              <continue/>
             </do_if>
-            <!-- Iterate the spawn-label registry to find exact label matches.
-                 The registry is a list of table entries [label, object]; we
-                 must iterate with do_for_each (append_to_list adds positional
-                 elements, not merged keys), not direct-key lookup. -->
-            <set_value name="$CompA" exact="null"/>
-            <set_value name="$CompB" exact="null"/>
-            <do_for_each name="$Entry" in="ScenarioRoot.$ProbeLabels">
-              <do_if value="$Entry.$label == $LabelA and $Entry.$object.exists and not $CompA">
-                <set_value name="$CompA" exact="$Entry.$object"/>
+            <do_else>
+              <!-- Iterate the spawn-label registry to find exact label matches.
+                   The registry is a list of table entries [label, object]; we
+                   must iterate with do_for_each (append_to_list adds positional
+                   elements, not merged keys), not direct-key lookup. -->
+              <set_value name="$CompA" exact="null"/>
+              <set_value name="$CompB" exact="null"/>
+              <set_value name="$MatchesA" exact="0"/>
+              <set_value name="$MatchesB" exact="0"/>
+              <do_for_each name="$Entry" in="ScenarioRoot.$ProbeLabels">
+                <do_if value="$Entry.$label == $LabelA and $Entry.$object.exists">
+                  <set_value name="$CompA" exact="$Entry.$object"/>
+                  <set_value name="$MatchesA" operation="add" value="1"/>
+                </do_if>
+                <do_if value="$Entry.$label == $LabelB and $Entry.$object.exists">
+                  <set_value name="$CompB" exact="$Entry.$object"/>
+                  <set_value name="$MatchesB" operation="add" value="1"/>
+                </do_if>
+              </do_for_each>
+              <!-- Require exactly one match per side and distinct components.
+                   Multiple matches would make the probe ambiguous; zero means
+                   the label was not found in the registry. -->
+              <do_if value="$RequestId != '' and $MatchesA == 1 and $MatchesB == 1 and $CompA != $CompB">
+                <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedA.' + $RequestId"
+                                 param="$CompA"/>
+                <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId"
+                                 param="$CompB"/>
               </do_if>
-              <do_if value="$Entry.$label == $LabelB and $Entry.$object.exists and not $CompB">
-                <set_value name="$CompB" exact="$Entry.$object"/>
-              </do_if>
-            </do_for_each>
-            <!-- Raise two raw-component events keyed by requestId so Lua
-                 receives actual component objects (type=number) and can
-                 reverse them with ConvertStringToLuaID(tostring(n)). -->
-            <do_if value="$RequestId != ''">
-              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedA.' + $RequestId"
-                               param="if $CompA and $CompA.exists then $CompA else 0"/>
-              <raise_lua_event name="'X4GunneryTestLab.ProbeTargetResolvedB.' + $RequestId"
-                               param="if $CompB and $CompB.exists then $CompB else 0"/>
-            </do_if>
+            </do_else>
           </actions>
         </cue>
 

@@ -128,7 +128,21 @@ local function requestProbeTargetResolution()
     local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(probeRequestSerial)
     probePendingRequestId = requestId
     probeResolvedTargets = nil
+    -- Reset per-request state so an incomplete older pair cannot contribute a half.
+    probeReceivedA, probeReceivedB = false, false
+    probeResolvedA, probeResolvedB = nil, nil
     log("probe_resolve", { action = "requested", request_id = requestId, label_a = labelA, label_b = labelB })
+    -- Register exact full dynamic event names (per-request correlation).
+    RegisterEvent(
+        "X4GunneryTestLab.ProbeTargetResolvedA." .. requestId,
+        function(_, value)
+            onProbeTargetResolved(requestId, "A", value)
+        end)
+    RegisterEvent(
+        "X4GunneryTestLab.ProbeTargetResolvedB." .. requestId,
+        function(_, value)
+            onProbeTargetResolved(requestId, "B", value)
+        end)
     AddUITriggeredEvent("X4GunneryTestLabScenario", "probe_target_resolve",
         { specId = X4GunneryTestLabScenarioSpec.id, requestId = requestId,
           labelA = labelA, labelB = labelB })
@@ -137,33 +151,36 @@ end
 -- Handle one raw-component response (A or B). Both must arrive before the
 -- pending requestId expires.  MD raises components as Lua numbers; reverse
 -- with ConvertStringToLuaID(tostring(n)).  param=0 signals "not found".
-local function onProbeTargetResolved(_, eventName, value)
-    local _, _, requestId = string.match(eventName, "^([^%.]+)%.(%w+)%.(.+)$")
+-- The requestId and side are captured from the per-registration closure, not
+-- parsed from a third callback argument.
+local function onProbeTargetResolved(requestId, side, value)
     if not probePendingRequestId or requestId ~= probePendingRequestId then
         log("probe_resolve", { action = "stale_response", received = requestId, pending = probePendingRequestId })
         return
     end
-    local comp = ConvertStringToLuaID(tostring(value))
-    if string.find(eventName, "ProbeTargetResolvedA") then
+    -- MD sends 0 for unresolved; nonzero is a live component identity.
+    local comp = ConvertStringToLuaID(tostring(value or 0))
+    if side == "A" then
         probeReceivedA = true
         probeResolvedA = comp
     else
         probeReceivedB = true
         probeResolvedB = comp
     end
-    log("probe_resolve", { action = "received_" .. (string.find(eventName, "ProbeTargetResolvedA") and "A" or "B"), request_id = requestId, value = tostring(comp) })
+    log("probe_resolve", { action = "received_" .. side, request_id = requestId, value = tostring(comp) })
     if not (probeReceivedA and probeReceivedB) then return end
     -- Both halves arrived for this requestId — finalize.
     probePendingRequestId = nil
-    local aValid = probeResolvedA and probeResolvedA.exists
-    local bValid = probeResolvedB and probeResolvedB.exists
+    -- Zero ID means unresolved; nonzero is accepted as resolved (MD owns existence).
+    local aValid = probeResolvedA and probeResolvedA ~= 0
+    local bValid = probeResolvedB and probeResolvedB ~= 0
     if aValid and bValid and probeResolvedA ~= probeResolvedB then
         probeResolvedTargets = { a = probeResolvedA, b = probeResolvedB }
         log("probe_resolve", { action = "resolved", a = tostring(probeResolvedA), b = tostring(probeResolvedB) })
         menu.display()
     else
         local count = (aValid and 1 or 0) + (bValid and 1 or 0)
-        log("probe_resolve", { action = "failed", count = count, a_exists = aValid, b_exists = bValid })
+        log("probe_resolve", { action = "failed", count = count, a_valid = aValid, b_valid = bValid })
         scenarioActionStatus = "FAILED: could not resolve probe targets A/B from scenario"
         menu.display()
     end
@@ -258,11 +275,9 @@ function menu.onCloseElement(dueToClose)
     Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTestLab", { 0, 0 }, true)
 end
 
-local function init()
+local function init():
     Menus = Menus or {}; table.insert(Menus, menu)
     log("loaded")
     if Helper then Helper.registerMenu(menu) end
-    RegisterEvent("X4GunneryTestLab.ProbeTargetResolvedA", onProbeTargetResolved)
-    RegisterEvent("X4GunneryTestLab.ProbeTargetResolvedB", onProbeTargetResolved)
 end
 init()

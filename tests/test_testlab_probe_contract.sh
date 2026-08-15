@@ -517,6 +517,124 @@ if [ -f "$scenario_md" ]; then
   fi
 fi
 
+# 29. [STRENGTHENED] Lua must register EXACT dynamic event names suffixed by requestId.
+#     Defect A: MD raises X4GunneryTestLab.ProbeTargetResolvedA.<requestId> but Lua
+#     only registers the unsuffixed prefix. Follow gunnery_persistence.lua pattern.
+if [ -f "$lua" ]; then
+  # Must NOT register unsuffixed prefix events in init() — those never match.
+  if grep -q 'RegisterEvent.*"X4GunneryTestLab.ProbeTargetResolvedA", onProbeTargetResolved' "$lua"; then
+    note "probe.lua must not register unsuffixed ProbeTargetResolvedA in init(); use per-request full dynamic name"
+  fi
+  if grep -q 'RegisterEvent.*"X4GunneryTestLab.ProbeTargetResolvedB", onProbeTargetResolved' "$lua"; then
+    note "probe.lua must not register unsuffixed ProbeTargetResolvedB in init(); use per-request full dynamic name"
+  fi
+  # Must register the exact full dynamic name inside requestProbeTargetResolution,
+  # after requestId is allocated and before AddUITriggeredEvent. The event name
+  # must contain the literal requestId variable reference, not a static string.
+  # The RegisterEvent call may span multiple lines; check that the file contains
+  # both the static prefix and the dynamic requestId suffix within the same call block.
+  if ! grep -q 'X4GunneryTestLab.ProbeTargetResolvedA\.\. \.\.' "$lua" && ! grep -q 'ProbeTargetResolvedA.*requestId' "$lua"; then
+    note "probe.lua must register exact full dynamic event X4GunneryTestLab.ProbeTargetResolvedA.<requestId> inside requestProbeTargetResolution"
+  fi
+  if ! grep -q 'X4GunneryTestLab.ProbeTargetResolvedB\.\. \.\.' "$lua" && ! grep -q 'ProbeTargetResolvedB.*requestId' "$lua"; then
+    note "probe.lua must register exact full dynamic event X4GunneryTestLab.ProbeTargetResolvedB.<requestId> inside requestProbeTargetResolution"
+  fi
+  # Registration must appear before the AddUITriggeredEvent call (ordering).
+  # Use line-number comparison since RegisterEvent and the event name may be on
+  # different lines. The second grep may find nothing when they are on separate
+  # lines; suppress the pipefail exit with || true.
+  reg_line=$(grep -n 'RegisterEvent' "$lua" | grep -i 'ProbeTargetResolved' | head -1 | cut -d: -f1 || true)
+  event_line=$(grep -n 'AddUITriggeredEvent.*probe_target_resolve' "$lua" | head -1 | cut -d: -f1)
+  if [ -n "$reg_line" ] && [ -n "$event_line" ]; then
+    if [ "$reg_line" -gt "$event_line" ]; then
+      note "probe.lua must register response events BEFORE emitting AddUITriggeredEvent for probe_target_resolve"
+    fi
+  fi
+fi
+
+# 30. [STRENGTHENED] Callback must use the established two-argument RegisterEvent contract.
+#     Defect B: three-arg callback (_, eventName, value) is wrong; production uses (_, param)
+#     or (name, value).
+if [ -f "$lua" ]; then
+  if grep -q 'local function onProbeTargetResolved(_, eventName, value)' "$lua"; then
+    note "probe.lua onProbeTargetResolved must use two-argument callback contract (_, value), not three"
+  fi
+  # The handler must receive the requestId from the closure (per-request registration),
+  # not attempt to parse a third callback argument.
+  if grep -q 'string.match(eventName' "$lua" | head -1; then
+    # Check that eventName is NOT used as a parsed third arg in onProbeTargetResolved
+    handler_body=$(awk '/^local function onProbeTargetResolved/ { found=1; depth=1; print; next }
+      found { line=$0; n=gsub(/function/,"function",line); depth+=n
+              n=gsub(/end/,"end",line); depth-=n
+              print; if (depth==0) exit }' "$lua")
+    if printf '%s\n' "$handler_body" | grep -q 'string.match(eventName'; then
+      note "probe.lua onProbeTargetResolved must not parse eventName from callback args; use closure to capture requestId"
+    fi
+  fi
+fi
+
+# 31. [STRENGTHENED] Lua must not access .exists on a ConvertStringToLuaID result.
+#     Defect C: ConvertStringToLuaID converts a number to a Lua component ID; it does
+#     not produce an MD component object with .exists.
+if [ -f "$lua" ]; then
+  if grep -q 'probeResolvedA\.exists\|probeResolvedB\.exists' "$lua"; then
+    note "probe.lua must not access .exists on values from ConvertStringToLuaID; use raw numeric ID or MD is authority"
+  fi
+  # Nonzero resolved IDs are accepted as-is; only 0/null means unresolved.
+  if grep -q 'aValid.*and.*bValid' "$lua" && grep -q '\.exists' "$lua"; then
+    note "probe.lua must not gate resolution success on .exists; gate on nonzero ID and distinctness instead"
+  fi
+fi
+
+# 32. [STRENGTHENED] MD must enforce exact-one registry match for A and B.
+#     Defect D: currently stores only the first match via 'not $CompA' / 'not $CompB'.
+if [ -f "$scenario_md" ]; then
+  if ! grep -q '\$MatchesA' "$scenario_md"; then
+    note "scenario MD ProbeTargetResolve must count A matches with \$MatchesA"
+  fi
+  if ! grep -q '\$MatchesB' "$scenario_md"; then
+    note "scenario MD ProbeTargetResolve must count B matches with \$MatchesB"
+  fi
+  # Must increment match counters inside the do_for_each loop.
+  probe_resolve_section=$(awk '/<cue name="ProbeTargetResolve"/,/<\/cue>/' "$scenario_md")
+  if [ -z "$probe_resolve_section" ]; then
+    note "scenario MD ProbeTargetResolve cue must exist"
+  else
+    if ! printf '%s\n' "$probe_resolve_section" | grep -q 'operation="add".*\$MatchesA\|\$MatchesA.*operation="add"'; then
+      note "scenario MD must increment \$MatchesA inside the registry iteration loop"
+    fi
+    if ! printf '%s\n' "$probe_resolve_section" | grep -q 'operation="add".*\$MatchesB\|\$MatchesB.*operation="add"'; then
+      note "scenario MD must increment \$MatchesB inside the registry iteration loop"
+    fi
+    # Must require exactly one match for each side.
+    if ! printf '%s\n' "$probe_resolve_section" | grep -q '\$MatchesA == 1'; then
+      note "scenario MD must require \$MatchesA == 1 for exact-one A resolution"
+    fi
+    if ! printf '%s\n' "$probe_resolve_section" | grep -q '\$MatchesB == 1'; then
+      note "scenario MD must require \$MatchesB == 1 for exact-one B resolution"
+    fi
+    # Must ensure A and B are distinct.
+    if ! printf '%s\n' "$probe_resolve_section" | grep -q '\$CompA != \$CompB'; then
+      note "scenario MD must require \$CompA != \$CompB (distinct components)"
+    fi
+  fi
+fi
+
+# 33. [STRENGTHENED] ProbeTargetResolve must not use <continue/> for spec-mismatch exit.
+#     Defect E: the spec-mismatch path uses <continue/> outside the registry loop;
+#     this is unestablished and must be replaced by ordinary guarded branches.
+if [ -f "$scenario_md" ]; then
+  probe_resolve_section=$(awk '/<cue name="ProbeTargetResolve"/,/<\/cue>/' "$scenario_md")
+  if [ -n "$probe_resolve_section" ]; then
+    # Extract lines before the do_for_each loop inside ProbeTargetResolve.
+    pre_loop=$(printf '%s\n' "$probe_resolve_section" | awk '/do_for_each.*\$Entry/,0' | head -20)
+    # The spec-mismatch <continue/> must not appear before the registry loop.
+    if printf '%s\n' "$pre_loop" | grep -q '<continue/>'; then
+      note "scenario MD ProbeTargetResolve must not use <continue/> for spec-mismatch exit; use do_if/do_else branches instead"
+    fi
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
