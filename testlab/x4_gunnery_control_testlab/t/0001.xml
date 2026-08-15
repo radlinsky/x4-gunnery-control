@@ -13,5 +13,8 @@
     <t id="27">Scenario spec</t>
     <t id="28">Arm capture of next engaged target (10s after engage)</t>
     <t id="29">Fire-control logging</t><t id="30">Mark moment</t>
+    <!-- PR3 Diagnostic Probes -->
+    <t id="31">PR3 Diagnostic Probes</t>
+    <t id="32">Return to Test Lab</t>
   </page>
 </language>

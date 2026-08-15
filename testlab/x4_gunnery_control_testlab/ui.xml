@@ -11,5 +11,8 @@
     <file name="ui/testlab_state.lua"/>
     <file name="ui/scenario_spec.lua"/>
     <file name="ui/testlab.lua"/>
+    <!-- PR3 diagnostic probe harness: loads after testlab so it can reference
+         the same scenario spec global and return to the Test Lab menu. -->
+    <file name="ui/probe.lua"/>
   </environment>
 </addon>
