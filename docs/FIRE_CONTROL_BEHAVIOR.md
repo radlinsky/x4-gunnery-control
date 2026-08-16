@@ -42,6 +42,14 @@ The situations that matter for this mod. Each is checked against **your target**
 
 *Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
 
+**What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when three conditions are all true for the selected target:
+
+- the turret's known traverse arc contains the aim direction (unknown or modded macros are excluded from the count rather than assumed clear);
+- the target is within weapon range; and
+- a ray from the muzzle to the target passes without intersecting the firing ship.
+
+The ratio does **not** prove weapon readiness, fire authorization, or whether a ballistic intercept solution exists. Those are separate predicates that X4 handles internally but do not feed into this display. The general fire-control concept `ENGAGEABLE` includes all of them; the console's ratio measures only the geometric subset listed above.
+
 ---
 
 ## Table 2: Turret group modes
