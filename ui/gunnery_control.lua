@@ -1895,16 +1895,16 @@ function menu.display()
             applyPov(); persistSession(); menu.display()
         end
         local pRow3 = controls:addRow("cycle_turret", {})
-        -- Next Turret (id 71)
-        pRow3[1]:createButton({ active = canCycle }):setText(text(71))
+        -- Previous Turret (id 72): left side, cycles towards the previous camera entry.
+        pRow3[1]:createButton({ active = canCycle }):setText(text(72))
         pRow3[1].handlers.onClick = function()
-            State.cycleCamera(session, 1)
+            State.cycleCamera(session, -1)
             enterCamera(cameraMember()); persistSession(); menu.display()
         end
-        -- Previous Turret (id 72)
-        pRow3[2]:createButton({ active = canCycle }):setText(text(72))
+        -- Next Turret (id 71): right side, cycles towards the next camera entry.
+        pRow3[2]:createButton({ active = canCycle }):setText(text(71))
         pRow3[2].handlers.onClick = function()
-            State.cycleCamera(session, -1)
+            State.cycleCamera(session, 1)
             enterCamera(cameraMember()); persistSession(); menu.display()
         end
         -- Direct-only: re-target, cease, and next/prev target buttons.
@@ -1928,12 +1928,12 @@ function menu.display()
             end
             local canCycleTarget = hasMultipleTargets()
             local pRow4 = controls:addRow("cycle_target", {})
-            -- Next Target (id 75)
-            pRow4[1]:createButton({ active = canCycleTarget }):setText(text(75))
-            pRow4[1].handlers.onClick = function() cycleTarget(1) end
-            -- Previous Target (id 76)
-            pRow4[2]:createButton({ active = canCycleTarget }):setText(text(76))
-            pRow4[2].handlers.onClick = function() cycleTarget(-1) end
+            -- Previous Target (id 76): left side, cycles towards the previous target.
+            pRow4[1]:createButton({ active = canCycleTarget }):setText(text(76))
+            pRow4[1].handlers.onClick = function() cycleTarget(-1) end
+            -- Next Target (id 75): right side, cycles towards the next target.
+            pRow4[2]:createButton({ active = canCycleTarget }):setText(text(75))
+            pRow4[2].handlers.onClick = function() cycleTarget(1) end
             -- Auto-next Target (id 78): what happens when the engaged target dies.
             local autoNextRow = controls:addRow("auto_next", {})
             autoNextRow[1]:createCheckBox(session.autoNextTarget ~= false,

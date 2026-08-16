@@ -23,6 +23,17 @@ for _, id in ipairs({ 71, 72 }) do
     assert(fix.callbackCheckpoint() > checkpoint,
         "cycle turret button " .. tostring(id) .. " must schedule its camera gate")
 end
+-- #18: Previous on the left, Next on the right.
+local cycleTurretBtns = {}
+for _, b in ipairs(fix.getCreatedButtons()) do
+    if string.find(b.text, "text:20991:7[12]") then cycleTurretBtns[#cycleTurretBtns + 1] = b end end
+assert(#cycleTurretBtns == 2, "engaged/auto must render exactly two cycle_turret buttons")
+local prevBtn, nextBtn
+for _, b in ipairs(cycleTurretBtns) do
+    if b.text == "text:20991:72" then prevBtn = b elseif b.text == "text:20991:71" then nextBtn = b end
+end
+assert(prevBtn and prevBtn.column == 1, "engaged/auto: Previous Turret (72) must be col 1")
+assert(nextBtn and nextBtn.column == 2, "engaged/auto: Next Turret (71) must be col 2")
 
 -- Deliverable D: the same commit point is available on the engaged panel, in
 -- both Auto and Direct. menu.display returns early for the engaged phase, so a
@@ -82,6 +93,46 @@ for _, controlMode in ipairs({ "auto", "direct" }) do
         "engaged/" .. controlMode .. ": Update must advance the committed baseline")
     assert(not X4GunneryState.isStagedDirty(sessE),
         "engaged/" .. controlMode .. ": Update must leave the session clean")
+    -- #18: Previous on the left, Next on the right (cycle_turret is shared).
+    local dirCycleBtns = {}
+    for _, b in ipairs(fixE.getCreatedButtons()) do
+        if string.find(b.text, "text:20991:7[12]") then dirCycleBtns[#dirCycleBtns + 1] = b end end
+    assert(#dirCycleBtns == 2, "engaged/" .. controlMode .. " must render exactly two cycle_turret buttons")
+    local dPrev, dNext
+    for _, b in ipairs(dirCycleBtns) do
+        if b.text == "text:20991:72" then dPrev = b elseif b.text == "text:20991:71" then dNext = b end
+    end
+    assert(dPrev and dPrev.column == 1, "engaged/" .. controlMode .. ": Previous Turret (72) must be col 1")
+    assert(dNext and dNext.column == 2, "engaged/" .. controlMode .. ": Next Turret (71) must be col 2")
+end
+-- #18: engaged/direct cycle_target row.
+do
+    local fixCT = dofile("tests/support/runtime_fixture.lua").load()
+    local key = X4GunneryState.groupKey(5, "p", "g")
+    local grp = {
+        key = key, kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
+    }
+    fixCT.gcMenu.onShowMenu()
+    local sess = fixCT.API.getSession()
+    sess.groups, sess.checkedGroupKeys, sess.cameraMemberID = { grp }, { [key] = true }, 27
+    sess.phase, sess.controlMode = "engaged", "direct"
+    X4GunneryState.seedBaseline(sess, { grp })
+    -- hasMultipleTargets returns false by default; fake it so cycle_target renders.
+    fixCT.C.hasMultipleTargets = function() return true end
+    fixCT.gcMenu.display()
+    local cycleTargetBtns = {}
+    for _, b in ipairs(fixCT.getCreatedButtons()) do
+        if string.find(b.text, "text:20991:7[56]") then cycleTargetBtns[#cycleTargetBtns + 1] = b end end
+    assert(#cycleTargetBtns == 2, "engaged/direct must render exactly two cycle_target buttons")
+    local cPrev, cNext
+    for _, b in ipairs(cycleTargetBtns) do
+        if b.text == "text:20991:76" then cPrev = b elseif b.text == "text:20991:75" then cNext = b end
+    end
+    assert(cPrev and cPrev.column == 1, "engaged/direct: Previous Target (76) must be col 1")
+    assert(cNext and cNext.column == 2, "engaged/direct: Next Target (75) must be col 2")
 end
 
 -- The engaged panel's stand-up button. It used to read "Cease Engagement" and
