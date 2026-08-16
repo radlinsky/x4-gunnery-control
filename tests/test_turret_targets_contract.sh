@@ -30,22 +30,11 @@ while IFS= read -r call; do
   esac
 done < <(grep -o "<set_turret_targets[^>]*>" "$md")
 
-# 2. The ship-wide override reaches EVERY turret, whatever its mode. The
-#    weaponmode attribute is optional and "defaults to any" (common.xsd:36223),
-#    so omitting it is what makes that true -- and it is the only way to reach
-#    autoassist and holdfire turrets at all, since neither is a member of
-#    weaponmodelookup (common.xsd:2419) and neither can be named in the
-#    attribute. An earlier version excluded six modes; that is the behaviour
-#    this rule now forbids.
-if grep -q "mode != weaponmode\." "$md"; then
-  note "PreferAllTurrets must not filter by mode; found a 'mode != weaponmode.' guard"
-fi
-
-# 2b. Per-cue: Apply and Release must omit weaponmode, DirectFallback must keep
-#     it. DirectFallback is scoped on purpose -- the console binds the checkbox
-#     to attackenemies, so that selector is what limits it to the ticked groups.
-#     Without the per-cue split, rule 2 alone would pass a file that had quietly
-#     dropped the selector from DirectFallback too.
+# 2. DirectFallback is the sole writer, and it must scope to attackenemies.
+#    Since #38 removed Prefer My Target, DirectFallback is the only cue that may
+#    call <set_turret_targets>; any other cue introducing one is a new, unreviewed
+#    turret writer. The attackenemies selector is what limits it to the ticked
+#    groups (the console binds the checkbox to attackenemies).
 cue_report=$(awk '
   /<cue name="/ { match($0, /name="[^"]*"/); cue = substr($0, RSTART + 6, RLENGTH - 7) }
   /<set_turret_targets/ { print cue "\t" $0 }
@@ -54,38 +43,20 @@ cue_report=$(awk '
 while IFS=$'\t' read -r cue call; do
   [ -n "$cue" ] || continue
   case $cue in
-    Apply|Release)
-      case $call in
-        *weaponmode=*) note "$cue must not pass weaponmode (it would skip modes): $call" ;;
-      esac
-      ;;
     DirectFallback)
       case $call in
         *'weaponmode="weaponmode.attackenemies"'*) ;;
         *) note "DirectFallback must scope to attackenemies (the ticked groups): $call" ;;
       esac
       ;;
+    *)
+      note "only DirectFallback may call <set_turret_targets>; found one in cue '$cue': $call"
+      ;;
   esac
 done <<< "$cue_report"
 
-for required in Apply Release DirectFallback; do
-  if ! grep -q "^$required	" <<< "$cue_report"; then
-    note "expected at least one <set_turret_targets> inside the $required cue; found none"
-  fi
-done
-
-# 3. Apply issues the narrow call before the wide one. stopshootingold only drops
-#    targets absent from the new list, so a list containing the turret's current
-#    target can never dislodge it: the narrow list of one forces the switch, and
-#    the wide list restores a fallback for turrets with no shot at the preferred
-#    target. Order is the whole point; reversed, the narrow call wins and the
-#    fallback is lost.
-narrow=$(grep -n $'target="\\[\\$target\\]"' "$md" | head -1 | cut -d: -f1)
-wide=$(grep -n $'target="\\$hostiles" preferredtarget=' "$md" | head -1 | cut -d: -f1)
-if [ -z "$narrow" ] || [ -z "$wide" ]; then
-  note "Apply must issue both a narrow (target=[\$target]) and a wide (target=\$hostiles) call"
-elif [ "$narrow" -ge "$wide" ]; then
-  note "narrow call (line $narrow) must precede the wide call (line $wide)"
+if ! grep -q "^DirectFallback	" <<< "$cue_report"; then
+  note "expected at least one <set_turret_targets> inside the DirectFallback cue; found none"
 fi
 
 if [ "$fail" -ne 0 ]; then

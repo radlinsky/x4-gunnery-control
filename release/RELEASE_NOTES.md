@@ -9,17 +9,12 @@ boring menu. This mod replaces it with a real turret console.
 
 ## New in this release
 
-- **New features**
-- **All Turrets: Prefer My Target** Normally, only the turret group(s)
-  you selected to control will try and fire at your target. If your target
-  goes out of range from any of your selected turrets, those turrets will sit idle.
-  This button tells **every** turret on the ship to prefer your chosen target,
-  regardless of Mode — including Missile Defence, Defend, Mine and Tow turrets.
-  Turrets that are out of range or cannot swing round to your target will roll
-  to another hostile; turrets where your own hull is in the way will track the
-  target and hold fire.
-- **Release Other Turrets** Turns off the ship-wide "Prefer my target" mode
-  and returns every turret this button reached back to its own settings.
+- **Removed**
+- **Other Turrets: Prefer My Target** and **Release Other Turrets** have been
+  removed. The X4 API cannot cleanly revert `defend`, `missiledefence`, and
+  `mining` turret modes after a ship-wide override, so Release was broken by
+  design. Ticking your turret groups and using Direct-control is the supported
+  way to direct turrets at a chosen target.
 
 - **Bug fixes**
 - Direct-control now works on M ships lacking a turret camera.
@@ -55,13 +50,6 @@ specific surface element instead — a turret, a shield generator, an engine.
   actually manning the gun.
 - **Next Target** / **Previous Target** step through the same list without
   reopening the browser.
-- **Other Turrets: Prefer My Target** pushes every turret on the ship to prefer
-  your target, whatever Mode it is in — no exceptions. That means a Missile
-  Defence turret will shoot your chosen ship instead of watching for incoming
-  missiles, and a Defend turret will engage a target that is not attacking you.
-  Mine and Tow turrets are included too.
-- **Release Other Turrets** turns that ship-wide preference back off and
-  returns everything it reached to its own settings.
 
 A few things to know: ticking a group's checkbox sets that group's Mode to
 **Attack all enemies**. Everything you change in the console is temporary and

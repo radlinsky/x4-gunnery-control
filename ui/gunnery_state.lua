@@ -135,12 +135,6 @@ function State.newSession(shipID, controlGroup)
         -- Direct-control only: take the turrets to the next target when the
         -- engaged one dies. Off sends the player back to the target browser.
         autoNextTarget = true,
-        -- Direct-control only: the ship-wide "prefer my target" override. Off
-        -- until the player explicitly asks for it, and always cleared before
-        -- the session ends. It reaches every turret on the ship rather than
-        -- just the checked groups, which is why it is an explicit action with
-        -- its own button and not a default.
-        preferAllTurrets = false,
         -- Revert target on stand-up: what modes and armed states the ship's
         -- turrets return to when the player leaves the chair. Seeded from the
         -- ship's actual state at sit-down, updated only by an explicit
@@ -776,7 +770,6 @@ function State.saveState(session)
         povAnchor = session.povAnchor or "turret",
         povMode = session.povMode or "manual",
         autoNextTarget = flag(session.autoNextTarget ~= false),
-        preferAllTurrets = flag(session.preferAllTurrets),
         shipID = tostring(session.shipID),
         -- Which ship this payload belongs to. shipID cannot answer that after a
         -- load, because a load reassigns it; the name survives.
@@ -860,7 +853,7 @@ end
 local function validSessionRecord(record)
     local required = {
         "phase", "controlMode", "povAnchor", "povMode", "autoNextTarget",
-        "preferAllTurrets", "shipID", "aimTargetID", "cameraMemberID",
+        "shipID", "aimTargetID", "cameraMemberID",
     }
     if record.t ~= "session" or not hasStringFields(record, required)
         or record.shipID == "" then
@@ -882,7 +875,7 @@ local function validSessionRecord(record)
     end
     if record.povAnchor ~= "turret" and record.povAnchor ~= "target" then return false end
     if record.povMode ~= "manual" and record.povMode ~= "cinematic" then return false end
-    if not validFlag(record.autoNextTarget) or not validFlag(record.preferAllTurrets) then return false end
+    if not validFlag(record.autoNextTarget) then return false end
     if record.shipName ~= nil and not isString(record.shipName) then return false end
     -- targetObjectID was emitted by the first two persistence revisions. It is
     -- intentionally ignored now (the target root is derived), but remains a
@@ -1073,7 +1066,6 @@ function State.restoreState(session, records, liveGroups)
     session.povAnchor = head.povAnchor
     session.povMode = head.povMode
     session.autoNextTarget = head.autoNextTarget == "1"
-    session.preferAllTurrets = head.preferAllTurrets == "1"
     session.checkedGroupKeys = checkedGroupKeys
     if idsHeld then
         session.aimTargetID = (head.aimTargetID ~= "" and head.aimTargetID) or nil

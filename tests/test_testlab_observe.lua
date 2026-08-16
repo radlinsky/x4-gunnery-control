@@ -80,12 +80,11 @@ assert(findButton(TOGGLE).text:find("ON", 1, true), "toggle label did not follow
 -- With no Direct-control session the payload carries no session fields at all.
 -- This is the ordinary free-play path, where MD falls back to player.target.
 local state = lastEvent("observe_state")
-assert(state.params.prefer == nil, "prefer must be absent without a session")
 assert(state.params.aimtgt == nil, "aimtgt must be absent without a session")
 
 -- A session supplies the two facts MD cannot read for itself.
 X4GunneryControlAPI.getSession = function()
-    return { preferAllTurrets = true, aimTargetID = 4242 }
+    return { aimTargetID = 4242 }
 end
 X4GunneryControlAPI.getTestSofttarget = function()
     return { id = "1637331", connection = "", name = "", macro = "" }
@@ -94,7 +93,6 @@ local observeClock = 0
 getElapsedTime = function() return observeClock end
 fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
 state = lastEvent("observe_state")
-assert(state.params.prefer == true, "prefer was not forwarded from the session")
 assert(state.params.aimtgt == 4242, "aimtgt was not forwarded from the session")
 assert(state.params.softtgt == 1637331, "softtgt was not forwarded")
 assert(countEvents("observe_mark") == 1,
@@ -115,7 +113,7 @@ assert(countEvents("observe_mark") == 2,
 -- A long pause must not produce the same premature duplicate snapshot that
 -- invalidated the first live arc capture.
 X4GunneryControlAPI.getSession = function()
-    return { preferAllTurrets = true, aimTargetID = 4243 }
+    return { aimTargetID = 4243 }
 end
 local paused = false
 X4GunneryControlAPI.isGamePaused = function() return paused end

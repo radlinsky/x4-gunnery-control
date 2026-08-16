@@ -33,8 +33,8 @@ local observing = false
 local lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled
 local suppressedObservedAimTarget
 
--- The engine SOFT target and the session's Prefer My Target flag are the whole
--- reason any Lua runs here: MD has player.target but no soft-target equivalent
+-- The engine SOFT target and the session's aimTargetID are the whole reason
+-- any Lua runs here: MD has player.target but no soft-target equivalent
 -- (scriptproperties.xml has no player.softtarget at all), and the mod session is
 -- Lua-side state. Both come from the main mod's already-public test API
 -- (ui/gunnery_control.lua:1121 getSession, :1169 getTestSofttarget), so the
@@ -61,7 +61,6 @@ local function pushObserveState()
         suppressedObservedAimTarget = nil
     end
     if session then
-        payload.prefer = session.preferAllTurrets == true
         if aimTarget and aimTarget ~= suppressedObservedAimTarget then
             payload.aimtgt = ConvertStringToLuaID(aimTarget)
         end

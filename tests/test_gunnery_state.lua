@@ -107,9 +107,6 @@ eq(s2.surfaceMacroFilter, "any", "newSession: surface macro filter defaults to A
 eq(s2.surfaceBrowser.pageSize, 20, "newSession: surface browser page size is bounded to 20")
 eq(s2.surfaceBrowser.autoRefresh, false, "newSession: surface auto-refresh defaults off")
 assert(type(s2.surfaceBrowser.pageResults) == "table", "newSession: page results are session-local")
--- The override reaches every turret on the ship, not just the checked groups,
--- so it is never on by default.
-eq(s2.preferAllTurrets, false, "newSession: preferAllTurrets defaults off")
 assert(s2.committedBaseline ~= nil, "newSession: committedBaseline exists")
 assert(type(s2.committedBaseline) == "table", "newSession: committedBaseline is table")
 assert(s2.staged ~= nil, "newSession: staged exists")
@@ -561,7 +558,7 @@ do
           group = nasty, mode = "attackenemies", armed = true },
     }
     session.phase, session.controlMode = "engaged", "direct"
-    session.aimTargetID, session.preferAllTurrets = "999", true
+    session.aimTargetID = "999"
 
     local reloaded = State.newSession("443760", "gunnercontrol")
     local ok = State.restoreState(reloaded, State.decode(State.encode(State.saveState(session))),
@@ -570,7 +567,6 @@ do
     eq(reloaded.phase, "engaged", "phase must be restored")
     eq(reloaded.controlMode, "direct", "controlMode must be restored")
     eq(reloaded.aimTargetID, "999", "the target must be restored, since the engine drops it")
-    eq(reloaded.preferAllTurrets, true, "preferAllTurrets must be restored")
     eq(reloaded.checkedGroupKeys["group:NEW:../:" .. nasty], true,
         "a checked group must be re-keyed onto the live contextID")
     eq(#reloaded.committedBaseline, 1, "the committedBaseline must be restored")
@@ -746,7 +742,7 @@ do
         local record = {
             t = "session", phase = "console", controlMode = "",
             povAnchor = "turret", povMode = "manual",
-            autoNextTarget = "1", preferAllTurrets = "0",
+            autoNextTarget = "1",
             shipID = "old", shipName = "", aimTargetID = "", cameraMemberID = "",
             camPath = "", camGroup = "", camIndex = "",
         }
@@ -820,7 +816,7 @@ do
     assertRefused({ { t = "session" } }, "matrix: truncated session is refused")
     for _, bad in ipairs({
         { phase = "broken" }, { controlMode = "auto" }, { povAnchor = "bridge" },
-        { povMode = "orbit" }, { autoNextTarget = "true" }, { preferAllTurrets = "2" },
+        { povMode = "orbit" }, { autoNextTarget = "true" },
         { camPath = "p", camGroup = "g", camIndex = "1.5" },
         { camPath = "p", camGroup = "", camIndex = "1" },
     }) do
@@ -1152,7 +1148,7 @@ do
     local legacyRecords = {
         { t = "session", phase = "engaged", controlMode = "direct",
           povAnchor = "turret", povMode = "manual",
-          autoNextTarget = "1", preferAllTurrets = "0",
+          autoNextTarget = "1",
           shipID = "222", shipName = "Nemesis", aimTargetID = "", cameraMemberID = "" },
         { t = "snapshot", kind = "group", shipID = "222", contextID = "CTX",
           path = "p", group = "g", mode = "attack", armed = "1" },
@@ -1169,7 +1165,7 @@ do
     local lfSingleRecords = {
         { t = "session", phase = "engaged", controlMode = "direct",
           povAnchor = "turret", povMode = "manual",
-          autoNextTarget = "1", preferAllTurrets = "0",
+          autoNextTarget = "1",
           shipID = "333", shipName = "Minotaur", aimTargetID = "", cameraMemberID = "" },
         { t = "snapshot", kind = "single", shipID = "333", componentID = "77",
           mode = "defend", armed = "0" },
@@ -1288,7 +1284,7 @@ do
     local legacyRec = {
         { t = "session", phase = "engaged", controlMode = "direct",
           povAnchor = "turret", povMode = "manual",
-          autoNextTarget = "1", preferAllTurrets = "0",
+          autoNextTarget = "1",
           shipID = "100", shipName = "Colossus", aimTargetID = "", cameraMemberID = "",
           directedMode = "autoassist" },
     }

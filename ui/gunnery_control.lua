@@ -404,49 +404,7 @@ local function isDirectedGroup(group)
     return session.checkedGroupKeys and session.checkedGroupKeys[group.key] == true
 end
 
--- Ship-wide "prefer my target" override. Tells X4 to treat the engaged target
--- as every turret's priority, and hands over a hostile list to fall back on.
---
--- What the fallback actually covers, live-tested 2026-08-09 and 2026-08-10 and
--- recorded in md-ai.md. The engine asks whether a turret can AIM at the
--- preferred target, not whether it can hit it:
---   OUT OF RANGE          rolls to another hostile.
---   CANNOT BEAR           rolls to another hostile.
---   LINE OF FIRE BLOCKED  does not. The turret tracks the target and holds fire
---                 indefinitely, and no mod can observe the condition to work
---                 around it. This is the residual idle-turret case.
--- An earlier version of this comment claimed the turret always engages
--- something else. That was written from a 2026-08-07 trial whose
--- set_turret_targets call threw on a null target list and applied nothing, so
--- it never observed this feature at all; the record is retracted in md-ai.md.
---
--- A turret's mode decides whether it RECEIVES the instruction, not what it
--- shoots once it has it, which is why the MD sweep excludes missiledefence and
--- defend: feeding them a hostile ship list made "shoot only missiles" turrets
--- fire on hulls.
---
--- Two details are load-bearing:
---
--- 1. Every group the console took over is put back into its own mode FIRST.
---    X4 ignores supplied targets for autoassist turrets -- the shipped comment
---    at aiscripts/fight.attack.object.capital.xml:1756 says target acquisition
---    for that mode is handled in code. An override applied on top of the
---    console's own autoassist silently does nothing and the turret keeps
---    idling, which looks identical to success from the cockpit.
--- 2. The event is raised a tick later, because MD reads the ship's turret
---    modes back when it runs. In the 2026-08-07 trial three of five presses
---    still saw autoassist in that read, so the mode writes above had not landed
---    yet. That timing observation stands: it is about our own mode writes, not
---    about the throwing call.
---
--- A group the player themselves left in autoassist stays there: that already
--- means "shoot my target", so the override has nothing to add, and forcing it
--- out would be the console rewriting a setting nobody asked it to touch.
--- Defined after refresh(), which it calls; declared here because restoreDirect
--- and engageTarget both sit above that definition.
-local applyPreferAllTurrets
--- Same reason: restoreDirect's deferred repaint calls refresh(), which is
--- defined below it.
+-- Forward-declared: restoreDirect's deferred repaint calls refresh(), which is defined below it.
 local refresh
 
 -- Give the directed groups a fallback target list for this target. The MD
@@ -479,50 +437,8 @@ local function emitDirectFallback(shipID, targetID)
     return true
 end
 
--- Puts the checked groups back under Direct-control after a release. The clear
--- is ship-wide -- there is no per-group form of set_turret_targets -- so without
--- this the groups the player is actually directing fall back to their own mode
--- and stop shooting the engaged target, which is not what "release the others"
--- means. Deferred a tick for the same reason the override is: MD reads the
--- ship's turret modes back when it runs, and the release has to see each turret
--- in its own mode rather than in the previous directed mode.
-local function resumeDirectControl()
-    local expectedSession, expectedEpoch = session, sessionEpoch
-    Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        if not currentSession(expectedSession, expectedEpoch) then return end
-        if session.phase ~= "engaged" or session.controlMode ~= "direct" then return end
-        -- Re-arm the checked groups under direct control. committedBaseline covers
-        -- all groups at stand-up, but here we only touch the directed (checked)
-        -- ones: the others are not under our override and must not be touched.
-        -- Direct-control always uses attackenemies (live-verified 2026-08-10).
-        local mode = State.TICK_MODE
-        for _, group in ipairs(State.checkedGroups(session)) do
-            if State.canMutate(group) then
-                setMode(group, mode); setArmed(group, true)
-            end
-        end
-        menu.display()
-    end, false, getElapsedTime() + 0.02)
-end
-
--- Hands the rest of the ship back. Safe to call when the override was never
--- applied. resume=true keeps the checked groups directed; teardown paths pass
--- nothing, because restoreDirect writes their snapshots back straight after.
-local function clearPreferAllTurrets(reason, resume)
-    if not session or not session.preferAllTurrets then return false end
-    session.preferAllTurrets = false
-    AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets_clear", {
-        ["ship"] = ConvertStringToLuaID(tostring(session.shipID)),
-    })
-    if resume then resumeDirectControl() end
-    return true
-end
-
 local function restoreDirect(reason)
     if not session then return end
-    -- Before the early return below: the override can outlive the baseline,
-    -- and leaving the chair must never leave the ship altered.
-    clearPreferAllTurrets(reason)
     -- Also before the early return, and for the same reason a level up: the
     -- parked session outlives the baseline. An Auto-engage session still has a
     -- baseline, but its temporary apply writes staged (not direct mode changes),
@@ -920,11 +836,6 @@ local function engageTarget(targetID)
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
-    -- The override names one specific target, so it dies with that target.
-    -- Every direct-mode target change funnels through here (auto-next, Next /
-    -- Previous Target, and picking a surface element), so re-issuing here is
-    -- what stops the turrets falling silent the moment a target is destroyed.
-    if session.preferAllTurrets then applyPreferAllTurrets() end
     -- Hand the directed groups a fallback list for this target. The MD
     -- DirectFallback cue uses weaponmode.attackenemies as its selector and
     -- reaches the directed groups. A turret with no firing solution on the
@@ -954,39 +865,6 @@ end
 refresh = function()
     if not session then return end
     State.retainSelection(session, readGroups(session.shipID))
-end
-
--- Forward-declared above restoreDirect; see the contract comment there.
-applyPreferAllTurrets = function()
-    if not session or session.phase ~= "engaged" then return false end
-    if isNullID(session.aimTargetID) then return false end
-    for _, group in ipairs(State.checkedGroups(session)) do
-        if State.canMutate(group) then
-            local s = session.staged and session.staged[group.key]
-            if s then setMode(group, s.mode) end
-        end
-    end
-    refresh()
-    session.preferAllTurrets = true
-    local expectedSession, expectedEpoch = session, sessionEpoch
-    local shipID, targetID = session.shipID, session.aimTargetID
-    Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        if not currentSession(expectedSession, expectedEpoch) then return end
-        -- Anything that happened inside the deferral window wins. A release
-        -- clears the flag synchronously, so emitting anyway would leave MD
-        -- applied with the flag already false -- no later teardown route could
-        -- clear it, and the player walks away with a silently altered ship.
-        -- A target change re-issues, so a stale target must not overwrite it.
-        if not session.preferAllTurrets or not sameID(session.aimTargetID, targetID) then
-            return
-        end
-        AddUITriggeredEvent("X4GunneryControl", "prefer_all_turrets", {
-            ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
-            ["target"] = ConvertStringToLuaID(tostring(targetID)),
-        })
-        persistSession()
-    end, false, getElapsedTime() + 0.01)
-    return true
 end
 
 -- "Update turret behavior" commit. Writes the staged config to every mutable
@@ -1626,9 +1504,6 @@ local function sendCutsceneAimStart(pov)
     cutsceneNoTurretFailureLogged = false
 end
 
-function TestAPI.applyPreferAllTurrets() return applyPreferAllTurrets() end
-function TestAPI.clearPreferAllTurrets(reason, resume) return clearPreferAllTurrets(reason, resume) end
-
 function TestAPI.sendCutsceneAimStart(pov) sendCutsceneAimStart(pov) end
 function TestAPI.sendCutsceneAimStop() sendCutsceneAimStop() end
 
@@ -2069,22 +1944,6 @@ function menu.display()
                 menu.display()
             end
             autoNextRow[2]:createText(text(78))
-            -- Ship-wide override. Lives here rather than on the console because
-            -- it needs an engaged target to prefer, and Direct-control's target
-            -- browser is the only way to choose one. Release stays greyed until
-            -- there is something to release.
-            local overrideRow = controls:addRow("prefer_all_turrets", {})
-            -- All Turrets: Prefer My Target (id 81)
-            overrideRow[1]:createButton({ active = not session.preferAllTurrets }):setText(text(81))
-            overrideRow[1].handlers.onClick = function()
-                applyPreferAllTurrets(); menu.display()
-            end
-            -- Release Other Turrets (id 82)
-            overrideRow[2]:createButton({ active = session.preferAllTurrets == true }):setText(text(82))
-            overrideRow[2].handlers.onClick = function()
-                if clearPreferAllTurrets("release button", true) then persistSession() end
-                menu.display()
-            end
         end
         -- "Update turret behavior" (id 83), same button as the console action
         -- row. A commit point is valid in any phase: pressing it here pushes the
