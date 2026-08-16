@@ -117,32 +117,32 @@
       </cues>
     </cue>
 
-    <!-- Exact selected-turret solution service. Lua owns checkbox membership
+    <!-- Exact selected-turret engageability service. Lua owns checkbox membership
          and streams flat component ids; MD owns the per-turret range and
          line-of-fire checks. Each batch repeats its selected members once and
          accepts at most the declared 20 targets. Responses are packed because
          raise_lua_event can carry only one scalar. -->
-    <cue name="SolutionService">
+    <cue name="EngageabilityService">
       <cues>
-        <cue name="SolutionBegin" instantiate="true">
+        <cue name="EngageabilityBegin" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_begin'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_begin'"/>
           </conditions>
           <actions>
-            <set_value name="SolutionService.$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="SolutionService.$expectedmembers" exact="@event.param3.$members"/>
-            <set_value name="SolutionService.$expectedtargets" exact="[@event.param3.$targets, 20].min"/>
-            <set_value name="SolutionService.$weapons" exact="[]"/>
-            <set_value name="SolutionService.$arcknown" exact="[]"/>
-            <set_value name="SolutionService.$arcmins" exact="[]"/>
-            <set_value name="SolutionService.$arcmaxs" exact="[]"/>
-            <set_value name="SolutionService.$targets" exact="[]"/>
-            <set_value name="SolutionService.$targetids" exact="[]"/>
+            <set_value name="EngageabilityService.$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="EngageabilityService.$expectedmembers" exact="@event.param3.$members"/>
+            <set_value name="EngageabilityService.$expectedtargets" exact="[@event.param3.$targets, 20].min"/>
+            <set_value name="EngageabilityService.$weapons" exact="[]"/>
+            <set_value name="EngageabilityService.$arcknown" exact="[]"/>
+            <set_value name="EngageabilityService.$arcmins" exact="[]"/>
+            <set_value name="EngageabilityService.$arcmaxs" exact="[]"/>
+            <set_value name="EngageabilityService.$targets" exact="[]"/>
+            <set_value name="EngageabilityService.$targetids" exact="[]"/>
           </actions>
         </cue>
-        <cue name="SolutionMember" instantiate="true">
+        <cue name="EngageabilityMember" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_member'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_member'"/>
           </conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
@@ -153,20 +153,20 @@
             <do_if value="typeof $weapon != datatype.component and $weapon">
               <set_value name="$weapon" exact="component.{$weapon}"/>
             </do_if>
-            <do_if value="$nonce == SolutionService.$nonce
-                          and SolutionService.$weapons.count lt SolutionService.$expectedmembers
+            <do_if value="$nonce == EngageabilityService.$nonce
+                          and EngageabilityService.$weapons.count lt EngageabilityService.$expectedmembers
                           and typeof $weapon == datatype.component
-                          and not SolutionService.$weapons.indexof.{$weapon}">
-              <append_to_list name="SolutionService.$weapons" exact="$weapon"/>
-              <append_to_list name="SolutionService.$arcknown" exact="$arcknow"/>
-              <append_to_list name="SolutionService.$arcmins" exact="$arcmin"/>
-              <append_to_list name="SolutionService.$arcmaxs" exact="$arcmax"/>
+                          and not EngageabilityService.$weapons.indexof.{$weapon}">
+              <append_to_list name="EngageabilityService.$weapons" exact="$weapon"/>
+              <append_to_list name="EngageabilityService.$arcknown" exact="$arcknow"/>
+              <append_to_list name="EngageabilityService.$arcmins" exact="$arcmin"/>
+              <append_to_list name="EngageabilityService.$arcmaxs" exact="$arcmax"/>
             </do_if>
           </actions>
         </cue>
-        <cue name="SolutionTarget" instantiate="true">
+        <cue name="EngageabilityTarget" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_target'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_target'"/>
           </conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
@@ -175,50 +175,50 @@
             <do_if value="typeof $target != datatype.component and $target">
               <set_value name="$target" exact="component.{$target}"/>
             </do_if>
-            <do_if value="$nonce == SolutionService.$nonce
-                          and SolutionService.$targets.count lt SolutionService.$expectedtargets
+            <do_if value="$nonce == EngageabilityService.$nonce
+                          and EngageabilityService.$targets.count lt EngageabilityService.$expectedtargets
                           and typeof $target == datatype.component
-                          and not SolutionService.$targets.indexof.{$target}">
-              <append_to_list name="SolutionService.$targets" exact="$target"/>
-              <append_to_list name="SolutionService.$targetids" exact="$targetid"/>
+                          and not EngageabilityService.$targets.indexof.{$target}">
+              <append_to_list name="EngageabilityService.$targets" exact="$target"/>
+              <append_to_list name="EngageabilityService.$targetids" exact="$targetid"/>
             </do_if>
           </actions>
         </cue>
-        <cue name="SolutionCommit" instantiate="true">
+        <cue name="EngageabilityCommit" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'solution_batch_commit'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_commit'"/>
           </conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <do_if value="$nonce == SolutionService.$nonce">
+            <do_if value="$nonce == EngageabilityService.$nonce">
               <set_value name="$completed" exact="0"/>
-              <do_for_each name="$target" in="SolutionService.$targets" counter="$targetindex">
-                <set_value name="$on" exact="0"/>
+              <do_for_each name="$target" in="EngageabilityService.$targets" counter="$targetindex">
+                <set_value name="$engageable" exact="0"/>
                 <set_value name="$known" exact="0"/>
-                <do_for_each name="$weapon" in="SolutionService.$weapons" counter="$weaponindex">
+                <do_for_each name="$weapon" in="EngageabilityService.$weapons" counter="$weaponindex">
                   <!-- rotation_x restrictions in shipped turret components are
                        pitch limits in this fixed mount-local reference frame.
                        Unknown/modded macros remain UNKNOWN rather than being
                        falsely promoted by range + line of fire alone. -->
-                  <do_if value="SolutionService.$arcknown.{$weaponindex} == 1">
+                  <do_if value="EngageabilityService.$arcknown.{$weaponindex} == 1">
                     <set_value name="$known" operation="add"/>
                     <set_value name="$aimpitch" exact="$target.relativeposition.{$weapon}.rotation.pitch"/>
-                    <do_if value="$aimpitch ge (SolutionService.$arcmins.{$weaponindex} * 1deg)
-                                  and $aimpitch le (SolutionService.$arcmaxs.{$weaponindex} * 1deg)
+                    <do_if value="$aimpitch ge (EngageabilityService.$arcmins.{$weaponindex} * 1deg)
+                                  and $aimpitch le (EngageabilityService.$arcmaxs.{$weaponindex} * 1deg)
                                   and ($weapon.distanceto.{$target} + ($target.size / 2)) lt $weapon.maxfirerange">
                       <!-- Start at the live muzzle and include the firing ship
                            so its own hull can mask an otherwise clear ray. -->
                       <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="false" useaimtarget="true"/>
                       <do_if value="$lineoffireclear">
-                        <set_value name="$on" operation="add"/>
+                        <set_value name="$engageable" operation="add"/>
                       </do_if>
                     </do_if>
                   </do_if>
                 </do_for_each>
-                <raise_lua_event name="'X4GunneryControl.SolutionResult'" param="'x4gcs3:' + $nonce + ':' + SolutionService.$targetids.{$targetindex} + ':' + $on + ':' + $known + ':' + SolutionService.$expectedmembers"/>
+                <raise_lua_event name="'X4GunneryControl.EngageabilityResult'" param="'x4gce3:' + $nonce + ':' + EngageabilityService.$targetids.{$targetindex} + ':' + $engageable + ':' + $known + ':' + EngageabilityService.$expectedmembers"/>
                 <set_value name="$completed" operation="add"/>
               </do_for_each>
-              <raise_lua_event name="'X4GunneryControl.SolutionBatchComplete'" param="'x4gcs2c:' + $nonce + ':' + SolutionService.$targets.count + ':' + $completed"/>
+              <raise_lua_event name="'X4GunneryControl.EngageabilityBatchComplete'" param="'x4gce2c:' + $nonce + ':' + EngageabilityService.$targets.count + ':' + $completed"/>
             </do_if>
           </actions>
         </cue>
@@ -533,9 +533,9 @@
              reason the ship-wide override button was built.
 
              The engine's fallback asks whether a turret can AIM at the preferred
-             target, not whether it can hit it. It therefore recovers OUT OF ARC
-             and OUT OF RANGE, both confirmed live, and does NOT recover MASKED:
-             a turret trained on the target with own hull in the line of fire
+             target, not whether it can hit it. It therefore recovers CANNOT BEAR
+             and OUT OF RANGE, both confirmed live, and does NOT recover a blocked
+             line of fire: a turret trained on the target with own hull in the way
              holds fire indefinitely, and no mod can observe that condition well
              enough to work around it. Accepted, not a bug in this cue.
 
@@ -546,8 +546,9 @@
              the list, and vanilla uses exactly this shape at capital.xml:2172.
              Live-tested 2026-08-09 and 2026-08-10 on a player-piloted capital:
              an attackenemies group obeyed preferredtarget, and rolled to another
-             hostile when the engaged one was OUT OF RANGE or OUT OF ARC. It does
-             not roll off a MASKED target; that condition is unrecoverable.
+             hostile when the engaged one was OUT OF RANGE or CANNOT BEAR. It does
+             not roll off a target with a blocked line of fire; that condition is
+             unrecoverable.
 
              weaponmode stays a real selector because the console binds the
              checkbox to the mode: a group is in attackenemies exactly when it

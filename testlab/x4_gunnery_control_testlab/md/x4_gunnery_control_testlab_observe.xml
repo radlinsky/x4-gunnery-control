@@ -46,7 +46,7 @@
   event_weapon_fired (common.xsd:16836) would also catch shots that MISS, and
   diffing it against the hits would give a per-turret hit rate.  It is left out:
   it fires on every trigger pull, so fourteen turrets in a sustained engagement
-  would swamp the log, and the only row it would help with (NO SOLUTION) is not
+  would swamp the log, and the only row it would help with (NO FIRING SOLUTION) is not
   one of the open ones.  Add it if that row ever matters.
 
   THE CENSUS, AND WHY IT SURVIVED THE REWRITE
@@ -91,8 +91,8 @@
   VOCABULARY
   The snapshot logs los_ex, muzzle LOS, local geometry, inrange and ready as raw
   values and stops there.
-  Mapping them to ON SOLUTION / OUT OF RANGE / OUT OF ARC / MASKED is the
-  analyst's job: the engine exposes no arc test at all, so OUT OF ARC can only
+  Mapping them to ENGAGEABLE / OUT OF RANGE / CANNOT BEAR / LINE OF FIRE BLOCKED is the
+  analyst's job: the engine exposes no arc test at all, so CANNOT BEAR can only
   ever be read off as "aimable and in range yet never firing", which is an
   interpretation and must not be baked into a log line.
 
@@ -153,16 +153,16 @@
             <set_value name="$Label" exact="'mark_' + ObserveRoot.$MarkCount"/>
             <debug_text text="'[X4GC TEST MARK] label=' + $Label + ' enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
 
-            <!-- The one-shot solution snapshot.  This is the sweep that used to
+            <!-- The one-shot engageability snapshot.  This is the sweep that used to
                  run once a second, kept only as a burst fired by hand at the
                  instant the owner is looking at something wrong.
 
                  It exists because HIT lines answer "what did the turret shoot"
-                 but never "why is this one not shooting".  MASKED and OUT OF
-                 ARC are indistinguishable from the cockpit - both look like a
+                 but never "why is this one not shooting".  LINE OF FIRE BLOCKED and
+                 CANNOT BEAR are indistinguishable from the cockpit - both look like a
                  turret pointed at the target holding its fire - yet the doc
-                 says they behave oppositely, OUT OF ARC switching away and
-                 MASKED staying put.  los_ex plus inrange is what separates
+                 says they behave oppositely, CANNOT BEAR switching away and
+                 LINE OF FIRE BLOCKED staying put.  los_ex plus inrange is what separates
                  them.
 
                  Root-origin excludeself="false" was measured returning blocked
@@ -200,7 +200,7 @@
                   <!-- The engine's own definition of in-range, verbatim from
                        shipped combat AI: distance plus half the target's size
                        under max fire range.  There is no arc term anywhere in
-                       vanilla's firing-solution test, which is why OUT OF ARC
+                       vanilla's firing-solution test, which is why CANNOT BEAR
                        has to be read off as "aimable but never firing" rather
                        than measured directly. -->
                   <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>

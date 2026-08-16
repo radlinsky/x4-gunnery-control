@@ -33,15 +33,15 @@ The situations that matter for this mod. Each is checked against **your target**
 
 | Situation | What it means |
 |---|---|
-| **ON SOLUTION** | The turret can aim at the target, the target is in range, and nothing blocks the shot. A clean shot. |
+| **ENGAGEABLE** | The turret can aim at the target, the target is in range, and nothing blocks the shot. A clean shot. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
-| **OUT OF ARC** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
-| **MASKED** | The turret is aimed right at the target, but part of your own ship is between the turret and the target, blocking the shot. |
-| **NO SOLUTION** | The turret can aim and the target is in range, but the target is moving in a way that leaves no shot that would connect. |
+| **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
+| **LINE OF FIRE BLOCKED** | The turret is aimed right at the target, but part of your own ship is between the turret and the target, blocking the shot. |
+| **NO FIRING SOLUTION** | The turret can aim and the target is in range, but the target is moving in a way that leaves no shot that would connect. |
 | **WEAPON NOT READY** | Aiming is fine, but the turret itself cannot fire right now: reloading, overheated, out of ammunition, or destroyed. |
-| **FIRE INHIBITED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
+| **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
-*Standard fire-control vocabulary also names NO CONTACT (the target is not detected at all) and NO FIRE-CONTROL TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
+*Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
 
 ---
 
@@ -78,15 +78,15 @@ Direct-control aims your ticked turrets at the target you selected, and also sen
 
 | Situation (vs your target) | Ticked group — pilot attacking OR idle, same result | Unticked, Prefer My Target ON | Unticked, Prefer OFF, pilot attacking | Unticked, Prefer OFF, pilot idle |
 |---|---|---|---|---|
-| **ON SOLUTION** | Shoots your target. **LIVE** | Shoots your target, if its mode acts on it (Table 2) | Ignores your target. Shoots enemies per its own mode | Ignores your target. Does whatever its own mode does |
+| **ENGAGEABLE** | Shoots your target. **LIVE** | Shoots your target, if its mode acts on it (Table 2) | Ignores your target. Shoots enemies per its own mode | Ignores your target. Does whatever its own mode does |
 | **OUT OF RANGE** | Switches to another target it can reach. **LIVE** | Switches to another target, mode permitting. **INFERRED** | Own mode | Own mode |
-| **OUT OF ARC** | Switches to another target it can aim at. **LIVE** | Switches to another target, mode permitting. **INFERRED** | Own mode | Own mode |
-| **MASKED** | Stays aimed at your target and does **not** fire. Does **not** switch to another target. **LIVE** | Same: stays aimed, does not fire. **INFERRED** | Own mode | Own mode |
-| **NO SOLUTION** | Fires at your target and misses; keeps trying. Does not switch, because X4 does not detect this situation. **INFERRED** | Same. **INFERRED** | Own mode | Own mode |
+| **CANNOT BEAR** | Switches to another target it can aim at. **LIVE** | Switches to another target, mode permitting. **INFERRED** | Own mode | Own mode |
+| **LINE OF FIRE BLOCKED** | Stays aimed at your target and does **not** fire. Does **not** switch to another target. **LIVE** | Same: stays aimed, does not fire. **INFERRED** | Own mode | Own mode |
+| **NO FIRING SOLUTION** | Fires at your target and misses; keeps trying. Does not switch, because X4 does not detect this situation. **INFERRED** | Same. **INFERRED** | Own mode | Own mode |
 | **WEAPON NOT READY** | Holds until the turret is ready. A destroyed turret is skipped, and re-included if it survives. **X4 CODE** | Same | Own mode | Own mode |
-| **FIRE INHIBITED** | Ticked groups are on Attack all enemies, so they never hold fire on their own. If your target can no longer be attacked, see [Global rules](#global-rules). **UNTESTED** | Depends on the group's own mode (Table 2) | Own mode | Own mode |
+| **FIRE NOT AUTHORIZED** | Ticked groups are on Attack all enemies, so they never hold fire on their own. If your target can no longer be attacked, see [Global rules](#global-rules). **UNTESTED** | Depends on the group's own mode (Table 2) | Own mode | Own mode |
 
-**Why MASKED behaves differently from OUT OF ARC.** X4 decides whether to switch to another target by asking only whether the turret can *aim* at your target, not whether it can *hit* it. A masked turret is aimed straight at your target, so the game counts it as fine and never switches. An OUT OF ARC turret cannot aim at your target at all, so the game switches it to another target. Nothing the mod sends changes this, because the decision to switch is the game engine's, not the mod's.
+**Why LINE OF FIRE BLOCKED behaves differently from CANNOT BEAR.** X4 decides whether to switch to another target by asking only whether the turret can *aim* at your target, not whether it can *hit* it. A turret with a blocked line of fire is aimed straight at your target, so the game counts it as fine and never switches. A turret that cannot bear cannot aim at your target at all, so the game switches it to another target. Nothing the mod sends changes this, because the decision to switch is the game engine's, not the mod's.
 
 **About "every turret."** Prefer My Target sends your target to every turret group on the ship at once. Sending it does not force a group to shoot. Whether a group shoots your target depends on the mode it is in, which is what Table 2 lists.
 
@@ -128,11 +128,11 @@ What the game itself checks, per situation, for a ticked turret:
 
 | Situation | What the game checks | Result | Confidence |
 |---|---|---|---|
-| **ON SOLUTION** | Can aim, in range, shot clear | Shoots your target | LIVE |
+| **ENGAGEABLE** | Can aim, in range, shot clear | Shoots your target | LIVE |
 | **OUT OF RANGE** | Distance vs the turret's reach | Switches to another target in range | LIVE |
-| **OUT OF ARC** | Can the turret aim that far | Switches to another target it can aim at | LIVE |
-| **MASKED** | Is the shot path clear of your own ship | Stays aimed, holds fire, does not switch | LIVE |
-| **NO SOLUTION** | (the game runs no such check) | Fires and misses | INFERRED |
+| **CANNOT BEAR** | Can the turret aim that far | Switches to another target it can aim at | LIVE |
+| **LINE OF FIRE BLOCKED** | Is the shot path clear of your own ship | Stays aimed, holds fire, does not switch | LIVE |
+| **NO FIRING SOLUTION** | (the game runs no such check) | Fires and misses | INFERRED |
 | **WEAPON NOT READY** | Turret ready to fire | Waits until ready | X4 CODE |
 
 ---

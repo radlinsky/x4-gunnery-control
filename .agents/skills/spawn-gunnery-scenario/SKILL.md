@@ -246,13 +246,13 @@ For hostile safety fixtures, also require the correlated READY fields for
 
 ## Geometry guardrails
 
-- For a guaranteed `MASKED` control, place a named stationary capital ship on
+- For a guaranteed `LINE OF FIRE BLOCKED` control, place a named stationary capital ship on
   the segment between turret ship and candidate. Make it player-owned when it
   must be excluded from the hostile browser. This establishes an intervening
   obstruction, not own-hull masking.
 - Keep an `OUT OF RANGE` control independently clear of blockers. Confirm its
   per-turret line of fire separately when the test needs that distinction.
-- Do not infer `OUT OF ARC`, `MASKED`, or `NO SOLUTION` from a no-fire interval.
+- Do not infer `CANNOT BEAR`, `LINE OF FIRE BLOCKED`, or `NO FIRING SOLUTION` from a no-fire interval.
   Follow `turret-fire-control-language` and instrument the actual predicate.
 
 ## Transport and evidence basis

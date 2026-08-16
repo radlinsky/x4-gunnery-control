@@ -22,7 +22,7 @@ A failure at one stage must not be described using terminology belonging to anot
 
 ## Canonical states
 
-### ON SOLUTION
+### ENGAGEABLE
 Use when all conditions required for an otherwise permitted shot are satisfied:
 
 - adequate fire-control track;
@@ -34,7 +34,7 @@ Use when all conditions required for an otherwise permitted shot are satisfied:
 Meaning: **the turret has a valid shot.**
 
 Preferred wording:
-- `ON SOLUTION`
+- `ENGAGEABLE`
 - `Fire-control solution valid`
 - `Valid engagement solution`
 
@@ -42,13 +42,13 @@ Do not use `TARGET ACQUIRED` as a synonym. Target acquisition/track does not imp
 
 ---
 
-### MASKED
+### LINE OF FIRE BLOCKED
 Use when the turret otherwise has a valid engagement geometry/solution but the projectile path is obstructed by the firing platform, terrain, another object, or other intervening geometry.
 
 Meaning: **the turret could point and solve the shot, but something blocks the line of fire.**
 
 Preferred wording:
-- `MASKED`
+- `LINE OF FIRE BLOCKED`
 - `Line of fire masked`
 - `Shot masked`
 
@@ -57,33 +57,33 @@ Examples:
 - a station module blocks the shot;
 - terrain or another vessel crosses the line of fire.
 
-Do **not** call this `NO SOLUTION`. An obstruction does not by itself invalidate the computed fire-control solution.
+Do **not** call this `NO FIRING SOLUTION`. An obstruction does not by itself invalidate the computed fire-control solution.
 
 ---
 
-### OUT OF ARC
+### CANNOT BEAR
 Use when the required aim direction lies outside the turret's mechanical traverse or elevation limits.
 
 Meaning: **the gun physically cannot point where it needs to point.**
 
 Preferred wording:
-- `OUT OF ARC`
+- `CANNOT BEAR`
 - `Outside firing arc`
 - `Train/elevation limit reached` when specifically describing the mechanical limit
 
-Important: evaluate the **required aim/intercept direction**, not merely the target's instantaneous position. A target may currently appear inside the nominal turret arc while the required lead point lies outside it. In that case, classify the shot as `OUT OF ARC`.
+Important: evaluate the **required aim/intercept direction**, not merely the target's instantaneous position. A target may currently appear inside the nominal turret arc while the required lead point lies outside it. In that case, classify the shot as `CANNOT BEAR`.
 
-Do not call this `MASKED`; masking means the required direction is reachable but the shot path is obstructed.
+Do not call this `LINE OF FIRE BLOCKED`; a blocked line of fire means the required direction is reachable but the shot path is obstructed.
 
 ---
 
-### NO SOLUTION
+### NO FIRING SOLUTION
 Use when adequate target information exists and the turret is not rejected merely by an obstruction, but fire control cannot compute a valid ballistic/intercept solution.
 
 Meaning: **there is no valid aim direction/timing that satisfies the engagement model.**
 
 Preferred wording:
-- `NO SOLUTION`
+- `NO FIRING SOLUTION`
 - `No fire-control solution`
 - `No intercept solution` when specifically discussing moving-target interception
 
@@ -92,7 +92,7 @@ Possible causes include:
 - projectile velocity/ballistics cannot produce a valid intercept;
 - required solution fails numerical or fire-control constraints.
 
-Do not use `NO SOLUTION` merely because the shot is masked, the target is out of arc, the weapon is reloading, or fire is administratively inhibited.
+Do not use `NO FIRING SOLUTION` merely because the line of fire is blocked, the turret cannot bear, the weapon is reloading, or fire is administratively inhibited.
 
 ---
 
@@ -104,30 +104,30 @@ Meaning: **the weapon cannot reach the required intercept.**
 Preferred wording:
 - `OUT OF RANGE`
 
-Do not describe ordinary range failure as `NO SOLUTION` if the system can identify range as the actual reason engagement is impossible.
+Do not describe ordinary range failure as `NO FIRING SOLUTION` if the system can identify range as the actual reason engagement is impossible.
 
 ---
 
-### NO FIRE-CONTROL TRACK
+### NO WEAPONS-QUALITY TRACK
 Use when the target may be detected but the available tracking information is insufficient to generate a fire-control solution.
 
 Meaning: **contact exists, but targeting data are not adequate for fire control.**
 
 Preferred wording:
-- `NO FIRE-CONTROL TRACK`
+- `NO WEAPONS-QUALITY TRACK`
 - `INSUFFICIENT TRACK`
 
-Distinguish this from `NO CONTACT`, where the target is not detected at all.
+Distinguish this from `TARGET NOT DETECTED`, where the target is not detected at all.
 
 If the game/system does not model detection and fire-control tracking separately, this state may be omitted.
 
 ---
 
-### NO CONTACT
+### TARGET NOT DETECTED
 Use when the target is not currently detected by the relevant sensor/targeting system.
 
 Preferred wording:
-- `NO CONTACT`
+- `TARGET NOT DETECTED`
 - `OUT OF SENSOR RANGE` when range is specifically known to be the reason
 
 Avoid saying `OUT OF RADAR RANGE` unless the system specifically uses radar. Prefer `sensor range` for a generic game/system sensor model.
@@ -148,41 +148,40 @@ Preferred wording:
 - `WEAPON NOT READY` as a category;
 - use the specific state (`RELOADING`, `OVERHEATED`, `NO AMMO`, `DISABLED`) when known.
 
-Do not call these conditions `NO SOLUTION`.
+Do not call these conditions `NO FIRING SOLUTION`.
 
 ---
 
-### FIRE INHIBITED
+### FIRE NOT AUTHORIZED
 Use when a shot is technically possible but firing is deliberately prohibited by logic, safety constraints, rules of engagement, friendly-fire protection, user settings, or another authorization layer.
 
 Preferred wording:
-- `FIRE INHIBITED`
-- `FIRE HOLD` if the surrounding UI intentionally uses terse command-style language
+- `FIRE NOT AUTHORIZED`
 
-Do not call this `MASKED` unless physical obstruction is actually the reason.
+Do not call this `LINE OF FIRE BLOCKED` unless physical obstruction is actually the reason.
 
 ## Recommended decision precedence
 
 When the UI needs to show exactly one reason a turret cannot fire, prefer the most specific actionable failure state using this order unless the project already defines another priority:
 
 ```text
-NO CONTACT
+TARGET NOT DETECTED
     ↓
-NO FIRE-CONTROL TRACK
+NO WEAPONS-QUALITY TRACK
     ↓
 OUT OF RANGE
     ↓
-NO SOLUTION
+NO FIRING SOLUTION
     ↓
-OUT OF ARC
+CANNOT BEAR
     ↓
-MASKED
+LINE OF FIRE BLOCKED
     ↓
 WEAPON NOT READY
     ↓
-FIRE INHIBITED
+FIRE NOT AUTHORIZED
     ↓
-ON SOLUTION
+ENGAGEABLE
 ```
 
 This order is a presentation convention, not a claim that every fire-control system evaluates checks in that exact sequence. If multiple failures exist simultaneously, preserve the individual booleans internally even if the UI displays only one status.
@@ -213,10 +212,10 @@ Keep these distinctions explicit:
 - **Contact / detected**: sensors know the target exists.
 - **Track**: sufficient target state is available for targeting/fire control.
 - **In arc**: turret can physically reach the required bearing/elevation.
-- **On solution**: a valid fire-control/intercept solution exists and the shot is otherwise geometrically valid.
-- **Masked**: line of fire is physically obstructed.
-- **Out of arc**: turret cannot mechanically reach the required aim direction.
-- **No solution**: fire control cannot obtain a valid ballistic/intercept solution.
+- **Engageable**: a valid fire-control/intercept solution exists and the shot is otherwise geometrically valid.
+- **Line of fire blocked**: line of fire is physically obstructed (masked).
+- **Cannot bear**: turret cannot mechanically reach the required aim direction.
+- **No firing solution**: fire control cannot obtain a valid ballistic/intercept solution.
 - **Weapon ready**: the gun itself is capable of firing now.
 - **Fire authorized**: higher-level logic permits the shot.
 
@@ -224,10 +223,10 @@ Keep these distinctions explicit:
 
 When writing UI text, comments, variable names, documentation, or explanations:
 
-1. Prefer `masked` for a blocked line of fire.
-2. Prefer `out of arc` for traverse/elevation limitations.
-3. Reserve `no solution` for inability to calculate/obtain a valid firing or intercept solution.
-4. Use `on solution` when describing a turret that has a valid solution and can engage.
+1. Prefer `line of fire blocked` for a blocked line of fire (the physical condition may still be called *masking*).
+2. Prefer `cannot bear` for traverse/elevation limitations.
+3. Reserve `no firing solution` for inability to calculate/obtain a valid firing or intercept solution.
+4. Use `engageable` when describing a turret that has a valid solution and can engage.
 5. Do not use `target acquired`, `target locked`, `line of sight`, `firing solution`, and `in firing arc` interchangeably.
 6. Distinguish **line of sight** from **line of fire** when relevant. A sensor may see/track a target even when the weapon's projectile path is masked.
 7. Prefer terse uppercase labels for HUD/status displays and natural sentence case in prose.
@@ -238,30 +237,30 @@ When writing UI text, comments, variable names, documentation, or explanations:
 ### Example 1
 Target is detected and tracked; intercept is in range; turret can point at the required lead point; projectile path is clear; solution exists.
 
-**State: `ON SOLUTION`**
+**State: `ENGAGEABLE`**
 
 ### Example 2
 Target is detected and tracked; intercept is in range; turret can reach the required lead point; a valid solution exists; own-ship geometry blocks the muzzle-to-intercept path.
 
-**State: `MASKED`**
+**State: `LINE OF FIRE BLOCKED`**
 
 ### Example 3
 Target is detected and tracked, but the required lead point is beyond the turret's allowed traverse.
 
-**State: `OUT OF ARC`**
+**State: `CANNOT BEAR`**
 
 ### Example 4
 Target is detected and tracked; required direction is mechanically reachable; line of fire is not the limiting factor; no valid projectile intercept can be computed.
 
-**State: `NO SOLUTION`**
+**State: `NO FIRING SOLUTION`**
 
 ### Example 5
 Target's current bearing is inside the nominal firing arc, but leading the moving target requires aiming beyond the traverse stop.
 
-**State: `OUT OF ARC`**
+**State: `CANNOT BEAR`**
 
 ### Example 6
-Target is on solution and unmasked, but the gun is cycling after its previous shot.
+Target is engageable and the line of fire is clear, but the gun is cycling after its previous shot.
 
 **State: `WEAPON NOT READY`** (`RELOADING`/`CYCLING` if that detail is exposed)
 

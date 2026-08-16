@@ -9,13 +9,13 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
 # fallback chain remains soft target, then player.target. Keep these checks
 # adjacent to the two consumers so a future edit cannot silently make HIT and
-# solution attribution disagree.
+# engageability attribution disagree.
 snapshot_target=$(awk '/<cue name="ObserveMark"/{inside=1} /<cue name="ObserveState"/{inside=0} inside && /AimTarget|SoftTarget|player\.target/{print NR ":" $0}' "$md")
 hit_target=$(awk '/<cue name="ObserveHit"/{inside=1} /<cue name="ObserveCensus"/{inside=0} inside && /AimTarget|SoftTarget|player\.target/{print NR ":" $0}' "$md")
 fired_target=$(awk '/<cue name="ObserveFired"/{inside=1} /<cue name="ObserveHit"/{inside=0} inside && /AimTarget|SoftTarget|player\.target/{print NR ":" $0}' "$md")
-printf '%s\n' "$snapshot_target" | grep -q 'AimTarget' || fail "solution snapshot does not prefer AimTarget"
-printf '%s\n' "$snapshot_target" | grep -q 'SoftTarget' || fail "solution snapshot lost soft-target fallback"
-printf '%s\n' "$snapshot_target" | grep -q 'player.target' || fail "solution snapshot lost player.target fallback"
+printf '%s\n' "$snapshot_target" | grep -q 'AimTarget' || fail "engageability snapshot does not prefer AimTarget"
+printf '%s\n' "$snapshot_target" | grep -q 'SoftTarget' || fail "engageability snapshot lost soft-target fallback"
+printf '%s\n' "$snapshot_target" | grep -q 'player.target' || fail "engageability snapshot lost player.target fallback"
 printf '%s\n' "$hit_target" | grep -q 'AimTarget' || fail "HIT attribution does not prefer AimTarget"
 printf '%s\n' "$hit_target" | grep -q 'SoftTarget' || fail "HIT attribution lost soft-target fallback"
 printf '%s\n' "$hit_target" | grep -q 'player.target' || fail "HIT attribution lost player.target fallback"
@@ -29,7 +29,7 @@ hit_aim=$(printf '%s\n' "$hit_target" | grep -F 'AimTarget? and' | cut -d: -f1)
 hit_soft=$(printf '%s\n' "$hit_target" | grep -F 'SoftTarget? and' | cut -d: -f1)
 hit_player=$(printf '%s\n' "$hit_target" | grep -F 'player.target?' | cut -d: -f1)
 if ! [[ "$snapshot_aim" -lt "$snapshot_soft" && "$snapshot_soft" -lt "$snapshot_player" ]]; then
-  fail "solution snapshot target precedence is not AimTarget > soft target > player.target"
+  fail "engageability snapshot target precedence is not AimTarget > soft target > player.target"
 fi
 if ! [[ "$hit_aim" -lt "$hit_soft" && "$hit_soft" -lt "$hit_player" ]]; then
   fail "HIT target precedence is not AimTarget > soft target > player.target"
@@ -54,7 +54,7 @@ aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")
 grep -Fq "event.param == \$Aimed or @event.param3.{1} == \$Aimed" "$md" \
   || fail "HIT attribution does not compare the selected component"
 
-# The solution snapshot and the census are both denominators. Each must cover
+# The engageability snapshot and the census are both denominators. Each must cover
 # regular weapons/turrets and the separate missile-turret property list.
 weapons=$(grep -Fc 'in="player.ship.weapons.operational.list"' "$md")
 missiles=$(grep -Fc 'in="player.ship.missileturrets.operational.list"' "$md")

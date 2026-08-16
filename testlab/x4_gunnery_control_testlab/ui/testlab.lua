@@ -69,7 +69,7 @@ local function pushObserveState()
     AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state", payload)
     -- Geometry tests should not depend on the owner switching menus and
     -- clicking Mark at the right instant. Once MD has the new aim target,
-    -- automatically request the same one-shot solution snapshot the button
+    -- automatically request the same one-shot engageability snapshot the button
     -- would have produced. String comparison normalises ffi cdata/number forms.
     local now = getElapsedTime()
     if aimTarget and aimTarget ~= suppressedObservedAimTarget
@@ -92,8 +92,7 @@ local function pushObserveState()
     -- Self-rescheduling at the MD sample rate, the pattern the main mod's
     -- session watchdog uses (ui/gunnery_control.lua:2224) because it runs with
     -- no displayed frame. Whether it keeps firing with every menu closed is
-    -- unverified; if it stops, MD still writes the full STATE and SOLUTION
-    -- block and only softtgt/prefer go stale. Degrades, does not break.
+    -- unverified; if it stops, MD still writes the full STATE and historical [X4GC TEST SOLUTION] block and only softtgt/prefer go stale. Degrades, does not break.
     if Helper then Helper.addDelayedOneTimeCallbackOnUpdate(pushObserveState, false, getElapsedTime() + 1.0) end
 end
 

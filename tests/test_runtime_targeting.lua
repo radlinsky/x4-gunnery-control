@@ -1798,7 +1798,7 @@ do
         "57: component-disappearance equipment reset needs exact audit evidence")
 end
 
--- ── 57. solution batches stream members once and preserve stale guards ──────
+-- ── 57. engageability batches stream members once and preserve stale guards ──────
 do
     local sess57 = API.getSession()
     sess57.phase, sess57.controlMode = "console", nil
@@ -1830,15 +1830,15 @@ do
     AddUITriggeredEvent = function(screen, control, params)
         events57[#events57 + 1] = { screen = screen, control = control, params = params }
     end
-    local pending57 = API.requestSolution(900)
+    local pending57 = API.requestEngageability(900)
     assert(pending57.pending and pending57.total == 2, "57: pending denominator must be two exact selected turrets")
     local controls57, nonce57 = {}, nil
     for _, event in ipairs(events57) do
         controls57[#controls57 + 1] = event.control
-        if event.control == "solution_batch_begin" then nonce57 = event.params.nonce end
+        if event.control == "engageability_begin" then nonce57 = event.params.nonce end
     end
-    assert(table.concat(controls57, ",") == "solution_batch_begin,solution_batch_member,solution_batch_member,solution_batch_target,solution_batch_commit",
-        "57: solution transport must stream selected members once before its target ids")
+    assert(table.concat(controls57, ",") == "engageability_begin,engageability_member,engageability_member,engageability_target,engageability_commit",
+        "57: engageability transport must stream selected members once before its target ids")
     assert(events57[2].params.weapon == 101 and events57[3].params.weapon == 102,
         "57: unchecked or inoperable turret leaked into exact-member request")
     assert(events57[2].params.arcknow == 1 and events57[2].params.arcmin == -10
@@ -1853,92 +1853,92 @@ do
     GetPlayerContextByClass = function() return nil end
     C.GetSofttarget2 = function() return { softtargetID = 0, softtargetConnectionName = "" } end
     local firstRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. nonce57 .. ":999:2:2")
-    assert(pending57.pending and pending57.on == nil
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. nonce57 .. ":999:2:2:2")
+    assert(pending57.pending and pending57.engageable == nil
             and fix.callbackCheckpoint() == firstRepaintMark57,
         "57: a reply for an unrequested target must not complete or repaint the batch")
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs3:" .. nonce57 .. ":900:1:1:2")
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. nonce57 .. ":1:1")
-    assert(pending57.pending == false and pending57.on == 1 and pending57.known == 1
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. nonce57 .. ":900:1:1:2")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. nonce57 .. ":1:1")
+    assert(pending57.pending == false and pending57.engageable == 1 and pending57.known == 1
             and pending57.total == 2,
         "57: matching arc-aware packed result was not accepted")
-    assert(API.solutionText(pending57) == "1 / 2  1 " .. ReadText(20991, 100),
-        "57: unknown macro coverage must be explicit and must suppress ON SOLUTION")
+    assert(API.engageabilityText(pending57) == "1 / 2  1 " .. ReadText(20991, 100),
+        "57: unknown macro coverage must be explicit and must suppress ENGAGEABLE")
     assert(fix.callbackCheckpoint() == firstRepaintMark57 + 1,
-        "57: the first accepted solution result must schedule one deferred repaint")
+        "57: the first accepted engageability result must schedule one deferred repaint")
     fix.drainCallbacksSince(firstRepaintMark57)
     events57 = {}
-    assert(API.requestSolution(900) == pending57 and #events57 == 0,
+    assert(API.requestEngageability(900) == pending57 and #events57 == 0,
         "57: a result must be cached for one second")
 
     local savedElapsed57, clock57 = getElapsedTime, (pending57.requestedAt or 0) + 2
     getElapsedTime = function() return clock57 end
     events57 = {}
-    local refreshed57 = API.requestSolution(900)
-    assert(refreshed57 == pending57 and refreshed57.pending and refreshed57.on == nil,
+    local refreshed57 = API.requestEngageability(900)
+    assert(refreshed57 == pending57 and refreshed57.pending and refreshed57.engageable == nil,
         "57: refreshing an expired completed result must clear its stale count; pending="
-            .. tostring(refreshed57.pending) .. " on=" .. tostring(refreshed57.on)
+            .. tostring(refreshed57.pending) .. " engageable=" .. tostring(refreshed57.engageable)
             .. " requested=" .. tostring(refreshed57.requestedAt))
-    assert(API.solutionText(refreshed57) == "… / 2",
-        "57: an expired completed result must render pending, not stale ON SOLUTION text")
+    assert(API.engageabilityText(refreshed57) == "… / 2",
+        "57: an expired completed result must render pending, not stale ENGAGEABLE text")
     local refreshNonce57 = events57[1].params.nonce
     local refreshRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. refreshNonce57 .. ":900:0:2")
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. refreshNonce57 .. ":1:1")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. refreshNonce57 .. ":900:0:2:2")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. refreshNonce57 .. ":1:1")
     fix.drainCallbacksSince(refreshRepaintMark57)
 
     sess57.checkedGroupKeys.unchecked = true
     events57 = {}
-    local changed57 = API.requestSolution(900)
+    local changed57 = API.requestEngageability(900)
     assert(changed57.pending and changed57.total == 3 and #events57 == 6,
         "57: checkbox membership change must invalidate cache and stream the new exact denominator")
     local changedNonce57 = events57[1].params.nonce
     local denominatorRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. changedNonce57 .. ":900:2:2")
-    assert(changed57.pending and changed57.on == nil
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. changedNonce57 .. ":900:2:2:2")
+    assert(changed57.pending and changed57.engageable == nil
             and fix.callbackCheckpoint() == denominatorRepaintMark57,
         "57: a result whose denominator shrank below the requested membership must be rejected")
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. changedNonce57 .. ":900:2:3")
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. changedNonce57 .. ":1:1")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. changedNonce57 .. ":900:2:3:3")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. changedNonce57 .. ":1:1")
     fix.drainCallbacksSince(denominatorRepaintMark57)
 
     events57 = {}
-    local timed57 = API.requestSolution(901)
+    local timed57 = API.requestEngageability(901)
     local oldNonce57 = events57[1].params.nonce
     clock57 = timed57.requestedAt + 3
     events57 = {}
-    assert(API.requestSolution(901) == timed57 and events57[1].params.nonce ~= oldNonce57,
-        "57: a timed-out solution request must be replaced with a fresh nonce")
+    assert(API.requestEngageability(901) == timed57 and events57[1].params.nonce ~= oldNonce57,
+        "57: a timed-out engageability request must be replaced with a fresh nonce")
     local newNonce57 = events57[1].params.nonce
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. oldNonce57 .. ":1:1")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. oldNonce57 .. ":1:1")
     assert(not table.concat(fix.getCapturedLog(), "\n"):find(
-            "event=solution_batch action=complete nonce=" .. oldNonce57, 1, true),
+            "event=engageability_batch action=complete nonce=" .. oldNonce57, 1, true),
         "57: superseding the final target must discard its empty prior request")
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. oldNonce57 .. ":901:3:3")
-    assert(timed57.pending and timed57.on == nil,
-        "57: a superseded solution response must not complete the replacement request")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. oldNonce57 .. ":901:3:3:3")
+    assert(timed57.pending and timed57.engageable == nil,
+        "57: a superseded engageability response must not complete the replacement request")
     local timeoutRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. newNonce57 .. ":901:2:3")
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. newNonce57 .. ":1:1")
-    assert(not timed57.pending and timed57.on == 2,
-        "57: the replacement solution response must still complete normally")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. newNonce57 .. ":901:2:3:3")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. newNonce57 .. ":1:1")
+    assert(not timed57.pending and timed57.engageable == 2,
+        "57: the replacement engageability response must still complete normally")
     fix.drainCallbacksSince(timeoutRepaintMark57)
 
     events57 = {}
-    local missingComplete57 = API.requestSolution(902)
+    local missingComplete57 = API.requestEngageability(902)
     local missingCompleteNonce57 = events57[1].params.nonce
     local missingCompleteRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult",
-        "x4gcs2:" .. missingCompleteNonce57 .. ":902:2:3")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult",
+        "x4gce3:" .. missingCompleteNonce57 .. ":902:2:3:3")
     clock57 = missingComplete57.requestedAt + 2
     events57 = {}
-    assert(API.requestSolution(902) == missingComplete57
+    assert(API.requestEngageability(902) == missingComplete57
             and events57[1].params.nonce ~= missingCompleteNonce57,
         "57: a completed result whose batch completion was lost must refresh after its cache TTL")
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete",
-        "x4gcs2c:" .. missingCompleteNonce57 .. ":1:1")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
+        "x4gce2c:" .. missingCompleteNonce57 .. ":1:1")
     assert(not table.concat(fix.getCapturedLog(), "\n"):find(
-            "event=solution_batch action=complete nonce=" .. missingCompleteNonce57, 1, true),
+            "event=engageability_batch action=complete nonce=" .. missingCompleteNonce57, 1, true),
         "57: post-TTL refresh must reclaim an empty request whose batch completion was lost")
     fix.drainCallbacksSince(missingCompleteRepaintMark57)
 
@@ -1946,14 +1946,14 @@ do
     events57 = batchEvents57
     local requestedTargets57 = {}
     for target = 910, 945 do requestedTargets57[#requestedTargets57 + 1] = target end
-    API.requestSolutions(requestedTargets57)
+    API.requestEngageabilities(requestedTargets57)
     local activeBatch57
     for _, event in ipairs(batchEvents57) do
-        if event.control == "solution_batch_begin" then
+        if event.control == "engageability_begin" then
             activeBatch57 = event.params.nonce
             batchNonces57[#batchNonces57 + 1] = activeBatch57
             batchTargets57[activeBatch57] = {}
-        elseif event.control == "solution_batch_target" then
+        elseif event.control == "engageability_target" then
             batchTargets57[activeBatch57][#batchTargets57[activeBatch57] + 1] = event.params.target
         end
     end
@@ -1963,12 +1963,12 @@ do
         "57: 36 targets must be bounded into 20-target and 16-target batches")
     local memberEvents57 = 0
     for _, event in ipairs(batchEvents57) do
-        if event.control == "solution_batch_member" then memberEvents57 = memberEvents57 + 1 end
+        if event.control == "engageability_member" then memberEvents57 = memberEvents57 + 1 end
     end
     assert(memberEvents57 == 6,
         "57: three selected turrets must be sent once per batch, not once per target")
     local batchLog57 = table.concat(fix.getCapturedLog(), "\n")
-    assert(batchLog57:find("event=solution_batch action=request", 1, true)
+    assert(batchLog57:find("event=engageability_batch action=request", 1, true)
             and batchLog57:find("requested=20 selected_total=3", 1, true)
             and batchLog57:find("requested=16 selected_total=3", 1, true),
         "57: aggregate request logs must prove bounded targets and exact selected-turret totals")
@@ -1979,40 +1979,40 @@ do
     end
     for _, nonce in ipairs(batchNonces57) do
         for _, target in ipairs(batchTargets57[nonce]) do
-            fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. nonce .. ":" .. target .. ":2:3")
+            fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. nonce .. ":" .. target .. ":2:3:3")
         end
-        fix.fireEvent("X4GunneryControl.SolutionBatchComplete",
-            "x4gcs2c:" .. nonce .. ":" .. #batchTargets57[nonce] .. ":" .. #batchTargets57[nonce])
+        fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
+            "x4gce2c:" .. nonce .. ":" .. #batchTargets57[nonce] .. ":" .. #batchTargets57[nonce])
     end
     batchLog57 = table.concat(fix.getCapturedLog(), "\n")
     assert(batchLog57:find("requested=20 accepted=20 completed=20 unresolved=0", 1, true)
             and batchLog57:find("requested=16 accepted=16 completed=16 unresolved=0", 1, true),
         "57: aggregate completion logs must prove all declared targets completed")
     assert(fix.callbackCheckpoint() == batchRepaintMark57 + 1,
-        "57: a burst of 36 solution replies must coalesce to one repaint callback")
+        "57: a burst of 36 engageability replies must coalesce to one repaint callback")
     fix.drainCallbacksSince(batchRepaintMark57)
     local renderedAfter57 = 0
     for _, line in ipairs(fix.getCapturedLog()) do
         if line:find("event=target_browser action=rendered", 1, true) then renderedAfter57 = renderedAfter57 + 1 end
     end
     assert(renderedAfter57 == renderedBefore57 + 1,
-        "57: a burst of solution replies must produce one target-browser audit batch")
+        "57: a burst of engageability replies must produce one target-browser audit batch")
 
     sess57.phase, sess57.controlMode, sess57.targetObjectID = "engaged", "direct", nil
     events57 = {}
-    API.requestSolution(950)
+    API.requestEngageability(950)
     local engagedNonce57 = events57[1].params.nonce
     local engagedRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. engagedNonce57 .. ":950:2:3")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. engagedNonce57 .. ":950:2:3:3")
     fix.drainCallbacksSince(engagedRepaintMark57)
     assert(fix.callbackCheckpoint() == engagedRepaintMark57 + 1,
-        "57: Direct-control solution replies must use the same deferred repaint path")
+        "57: Direct-control engageability replies must use the same deferred repaint path")
 
     events57 = {}
-    API.requestSolution(951)
+    API.requestEngageability(951)
     local testLabNonce57 = events57[1].params.nonce
     local testLabRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. testLabNonce57 .. ":951:2:3")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. testLabNonce57 .. ":951:2:3:3")
     X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.reopening)
     gcMenu.shown = false
     local hiddenAuditBefore57 = #fix.getCapturedLog()
@@ -2023,10 +2023,10 @@ do
     X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.owned)
     gcMenu.shown = true
     events57 = {}
-    API.requestSolution(952)
+    API.requestEngageability(952)
     local mapNonce57 = events57[1].params.nonce
     local mapRepaintMark57 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. mapNonce57 .. ":952:2:3")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. mapNonce57 .. ":952:2:3:3")
     X4GunneryState.setLifecycle(sess57, X4GunneryState.lifecycle.suspendedMap)
     gcMenu.shown = false
     hiddenAuditBefore57 = #fix.getCapturedLog()
@@ -2038,11 +2038,11 @@ do
     gcMenu.shown = true
     sess57.phase, sess57.controlMode = "target_select", nil
     events57 = {}
-    local incomplete57 = API.requestSolution(953)
+    local incomplete57 = API.requestEngageability(953)
     local incompleteNonce57 = events57[1].params.nonce
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete",
-        "x4gcs2c:" .. incompleteNonce57 .. ":0:0")
-    assert(incomplete57.pending and incomplete57.on == nil
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
+        "x4gce2c:" .. incompleteNonce57 .. ":0:0")
+    assert(incomplete57.pending and incomplete57.engageable == nil
             and table.concat(fix.getCapturedLog(), "\n"):find(
                 "requested=1 accepted=0 completed=0 unresolved=1", 1, true),
         "57: an incomplete batch must remain pending and emit one aggregate unresolved count")
@@ -2051,7 +2051,7 @@ do
     AddUITriggeredEvent = savedAdd57
 end
 
--- ── 58. target/surface rows render and sort complete solution results ────────
+-- ── 58. target/surface rows render and sort complete engageability results ────────
 do
     local sess58 = API.getSession()
     sess58.phase, sess58.controlMode = "console", nil
@@ -2062,13 +2062,13 @@ do
     end
     local function seed58(target, on)
         events58 = {}
-        local result = API.requestSolution(target)
+        local result = API.requestEngageability(target)
         local nonce
         for _, event in ipairs(events58) do
-            if event.control == "solution_batch_begin" then nonce = event.params.nonce end
+            if event.control == "engageability_begin" then nonce = event.params.nonce end
         end
-        fix.fireEvent("X4GunneryControl.SolutionResult", "x4gcs2:" .. nonce .. ":" .. target .. ":" .. on .. ":2")
-        fix.fireEvent("X4GunneryControl.SolutionBatchComplete", "x4gcs2c:" .. nonce .. ":1:1")
+        fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. nonce .. ":" .. target .. ":" .. on .. ":2:2")
+        fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. nonce .. ":1:1")
         return result
     end
     seed58(701, 2); seed58(702, 0); seed58(703, 1); seed58(704, 0)
@@ -2113,7 +2113,7 @@ do
         end
     end
     assert(renderedSurfaces58["701"] == "2 / 2  " .. ReadText(20991, 89),
-        "58: complete surface solution must render the aggregate ON SOLUTION label")
+        "58: complete surface solution must render the aggregate ENGAGEABLE label")
     assert(renderedSurfaces58["702"] == "0 / 2" and renderedSurfaces58["703"] == "1 / 2",
         "58: incomplete surface solutions must render their exact binary counts")
     local surfaceButton58
@@ -2140,16 +2140,16 @@ do
         end
     end
     assert(table.concat(targetOrder58, ",") == "801,802",
-        "58: an all-on-solution target must sort before an incomplete target")
+        "58: an all-on-engageability target must sort before an incomplete target")
     assert(targetSolutions58["801"] == "2 / 2  " .. ReadText(20991, 89)
             and targetSolutions58["802"] == "0 / 2",
         "58: target rows must bind the exact aggregate solution text to column 8")
     local log58 = table.concat(fix.getCapturedLog(), "\n")
     assert(log58:find('event=surface_browser action=row target=900 component=701 name="Alpha"', 1, true)
-            and log58:find('macro="" position=1 solution_state=complete solution_on=2 solution_known=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+            and log58:find('macro="" position=1 engageability_state=complete engageability_engageable=2 engageability_known=2 engageability_total=2 engageability_text="2 / 2  text:20991:89"', 1, true),
         "58: surface-row audit must prove first position and the displayed complete solution")
     assert(log58:find('event=target_browser action=row component=801 name="Zulu"', 1, true)
-            and log58:find('position=1 solution_state=complete solution_on=2 solution_known=2 solution_total=2 solution_text="2 / 2  text:20991:89"', 1, true),
+            and log58:find('position=1 engageability_state=complete engageability_engageable=2 engageability_known=2 engageability_total=2 engageability_text="2 / 2  text:20991:89"', 1, true),
         "58: target-row audit must prove all-on-solution ordering and displayed value")
 end
 
@@ -2200,8 +2200,8 @@ do
     end
     local savedAdd59, targetEvents59, activeNonce59, nonceByTarget59 = AddUITriggeredEvent, {}, nil, {}
     AddUITriggeredEvent = function(screen, control, params)
-        if control == "solution_batch_begin" then activeNonce59 = params.nonce end
-        if control == "solution_batch_target" then
+        if control == "engageability_begin" then activeNonce59 = params.nonce end
+        if control == "engageability_target" then
             local target = tostring(params.target)
             targetEvents59[#targetEvents59 + 1] = target
             nonceByTarget59[target] = activeNonce59
@@ -2243,17 +2243,17 @@ do
     assert(largeRow59 == "Surface 10022",
         "59: surface rows must display only the engine-provided equipment name")
     local pinnedRepaintMark59 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.SolutionResult",
-        "x4gcs2:" .. nonceByTarget59["10000"] .. ":10000:1:2")
-    fix.fireEvent("X4GunneryControl.SolutionBatchComplete",
-        "x4gcs2c:" .. nonceByTarget59["10000"] .. ":1:1")
+    fix.fireEvent("X4GunneryControl.EngageabilityResult",
+        "x4gce3:" .. nonceByTarget59["10000"] .. ":10000:1:2:2")
+    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
+        "x4gce2c:" .. nonceByTarget59["10000"] .. ":1:1")
     assert(fix.callbackCheckpoint() == pinnedRepaintMark59 + 1,
         "59: pinned result must schedule one isolated element-frame update")
     fix.drainCallbacksSince(pinnedRepaintMark59)
     local log59 = table.concat(fix.getCapturedLog(), "\n")
     assert(log59:find("event=surface_pinned action=refresh component=10000", 1, true)
-            and log59:find("solution_on=1 solution_known=2 solution_total=2 distance=0 shield_capacity=true shield_percent=0 hull_percent=41", 1, true),
-        "59: pinned refresh audit must carry exact solution, distance, and live health values")
+            and log59:find("engageability_engageable=1 engageability_known=2 engageability_total=2 distance=0 shield_capacity=true shield_percent=0 hull_percent=41", 1, true),
+        "59: pinned refresh audit must carry exact engageability, distance, and live health values")
 
     targetEvents59 = {}
     local nextPage59 = fix.buttonByText(ReadText(20991, 95))
@@ -2275,7 +2275,7 @@ do
         if tostring(entry.row) == "10001" and entry.column == 1 then mediumFallbackRow59 = entry.text end
     end
     assert(pageTwoDistance59 == "1.0 km",
-        "59: alternative distance must be captured alongside that page's solution batch")
+        "59: alternative distance must be captured alongside that page's engageability batch")
     assert(mediumFallbackRow59 == "Surface 10001",
         "59: medium surface rows must not append redundant type or size text")
 
@@ -2289,7 +2289,7 @@ do
         if tostring(entry.row) == "10022" and entry.column == 3 then cachedPageDistance59 = entry.text end
     end
     assert(cachedPageDistance59 == "22.0 km",
-        "59: revisiting a cached page must retain the distance captured with its solution batch")
+        "59: revisiting a cached page must retain the distance captured with its engageability batch")
     local autoRefresh59
     for _, checkbox in ipairs(fix.getCreatedCheckBoxes()) do
         if checkbox.row == "surface_auto_refresh" then autoRefresh59 = checkbox end
@@ -2315,7 +2315,7 @@ do
         if tostring(entry.row) == "10022" and entry.column == 3 then refreshedPageDistance59 = entry.text end
     end
     assert(type(refreshedPinnedDistance59) == "function" and refreshedPinnedDistance59() == "5.0 km",
-        "59: pinned distance must refresh on the same one-second tick as its solution")
+        "59: pinned distance must refresh on the same one-second tick as its engageability")
     assert(refreshedPageDistance59 == "27.0 km",
         "59: automatic page refresh must recapture distance with the new 20-row solution batch")
     log59 = table.concat(fix.getCapturedLog(), "\n")
@@ -2328,7 +2328,7 @@ do
 
     -- X4 keeps updating UI frames while the simulation is paused. A paused
     -- elapsed clock must not repeatedly satisfy the same pinned/automatic
-    -- refresh deadline and recursively request another solution batch.
+    -- refresh deadline and recursively request another engageability batch.
     targetEvents59 = {}
     C.IsGamePaused = function() return true end
     clock = clock + 20
