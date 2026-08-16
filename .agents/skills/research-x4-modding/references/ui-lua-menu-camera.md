@@ -1297,3 +1297,27 @@ save using `pcall`.
   `getElapsedTime` is engine-provided: it appears in the extracted 9.00 UI Lua only as a
   caller, never as a definition, so the readings above are the only evidence of its
   behaviour across a load.
+
+### `SetTurretGroupMode2` with the group's CURRENT mode is not a no-op: it drops the script-supplied preferred target
+- X4: 9.00
+- Status: live-tested
+- Source: live sessions 2026-08-15, extension `x4_gunnery_control`; game debug.log
+- Live test: yes — reproduced twice on 2026-08-15
+- Finding: calling `C.SetTurretGroupMode2(ship, contextID, path, group, mode)` with
+  the mode the group is ALREADY in still reinitialises the turret group's targeting
+  and discards any preferred target an MD `set_turret_targets ... preferredtarget=`
+  had installed. The group falls back to autonomous selection over the hostiles in
+  range and takes a different target. Observed twice, each flipping fire off the
+  player's selected target onto another hostile: once on apply (a per-click mode
+  rewrite of already-directed groups) and once on release (a re-arm loop that re-set
+  the directed groups to `attackenemies`, the mode they were already in). The census
+  `prefer` flag dropped `1 → 0` at the release with the selected target unchanged,
+  and fire moved to the other hostile.
+- Fix: guard the write with a live-mode compare — skip `SetTurretGroupMode2` when the
+  group's read-back `.mode` already equals the target mode. A group genuinely knocked
+  out of mode still gets re-set; one already in mode is left undisturbed and keeps its
+  preferred target. Verified: with the guard, directed groups held the selected target
+  through both apply and release.
+- Cross-reference: the MD side of the same preferred-target semantics is under
+  "Vanilla's fight loop does NOT overwrite mod-supplied attackenemies targets" in
+  [md-ai.md](md-ai.md).

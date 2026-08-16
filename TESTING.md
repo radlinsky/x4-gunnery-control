@@ -32,41 +32,7 @@ evidence that the engine trims. Settle this only in an explicitly instrumented
 research run before changing the classification of the research KB record
 "Group identifiers in ship component XML carry surrounding whitespace".
 
-### 1. Rapid operator Release after Prefer My Target (added 2026-08-07)
-
-The exact apply/release race fixed in `5531dda` exists inside a 0.01-second
-deferred callback and is deterministic-test-only: a human click cannot reliably
-land before the Apply handler repaints the panel. This live check covers rapid
-ordinary operator behavior after that repaint, not the sub-frame race itself.
-
-1. Direct-control on a ship with turrets not in your checked groups.
-2. Engage a target, click **All Turrets: Prefer My Target**, then click
-   **Release Other Turrets** as soon as the repainted panel enables it.
-3. Watch the unchecked turrets after the release.
-
-- **Pass:** the unchecked turrets stop preferring your target after the release.
-- **Fail:** unchecked turrets keep firing on your target after the release, and
-  the panel shows **Prefer My Target** available again. That is the stranded
-  state; capture the filtered log and the visible turret behaviour, because no
-  later cease or get-up can clear it.
-
-### 2. Prefer/Release on a ship with mining or towing turrets (added 2026-08-07)
-
-Covers the Release filter added in `bd61680`. Apply deliberately skips towing,
-mining and autoassist turrets; Release now skips them too.
-
-1. Take a ship carrying at least one mining or tug turret alongside combat
-   turrets (a Wyvern Mineral or any mixed L hull with a mining turret fitted).
-2. Note what the mining turret is doing, then Direct-control, engage a target,
-   **Prefer My Target**, then **Release Other Turrets**.
-3. Watch the mining or towing turret through both clicks.
-
-- **Pass:** the mining or towing turret's behaviour is unchanged throughout.
-- **Fail:** the mining turret stops mining, retargets, or goes idle after either
-  click. Record which click caused it; the Apply filter and the Release filter
-  are separate code paths.
-
-### 3. Is the 2026-08-07 mode-write race dead? (added 2026-08-07)
+### 1. Is the 2026-08-07 mode-write race dead? (added 2026-08-07)
 
 The per-write diagnostics were removed in `0b48b90`; the post-restore readback
 now logs only on disagreement, so silence is the pass condition.
@@ -80,7 +46,7 @@ now logs only on disagreement, so silence is the pass condition.
   did not take one or more restore writes. Keep the log and the ship/groups;
   this is the original race resurfacing.
 
-### 4. Duplicate turret group labels on the known hulls (added 2026-08-07)
+### 2. Duplicate turret group labels on the known hulls (added 2026-08-07)
 
 Fifteen shipped hulls have two groups that humanize to one label. Addressing is
 by key, so this should be cosmetic only. Worst case is the Split Raptor, where

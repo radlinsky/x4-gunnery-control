@@ -373,164 +373,16 @@
       </actions>
     </cue>
 
-    <!-- Ship-wide "prefer my target" override (live-tested 2026-08-09 and
-         2026-08-10). A hostile target list IS sent, and must be: the schema says
-         a turret that cannot aim at the preferred target chooses from the
-         supplied list, and an omitted list is not "the engine's own acquisition"
-         but a hard error, "Evaluated value 'null' is not of type list", which
-         throws and applies nothing. That fallback list is the whole feature.
-
-         An earlier version of this comment described a listless call and cited a
-         2026-08-07 trial for its behaviour. That trial's call was the one that
-         threw, so it observed nothing; the record is retracted in md-ai.md.
-
-         Neither Apply nor Release passes weaponmode. The attribute selects which
-         turrets RECEIVE the instruction, and the owner's requirement is that
-         this button reach all of them, so the selector is omitted and the engine
-         default ("any", common.xsd:36223) applies. The per-call comments carry
-         the reasoning and the two known limits; the contract test enforces the
-         omission on these two cues and enforces its PRESENCE on DirectFallback,
-         which is scoped to the ticked groups on purpose.
-
-         Until 2026-08-10 this swept a deduplicated list of the ship's live
-         turret modes and skipped six of them. That is gone. Do not reintroduce a
-         mode loop here without the owner asking for one: it cannot reach
-         autoassist or holdfire turrets at all, and it silently narrows a button
-         whose entire meaning is "everything". -->
+    <!-- Legacy name: this cue once also hosted the "Prefer My Target" / "Release
+         Other Turrets" override (removed in #38 as unreachable with the X4 API).
+         It now hosts only Direct-control (DirectFallback + DirectWatch). The name
+         is kept deliberately: renaming a save-persistent cue breaks loads. -->
     <cue name="PreferAllTurrets">
       <cues>
-        <cue name="Apply" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'prefer_all_turrets'"/>
-          </conditions>
-          <actions>
-            <!-- Same transport contract as CutsceneAim.Start above: the engine
-                 prepends $ to Lua string keys, ids arrive as components. -->
-            <set_value name="$ship" exact="@event.param3.$ship"/>
-            <set_value name="$target" exact="@event.param3.$target"/>
-            <do_if value="typeof $ship != datatype.component and $ship">
-              <set_value name="$ship" exact="component.{$ship}"/>
-            </do_if>
-            <do_if value="typeof $target != datatype.component and $target">
-              <set_value name="$target" exact="component.{$target}"/>
-            </do_if>
-            <do_if value="$ship and $target">
-              <!-- target is not optional in practice. Without it the action
-                   evaluates null for its target list and throws "Evaluated
-                   value 'null' is not of type list", so nothing is applied and
-                   stopshootingold never gets a chance to drop the old target.
-                   All 24 shipped set_turret_targets calls that pass
-                   preferredtarget also pass target; see
-                   aiscripts/fight.attack.object.capital.xml:2172 for the shape
-                   copied here. The list is what a turret falls back to when it
-                   has no shot at the preferred target, so it has to be the
-                   real hostile set, not just [$target]. -->
-              <find_ship name="$hostiles" space="$ship.sector" masstraffic="false" multiple="true">
-                <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
-              </find_ship>
-              <do_if value="not $hostiles.indexof.{$target}">
-                <append_to_list name="$hostiles" exact="$target"/>
-              </do_if>
-              <!-- No weaponmode, deliberately. The attribute is optional and
-                   "defaults to any" (common.xsd:36223), so leaving it off is
-                   what makes this button mean every turret on the ship. It is
-                   also the ONLY way to reach autoassist and holdfire turrets:
-                   neither is a member of weaponmodelookup (common.xsd:2419), so
-                   neither can ever be named in the attribute, and any loop over
-                   modes necessarily skips them.
-
-                   This replaces a six-mode exclusion list (towing, mining,
-                   autoassist, holdfire, missiledefence, defend). Dropping it is
-                   an owner decision, not an oversight, and it has consequences
-                   that are the point rather than bugs: a Missile Defence turret
-                   will shoot the hull you picked instead of watching for
-                   missiles, and a Defend turret will engage a target that is not
-                   attacking you. "Prefer my target" now means what it says.
-                   Release puts every one of them back.
-
-                   Two known limits, neither fixable from here. Autoassist
-                   turrets receive the call but discard script-supplied target
-                   lists outright; Egosoft say so at
-                   aiscripts/fight.attack.object.capital.xml:1756. Whether a
-                   target list moves a holdfire turret at all is UNTESTED as of
-                   2026-08-10; "do not shoot" may well win. Do not record either
-                   as working until a live session says so.
-
-                   Two calls, and the order matters. stopshootingold (default
-                   true) only drops targets that are absent from the new list, so
-                   a single call carrying the full hostile set can never dislodge
-                   a turret already shooting one of them: the old target is in
-                   the list, so it stays valid and the preference waits for a
-                   re-selection that never comes. Live-tested 2026-08-09: turret
-                   515058 held target B at los=1 solution=1 on the preferred A.
-
-                   The narrow-then-wide pair establishes the initial
-                   preference, but a 2026-08-13 two-Osaka retarget exposed a
-                   second shoot-controller latch: changing preferredtarget from
-                   the live target A to B left every newly fired round on A even
-                   though this cue logged B. Two reset variants were live-
-                   disproved in that fixture: an empty target list did not release
-                   active guns, while cease_fire plus the empty list prevented a
-                   fresh engagement from firing at all. Do not reintroduce either
-                   here. A ship-wide HOLD FIRE mode pulse was also live-
-                   disproved: the cue received B while newly fired rounds and
-                   direct hits remained on A. The narrow call installs only
-                   $target; the wide call immediately restores the fallback set
-                   for turrets that cannot AIM at $target. Do not claim that
-                   reissuing this pair retargets a turret whose shoot controller
-                   remains latched to another still-valid hostile.
-                   Aim, not hit: a turret whose own hull blocks the shot can aim,
-                   so it takes $target and holds fire. -->
-              <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target"/>
-              <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target"/>
-              <!-- Success line, mirroring the bad-payload line below. Without it
-                   this cue is silent on the happy path, and a log that shows no
-                   turret acting on the preference cannot distinguish "the click
-                   never arrived" from "the engine ignored the order". Those need
-                   opposite fixes. Guard every read with @: a failed lookup inside
-                   debug_text makes MD write the expression SOURCE to the log
-                   instead of blanking one field, corrupting the whole line. -->
-              <debug_text text="'[X4GC] prefer_all_turrets: applied ship=' + $ship + ' target=' + $target + ' tgtname=' + @$target.knownname + ' hostiles=' + $hostiles.count + ' t=' + player.age" chance="100"/>
-            </do_if>
-            <do_else>
-              <debug_text text="'[X4GC] prefer_all_turrets: bad payload ship=' + @$ship + ' target=' + @$target" chance="100"/>
-            </do_else>
-          </actions>
-        </cue>
-
-        <cue name="Release" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'prefer_all_turrets_clear'"/>
-          </conditions>
-          <actions>
-            <set_value name="$ship" exact="@event.param3.$ship"/>
-            <do_if value="typeof $ship != datatype.component and $ship">
-              <set_value name="$ship" exact="component.{$ship}"/>
-            </do_if>
-            <do_if value="$ship">
-              <!-- Same hostile list as Apply, for the same reason: omitting
-                   target made the action throw on a null list, so the release
-                   never actually cleared anything. Handing back the unfiltered
-                   hostile set with no preferredtarget is the pre-Apply state. -->
-              <find_ship name="$hostiles" space="$ship.sector" masstraffic="false" multiple="true">
-                <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
-              </find_ship>
-              <!-- No weaponmode, matching Apply exactly. Release has to reach
-                   every turret Apply reached or the override becomes impossible
-                   to switch off for the modes it newly covers: a Missile Defence
-                   turret left holding a hull preference would keep shooting
-                   hulls for the rest of the session. Symmetry here is not
-                   tidiness, it is the off switch.
-                   No preferredtarget: clearpreferred defaults to true. -->
-              <set_turret_targets object="$ship" target="$hostiles"/>
-            </do_if>
-          </actions>
-        </cue>
-
         <!-- Gives the directed groups a fallback target list, so a turret that
              cannot bear on $target rolls to a hostile it can engage instead of
              tracking one it will never fire on. That idle turret is the whole
-             reason the ship-wide override button was built.
+             reason Direct-control hands out a fallback list at all.
 
              The engine's fallback asks whether a turret can AIM at the preferred
              target, not whether it can hit it. It therefore recovers CANNOT BEAR

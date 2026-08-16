@@ -37,21 +37,6 @@ mark a specific surface element (e.g. turret, shield, engine).
   the next target yourself, which is closer to actually manning the gun.
 - **Next Target** / **Previous Target** step through the same candidate list
   without reopening the browser.
-- **Other Turrets: Prefer My Target**: every turret on the ship prefers your
-  target. A turret that is out of range or cannot swing round to the target will
-  roll to another hostile, but one whose own hull is in the way will track the
-  target and hold fire rather than rolling.
-
-  This affects every turret on the ship regardless of its Mode — no exceptions.
-  A **Missile Defence** turret will start shooting the ship you picked instead
-  of watching for incoming missiles; a **Defend** turret will engage a target
-  that is not attacking you; **Mine** and **Tow** turrets are included too.
-  **Release Other Turrets** is the off switch and reaches everything this
-  button reached.
-- **Release Other Turrets**: gives the rest of the ship back to its own
-  settings. The groups you checked keep shooting your target, because you are
-  still directing them. Getting up releases everything.
-
 A few things worth knowing up front:
 
 - **Ticking a group's checkbox sets that group's Mode to Attack all enemies.**

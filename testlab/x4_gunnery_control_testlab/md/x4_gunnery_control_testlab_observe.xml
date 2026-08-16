@@ -4,11 +4,9 @@
   Developer-only.  Belongs in testlab, NOT in the shipped mod.
 
   PURPOSE
-  docs/FIRE_CONTROL_BEHAVIOR.md carries rows marked UNTESTED and UNKNOWN,
-  mostly the "Prefer My Target ON" column.  Each asks the same question: when
-  the mod sends the whole ship a preferred target with no mode restriction,
-  does a group in mode X actually shoot it?  This script answers that during
-  ordinary free play, so a capture can be read back and a row promoted to LIVE.
+  docs/FIRE_CONTROL_BEHAVIOR.md carries rows marked UNTESTED and UNKNOWN.
+  This script answers those during ordinary free play so a capture can be read
+  back and a row promoted to LIVE.
 
   WHY THIS IS EVENT DRIVEN AND NOT A POLLING SWEEP
   The first version of this file polled every turret once a second and logged
@@ -73,7 +71,7 @@
 
     observe_toggle {enabled = true|false}
     observe_mark   {}
-    observe_state  {softtgt =, aimtgt =, prefer = true|false}
+    observe_state  {softtgt =, aimtgt =}
 
   observe_state is only sent while a Direct-control session exists.  In plain
   free play it never arrives and the log simply carries player.target, which is
@@ -109,7 +107,6 @@
              until the owner arms it from the Test Lab menu. -->
         <set_value name="$Enabled" exact="false"/>
         <set_value name="$MarkCount" exact="0"/>
-        <set_value name="$Prefer" exact="false"/>
         <!-- Seeded so the census time guard has something to compare against on
              its very first check.  Derived from player.age rather than written
              as a bare -1 so it carries the time datatype: player.age is a time
@@ -282,7 +279,6 @@
                   + ' end tgt=' + $Target
                   + ' tgtname=' + $Target.knownname
                   + ' tgtsize=' + $Target.size
-                  + ' prefer=' + ObserveRoot.$Prefer
                   + ' pilot=' + (if player.ship.pilot then player.ship.pilot.command.value else 'none')"/>
               </do_if>
               <do_else>
@@ -294,11 +290,11 @@
 
         <!-- ObserveState
              AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state",
-               {softtgt =, aimtgt =, prefer = true|false})
+               {softtgt =, aimtgt =})
              The only two facts MD cannot see for itself: the engine SOFT target
              (MD has player.target and no soft equivalent - scriptproperties.xml
              has no player.softtarget at all) and the mod session's
-             preferAllTurrets / aimTargetID.  Pushed from Lua only while a
+             aimTargetID.  Pushed from Lua only while a
              Direct-control session exists.  These are what make a HIT line
              answer "did it shoot MY target" rather than merely "it shot". -->
         <cue name="ObserveState" instantiate="true">
@@ -308,7 +304,6 @@
           <actions>
             <set_value name="ObserveRoot.$SoftTarget" exact="@event.param3.$softtgt"/>
             <set_value name="ObserveRoot.$AimTarget" exact="@event.param3.$aimtgt"/>
-            <set_value name="ObserveRoot.$Prefer" exact="@event.param3.$prefer == true"/>
           </actions>
         </cue>
 
@@ -393,8 +388,8 @@
 
                  istgt is the field the open rows turn on: it is true when the
                  thing this weapon hit is the target Direct-control was aiming
-                 at.  A line with mode=weaponmode.defend, prefer=true and
-                 istgt=true closes the Defend row on its own. -->
+                 at.  A line with mode=weaponmode.defend and istgt=true closes
+                 the Defend row on its own. -->
             <cue name="ObserveHit" instantiate="true">
               <conditions>
                 <event_object_attacked_object object="$Ship"/>
@@ -430,8 +425,7 @@
                   + ' hitcomp=' + (if @event.param3.{1} then event.param3.{1} else 'none')
                   + ' method=' + event.param2
                   + ' aimed=' + (if $Aimed then $Aimed else 'none')
-                  + ' istgt=' + ($Aimed? and (event.param == $Aimed or @event.param3.{1} == $Aimed))
-                  + ' prefer=' + ObserveRoot.$Prefer"/>
+                  + ' istgt=' + ($Aimed? and (event.param == $Aimed or @event.param3.{1} == $Aimed))"/>
               </actions>
             </cue>
 
@@ -481,7 +475,6 @@
                   + ' pilot=' + (if $Ship.pilot then $Ship.pilot.command.value else 'none')
                   + ' hardtgt=' + (if player.target then player.target else 'none')
                   + ' softtgt=' + (if ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget then ObserveRoot.$SoftTarget else 'none')
-                  + ' prefer=' + ObserveRoot.$Prefer
                   + ' modes=' + $Census"/>
               </actions>
             </cue>

@@ -719,7 +719,7 @@
   documented "Do not shoot"). Those two are therefore invalid as `weaponmode`
   values here, and no loop over modes can address them however it is written.
   OMITTING `weaponmode` entirely is the only path that reaches a holdfire
-  turret — which is what this mod's `PreferAllTurrets` action does.
+  turret.
   (Note the containment direction: `$turretmodes` is built from live turret
   `.mode` reads, so on a ship with a holdfire turret the loop variable can hold a
   value the attribute will not accept.)
@@ -792,3 +792,46 @@ whole-object, engine, shield, turret, and station-module surface tests.
 
   Not established by this test: the exact point at which MD begins accepting these events, or
   whether a retry or delay from Lua would be received earlier than the `gameLoadingDone` hook.
+
+### A `checkinterval` cue that resets itself hard-freezes X4; periodic cues need `<delay>`
+- X4: 9.00
+- Status: live-tested
+- Source: live session 2026-08-15, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — froze the game on the first click that armed the cue, 2026-08-15
+- Finding: a `<cue checkinterval="2s">` whose `<actions>` end with a self
+  `<reset_cue>` does NOT wait the interval between cycles. It re-arms, re-evaluates
+  its `<conditions>` true, and re-fires in the SAME frame, an unbounded loop that
+  hard-freezes X4 with no error and no further log output (the log ended exactly on
+  the last action before the loop). `checkinterval` only spaces out polls of a cue
+  still WAITING for its first fire; it does not throttle a reset-driven re-arm.
+- Fix: for a periodic self-repeating cue use `<delay exact="Ns"/>` (child order
+  `conditions` → `delay` → `actions`) with the trailing `reset_cue`. `<delay>` gates
+  each cycle: after the condition passes the cue waits N s, runs, resets, waits N s
+  again. Verified non-freezing in the same session.
+- The event-driven `reset_cue` re-arm idiom (a sibling cue reset from an
+  `event_ui_triggered` handler) is unaffected — it is safe precisely because it is
+  not condition-polled.
+
+### Re-feeding the hostile list on release does NOT revert defend/missiledefence/mining
+- X4: 9.00
+- Status: live-tested
+- Source: live session 2026-08-15, extension `x4_gunnery_control`, fixture with one
+  `attackenemies` group and the rest `defend`; game debug.log
+- Live test: yes — 2026-08-15, `defend` observed still firing after release
+- Finding: to undo a ship-wide preferred-target override, issuing
+  `set_turret_targets target=$hostiles weaponmode=$mode` with `clearpreferred`
+  (default true) reverts the ATTACK-family modes (`attackcapital`, `attackfighters`,
+  `prefercapital`, `preferfighters`, `prefermissiles`, `any`) correctly, because
+  attacking the hostile list IS their resting behaviour. It does NOT revert the three
+  modes vanilla feeds a CURATED list — `defend` (attackers), `missiledefence`
+  (incoming missiles), `mining` (asteroids). `clearpreferred` drops the preferred
+  MARK but not the target LIST, and the old target is still in `$hostiles`, so the
+  turret keeps engaging it. Census showed 29 `mode=defend` turret hits after the
+  release flag went `prefer=0`. `missiledefence`/`mining` were not on the fixture but
+  share the structure (see the shipped-source records at "Vanilla hands
+  missiledefence and mining turrets a SHIP as preferred target" and the note that a
+  ship list made `missiledefence` fire on hulls).
+- Implication: reverting those three requires stopping the mod's influence, not
+  re-supplying a list. `cease_fire weaponmode=$mode` is the candidate (vanilla's own
+  stop mechanism); UNTESTED as of 2026-08-15.

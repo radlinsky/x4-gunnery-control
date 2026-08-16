@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Removed **Other Turrets: Prefer My Target** and **Release Other Turrets**. The Release behavior was unreachable with the X4 API: re-feeding the hostile list does not revert `defend`, `missiledefence`, or `mining` modes because those modes use a curated target list rather than the standard hostile list. Direct-control (ticking turret groups) covers directing turrets at a chosen target.
+
 - **Loading a save no longer loses your gunnery session.** You come back to the
   same turret groups, the same turret POV and the same target, in Direct-control
   or Auto-engage. Before, a load dumped you at the console with your turrets
