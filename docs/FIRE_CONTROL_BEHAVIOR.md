@@ -15,7 +15,8 @@ These words mean one specific thing throughout this document.
 - **Own mode** — whatever mode you left an unticked group in.
 - **Armed / not armed** — a turret's on/off switch. A turret that is not armed does not fire, whatever else is true.
 - **Your pilot** — whoever is flying your ship while you sit at the Gunnery Console. Your pilot may be **attacking** a target, or may be flying or idle.
-Confidence is marked on every behavior, strongest first:
+
+Where a behavior carries a confidence rating, it uses these labels, strongest first:
 
 - **X4 CODE** — stated in Egosoft's own game scripts.
 - **LIVE** — watched happen in game.

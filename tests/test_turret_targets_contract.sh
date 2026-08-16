@@ -30,9 +30,11 @@ while IFS= read -r call; do
   esac
 done < <(grep -o "<set_turret_targets[^>]*>" "$md")
 
-# 2. DirectFallback must scope to attackenemies -- the console binds the
-#    checkbox to attackenemies, so that selector is what limits it to the
-#    ticked groups.
+# 2. DirectFallback is the sole writer, and it must scope to attackenemies.
+#    Since #38 removed Prefer My Target, DirectFallback is the only cue that may
+#    call <set_turret_targets>; any other cue introducing one is a new, unreviewed
+#    turret writer. The attackenemies selector is what limits it to the ticked
+#    groups (the console binds the checkbox to attackenemies).
 cue_report=$(awk '
   /<cue name="/ { match($0, /name="[^"]*"/); cue = substr($0, RSTART + 6, RLENGTH - 7) }
   /<set_turret_targets/ { print cue "\t" $0 }
@@ -46,6 +48,9 @@ while IFS=$'\t' read -r cue call; do
         *'weaponmode="weaponmode.attackenemies"'*) ;;
         *) note "DirectFallback must scope to attackenemies (the ticked groups): $call" ;;
       esac
+      ;;
+    *)
+      note "only DirectFallback may call <set_turret_targets>; found one in cue '$cue': $call"
       ;;
   esac
 done <<< "$cue_report"

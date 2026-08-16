@@ -833,5 +833,12 @@ whole-object, engine, shield, turret, and station-module surface tests.
   missiledefence and mining turrets a SHIP as preferred target" and the note that a
   ship list made `missiledefence` fire on hulls).
 - Implication: reverting those three requires stopping the mod's influence, not
-  re-supplying a list. `cease_fire weaponmode=$mode` is the candidate (vanilla's own
-  stop mechanism); UNTESTED as of 2026-08-15.
+  re-supplying a list — and no available API does so cleanly. `cease_fire
+  weaponmode=$mode` (vanilla's own stop mechanism) was then tried live and only
+  stops these turrets MOMENTARILY: they resume firing on the old target within
+  seconds, so it does not revert the curated-list modes either. `SetTurretGroupMode2`
+  reset (no-op write of a group's own mode) cleared the preferred mark but not the
+  list, and an empty target list did not release active guns. Live-tested across the
+  issue #36 sessions (2026-08-13..16, X4 9.00, mixed-mode fixture). With no API found
+  to clear a turret's supplied target list, the ship-wide override was removed
+  entirely (issue #38) rather than shipped with an unreachable release.
