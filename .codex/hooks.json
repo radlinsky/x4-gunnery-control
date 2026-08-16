@@ -1,6 +1,19 @@
 {
   "description": "Shared X4 reload advice after repository file edits.",
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/.agents/hooks/codex-shellcheck-disable-contract.sh\"",
+            "commandWindows": "bash -lc '\"$(git rev-parse --show-toplevel)/.agents/hooks/codex-shellcheck-disable-contract.sh\"'",
+            "statusMessage": "Enforcing ShellCheck disable contract policy"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "apply_patch|Edit|Write|NotebookEdit",

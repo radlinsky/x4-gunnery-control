@@ -80,11 +80,8 @@ done
 #    the wide list restores a fallback for turrets with no shot at the preferred
 #    target. Order is the whole point; reversed, the narrow call wins and the
 #    fallback is lost.
-# shellcheck disable=SC2016 # $target and $hostiles are MD variable names in the
-# XML being searched, not shell expansions.
-narrow=$(grep -n 'target="\[\$target\]"' "$md" | head -1 | cut -d: -f1)
-# shellcheck disable=SC2016
-wide=$(grep -n 'target="\$hostiles" preferredtarget=' "$md" | head -1 | cut -d: -f1)
+narrow=$(grep -n $'target="\\[\\$target\\]"' "$md" | head -1 | cut -d: -f1)
+wide=$(grep -n $'target="\\$hostiles" preferredtarget=' "$md" | head -1 | cut -d: -f1)
 if [ -z "$narrow" ] || [ -z "$wide" ]; then
   note "Apply must issue both a narrow (target=[\$target]) and a wide (target=\$hostiles) call"
 elif [ "$narrow" -ge "$wide" ]; then
