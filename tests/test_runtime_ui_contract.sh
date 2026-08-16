@@ -275,7 +275,6 @@ assert_md_xpath 1 "count($guard/reset_cue[@cue=\"parent\"] \
 # expression is the mechanism; event.param3.$text carries the Lua string.
 grep -Fq "cue name=\"Notify\"" "$md"
 grep -Fq 'show_help' "$md"
-# shellcheck disable=SC2016
 grep -Fq "custom=\"@event.param3.\$text\"" "$md"
 # Text ids 79 (restored-settings) and 80 (disengaged) used by leaveChair.
 grep -Fq '<t id="79">' t/0001.xml
@@ -285,25 +284,20 @@ grep -Fq '<t id="80">' t/0001.xml
 # the MD variable key $anchor, read via event.param3.$anchor. Never pre-prefix
 # $ in Lua (it becomes the unreadable $$anchor). Ids go through
 # ConvertStringToLuaID and the reads keep the null-tolerant @ prefix. The $ is
-# a literal MD sigil, not a shell expansion, hence the single quotes.
-# shellcheck disable=SC2016
-grep -Fq 'event.param3.$anchor' md/x4_gunnery_control.xml
-# shellcheck disable=SC2016
-grep -Fq 'event.param3.$target' md/x4_gunnery_control.xml
+# a literal MD sigil, not a shell expansion; double-quoted and escaped for ShellCheck.
+grep -Fq "event.param3.\$anchor" md/x4_gunnery_control.xml
+grep -Fq "event.param3.\$target" md/x4_gunnery_control.xml
 grep -Fq 'ConvertStringToLuaID' "$main"
 # Framing (live-tested 2026-08-04): anchordist=0 puts the camera inside the
 # anchor's hull. Vanilla idiom (cinematiccamera.xml:2504) is a NEGATIVE
 # distance of anchor.size + margin so the camera sits behind the anchor along
 # the anchor->target axis with the anchor fully in frame.
-# shellcheck disable=SC2016
-grep -Fq 'number="-CutsceneAim.$Dist"' md/x4_gunnery_control.xml
+grep -Fq "number=\"-CutsceneAim.\$Dist\"" md/x4_gunnery_control.xml
 # Per-POV framing tune (round 5): Sit@Turret wants a close camera (~3m class),
 # Sit@Target keeps size + 50m; both need a lateral/vertical offset so the
 # anchor is not dead-center on the camera->target sight line.
-# shellcheck disable=SC2016
-grep -Fq 'CutsceneAim.$Pov' md/x4_gunnery_control.xml
-# shellcheck disable=SC2016
-grep -Fq 'number="CutsceneAim.$Dist * 0.4"' md/x4_gunnery_control.xml
+grep -Fq "CutsceneAim.\$Pov" md/x4_gunnery_control.xml
+grep -Fq "number=\"CutsceneAim.\$Dist * 0.4\"" md/x4_gunnery_control.xml
 # Shoulder-cam experiment: the asset cutscenes/x4gc_shoulder_cam.xml exists but
 # is deliberately UNWIRED (no MD cue, not in install/package). Sit@Turret
 # perpendicular-aim clipping is deferred; see docs/goals/engage-camera-aim.md.
