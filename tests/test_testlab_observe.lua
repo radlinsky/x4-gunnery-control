@@ -98,7 +98,7 @@ assert(state.params.prefer == true, "prefer was not forwarded from the session")
 assert(state.params.aimtgt == 4242, "aimtgt was not forwarded from the session")
 assert(state.params.softtgt == 1637331, "softtgt was not forwarded")
 assert(countEvents("observe_mark") == 1,
-    "a new Direct-control aim target must trigger one automatic solution snapshot")
+    "a new Direct-control aim target must trigger one automatic engageability snapshot")
 fix.runCallback(fix.pendingCallbacks[#fix.pendingCallbacks])
 assert(countEvents("observe_mark") == 1,
     "an unchanged Direct-control aim target must not trigger duplicate snapshots")

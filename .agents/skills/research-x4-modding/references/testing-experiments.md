@@ -103,7 +103,7 @@ selected group was raw `group_front_up_left`, members `0x204df21` and
 target B used the same range/bearing at 1.2 km elevation; C was the elevated
 15 km range control.
 
-This did NOT stage MASKED. Against A, the MD predicate reported `los_ex=1` and
+This did NOT stage LINE OF FIRE BLOCKED. Against A, the MD predicate reported `los_ex=1` and
 `inrange=1` for both selected turrets. `0x204df21` hit A three times during the
 initial 11-second hold. `0x204df32` did not fire in that interval, but later hit
 the unchanged A when selected C was OUT OF RANGE. The late hit proves A was a
@@ -126,7 +126,7 @@ signal on a traversing turret.
 The immediate follow-up in the same X4 9.00 session used scenario
 `issue-1-on-solution-cross-hull-r2`: A was moved from 1.2 km port to 1.2 km
 starboard, still 3 km forward and at hull level. This also did NOT stage
-MASKED. Immediate and settled (20-second) snapshots both reported `los_ex=1`
+LINE OF FIRE BLOCKED. Immediate and settled (20-second) snapshots both reported `los_ex=1`
 and `inrange=1` for exact selected members `0x204df21` and `0x204df32`, and
 both turrets struck A roughly 15--19 seconds after designation. The owner also
 reported that A was visibly not masked.
@@ -149,7 +149,7 @@ was 4 km forward and 1.2 km up, and C was 15 km forward and 1.2 km up.
 
 Immediate and settled snapshots agreed for both selected turrets:
 
-- A: `los_ex=0`, `inrange=1` -- MASKED only.
+- A: `los_ex=0`, `inrange=1` -- LINE OF FIRE BLOCKED only.
 - B: `los_ex=1`, `inrange=1` -- clear and within weapon range. Both selected
   turrets produced attributed hits on B.
 - C: `los_ex=1`, `inrange=0` -- OUT OF RANGE only. Although C appeared nearly

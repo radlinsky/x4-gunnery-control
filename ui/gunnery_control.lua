@@ -59,8 +59,8 @@ local resumePending, endingSession = false, false
 local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
-local solutionSerial, solutionCache, solutionRequests = 0, {}, {}
-local solutionRepaintSerial, solutionRepaintPending = 0, nil
+local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
+local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
 local activeExternalMenuName
@@ -120,8 +120,8 @@ end
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship)
-    solutionCache, solutionRequests = {}, {}
-    solutionRepaintPending = nil
+    engageabilityCache, engageabilityRequests = {}, {}
+    engageabilityRepaintPending = nil
     surfacePinnedUpdatePending = false
     local session = State.newSession(ship, "gunnercontrol")
     session.shipName = str(C.GetComponentName(ship))
@@ -410,9 +410,9 @@ end
 -- What the fallback actually covers, live-tested 2026-08-09 and 2026-08-10 and
 -- recorded in md-ai.md. The engine asks whether a turret can AIM at the
 -- preferred target, not whether it can hit it:
---   OUT OF RANGE  rolls to another hostile.
---   OUT OF ARC    rolls to another hostile.
---   MASKED        does not. The turret tracks the target and holds fire
+--   OUT OF RANGE          rolls to another hostile.
+--   CANNOT BEAR           rolls to another hostile.
+--   LINE OF FIRE BLOCKED  does not. The turret tracks the target and holds fire
 --                 indefinitely, and no mod can observe the condition to work
 --                 around it. This is the residual idle-turret case.
 -- An earlier version of this comment claimed the turret always engages
@@ -592,8 +592,8 @@ local function discardSession(reason)
     -- route (endForMovement -> endSession) is also covered.
     local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
-    solutionCache, solutionRequests = {}, {}
-    solutionRepaintPending = nil
+    engageabilityCache, engageabilityRequests = {}, {}
+    engageabilityRepaintPending = nil
     resumePending = false
     transitionLifecycle("ending", reason)
     clearOwnShipSofttarget()
@@ -1057,8 +1057,8 @@ end
 -- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
 -- events avoid relying on unproven nested-table transport: selected turret ids
 -- are streamed once, followed by at most 20 target ids for the batch.
-local solutionBatchSize = 20
-local function requestSolutions(targets, purpose)
+local engageabilityBatchSize = 20
+local function requestEngageabilities(targets, purpose)
     local results = {}
     if not session then return results end
     local members, signatureParts = checkedOperationalTurrets(), {}
@@ -1071,16 +1071,16 @@ local function requestSolutions(targets, purpose)
     -- If only that aggregate event is lost, retain the empty request briefly so
     -- a late completion can still be audited, then reclaim it before the next
     -- completed-result cache refresh.
-    for nonce, request in pairs(solutionRequests) do
+    for nonce, request in pairs(engageabilityRequests) do
         if request.resultsCompleteAt and now - request.resultsCompleteAt >= 1 then
-            solutionRequests[nonce] = nil
+            engageabilityRequests[nonce] = nil
         end
     end
     for position, target in ipairs(targets or {}) do
         if not State.isNullID(target) then
             local targetKey = State.normID(target)
             local key = tostring(sessionEpoch) .. ":" .. targetKey
-            local cached = solutionCache[key]
+            local cached = engageabilityCache[key]
             if cached and cached.signature == signature then
                 if cached.pending and now - cached.requestedAt < 2 then
                     results[position] = cached
@@ -1090,23 +1090,23 @@ local function requestSolutions(targets, purpose)
             end
             if not results[position] then
                 if #members == 0 then
-                    cached = { on = 0, total = 0, signature = signature, requestedAt = now }
-                    solutionCache[key] = cached
+                    cached = { engageable = 0, total = 0, signature = signature, requestedAt = now }
+                    engageabilityCache[key] = cached
                 else
                     -- Supersede only this target in an older batch. The older
                     -- request remains alive for its other correlated targets.
                     if cached and cached.pendingNonce then
                         local previousNonce = cached.pendingNonce
-                        local previous = solutionRequests[previousNonce]
+                        local previous = engageabilityRequests[previousNonce]
                         if previous then
                             previous.targets[targetKey] = nil
-                            if next(previous.targets) == nil then solutionRequests[previousNonce] = nil end
+                            if next(previous.targets) == nil then engageabilityRequests[previousNonce] = nil end
                         end
                     end
                     cached = cached and cached.signature == signature and cached or {}
                     cached.signature, cached.requestedAt, cached.pending, cached.total,
-                        cached.on, cached.known = signature, now, true, #members, nil, nil
-                    solutionCache[key] = cached
+                        cached.engageable, cached.known = signature, now, true, #members, nil, nil
+                    engageabilityCache[key] = cached
                     if not seen[targetKey] then
                         seen[targetKey] = true
                         pending[#pending + 1] = { target = target, targetKey = targetKey, key = key, cached = cached }
@@ -1117,16 +1117,16 @@ local function requestSolutions(targets, purpose)
         end
     end
 
-    for first = 1, #pending, solutionBatchSize do
-        local last = math.min(first + solutionBatchSize - 1, #pending)
-        solutionSerial = solutionSerial + 1
-        local nonce = tostring(sessionEpoch) .. "_" .. tostring(solutionSerial)
+    for first = 1, #pending, engageabilityBatchSize do
+        local last = math.min(first + engageabilityBatchSize - 1, #pending)
+        engageabilitySerial = engageabilitySerial + 1
+        local nonce = tostring(sessionEpoch) .. "_" .. tostring(engageabilitySerial)
         local request = {
             epoch = sessionEpoch, signature = signature, selectedTotal = #members,
             targets = {}, requested = last - first + 1, purpose = purpose,
         }
-        solutionRequests[nonce] = request
-        AddUITriggeredEvent("X4GunneryControl", "solution_batch_begin", {
+        engageabilityRequests[nonce] = request
+        AddUITriggeredEvent("X4GunneryControl", "engageability_begin", {
             nonce = nonce, members = #members, targets = request.requested,
         })
         for _, member in ipairs(members) do
@@ -1138,7 +1138,7 @@ local function requestSolutions(targets, purpose)
             local macro = tostring(member.macro or "")
             if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
             local arc = TurretArcLimits[macro]
-            AddUITriggeredEvent("X4GunneryControl", "solution_batch_member", {
+            AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
                 nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
                 arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0 })
         end
@@ -1146,12 +1146,12 @@ local function requestSolutions(targets, purpose)
             local entry = pending[index]
             entry.cached.pendingNonce = nonce
             request.targets[entry.targetKey] = entry.key
-            AddUITriggeredEvent("X4GunneryControl", "solution_batch_target", {
+            AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
                 nonce = nonce, target = id(entry.target),
             })
         end
-        AddUITriggeredEvent("X4GunneryControl", "solution_batch_commit", { nonce = nonce })
-        log("event=solution_batch action=request nonce=" .. nonce
+        AddUITriggeredEvent("X4GunneryControl", "engageability_commit", { nonce = nonce })
+        log("event=engageability_batch action=request nonce=" .. nonce
             .. " requested=" .. tostring(request.requested)
             .. " selected_total=" .. tostring(#members)
             .. " selected_signature=" .. string.format("%q", signature))
@@ -1159,24 +1159,24 @@ local function requestSolutions(targets, purpose)
     return results
 end
 
-local function requestSolution(target, purpose)
-    return requestSolutions({ target }, purpose)[1]
+local function requestEngageability(target, purpose)
+    return requestEngageabilities({ target }, purpose)[1]
 end
 
-local function solutionText(result)
+local function engageabilityText(result)
     if not result then return "-" end
-    if result.pending and result.on == nil then return "… / " .. tostring(result.total) end
-    local label = tostring(result.on or 0) .. " / " .. tostring(result.total or 0)
+    if result.pending and result.engageable == nil then return "… / " .. tostring(result.total) end
+    local label = tostring(result.engageable or 0) .. " / " .. tostring(result.total or 0)
     local unknown = math.max(0, (result.total or 0) - (result.known or 0))
     if unknown > 0 then return label .. "  " .. tostring(unknown) .. " " .. text(100) end
-    if (result.total or 0) > 0 and result.on == result.total then return label .. "  " .. text(89) end
+    if (result.total or 0) > 0 and result.engageable == result.total then return label .. "  " .. text(89) end
     return label
 end
 
-local function solutionAudit(result)
+local function engageabilityAudit(result)
     if not result then return "unavailable", "-", 0, 0 end
     if result.pending then return "pending", "-", 0, result.total or 0 end
-    return "complete", result.on or 0, result.known or 0, result.total or 0
+    return "complete", result.engageable or 0, result.known or 0, result.total or 0
 end
 
 -- A target/surface render can issue dozens of independent MD requests. Their
@@ -1184,7 +1184,7 @@ end
 -- for every reply makes enumeration and audit logging quadratic in row count.
 -- One tokenized callback repaints the whole accepted batch. A token survives
 -- stale callbacks safely when session teardown resets the pending marker.
-local function scheduleSolutionRepaint(purpose)
+local function scheduleEngageabilityRepaint(purpose)
         if purpose == "surface_pinned" then
         if surfacePinnedUpdatePending then return end
         surfacePinnedUpdatePending = true
@@ -1196,12 +1196,12 @@ local function scheduleSolutionRepaint(purpose)
                 local browser = session.surfaceBrowser
                 local pinnedID = session.aimTargetID or session.targetObjectID
                 local result = browser and browser.pinnedResult
-                local state, on, known, total = solutionAudit(result)
+                local state, engageable, known, total = engageabilityAudit(result)
                 local shielded, shieldpercent, hullpercent = surfaceHealth(pinnedID)
                 log("event=surface_pinned action=refresh component=" .. tostring(pinnedID)
-                    .. " solution_state=" .. state .. " solution_on=" .. tostring(on)
-                    .. " solution_known=" .. tostring(known)
-                    .. " solution_total=" .. tostring(total)
+                    .. " engageability_state=" .. state .. " engageability_engageable=" .. tostring(engageable)
+                    .. " engageability_known=" .. tostring(known)
+                    .. " engageability_total=" .. tostring(total)
                     .. " distance=" .. tostring(browser and browser.pinnedDistance or -1)
                     .. " shield_capacity=" .. tostring(shielded)
                     .. " shield_percent=" .. tostring(shieldpercent)
@@ -1211,14 +1211,14 @@ local function scheduleSolutionRepaint(purpose)
         end, false, getElapsedTime() + 0.01)
         return
     end
-    if solutionRepaintPending then return end
-    solutionRepaintSerial = solutionRepaintSerial + 1
-    local token = solutionRepaintSerial
-    solutionRepaintPending = token
+    if engageabilityRepaintPending then return end
+    engageabilityRepaintSerial = engageabilityRepaintSerial + 1
+    local token = engageabilityRepaintSerial
+    engageabilityRepaintPending = token
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        if solutionRepaintPending ~= token then return end
-        solutionRepaintPending = nil
+        if engageabilityRepaintPending ~= token then return end
+        engageabilityRepaintPending = nil
         if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
         if session.phase == "target_select"
                 or (session.phase == "engaged" and session.controlMode == "direct") then
@@ -1227,48 +1227,41 @@ local function scheduleSolutionRepaint(purpose)
     end, false, getElapsedTime() + 0.01)
 end
 
-local function onSolutionResult(_, param)
-    local nonce, targetKey, on, known, total = tostring(param or ""):match(
-        "^x4gcs3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
-    if not nonce then
-        -- Accept the immediately preceding protocol during a UI-only reload;
-        -- it had no UNKNOWN state, so every returned member was implicitly known.
-        nonce, targetKey, on, total = tostring(param or ""):match(
-            "^x4gcs2:([^:]+):([^:]+):(%d+):(%d+)$")
-        known = total
-    end
-    local request = nonce and solutionRequests[nonce]
+local function onEngageabilityResult(_, param)
+    local nonce, targetKey, engageable, known, total = tostring(param or ""):match(
+        "^x4gce3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
+    local request = nonce and engageabilityRequests[nonce]
     if not request or not session or request.epoch ~= sessionEpoch then return end
-    on, known, total = tonumber(on), tonumber(known), tonumber(total)
-    if total ~= request.selectedTotal or known > total or on > known then return end
+    engageable, known, total = tonumber(engageable), tonumber(known), tonumber(total)
+    if total ~= request.selectedTotal or known > total or engageable > known then return end
     targetKey = State.normID(targetKey)
     local key = request.targets[targetKey]
-    local cached = key and solutionCache[key]
+    local cached = key and engageabilityCache[key]
     if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.on, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
-        on, known, total, false, nil, getElapsedTime()
+    cached.engageable, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
+        engageable, known, total, false, nil, getElapsedTime()
     request.targets[targetKey] = nil
     if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
     if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        scheduleSolutionRepaint(request.purpose)
+        scheduleEngageabilityRepaint(request.purpose)
     end
 end
 
 
-local function onSolutionBatchComplete(_, param)
-    local nonce, accepted, completed = tostring(param or ""):match("^x4gcs2c:([^:]+):(%d+):(%d+)$")
-    local request = nonce and solutionRequests[nonce]
+local function onEngageabilityBatchComplete(_, param)
+    local nonce, accepted, completed = tostring(param or ""):match("^x4gce2c:([^:]+):(%d+):(%d+)$")
+    local request = nonce and engageabilityRequests[nonce]
     if not request or not session or request.epoch ~= sessionEpoch then return end
     local unresolved = 0
     for _, key in pairs(request.targets) do
-        local cached = solutionCache[key]
+        local cached = engageabilityCache[key]
         if cached and cached.signature == request.signature and cached.pendingNonce == nonce then
             cached.pendingNonce = nil
             unresolved = unresolved + 1
         end
     end
-    solutionRequests[nonce] = nil
-    log("event=solution_batch action=complete nonce=" .. nonce
+    engageabilityRequests[nonce] = nil
+    log("event=engageability_batch action=complete nonce=" .. nonce
         .. " requested=" .. tostring(request.requested)
         .. " accepted=" .. tostring(accepted)
         .. " completed=" .. tostring(completed)
@@ -1857,9 +1850,9 @@ function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
-function TestAPI.requestSolution(target) return requestSolution(target) end
-function TestAPI.requestSolutions(targets) return requestSolutions(targets) end
-function TestAPI.solutionText(result) return solutionText(result) end
+function TestAPI.requestEngageability(target) return requestEngageability(target) end
+function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
+function TestAPI.engageabilityText(result) return engageabilityText(result) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
@@ -2214,7 +2207,7 @@ function menu.display()
             local pinnedSurface = surfaceMetadata(browser, pinnedID)
             if not browser.pinnedResult then
                 browser.pinnedDistance = surfaceDistance(pinnedID)
-                browser.pinnedResult = requestSolution(pinnedID, "surface_pinned")
+                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
             end
             local pinnedName = pinnedSurface and pinnedSurface.name or tgtName
             local pinnedKind = pinnedSurface and pinnedSurface.kind or text(92)
@@ -2227,7 +2220,7 @@ function menu.display()
             local pinnedRow = elemTable:addRow("surface_pinned", {})
             pinnedRow[1]:setColSpan(2):createText(pinnedKind)
             pinnedRow[3]:createText(function() return surfaceDistanceText(browser.pinnedDistance) end)
-            pinnedRow[4]:createText(function() return solutionText(browser.pinnedResult) end)
+            pinnedRow[4]:createText(function() return engageabilityText(browser.pinnedResult) end)
             pinnedRow[5]:createText(function() return surfaceShieldText(pinnedID) end)
             local pinnedHullRow = elemTable:addRow("surface_pinned_hull", {})
             pinnedHullRow[5]:createText(function() return surfaceHullText(pinnedID) end)
@@ -2255,7 +2248,7 @@ function menu.display()
                     signatureParts[#signatureParts + 1] = State.normID(member.componentID)
                 end
                 pageCache = {
-                    results = requestSolutions(pageIDs, "surface_page"), audited = false,
+                    results = requestEngageabilities(pageIDs, "surface_page"), audited = false,
                     distances = {},
                     selectedTotal = #pageMembers, selectedSignature = table.concat(signatureParts, ","),
                 }
@@ -2289,19 +2282,19 @@ function menu.display()
                     local result = pageCache.results[position]
                     if not result or result.pending then complete = false end
                     if complete and not pageCache.audited then
-                        local solutionState, solutionOn, solutionKnown, solutionTotal = solutionAudit(result)
-                        log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s macro=%q size=%s size_source=%s distance=%s snapshot_distance=%s position=%d page=%d pinned=false solution_state=%s solution_on=%s solution_known=%s solution_total=%s solution_text=%q",
+                        local engageabilityState, engageabilityEngageable, engageabilityKnown, engageabilityTotal = engageabilityAudit(result)
+                        log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s macro=%q size=%s size_source=%s distance=%s snapshot_distance=%s position=%d page=%d pinned=false engageability_state=%s engageability_engageable=%s engageability_known=%s engageability_total=%s engageability_text=%q",
                             tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
                             surface.kindKey, surface.macro, surface.size, surface.sizeSource,
                             tostring(pageCache.distances[position]),
                             tostring(surface.distance), position, page,
-                            solutionState, tostring(solutionOn), tostring(solutionKnown),
-                            tostring(solutionTotal), solutionText(result)))
+                            engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
+                            tostring(engageabilityTotal), engageabilityText(result)))
                     end
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
                     surfRow[1]:setColSpan(2):createText(surface.name)
                     surfRow[3]:createText(surfaceDistanceText(pageCache.distances[position]))
-                    surfRow[4]:createText(solutionText(result))
+                    surfRow[4]:createText(engageabilityText(result))
                     surfRow[5]:createButton({}):setText(text(60))
                     surfRow[5].handlers.onClick = function() engageTarget(surface.componentID) end
                 end
@@ -2372,12 +2365,12 @@ function menu.display()
         local classValues, typeValues = 0, 0
         local candidateIDs = {}
         for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
-        local candidateSolutions = requestSolutions(candidateIDs)
-        for index, candidate in ipairs(candidates) do candidate.solution = candidateSolutions[index] end
+        local candidateEngageabilities = requestEngageabilities(candidateIDs)
+        for index, candidate in ipairs(candidates) do candidate.engageability = candidateEngageabilities[index] end
         table.sort(candidates, function(a, b)
-            local aOn = a.solution and a.solution.total > 0 and a.solution.on == a.solution.total or false
-            local bOn = b.solution and b.solution.total > 0 and b.solution.on == b.solution.total or false
-            if aOn ~= bOn then return aOn end
+            local aEngageable = a.engageability and a.engageability.total > 0 and a.engageability.engageable == a.engageability.total or false
+            local bEngageable = b.engageability and b.engageability.total > 0 and b.engageability.engageable == b.engageability.total or false
+            if aEngageable ~= bEngageable then return aEngageable end
             if a.priority ~= b.priority then return a.priority < b.priority end
             if a.distance ~= b.distance then
                 if a.distance < 0 then return false end
@@ -2394,17 +2387,17 @@ function menu.display()
             .. " class_values=" .. tostring(classValues)
             .. " type_values=" .. tostring(typeValues))
         for position, candidate in ipairs(candidates) do
-            local solutionState, solutionOn, solutionKnown, solutionTotal = solutionAudit(candidate.solution)
-            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d solution_state=%s solution_on=%s solution_known=%s solution_total=%s solution_text=%q",
+            local engageabilityState, engageabilityEngageable, engageabilityKnown, engageabilityTotal = engageabilityAudit(candidate.engageability)
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d engageability_state=%s engageability_engageable=%s engageability_known=%s engageability_total=%s engageability_text=%q",
                 tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName,
-                candidate.macro, position, solutionState, tostring(solutionOn), tostring(solutionKnown),
-                tostring(solutionTotal), solutionText(candidate.solution)))
+                candidate.macro, position, engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
+                tostring(engageabilityTotal), engageabilityText(candidate.engageability)))
             local row = tableView:addRow(tostring(candidate.componentID), {})
             row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
             row[6]:createText(candidate.relation)
             row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
-            row[8]:setColSpan(2):createText(solutionText(candidate.solution))
+            row[8]:setColSpan(2):createText(engageabilityText(candidate.engageability))
             row[10]:setColSpan(3):createButton({}):setText(text(52))
             row[10].handlers.onClick = function() engageTarget(candidate.componentID) end
         end
@@ -2572,7 +2565,7 @@ function menu.onUpdate()
     local now = getElapsedTime()
     -- X4 can continue delivering UI updates while simulation time is paused.
     -- Do not let those updates turn a frozen elapsed-time deadline into a
-    -- recursive pinned-solution request/repaint loop.
+    -- recursive pinned-engageability request/repaint loop.
     if not C.IsGamePaused()
             and session.phase == "engaged" and session.controlMode == "direct"
             and session.targetObjectID and session.surfaceBrowser then
@@ -2581,7 +2574,7 @@ function menu.onUpdate()
             browser.pinnedRefreshAt = now + 1
             local pinnedID = session.aimTargetID or session.targetObjectID
             browser.pinnedDistance = surfaceDistance(pinnedID)
-            browser.pinnedResult = requestSolution(pinnedID, "surface_pinned")
+            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
         end
         if browser.autoRefresh and browser.nextAutoRefreshAt and now >= browser.nextAutoRefreshAt then
             browser.nextAutoRefreshAt = now + 10
@@ -2883,8 +2876,8 @@ local function init()
     -- so directed turrets roll to the next hostile instead of holding fire.
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
-    RegisterEvent("X4GunneryControl.SolutionResult", onSolutionResult)
-    RegisterEvent("X4GunneryControl.SolutionBatchComplete", onSolutionBatchComplete)
+    RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
+    RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu

@@ -64,7 +64,7 @@
 --                            READY unless the live mode census proves it.
 --
 -- Issue #1 experiment: compare the same ticked upper turret group against a
--- candidate MASKED by a named, player-owned capital ship, a clear-sky control,
+-- candidate whose LINE OF FIRE is BLOCKED by a named, player-owned capital ship, a clear-sky control,
 -- and an OUT OF RANGE control. Mark each target in Test Lab and compare
 -- [X4GC TEST SOLUTION] against [X4GC TEST HIT].
 

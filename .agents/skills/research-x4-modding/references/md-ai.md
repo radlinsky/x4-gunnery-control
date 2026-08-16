@@ -47,7 +47,7 @@
 - Source: `schemas-9.00/libraries/common.xsd:21691` (the `check_line_of_sight` action element); `aiscripts/mining.collect.ship.capital.xml:229-231`; `aiscripts/move.attack.object.capital.xml:657,681`
 - Live test: no — untested as of 2026-08-09
 - Finding: `check_line_of_sight` is an MD/AI action that performs ray casts. Its `object` attribute accepts a turret component, so line of sight can be tested per individual turret against a target. Attributes include `object`, `objectoffset`, `target`, `targetoffset`, `useaimtarget`, `excludeself`, and `name`. Setting `useaimtarget="true"` uses the object's aim targets as the raycast destination, consistent with weapon aiming. Shipped combat and mining AI defines "this turret can engage this target" as line of sight AND `turret.distanceto.{target} + (target.size/2) < turret.maxfirerange`. Vanilla does NOT perform any separate gimbal or traverse-arc test; LOS from the turret component plus range is the engine's own working definition of a firing solution. The vanilla loop answers only "does ANY turret have a solution" (it breaks on first hit), so an N-of-total count is strictly more expensive than anything shipped code does.
-- Scope of that claim, added 2026-08-10 so it is not over-read: this establishes what VANILLA computes, from shipped source. It has never been run by this project and says nothing about detecting the MASKED condition — a turret trained on a target with the ship's OWN hull in the line of fire. Whether `check_line_of_sight` can answer that is UNRESOLVED and untested: the ray from a turret to its target begins inside the firing ship's own hull, so `excludeself` plausibly decides the result in both directions (true and it cannot see own-hull masking at all; false and it may report every shot blocked), but the exact `excludeself` semantics have not been verified against the engine. Not pursued, because MASKED was confirmed live on 2026-08-09 to be unrecoverable regardless — the engine's preferred-target fallback never rolls off a MASKED target, so knowing the condition would not let a mod act on it. Do not cite this entry as evidence either that the technique works for MASKED or that it cannot.
+- Scope of that claim, added 2026-08-10 so it is not over-read: this establishes what VANILLA computes, from shipped source. It has never been run by this project and says nothing about detecting the LINE OF FIRE BLOCKED condition — a turret trained on a target with the ship's OWN hull in the line of fire. Whether `check_line_of_sight` can answer that is UNRESOLVED and untested: the ray from a turret to its target begins inside the firing ship's own hull, so `excludeself` plausibly decides the result in both directions (true and it cannot see own-hull masking at all; false and it may report every shot blocked), but the exact `excludeself` semantics have not been verified against the engine. Not pursued, because LINE OF FIRE BLOCKED was confirmed live on 2026-08-09 to be unrecoverable regardless — the engine's preferred-target fallback never rolls off a LINE OF FIRE BLOCKED target, so knowing the condition would not let a mod act on it. Do not cite this entry as evidence either that the technique works for LINE OF FIRE BLOCKED or that it cannot.
 - RESOLVED 2026-08-11, the `excludeself` half only: `excludeself="false"` is useless
   from a turret mounted on the firing ship. In a Test Lab capture that called both
   variants back to back on the same turret/target pair every sample,
@@ -63,8 +63,8 @@
   `testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml`
   (call sites `:244-245`), captured to `debug.log`. Not shipped-source; not
   reproduced on a second ship or a second session.
-- Still UNRESOLVED after that capture: everything above about MASKED. The capture
-  did not stage a MASKED condition, and it never established what
+- Still UNRESOLVED after that capture: everything above about LINE OF FIRE BLOCKED. The capture
+  did not stage a LINE OF FIRE BLOCKED condition, and it never established what
   `excludeself="true"` blocked results actually correspond to. Do not read
   "1803 blocked" as "1803 masked".
 - WHY it behaves that way, added 2026-08-11 from shipped source (not live-tested):
@@ -162,7 +162,7 @@
   `$turret.rotation` route (record below). MD cannot ask a turret where it is
   pointing, but it can observe where a turret actually shot. The two are not
   equivalent — this samples only at trigger pulls, so a turret that is tracking
-  but holding fire produces nothing, which is precisely the MASKED case.
+  but holding fire produces nothing, which is precisely the LINE OF FIRE BLOCKED case.
 - Untested by this project. Whether `bullet.rotation` is populated usefully at
   event time, and whether the bullet is still valid when the handler runs, are
   both open.
@@ -356,8 +356,8 @@
   decision on 2026-08-10 and the sweep now omits `weaponmode` entirely. The
   engine finding above is unaffected — it is what makes the new behaviour work,
   and what makes it a real change rather than a cosmetic one. For what a
-  preferred target plus a real list actually does, see the OUT OF ARC / OUT OF
-  RANGE / MASKED record below.
+  preferred target plus a real list actually does, see the CANNOT BEAR / OUT OF
+  RANGE / LINE OF FIRE BLOCKED record below.
 - Lesson: an MD action that throws is a log line, not an error the game surfaces.
   Confirm the action applied before recording anything observed after it.
 
@@ -425,7 +425,7 @@
   pilot's script would overwrite any mod-supplied list ~60 times a second. It
   does not. Under an active attack order the mod's preferred target was honoured
   and held, re-acquired on every target change, and its fallback list was used
-  when the preferred target was MASKED and OUT OF ARC.
+  when the preferred target was LINE OF FIRE BLOCKED and CANNOT BEAR.
 - Consequence for mods: a mod may direct turrets with
   `weaponmode.attackenemies` regardless of what the ship's own pilot is doing.
   There is no need to detect the pilot's command state and switch modes to avoid
@@ -441,27 +441,27 @@
   ships, for a pilot under `command.attackenemies` specifically, or when two
   mods write turret targets at once.
 
-### preferredtarget falls back on OUT OF ARC and OUT OF RANGE, but not on MASKED
+### preferredtarget falls back on CANNOT BEAR and OUT OF RANGE, but not on LINE OF FIRE BLOCKED
 - X4: 9.00
 - Status: live-tested
 - Corroboration: staged twice against purpose-built hostile groups, with the
   directed mode logged per engage
-- Source: in-game trials 2026-08-09 (OUT OF RANGE, MASKED) and 2026-08-10
-  (OUT OF ARC), player-piloted capital ship, `set_turret_targets` issued
+- Source: in-game trials 2026-08-09 (OUT OF RANGE, LINE OF FIRE BLOCKED) and 2026-08-10
+  (CANNOT BEAR), player-piloted capital ship, `set_turret_targets` issued
   narrow-then-wide with `preferredtarget` plus a hostile `target` list and
   `weaponmode="weaponmode.attackenemies"`
 - Live test: yes — 2026-08-09 and 2026-08-10, X4 9.00
 - Finding: a turret that cannot engage the preferred target rolls to another
   hostile from the supplied list in two of the three fire-control conditions.
   - **OUT OF RANGE** (target 15 km out, far beyond turret reach): falls back.
-  - **OUT OF ARC** (target 3 km astern and 1.2 km high, engaged by a group whose
+  - **CANNOT BEAR** (target 3 km astern and 1.2 km high, engaged by a group whose
     mount cannot bear on it): falls back. A group that *can* bear on the same
     target engages it normally, which is the control.
-  - **MASKED** (turret trained on the target with own hull in the line of fire):
+  - **LINE OF FIRE BLOCKED** (turret trained on the target with own hull in the line of fire):
     does **not** fall back. The turret tracks the target and holds fire
     indefinitely. The engine's fallback asks whether the turret can aim, not
     whether it can hit.
-- Consequence: MASKED cannot be corrected by re-issuing targets, because the
+- Consequence: LINE OF FIRE BLOCKED cannot be corrected by re-issuing targets, because the
   engine's own fallback is what would have to act and it does not. Whether a mod
   could OBSERVE the condition is a separate and open question: there is no
   per-turret current-target property (`scriptproperties.xml:1441-1461`, checked),
@@ -473,7 +473,7 @@
   "attribution is impossible": per-turret attribution exists via the EVENT
   `event_object_attacked_object`, whose `param3.{2}` is the firing weapon, and
   per-shot bore direction via `event_weapon_fired` plus `bullet.launcher` (both
-  records above). What is unavailable is polling, not attribution. MASKED itself
+  records above). What is unavailable is polling, not attribution. LINE OF FIRE BLOCKED itself
   was still never staged and remains unobserved; no fix follows from the answer
   regardless, so the closure of this line of work stands on the fix, not on the
   detectors.
