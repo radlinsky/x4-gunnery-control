@@ -135,6 +135,11 @@ function State.newSession(shipID, controlGroup)
         -- Direct-control only: take the turrets to the next target when the
         -- engaged one dies. Off sends the player back to the target browser.
         autoNextTarget = true,
+        -- Global Direct-control policy applied to checked groups. "attackenemies"
+        -- honours a script-supplied target list; "autoassist" ignores the list and
+        -- follows the soft target. Changing this re-stages all currently-checked
+        -- groups in the new mode without touching preTickMode.
+        directMode = "attackenemies",
         -- Revert target on stand-up: what modes and armed states the ship's
         -- turrets return to when the player leaves the chair. Seeded from the
         -- ship's actual state at sit-down, updated only by an explicit
@@ -356,31 +361,39 @@ end
 -- This is the mode ticking assigns and the binding tests against.
 State.TICK_MODE = "attackenemies"
 
--- When a group that was seeded ticked at sit-down (the ship was already in
--- attackenemies from a previously committed session — correct and intended) is
--- unticked it has no preTickMode to restore. "defend" is the deliberate fallback:
--- it keeps the group protecting the ship rather than aggressive or silent.
+-- When a group that was seeded ticked at sit-down (the ship was already in a
+-- Direct-control mode from a previously committed session — correct and
+-- intended) is unticked it has no preTickMode to restore. "defend" is the
+-- deliberate fallback: it keeps the group protecting the ship rather than
+-- aggressive or silent.
 State.UNTICK_FALLBACK = "defend"
 
--- Apply tick side-effects on a staged entry: set mode to TICK_MODE and
--- record the displaced mode in preTickMode so an untick can restore it.
--- Mutates staged[groupKey] in-place; creates the entry if needed.
--- defaultArmed is the group's live armed state, used only when the entry
--- must be created from scratch (same contract as stageMode).
+-- Returns true when mode is one of the two Direct-control engine modes.
+function State.isDirectedMode(mode)
+    return mode == "attackenemies" or mode == "autoassist"
+end
+
+-- Apply tick side-effects on a staged entry: set mode to the session's current
+-- Direct-control policy and record the displaced mode in preTickMode so an
+-- untick can restore it. Mutates staged[groupKey] in-place; creates the entry
+-- if needed. defaultArmed is the group's live armed state, used only when the
+-- entry must be created from scratch (same contract as stageMode).
 local function applyTick(session, groupKey, defaultArmed)
+    local tickMode = session.directMode or State.TICK_MODE
     local s = session.staged and session.staged[groupKey]
     if s then
-        -- preTickMode must never be TICK_MODE itself, or untick "restores" the
-        -- mode the group already has and the checkbox looks dead. Two ways in:
-        -- a double-tick, and a group whose live mode was already TICK_MODE when
-        -- it was ticked. Guard the value, not just the first write.
-        if not s.preTickMode and s.mode ~= State.TICK_MODE then s.preTickMode = s.mode end
-        s.mode = State.TICK_MODE
+        -- preTickMode must never be a Direct-control mode itself, or untick
+        -- "restores" the mode the group already has and the checkbox looks dead.
+        -- Two ways in: a double-tick, and a group whose live mode was already a
+        -- Direct-control mode when it was ticked. Guard the value, not just the
+        -- first write.
+        if not s.preTickMode and not State.isDirectedMode(s.mode) then s.preTickMode = s.mode end
+        s.mode = tickMode
     else
         -- No staged entry yet: invent one from defaults. preTickMode is nil
         -- so untick falls back to UNTICK_FALLBACK.
         if session.staged then
-            session.staged[groupKey] = { mode = State.TICK_MODE, armed = defaultArmed }
+            session.staged[groupKey] = { mode = tickMode, armed = defaultArmed }
         end
     end
 end
@@ -574,13 +587,15 @@ function State.seedBaseline(session, groups)
         local stagedKey = State.baselineStagedKey(entry)
         staged[stagedKey] = { mode = group.mode, armed = group.armed }
         -- The checkbox is bound to the mode in both directions, so a group the
-        -- ship is already flying in TICK_MODE must come up ticked -- otherwise a
-        -- committed change survives standing up but its checkbox does not, and
-        -- ticking it then records TICK_MODE as its own preTickMode and the
-        -- checkbox stops doing anything at all. No preTickMode is stored: there
-        -- is no earlier mode to go back to, so untick falls to UNTICK_FALLBACK.
-        if group.mode == State.TICK_MODE then
+        -- ship is already flying in a Direct-control mode (attackenemies or
+        -- autoassist) must come up ticked -- otherwise a committed change survives
+        -- standing up but its checkbox does not, and ticking it then records the
+        -- Directed-control mode as its own preTickMode and the checkbox stops
+        -- doing anything at all. No preTickMode is stored: there is no earlier
+        -- mode to go back to, so untick falls to UNTICK_FALLBACK.
+        if State.isDirectedMode(group.mode) then
             session.checkedGroupKeys[stagedKey] = true
+            staged[stagedKey].mode = session.directMode
         end
     end
     session.committedBaseline = baseline
@@ -588,8 +603,11 @@ function State.seedBaseline(session, groups)
 end
 
 -- Update the staged mode for one group and sync the checkbox. The ship is not
--- touched. The checkbox is bound to TICK_MODE: setting the mode to TICK_MODE
--- ticks the group; setting it to anything else unticks it.
+-- touched. Membership is bound to the current Direct-control policy: setting
+-- the mode to the session's directMode ticks the group; setting it to an
+-- ordinary (non-Direct) mode unticks it. Choosing the OTHER Directed-control
+-- engine mode is a no-op for membership and staged mode, keeping the API safe
+-- for Task 2's constrained dropdown.
 --
 -- defaultArmed is the group's LIVE armed state, passed by the caller. A group
 -- can exist without a staged entry (a refresh() that discovers a turret group
@@ -602,23 +620,31 @@ function State.stageMode(session, groupKey, mode, defaultArmed)
     -- Capture the old mode before writing so the checkbox-sync can use it as
     -- preTickMode. Once s.mode is overwritten the information is gone.
     local oldMode = s and s.mode
-    local wasAttackEnemies = oldMode == State.TICK_MODE
-    local isAttackEnemies  = mode == State.TICK_MODE
+    local wasDirected   = State.isDirectedMode(oldMode)
+    local currentDirect = session.directMode
+    local isCurrentDirect = mode == currentDirect
+    local isOtherDirect   = State.isDirectedMode(mode) and mode ~= currentDirect
+    -- Choosing the OTHER Direct-control engine mode must not redefine membership
+    -- or policy: leave everything as-is.
+    if isOtherDirect then return end
     if s then s.mode = mode
     else session.staged[groupKey] = { mode = mode, armed = defaultArmed } end
     -- Sync the checkbox. When the player picks a mode from the dropdown the
-    -- checkbox follows: attackenemies ticks it, any other mode unticks it.
-    if not wasAttackEnemies and isAttackEnemies then
+    -- checkbox follows: the current directMode ticks it, any ordinary mode
+    -- unticks it.
+    if isCurrentDirect then
         -- Tick: record the displaced mode in preTickMode so untick can restore it.
-        -- Only set preTickMode when not already set, so a second tick doesn't
-        -- overwrite it with TICK_MODE itself.
+        -- Only set preTickMode when not already set and the old mode was not a
+        -- Direct-control mode (a double-tick, or a group that was seeded from a
+        -- previously-committed Directed session).
         session.checkedGroupKeys[groupKey] = true
         local entry = session.staged[groupKey]
-        if entry and not entry.preTickMode then entry.preTickMode = oldMode end
-    elseif wasAttackEnemies and not isAttackEnemies then
-        -- Untick: the caller chose a specific mode via the dropdown; honour it
-        -- directly rather than going through preTickMode (which would restore
-        -- the mode as of the last tick, which may differ from what was just picked).
+        if entry and not entry.preTickMode and not wasDirected then entry.preTickMode = oldMode end
+    elseif wasDirected then
+        -- Untick: the caller chose a specific ordinary mode via the dropdown;
+        -- honour it directly rather than going through preTickMode (which would
+        -- restore the mode as of the last tick, which may differ from what was
+        -- just picked).
         session.checkedGroupKeys[groupKey] = nil
         local entry = session.staged[groupKey]
         if entry then entry.mode = mode; entry.preTickMode = nil end
@@ -652,7 +678,8 @@ end
 
 -- Advance committedBaseline to match staged (permanent commit). Called when
 -- the player presses "Update turret behavior"; the caller writes staged to the
--- ship before calling this.
+-- ship before calling this. Checked groups have their preTickMode cleared so a
+-- later untick falls back to defend rather than resurrecting a stale ordinary mode.
 function State.commitStagedToBaseline(session)
     if not session then return end
     local staged = session.staged
@@ -660,6 +687,13 @@ function State.commitStagedToBaseline(session)
     for _, entry in ipairs(session.committedBaseline or {}) do
         local s = staged[State.baselineStagedKey(entry)]
         if s then entry.mode = s.mode; entry.armed = s.armed end
+    end
+    -- Checked groups just had their changes committed. Their preTickMode is no
+    -- longer a snapshot of the mode before the current engagement: a later
+    -- untick should fall back to defend, not resurrect a stale ordinary mode.
+    for key in pairs(session.checkedGroupKeys or {}) do
+        local s = staged[key]
+        if s then s.preTickMode = nil end
     end
 end
 
@@ -694,6 +728,29 @@ function State.snapshotsForSave(list)
         result[#result + 1] = State.snapshotForSave(snap)
     end
     return result
+end
+
+-- Set the global Direct-control policy for a session. Validates that mode is
+-- exactly "attackenemies" or "autoassist"; ignores any other value. On a valid
+-- change, updates session.directMode and re-stages every currently-checked group
+-- to the new mode (preTickMode is left untouched so untick still restores
+-- correctly). Returns true when the mode was valid and changed, false when
+-- ignored.
+function State.setDirectMode(session, mode)
+    if not State.isDirectedMode(mode) then return false end
+    if session.directMode == mode then return false end
+    session.directMode = mode
+    -- Re-stage all currently-checked groups so an active engagement sees the new
+    -- mode immediately on the next arm call. preTickMode is not touched: the
+    -- restore contract (untick -> preTickMode or UNTICK_FALLBACK) is independent
+    -- of which Directed-control mode the group is currently staged in.
+    if session.staged then
+        for key in pairs(session.checkedGroupKeys or {}) do
+            local s = session.staged[key]
+            if s then s.mode = mode end
+        end
+    end
+    return true
 end
 
 -- === Session persistence ===
@@ -770,6 +827,7 @@ function State.saveState(session)
         povAnchor = session.povAnchor or "turret",
         povMode = session.povMode or "manual",
         autoNextTarget = flag(session.autoNextTarget ~= false),
+        directMode = session.directMode or "attackenemies",
         shipID = tostring(session.shipID),
         -- Which ship this payload belongs to. shipID cannot answer that after a
         -- load, because a load reassigns it; the name survives.
@@ -881,7 +939,11 @@ local function validSessionRecord(record)
     -- intentionally ignored now (the target root is derived), but remains a
     -- valid optional legacy field rather than making an old save unrestorable.
     if record.targetObjectID ~= nil and not isString(record.targetObjectID) then return false end
-    -- directedMode: legacy field, no longer written or acted on; ignored if present.
+    -- directMode: optional; absent in legacy payloads (defaults to "attackenemies").
+    -- When present it must be one of the two known values; anything else is corruption.
+    if record.directMode ~= nil then
+        if record.directMode ~= "attackenemies" and record.directMode ~= "autoassist" then return false end
+    end
     return validCameraLocation(record)
 end
 
@@ -1036,22 +1098,37 @@ function State.restoreState(session, records, liveGroups)
             end
         end
     end
+    -- The restored global Direct-control policy. Computed before the staged
+    -- rebuild so a checked group stages in the session's actual policy -- otherwise
+    -- a reload of an autoassist session would stage checked groups as attackenemies
+    -- and the next "Update turret behavior" commit would silently arm the wrong mode.
+    -- Default "attackenemies" for legacy payloads that lack the field.
+    local restoredDirectMode = (head.directMode == "autoassist") and "autoassist" or "attackenemies"
     -- Rebuild staged from restored baseline so the console shows the committed
     -- config immediately, before the player makes any new changes.
     local restoredStaged = {}
     for _, entry in ipairs(baseline) do
         local stagedKey = State.baselineStagedKey(entry)
-        -- A checked group is under Direct-control, whose temporary mode is
-        -- always TICK_MODE. The checked and baseline records are independent:
-        -- baseline is the stand-up revert target, while checked describes the
-        -- current engagement. An unchecked group whose committed baseline is
-        -- TICK_MODE is the tick->commit->untick case: keep the checkbox clear,
-        -- display the normal unticked fallback, and retain TICK_MODE in the
-        -- baseline so standing up can still restore the committed mode.
+        -- A checked group is under Direct-control, staged in the session's directMode.
+        -- The checked and baseline records are independent: baseline is the stand-up
+        -- revert target, while checked describes the current engagement. An unchecked
+        -- group whose committed baseline is a Directed mode (attackenemies or autoassist)
+        -- is the tick->commit->untick case: keep the checkbox clear, display the normal
+        -- unticked fallback, and retain the committed mode in the baseline so standing
+        -- up can still restore it.
         local isChecked = checkedGroupKeys[stagedKey] == true
-        local stagedMode = isChecked and State.TICK_MODE
-            or (entry.mode == State.TICK_MODE and State.UNTICK_FALLBACK or entry.mode)
-        restoredStaged[stagedKey] = { mode = stagedMode, armed = entry.armed }
+        if isChecked then
+            restoredStaged[stagedKey] = { mode = restoredDirectMode, armed = entry.armed }
+            -- If baseline was an ordinary mode, this is a "before checkpoint" restore:
+            -- preserve the original mode as preTickMode so untick can go back to it.
+            if not State.isDirectedMode(entry.mode) then
+                restoredStaged[stagedKey].preTickMode = entry.mode
+            end
+        elseif State.isDirectedMode(entry.mode) then
+            restoredStaged[stagedKey] = { mode = State.UNTICK_FALLBACK, armed = entry.armed }
+        else
+            restoredStaged[stagedKey] = { mode = entry.mode, armed = entry.armed }
+        end
     end
     -- Last, so it wins over the componentID read in the loop: group name plus
     -- position is the only form of "which turret" that outlives a load.
@@ -1066,6 +1143,9 @@ function State.restoreState(session, records, liveGroups)
     session.povAnchor = head.povAnchor
     session.povMode = head.povMode
     session.autoNextTarget = head.autoNextTarget == "1"
+    -- directMode was resolved above (restoredDirectMode) so the staged rebuild
+    -- could see it; reuse that value rather than recomputing.
+    session.directMode = restoredDirectMode
     session.checkedGroupKeys = checkedGroupKeys
     if idsHeld then
         session.aimTargetID = (head.aimTargetID ~= "" and head.aimTargetID) or nil

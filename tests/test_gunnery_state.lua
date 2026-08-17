@@ -1302,4 +1302,302 @@ do
         "saveState must not emit directedMode")
 end
 
+-- Direct-control policy: State.isDirectedMode.
+assert(State.isDirectedMode("attackenemies"), "isDirectedMode: attackenemies is direct")
+assert(State.isDirectedMode("autoassist"),   "isDirectedMode: autoassist is direct")
+assert(not State.isDirectedMode("defend"),   "isDirectedMode: defend is ordinary")
+assert(not State.isDirectedMode("attack"),   "isDirectedMode: attack is ordinary")
+assert(not State.isDirectedMode(nil),        "isDirectedMode: nil is not direct")
+
+-- Fresh session defaults directMode to "attackenemies".
+do
+    local s = State.newSession(1, "g")
+    eq(s.directMode, "attackenemies", "newSession: default directMode is attackenemies")
+end
+
+-- seedBaseline: groups in either Direct-control mode come up checked and are
+-- staged in the session's current (default) policy, not their original mode.
+do
+    local sb = State.newSession(77, "g")
+    local atkGrp = { key = "group:C1:p:atk", kind = "group", componentID = 10,
+        contextID = "C1", path = "p", group = "atk",
+        mode = State.TICK_MODE, armed = true, operationalCount = 1, totalCount = 1 }
+    local autoGrp = { key = "group:C1:p:auto", kind = "group", componentID = 11,
+        contextID = "C1", path = "p", group = "auto",
+        mode = "autoassist", armed = true, operationalCount = 1, totalCount = 1 }
+    local ordGrp = { key = "group:C1:p:ord", kind = "group", componentID = 12,
+        contextID = "C1", path = "p", group = "ord",
+        mode = "defend", armed = false, operationalCount = 1, totalCount = 1 }
+    State.seedBaseline(sb, { atkGrp, autoGrp, ordGrp })
+    local atkKey   = State.groupKey("C1", "p", "atk")
+    local autoKey  = State.groupKey("C1", "p", "auto")
+    local ordKey   = State.groupKey("C1", "p", "ord")
+    assert(sb.checkedGroupKeys[atkKey] == true,  "seedBaseline: attackenemies group is checked")
+    assert(sb.checkedGroupKeys[autoKey] == true, "seedBaseline: autoassist group is checked")
+    assert(sb.checkedGroupKeys[ordKey] == nil,   "seedBaseline: ordinary group is unchecked")
+    -- Both direct groups are staged in the default policy (attackenemies).
+    eq(sb.staged[atkKey].mode, State.TICK_MODE,  "seedBaseline: attackenemies staged in policy")
+    eq(sb.staged[autoKey].mode, State.TICK_MODE, "seedBaseline: autoassist normalized to policy")
+    eq(sb.staged[ordKey].mode, "defend",         "seedBaseline: ordinary stays ordinary")
+    -- No preTickMode on seeded direct groups.
+    assert(sb.staged[atkKey].preTickMode == nil,  "seedBaseline: no preTickMode for attackenemies seed")
+    assert(sb.staged[autoKey].preTickMode == nil, "seedBaseline: no preTickMode for autoassist seed")
+end
+
+-- Ordinary tick/untick restoration.
+do
+    local s = State.newSession(1, "g")
+    s.staged = { k = { mode = "defend", armed = true } }
+    State.toggleGroup(s, "k", true)
+    assert(s.checkedGroupKeys["k"] == true, "ordinary tick: checks the group")
+    eq(s.staged["k"].mode, State.TICK_MODE, "ordinary tick: stages current policy")
+    eq(s.staged["k"].preTickMode, "defend", "ordinary tick: records displaced ordinary mode")
+    State.toggleGroup(s, "k", true)
+    assert(s.checkedGroupKeys["k"] == nil,  "ordinary untick: clears the checkbox")
+    eq(s.staged["k"].mode, "defend",       "ordinary untick: restores original mode")
+    assert(s.staged["k"].preTickMode == nil, "ordinary untick: clears preTickMode")
+end
+
+-- Direct-mode-origin tick/untick falls back to defend.
+do
+    local s = State.newSession(1, "g")
+    -- Group already in attackenemies (the default policy) but unchecked.
+    -- applyTick should NOT record the directed mode as preTickMode.
+    s.staged = { k = { mode = State.TICK_MODE, armed = true } }
+    assert(s.checkedGroupKeys["k"] == nil, "setup: group is unchecked")
+    State.toggleGroup(s, "k", true)  -- tick
+    assert(s.checkedGroupKeys["k"] == true, "direct tick: group is checked")
+    assert(s.staged["k"].preTickMode ~= State.TICK_MODE,
+        "direct tick: preTickMode is not the directed mode")
+    assert(s.staged["k"].preTickMode == nil,
+        "direct tick: preTickMode is nil so untick falls back")
+    State.toggleGroup(s, "k", true)  -- untick
+    eq(s.staged["k"].mode, State.UNTICK_FALLBACK,
+        "direct tick then untick: falls back to defend")
+end
+
+-- Policy change: attackenemies -> autoassist -> attackenemies while checked.
+do
+    local s = State.newSession(1, "g")
+    s.staged = { k1 = { mode = "defend", armed = true } }
+    assert(s.checkedGroupKeys["k1"] == nil, "policy setup: group is unchecked")
+    State.toggleGroup(s, "k1", true)  -- tick into attackenemies
+    eq(s.staged["k1"].mode, State.TICK_MODE, "policy: initial tick uses attackenemies")
+    eq(s.directMode, "attackenemies", "policy: default is attackenemies")
+    -- Switch to autoassist.
+    local ok = State.setDirectMode(s, "autoassist")
+    assert(ok, "policy: autoassist accepted")
+    eq(s.directMode, "autoassist",   "policy: directMode changed")
+    eq(s.staged["k1"].mode, "autoassist", "policy: checked group re-staged to new mode")
+    -- Switch back to attackenemies.
+    ok = State.setDirectMode(s, "attackenemies")
+    assert(ok, "policy: attackenemies accepted")
+    eq(s.directMode, "attackenemies", "policy: directMode changed back")
+    eq(s.staged["k1"].mode, State.TICK_MODE, "policy: checked group re-staged back")
+end
+
+-- Policy change preserves ordinary preTickMode on checked groups.
+do
+    local s = State.newSession(1, "g")
+    s.staged = { k = { mode = "defend", armed = true, preTickMode = "attack" } }
+    s.checkedGroupKeys["k"] = true
+    State.setDirectMode(s, "autoassist")
+    assert(s.staged["k"].preTickMode == "attack",
+        "policy change: preserves existing preTickMode on checked group")
+end
+
+-- toggleAllGroups obeys current policy and preserves valid preTickMode.
+do
+    local s = State.newSession(1, "g")
+    s.groups = {
+        { key = "m1", operationalCount = 1, totalCount = 1, armed = false },
+        { key = "m2", operationalCount = 1, totalCount = 1, armed = true },
+    }
+    s.staged = {
+        m1 = { mode = "defend", armed = false },
+        m2 = { mode = "attack", armed = true, preTickMode = "patrol" },
+    }
+    -- Select all: newly-ticked group uses current policy; already-checked keeps preTickMode.
+    State.toggleGroup(s, "m2", true)  -- check m2 first
+    eq(State.toggleAllGroups(s), true, "toggleAll: partial -> select all")
+    eq(s.staged["m1"].mode, State.TICK_MODE, "toggleAll: new tick uses current policy")
+    eq(s.staged["m2"].preTickMode, "patrol", "toggleAll: existing preTickMode preserved")
+    -- Deselect all.
+    eq(State.toggleAllGroups(s), false, "toggleAll: select all -> deselect all")
+    assert(next(s.checkedGroupKeys) == nil, "toggleAll: all unchecked")
+end
+
+-- Explicit ordinary stageMode removes membership.
+do
+    local s = State.newSession(1, "g")
+    s.staged = { k = { mode = State.TICK_MODE, armed = true } }
+    s.checkedGroupKeys["k"] = true
+    State.stageMode(s, "k", "defend", true)
+    assert(s.checkedGroupKeys["k"] == nil, "stageMode ordinary: unchecked on ordinary mode")
+    eq(s.staged["k"].mode, "defend",      "stageMode ordinary: stages explicit mode")
+    assert(s.staged["k"].preTickMode == nil, "stageMode ordinary: clears preTickMode")
+end
+
+-- Choosing the OTHER Direct-control engine mode via stageMode is a no-op for
+-- membership and staged mode.
+do
+    local s = State.newSession(1, "g")
+    s.directMode = "attackenemies"
+    s.staged = { k = { mode = State.TICK_MODE, armed = true } }
+    s.checkedGroupKeys["k"] = true
+    -- Try to switch to autoassist via stageMode.
+    State.stageMode(s, "k", "autoassist", true)
+    assert(s.checkedGroupKeys["k"] == true,  "other-direct stageMode: membership unchanged")
+    eq(s.staged["k"].mode, State.TICK_MODE, "other-direct stageMode: staged mode unchanged")
+    -- Unchecked group in ordinary mode: other-direct is also a no-op.
+    s.checkedGroupKeys = {}
+    s.staged = { k2 = { mode = "defend", armed = false } }
+    State.stageMode(s, "k2", "autoassist", false)
+    assert(s.checkedGroupKeys["k2"] == nil,  "other-direct stageMode unchecked: no check")
+    eq(s.staged["k2"].mode, "defend",       "other-direct stageMode unchecked: mode unchanged")
+end
+
+-- checkpoint then untick -> defend (preTickMode cleared by commit).
+do
+    local s = State.newSession(1, "g")
+    s.groups = { { key = "g1", operationalCount = 1, totalCount = 1 } }
+    s.staged = { g1 = { mode = "defend", armed = true, preTickMode = "attack" } }
+    s.checkedGroupKeys["g1"] = true
+    State.commitStagedToBaseline(s)
+    assert(s.staged["g1"].preTickMode == nil,
+        "checkpoint: clears preTickMode on checked group")
+    State.toggleGroup(s, "g1", true)
+    eq(s.staged["g1"].mode, State.UNTICK_FALLBACK,
+        "checkpoint then untick: falls back to defend")
+end
+
+-- save/load before checkpoint preserves a valid ordinary preTickMode.
+do
+    local saved = State.newSession("400", "gunnercontrol")
+    saved.shipName = "Titan"
+    saved.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    saved.checkedGroupKeys["group:OLD:p:g"] = true
+    saved.staged = { ["group:OLD:p:g"] = { mode = State.TICK_MODE, armed = true, preTickMode = "attack" } }
+    saved.committedBaseline = {
+        { kind = "group", shipID = "400", contextID = "OLD", path = "p", group = "g",
+          mode = "defend", armed = true },
+    }
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("400", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "save/load before checkpoint: restore succeeds")
+    eq(loaded.directMode, "attackenemies", "save/load before cp: default policy restored")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "save/load before checkpoint: checked group remains checked")
+    eq(loaded.staged[loadKey].mode, State.TICK_MODE,
+        "save/load before checkpoint: staged in policy mode")
+    eq(loaded.staged[loadKey].preTickMode, "defend",
+        "save/load before checkpoint: ordinary preTickMode is the baseline mode")
+end
+
+-- save/load after checkpoint does not restore old preTickMode.
+do
+    local saved = State.newSession("401", "gunnercontrol")
+    saved.shipName = "Titan"
+    saved.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = State.TICK_MODE, armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    saved.checkedGroupKeys["group:OLD:p:g"] = true
+    saved.staged = { ["group:OLD:p:g"] = { mode = State.TICK_MODE, armed = true } }
+    saved.committedBaseline = {
+        { kind = "group", shipID = "401", contextID = "OLD", path = "p", group = "g",
+          mode = State.TICK_MODE, armed = true },
+    }
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("401", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "save/load after checkpoint: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "save/load after checkpoint: checked group remains checked")
+    eq(loaded.staged[loadKey].mode, State.TICK_MODE,
+        "save/load after checkpoint: staged in policy mode")
+    assert(loaded.staged[loadKey].preTickMode == nil,
+        "save/load after checkpoint: preTickMode NOT restored (baseline was directed)")
+end
+
+-- active save/load restores autoassist policy.
+do
+    local saved = State.newSession("402", "gunnercontrol")
+    saved.shipName = "Titan"
+    saved.directMode = "autoassist"
+    saved.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    saved.checkedGroupKeys["group:OLD:p:g"] = true
+    saved.staged = { ["group:OLD:p:g"] = { mode = "autoassist", armed = true, preTickMode = "attack" } }
+    saved.committedBaseline = {
+        { kind = "group", shipID = "402", contextID = "OLD", path = "p", group = "g",
+          mode = "defend", armed = true },
+    }
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("402", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "active save/load autoassist: restore succeeds")
+    eq(loaded.directMode, "autoassist",
+        "active save/load: autoassist policy restored")
+    local loadKey = "group:NEW:p:g"
+    eq(loaded.staged[loadKey].mode, "autoassist",
+        "active save/load: checked group staged in restored policy")
+    eq(loaded.staged[loadKey].preTickMode, "defend",
+        "active save/load: ordinary preTickMode is the baseline mode")
+end
+
+-- legacy payload without directMode defaults to attackenemies.
+do
+    local legacyRecords = {
+        { t = "session", phase = "engaged", controlMode = "direct",
+          povAnchor = "turret", povMode = "manual",
+          autoNextTarget = "1",
+          shipID = "403", shipName = "Titan", aimTargetID = "", cameraMemberID = "" },
+        { t = "baseline", kind = "group", shipID = "403", contextID = "OLD",
+          path = "p", group = "g", mode = "defend", armed = "1" },
+        { t = "checked", path = "p", group = "g" },
+    }
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("403", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, legacyRecords, liveGroups),
+        "legacy payload without policy: restore succeeds")
+    eq(loaded.directMode, "attackenemies",
+        "legacy payload: defaults to attackenemies")
+end
+
+-- setDirectMode rejects invalid values.
+do
+    local s = State.newSession(1, "g")
+    assert(not State.setDirectMode(s, "defend"),   "setDirectMode: reject ordinary mode")
+    assert(not State.setDirectMode(s, "attack"),  "setDirectMode: reject unknown mode")
+    assert(not State.setDirectMode(s, ""),         "setDirectMode: reject empty string")
+    assert(not State.setDirectMode(s, nil),        "setDirectMode: reject nil")
+    eq(s.directMode, "attackenemies", "setDirectMode: policy unchanged on rejection")
+end
+
+-- setDirectMode is a no-op when the mode is already active.
+do
+    local s = State.newSession(1, "g")
+    assert(not State.setDirectMode(s, "attackenemies"),
+        "setDirectMode: no-op when already attackenemies")
+end
+
 print("gunnery_state tests passed")
