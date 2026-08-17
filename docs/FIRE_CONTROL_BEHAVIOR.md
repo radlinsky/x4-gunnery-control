@@ -32,7 +32,7 @@ The situations that matter for this mod. Each is checked against **your target**
 
 | Situation | What it means |
 |---|---|
-| **ENGAGEABLE** | The turret can aim at the target, the target is in range, and nothing blocks the shot. A clean shot. |
+| **ENGAGEABLE** | Generic fire-control condition: adequate track, the turret can aim at the target, the target is in range, nothing blocks the shot, and a valid firing/intercept solution exists. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
 | **LINE OF FIRE BLOCKED** | The turret is aimed right at the target, but part of your own ship is between the turret and the target, blocking the shot. |
@@ -41,6 +41,14 @@ The situations that matter for this mod. Each is checked against **your target**
 | **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
 *Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
+
+**What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when all three conditions are true for the selected target:
+
+- the turret has known arc data and its traverse arc contains the aim direction;
+- the target is within weapon range; and
+- a ray from the muzzle to the target passes without intersecting the firing ship.
+
+The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio does **not** prove adequate fire-control track, a valid ballistic/intercept solution, weapon readiness, fire authorization, or actual firing. The generic fire-control concept `ENGAGEABLE` additionally assumes adequate track and a valid firing/intercept solution; weapon readiness and fire authorization remain separate states.
 
 ---
 
@@ -121,9 +129,9 @@ For readers who want the mechanism.
 
 What the game itself checks, per situation, for a ticked turret:
 
-| Situation | What the game checks | Result | Confidence |
+| Condition | What the game checks | Result | Confidence |
 |---|---|---|---|
-| **ENGAGEABLE** | Can aim, in range, shot clear | Shoots your target | LIVE |
+| **AIM / RANGE / LINE CLEAR** | Can aim, in range, shot clear | Shoots your target | LIVE |
 | **OUT OF RANGE** | Distance vs the turret's reach | Switches to another target in range | LIVE |
 | **CANNOT BEAR** | Can the turret aim that far | Switches to another target it can aim at | LIVE |
 | **LINE OF FIRE BLOCKED** | Is the shot path clear of your own ship | Stays aimed, holds fire, does not switch | LIVE |

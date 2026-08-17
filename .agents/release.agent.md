@@ -1,11 +1,11 @@
 ---
 name: release
 description: >
-  Guides a full release of X4 Gunnery Control: reviews unreleased changes,
-  proposes a version number, bumps CHANGELOG.md and content.xml, runs
-  validation, commits, tags, and provides the exact terminal commands to
-  publish via GitHub Releases, upload on Nexus manually, and publish to Steam
-  Workshop.
+  Guides a full release of X4 Gunnery Control: reviews unreleased changes in
+  NEWS.md and CHANGELOG.md, proposes a version number, bumps both history files
+  and content.xml, synchronizes release/RELEASE_NOTES.md, runs validation,
+  commits, tags, and provides the exact terminal commands to publish via GitHub
+  Releases, upload on Nexus manually, and publish to Steam Workshop.
 ---
 
 # Release Agent
@@ -19,10 +19,11 @@ after a tag is pushed.
 
 ## Step 1 — Read the current state
 
-Read these two files and display the relevant sections to the user:
+Read these three files and display the relevant sections to the user:
 
-1. `CHANGELOG.md` — show the full `## [Unreleased]` section verbatim.
-2. `content.xml` — show the current `version` attribute value and `date`.
+1. `NEWS.md` — show the full `## Unreleased` section verbatim.
+2. `CHANGELOG.md` — show the full `## [Unreleased]` section verbatim.
+3. `content.xml` — show the current `version` attribute value and `date`.
 
 Derive the current display version: divide the integer in `content.xml` by 100.
 For example `version="20"` → `0.20`.
@@ -31,7 +32,7 @@ For example `version="20"` → `0.20`.
 
 ## Step 2 — Propose the version number
 
-Based on the `[Unreleased]` changes, suggest a version:
+Based on the `[Unreleased]` sections, suggest a version:
 
 - **MINOR bump** (e.g. `0.20` → `0.21`) — the default for feature releases and
   bug-fix releases where the save format and API surface are compatible.
@@ -118,39 +119,55 @@ them that a tag pushed without it cannot be undone cleanly.
 Once the version (e.g. `0.21`) and today's date are confirmed, make these edits
 **in a single operation**:
 
-1. **`CHANGELOG.md`** — rename the top heading from
+1. **`NEWS.md`** — rename the top heading from
+   `## Unreleased`
+   to
+   `## 0.21 — 2026-08-07`
+   (substitute the confirmed version and today's ISO date).
+
+2. **`CHANGELOG.md`** — rename the top heading from
    `## [Unreleased]`
    to
    `## [0.21] - 2026-08-07`
    (substitute the confirmed version and today's ISO date).
 
-2. **`content.xml`** — update the `version` integer and `date` attribute:
+3. **`content.xml`** — update the `version` integer and `date` attribute:
    - `version` = `MAJOR * 100 + MINOR` (e.g. `21` for `0.21`)
    - `date` = today's ISO date (e.g. `2026-08-07`)
 
-After editing, read both files back and show the changed lines to the user.
+After editing, read all three files back and show the changed lines to the user.
 
-These two files are the only place the version lives. CI and the packaging
-scripts read `content.xml`; the release workflow derives it from the tag. If you
-ever find a version number hardcoded anywhere else, delete it rather than bump
-it — a second copy is what silently breaks CI one commit later.
+The release version is recorded in three files for different audiences:
+`content.xml` is the machine-readable source that CI, packaging, and the X4
+launcher read; `NEWS.md` is the player-facing history whose top heading is
+intentionally versioned so users can see what shipped in each release.
+`CHANGELOG.md` carries the parallel technical record. If you ever find a version
+number hardcoded anywhere else outside these three files, delete it rather than
+bump it — a second copy is what silently breaks CI one commit later.
 
 ---
 
 ## Step 5 — Review release notes
 
-Read `release/RELEASE_NOTES.md` and `release/nexus_description.txt` and ask
-the user:
+Read `release/RELEASE_NOTES.md` and compare it to the current release entry in
+`NEWS.md` (the heading you just versioned in Step 4). Then read
+`release/nexus_description.txt` and `release/workshop-description.bbcode`
+solely to audit whether any **evergreen** content — current behaviour
+description, requirements, limitations, installation steps, or links — has
+become inaccurate since the last release.
 
-> Does this release add features or change user-visible behaviour that aren't
-> reflected in `RELEASE_NOTES.md` or `nexus_description.txt`?
+If `release/RELEASE_NOTES.md` does not match the current release entry in
+`NEWS.md`, update it so the two are aligned. Show the diff and ask the user to
+confirm before saving.
 
-If yes, open the relevant file(s) so the user can edit them, then remind them
-to keep `release/workshop-description.bbcode` in step (the Workshop description
-is the same text in BBCode format; it's edited on the Workshop website, with the
-in-repo file as the paste-ready copy).
+Do **not** ask whether features changed or whether release notes should be
+copied into store descriptions. Nexus and Workshop descriptions are evergreen
+current-product docs; they stay current by correcting inaccuracies, not by
+mirroring every new release.
 
-If no changes are needed, move on.
+If you find stale evergreen content in either store-description file,
+update the file so it accurately reflects current behaviour/requirements and
+show the diff to the user for confirmation. If no staleness is found, move on.
 
 ---
 
@@ -175,16 +192,18 @@ Show the user the exact git diff and ask them to confirm before committing:
 git diff
 ```
 
-Then stage and commit only the version-bump files (and `release/RELEASE_NOTES.md`
-if it was updated):
+Then stage and commit:
 
 ```bash
-git add CHANGELOG.md content.xml
-# add release/RELEASE_NOTES.md, release/nexus_description.txt and
-# release/workshop-description.bbcode if changed
+git add NEWS.md CHANGELOG.md content.xml
 git diff --cached
 git commit -m "Release v0.21"
 ```
+
+Also stage `release/RELEASE_NOTES.md` if it was synchronized in Step 5, and
+stage `release/nexus_description.txt` or `release/workshop-description.bbcode`
+only when an evergreen accuracy correction was actually made. Do not stage
+store-description files merely because a new release introduced new features.
 
 Substitute the confirmed version. Do not amend or force-push existing commits.
 
@@ -233,16 +252,19 @@ Use this flow on the Nexus website:
 4. Provide the one-line change summary Nexus asks for.
 5. Confirm the updated file now shows the new version as latest.
 
-Description update (required):
+Audit only (no automatic update):
 
-6. Update the Nexus mod-page description text for this release when features or
-   behaviour changed. Keep it aligned with `release/RELEASE_NOTES.md`.
+6. Re-read the Nexus mod-page description carefully. Update it **only** when
+   its evergreen content — behaviour description, requirements, limitations,
+   installation steps, or links — is inaccurate for the current release.
+   Do not update it simply because features or behaviour changed; that belongs
+   in `RELEASE_NOTES.md`, not in an evergreen store description.
 
 Verification before moving on:
 
 - The new file appears in the Files tab with the expected version.
 - The page's primary download points at the new file.
-- Description/requirements still match `README.md` and release notes.
+- Description/requirements still match `README.md` and current product state.
 
 Notes from Nexus docs and current site rollout:
 
@@ -278,8 +300,11 @@ Remind the user:
 - The script aborts if WorkshopTool is not found; set `X4GC_WORKSHOPTOOL` to
   override the path, or `X4GC_DRY_RUN=1` to print the command without publishing.
 - `WorkshopTool` does **not** update the title or long description. After
-  publishing, update the Workshop page description text on the website and keep
-  `release/workshop-description.bbcode` in step as the paste-ready copy.
+  publishing, audit the Workshop page description for stale evergreen content
+  (behaviour, requirements, limitations, installation steps, or links). Update
+  it only when something is inaccurate; do not rewrite it merely because a new
+  release introduced new features. Keep `release/workshop-description.bbcode`
+  in step as the paste-ready copy.
 
 ---
 
@@ -291,12 +316,12 @@ After both platforms are live:
 - [ ] Nexus file uploaded and set as the main download.
 - [ ] Steam Workshop item updated (check the page to confirm the new version
   appears in the mod's file info).
-- [ ] `release/workshop-description.bbcode` reflects the current feature set if
-  the description was updated on the website.
+- [ ] `release/workshop-description.bbcode` reflects any evergreen content that was corrected on the website.
+- [ ] Open a new `## Unreleased` section at the top of `NEWS.md` on `main` so the next feature branch has somewhere to record changes for players.
 - [ ] Open a new `## [Unreleased]` section at the top of `CHANGELOG.md` on
-  `main` so the next feature branch has somewhere to record changes.
+  `main` so the next feature branch has somewhere to record changes for maintainers.
 
 ```bash
-# Add the empty unreleased heading after confirming the release is live
-# Edit CHANGELOG.md manually or ask the agent to prepend the heading
+# Add the empty unreleased headings after confirming the release is live
+# Edit NEWS.md and CHANGELOG.md manually or ask the agent to prepend both headings
 ```
