@@ -35,9 +35,9 @@ end
 assert(prevBtn and prevBtn.column == 1, "engaged/auto: Previous Turret (72) must be col 1")
 assert(nextBtn and nextBtn.column == 2, "engaged/auto: Next Turret (71) must be col 2")
 
--- Deliverable D: the same commit point is available on the engaged panel, in
--- both Auto and Direct. menu.display returns early for the engaged phase, so a
--- console-only row would never render here.
+-- Regression: Update turret behavior is console-only and must not appear on
+-- either engaged panel. menu.display returns early for the engaged phase, so
+-- these fixtures specifically exercise the compact Auto and Direct views.
 --
 -- buttonByText returns the FIRST match. A repaint can leave more than one entry
 -- with the same label in the fixture's list, and only the newest one's handlers
