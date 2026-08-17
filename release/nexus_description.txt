@@ -59,8 +59,6 @@ In Steam, right-click X4 Foundations in your Library, choose Properties, and add
 
 [code]-debug all -logfile debug.log[/code]
 
-Use debug.log exactly as shown. Do not put quotes around it and do not replace it with a full path.
-
 For GOG or another launcher, add the same arguments to X4's launch command.
 
 Start X4, reproduce the problem, then quit the game. On Windows, the log is usually here:
