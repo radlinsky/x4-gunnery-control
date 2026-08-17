@@ -35,9 +35,9 @@ end
 assert(prevBtn and prevBtn.column == 1, "engaged/auto: Previous Turret (72) must be col 1")
 assert(nextBtn and nextBtn.column == 2, "engaged/auto: Next Turret (71) must be col 2")
 
--- Deliverable D: the same commit point is available on the engaged panel, in
--- both Auto and Direct. menu.display returns early for the engaged phase, so a
--- console-only row would never render here.
+-- Regression: Update turret behavior is console-only and must not appear on
+-- either engaged panel. menu.display returns early for the engaged phase, so
+-- these fixtures specifically exercise the compact Auto and Direct views.
 --
 -- buttonByText returns the FIRST match. A repaint can leave more than one entry
 -- with the same label in the fixture's list, and only the newest one's handlers
@@ -65,34 +65,11 @@ for _, controlMode in ipairs({ "auto", "direct" }) do
     X4GunneryState.seedBaseline(sessE, { grpE })
 
     fixE.gcMenu.display()
-    local cleanBtn = latestButton(fixE, "text:20991:83")
-    assert(cleanBtn ~= nil,
-        "engaged/" .. controlMode .. " panel must render the Update turret behavior button")
-    assert(cleanBtn.active == false,
-        "engaged/" .. controlMode .. ": Update must be greyed while staged matches the baseline")
-
-    X4GunneryState.stageMode(sessE, key, "defend", grpE.armed)
-    fixE.gcMenu.display()
-    local dirtyBtn = latestButton(fixE, "text:20991:83")
-    assert(dirtyBtn.active == true,
-        "engaged/" .. controlMode .. ": Update must be active once staged diverges")
-
-    -- Capture the turret write on the C table the loaded module actually holds.
-    -- Each fixture load() builds a fresh C, and gunnery_control binds ffi.C once
-    -- at load, so a later fixture's .C is not the one production calls through.
-    local liveC = require("ffi").C
-    local writesE = {}
-    local origMode = rawget(liveC, "SetTurretGroupMode2")
-    liveC.SetTurretGroupMode2 = function(_, _, _, _, mode) writesE[#writesE + 1] = tostring(mode) end
-    dirtyBtn.handlers.onClick()
-    liveC.SetTurretGroupMode2 = origMode
-    assert(#writesE == 1 and writesE[1] == "defend",
-        "engaged/" .. controlMode .. ": Update must push the staged mode immediately; wrote "
-        .. table.concat(writesE, ","))
-    assert(sessE.committedBaseline[1].mode == "defend",
-        "engaged/" .. controlMode .. ": Update must advance the committed baseline")
-    assert(not X4GunneryState.isStagedDirty(sessE),
-        "engaged/" .. controlMode .. ": Update must leave the session clean")
+    -- Task 1: engaged panels (auto and direct) must NOT render Update turret
+    -- behavior; the button lives on the main console only.
+    local engagedUpdateBtn = latestButton(fixE, "text:20991:83")
+    assert(engagedUpdateBtn == nil,
+        "engaged/" .. controlMode .. " panel must NOT render the Update turret behavior button")
     -- #18: Previous on the left, Next on the right (cycle_turret is shared).
     local dirCycleBtns = {}
     for _, b in ipairs(fixE.getCreatedButtons()) do
@@ -256,13 +233,27 @@ sess2.controlMode = "direct"
 -- the group this test installs. That gives committedBaseline something to
 -- compare against and starts the session clean, as a real sit-down would.
 X4GunneryState.seedBaseline(sess2, { group })
-X4GunneryState.stageMode(sess2, groupKey, "defend", group.armed)
 -- Make the ship appear player-owned so the console group loop runs.
 GetComponentData = function(_, key) if key == "isplayerowned" then return true end return nil end
 fix2.gcMenu.display()
--- The Update turret behavior button (id 83) must be rendered.
-local updateBtn = fix2.buttonByText("text:20991:83")
-assert(updateBtn ~= nil, "Update turret behavior button must be rendered in console display")
+-- Task 1: Update must exist while clean and be inactive (active == false).
+local State = X4GunneryState
+assert(not State.isStagedDirty(sess2), "seeded session must start clean")
+local updateBtnClean = latestButton(fix2, "text:20991:83")
+assert(updateBtnClean ~= nil,
+    "Update turret behavior button must be rendered in clean console display")
+assert(updateBtnClean.active == false,
+    "Update button must be inactive while clean (staged equals baseline)")
+
+-- Stage a divergent mode and re-display; Update must become active.
+X4GunneryState.stageMode(sess2, groupKey, "defend", group.armed)
+fix2.gcMenu.display()
+local updateBtnDirty = latestButton(fix2, "text:20991:83")
+assert(updateBtnDirty ~= nil,
+    "Update button must still render while dirty")
+assert(updateBtnDirty.active == true,
+    "Update button must be active after staged divergence")
+
 -- Exercise the dropdown onDropDownConfirmed handler (line 1769): covers stageMode closure.
 local dropDowns = fix2.getCreatedDropDowns()
 for _, dd in ipairs(dropDowns) do
@@ -285,15 +276,42 @@ for _, btn in ipairs(fix2.getCreatedButtons()) do
     end
 end
 assert(armedClicked, "console group row must expose a clickable armed toggle")
-
--- The console row handlers above edit staged only; nothing reaches the turrets
--- until a commit point. The dirty flag is what greys the Update button.
-local State = X4GunneryState
 assert(State.isStagedDirty(sess2),
     "console row handlers must leave the session dirty (staged diverges from the baseline)")
-fix2.gcMenu.display()
-assert(fix2.buttonByText("text:20991:83") ~= nil,
-    "Update turret behavior button must still render while dirty")
+
+-- Clicking the Update button writes staged to the ship and advances committedBaseline.
+-- Intercept the live C table the loaded module actually bound at load time, so
+-- SetTurretGroupMode2 and SetTurretGroupArmed calls are captured rather than
+-- silently dispatched to stubs. Each fixture.load() builds a fresh C and
+-- gunnery_control captures ffi.C once; fix2.C is only the fixture's copy.
+local liveC = require("ffi").C
+local stagedMode = sess2.staged[groupKey] and sess2.staged[groupKey].mode or "attack"
+local stagedArmed = sess2.staged[groupKey] and sess2.staged[groupKey].armed or false
+local modeWrites = {}
+local armedWrites = {}
+local origSetMode = rawget(liveC, "SetTurretGroupMode2")
+local origSetArmed = rawget(liveC, "SetTurretGroupArmed")
+liveC.SetTurretGroupMode2 = function(_, _, _, _, mode) modeWrites[#modeWrites + 1] = tostring(mode) end
+liveC.SetTurretGroupArmed = function(_, _, _, _, armed) armedWrites[#armedWrites + 1] = armed end
+local commitMark = fix2.callbackCheckpoint()
+updateBtnDirty.handlers.onClick()
+fix2.drainCallbacksSince(commitMark)
+liveC.SetTurretGroupMode2 = origSetMode
+liveC.SetTurretGroupArmed = origSetArmed
+assert(#modeWrites == 1 and modeWrites[1] == stagedMode,
+    "Update must push exactly one SetTurretGroupMode2 for the staged mode; got "
+    .. table.concat(modeWrites, ","))
+assert(#armedWrites == 1 and armedWrites[1] == stagedArmed,
+    "Update must push exactly one SetTurretGroupArmed for the staged armed value; got "
+    .. tostring(armedWrites[1]))
+-- Read the final staged values (armed may have been toggled by the armed button).
+local finalStaged = sess2.staged[groupKey]
+assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].mode == finalStaged.mode,
+    "committedBaseline must advance to the staged mode after clicking Update")
+assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].armed == finalStaged.armed,
+    "committedBaseline armed must match after clicking Update")
+assert(not State.isStagedDirty(sess2),
+    "session must be clean after committing staged to baseline")
 GetComponentData = function() return nil end
 
 print("runtime coverage ui tests passed")
