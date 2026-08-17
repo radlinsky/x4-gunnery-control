@@ -51,6 +51,24 @@ Saving and loading keeps your seat. Save while engaged and loading that save put
 [*]Duplicate-named groups can mislabel members in the UI. Commands still reach the correct group.[/*]
 [/list]
 
+[size=4][b]Reporting problems[/b][/size]
+
+If Gunnery Control is not working correctly, please send me a debug log with the report.
+
+In Steam, right-click X4 Foundations in your Library, choose Properties, and add this under General > Launch Options:
+
+[code]-debug all -logfile debug.log[/code]
+
+For GOG or another launcher, add the same arguments to X4's launch command.
+
+Start X4, reproduce the problem, then quit the game. On Windows, the log is usually here:
+
+[code]C:\Users\<your-name>\Documents\Egosoft\X4\<number>\debug.log[/code]
+
+Attach debug.log to a [url=https://github.com/radlinsky/x4-gunnery-control/issues]GitHub issue[/url] and briefly describe what you were doing when the problem occurred. If GitHub will not accept the .log file, zip it first.
+
+X4 replaces debug.log every time it launches, so save or send the log before starting the game again.
+
 [size=4][b]Requirements[/b][/size]
 
 [list]

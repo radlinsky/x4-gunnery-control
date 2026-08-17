@@ -44,6 +44,28 @@ Saving and loading keeps your seat. Save while engaged and loading that save put
 - ENGAGEABLE is a targeting aid, not a firing guarantee. A turret can pass the geometry check and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. UNKNOWN turrets may still fire when their arc data are unavailable to the mod.
 - Duplicate-named groups can mislabel members in the UI. Commands still reach the correct group.
 
+## Reporting problems
+
+If Gunnery Control is not working correctly, please send me a debug log with the report.
+
+In Steam, right-click X4 Foundations in your Library, choose Properties, and add this under General > Launch Options:
+
+```text
+-debug all -logfile debug.log
+```
+
+For GOG or another launcher, add the same arguments to X4's launch command.
+
+Start X4, reproduce the problem, then quit the game. On Windows, the log is usually here:
+
+```text
+C:\Users\<your-name>\Documents\Egosoft\X4\<number>\debug.log
+```
+
+Attach `debug.log` to a [GitHub issue](https://github.com/radlinsky/x4-gunnery-control/issues) and briefly describe what you were doing when the problem occurred. If GitHub will not accept the `.log` file, zip it first.
+
+X4 replaces `debug.log` every time it launches, so save or send the log before starting the game again.
+
 ## Requirements
 
 - X4 Foundations 9.00 or newer.
