@@ -373,13 +373,21 @@ function State.isDirectedMode(mode)
     return mode == "attackenemies" or mode == "autoassist"
 end
 
+-- Returns the effective engine mode for a checked group under the session's
+-- current Direct-control policy. Pure helper so tests can substitute without
+-- touching session.directMode itself. For the two current manual policies it
+-- returns the selected policy value; future constrained policies may diverge.
+function State.resolveDirectMode(session, groupKey)
+    return (session and session.directMode) or State.TICK_MODE
+end
+
 -- Apply tick side-effects on a staged entry: set mode to the session's current
 -- Direct-control policy and record the displaced mode in preTickMode so an
 -- untick can restore it. Mutates staged[groupKey] in-place; creates the entry
 -- if needed. defaultArmed is the group's live armed state, used only when the
 -- entry must be created from scratch (same contract as stageMode).
 local function applyTick(session, groupKey, defaultArmed)
-    local tickMode = session.directMode or State.TICK_MODE
+    local tickMode = State.resolveDirectMode(session, groupKey)
     local s = session.staged and session.staged[groupKey]
     if s then
         -- preTickMode must never be a Direct-control mode itself, or untick
@@ -747,7 +755,7 @@ function State.setDirectMode(session, mode)
     if session.staged then
         for key in pairs(session.checkedGroupKeys or {}) do
             local s = session.staged[key]
-            if s then s.mode = mode end
+            if s then s.mode = State.resolveDirectMode(session, key) end
         end
     end
     return true
@@ -865,6 +873,13 @@ function State.saveState(session)
         records[#records + 1] = {
             t = "checked", path = group.path or "", group = group.group or "",
         }
+        local s = session.staged and session.staged[group.key]
+        if s and s.preTickMode and not State.isDirectedMode(s.preTickMode) then
+            records[#records + 1] = {
+                t = "preTick", path = group.path or "", group = group.group or "",
+                mode = s.preTickMode,
+            }
+        end
     end
     return records
 end
@@ -972,6 +987,12 @@ local function validCheckedRecord(record)
     return record.t == "checked" and hasStringFields(record, { "path", "group" })
 end
 
+local function validPreTickRecord(record)
+    return record.t == "preTick"
+        and hasStringFields(record, { "path", "group", "mode" })
+        and not State.isDirectedMode(record.mode)
+end
+
 -- Validate the entire decoded transport before restoreState changes even a
 -- throwaway candidate. `decode` is deliberately permissive so it can carry
 -- escaped vanilla identifiers; restore is not. A parseable truncation such as
@@ -993,6 +1014,8 @@ local function validatedSessionRecord(records)
             -- Its session identity is checked after the head is found below.
         elseif record.t == "checked" then
             if not validCheckedRecord(record) then return nil end
+        elseif record.t == "preTick" then
+            if not validPreTickRecord(record) then return nil end
         else
             return nil
         end
@@ -1042,6 +1065,7 @@ function State.restoreState(session, records, liveGroups)
     local checkedGroupKeys = {}
     local snapshots = {}
     local baseline = {}
+    local preTickModes = {}
     for _, record in ipairs(records) do
         if record.t == "checked" then
             local live = byName[nameKey(record.path, record.group)]
@@ -1096,6 +1120,8 @@ function State.restoreState(session, records, liveGroups)
                     }
                 end
             end
+        elseif record.t == "preTick" then
+            preTickModes[nameKey(record.path, record.group)] = record.mode
         end
     end
     -- The restored global Direct-control policy. Computed before the staged
@@ -1104,6 +1130,8 @@ function State.restoreState(session, records, liveGroups)
     -- and the next "Update turret behavior" commit would silently arm the wrong mode.
     -- Default "attackenemies" for legacy payloads that lack the field.
     local restoredDirectMode = (head.directMode == "autoassist") and "autoassist" or "attackenemies"
+    -- Set early so the resolver sees the restored policy during staged rebuild.
+    session.directMode = restoredDirectMode
     -- Rebuild staged from restored baseline so the console shows the committed
     -- config immediately, before the player makes any new changes.
     local restoredStaged = {}
@@ -1118,16 +1146,26 @@ function State.restoreState(session, records, liveGroups)
         -- up can still restore it.
         local isChecked = checkedGroupKeys[stagedKey] == true
         if isChecked then
-            restoredStaged[stagedKey] = { mode = restoredDirectMode, armed = entry.armed }
-            -- If baseline was an ordinary mode, this is a "before checkpoint" restore:
-            -- preserve the original mode as preTickMode so untick can go back to it.
-            if not State.isDirectedMode(entry.mode) then
-                restoredStaged[stagedKey].preTickMode = entry.mode
-            end
+            restoredStaged[stagedKey] = { mode = State.resolveDirectMode(session, stagedKey), armed = entry.armed }
         elseif State.isDirectedMode(entry.mode) then
             restoredStaged[stagedKey] = { mode = State.UNTICK_FALLBACK, armed = entry.armed }
         else
             restoredStaged[stagedKey] = { mode = entry.mode, armed = entry.armed }
+        end
+    end
+    -- Apply persisted preTickMode for checked groups. If a group was saved with an
+    -- ordinary preTickMode (the mode displaced at tick time), restore it so an
+    -- untick can go back to that exact mode rather than falling back to the
+    -- committed baseline. Legacy payloads without this record fall through and
+    -- the existing safe behaviour remains intact.
+    for name, mode in pairs(preTickModes) do
+        local live = byName[name]
+        if live then
+            local key = live.key
+            if checkedGroupKeys[key] == true then
+                local s = restoredStaged[key]
+                if s then s.preTickMode = mode end
+            end
         end
     end
     -- Last, so it wins over the componentID read in the loop: group name plus
@@ -1143,9 +1181,8 @@ function State.restoreState(session, records, liveGroups)
     session.povAnchor = head.povAnchor
     session.povMode = head.povMode
     session.autoNextTarget = head.autoNextTarget == "1"
-    -- directMode was resolved above (restoredDirectMode) so the staged rebuild
-    -- could see it; reuse that value rather than recomputing.
-    session.directMode = restoredDirectMode
+    -- directMode was set above before the staged rebuild so the resolver could
+    -- use it there; keep it in step.
     session.checkedGroupKeys = checkedGroupKeys
     if idsHeld then
         session.aimTargetID = (head.aimTargetID ~= "" and head.aimTargetID) or nil

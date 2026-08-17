@@ -1498,8 +1498,8 @@ do
         "save/load before checkpoint: checked group remains checked")
     eq(loaded.staged[loadKey].mode, State.TICK_MODE,
         "save/load before checkpoint: staged in policy mode")
-    eq(loaded.staged[loadKey].preTickMode, "defend",
-        "save/load before checkpoint: ordinary preTickMode is the baseline mode")
+    eq(loaded.staged[loadKey].preTickMode, "attack",
+        "save/load before checkpoint: persisted ordinary preTickMode survives")
 end
 
 -- save/load after checkpoint does not restore old preTickMode.
@@ -1559,8 +1559,8 @@ do
     local loadKey = "group:NEW:p:g"
     eq(loaded.staged[loadKey].mode, "autoassist",
         "active save/load: checked group staged in restored policy")
-    eq(loaded.staged[loadKey].preTickMode, "defend",
-        "active save/load: ordinary preTickMode is the baseline mode")
+    eq(loaded.staged[loadKey].preTickMode, "attack",
+        "active save/load: persisted ordinary preTickMode survives autoassist policy")
 end
 
 -- legacy payload without directMode defaults to attackenemies.
@@ -1598,6 +1598,156 @@ do
     local s = State.newSession(1, "g")
     assert(not State.setDirectMode(s, "attackenemies"),
         "setDirectMode: no-op when already attackenemies")
+end
+
+-- Exact preTick round trip via normal stageMode/toggleGroup path.
+-- baseline=defend, player stages ordinary mode=attack, then ticks the group,
+-- then save/load must preserve that exact preTickMode so untick restores it.
+do
+    local rt = State.newSession("500", "gunnercontrol")
+    rt.shipName = "Titan"
+    rt.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    State.seedBaseline(rt, rt.groups)
+    eq(rt.staged["group:OLD:p:g"].mode, "defend", "round-trip setup: baseline seeded")
+    -- Stage an ordinary mode via the normal dropdown path; group stays unchecked.
+    State.stageMode(rt, "group:OLD:p:g", "attack", true)
+    eq(rt.staged["group:OLD:p:g"].mode, "attack", "round-trip setup: ordinary mode staged")
+    assert(rt.checkedGroupKeys["group:OLD:p:g"] == nil,
+        "round-trip setup: group is still unchecked after staging ordinary mode")
+    -- Tick the group: applyTick records the current staged mode as preTickMode.
+    State.toggleGroup(rt, "group:OLD:p:g", true)
+    eq(rt.staged["group:OLD:p:g"].mode, State.TICK_MODE,
+        "round-trip setup: ticked into policy mode")
+    eq(rt.staged["group:OLD:p:g"].preTickMode, "attack",
+        "round-trip setup: preTickMode records the displaced ordinary mode")
+    assert(rt.checkedGroupKeys["group:OLD:p:g"] == true,
+        "round-trip setup: group is now checked")
+    -- Save and load.
+    local payload = State.encode(State.saveState(rt))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("500", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "round-trip: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "round-trip: checked group remains checked after save/load")
+    eq(loaded.staged[loadKey].mode, State.TICK_MODE,
+        "round-trip: staged in policy mode after restore")
+    eq(loaded.staged[loadKey].preTickMode, "attack",
+        "round-trip: persisted preTickMode survives save/load")
+    -- Untick restores the exact saved ordinary mode.
+    State.toggleGroup(loaded, loadKey, true)
+    eq(loaded.staged[loadKey].mode, "attack",
+        "round-trip: untick restores the exact persisted preTickMode")
+    assert(loaded.checkedGroupKeys[loadKey] == nil,
+        "round-trip: checkbox cleared after untick")
+end
+
+-- After checkpoint: commit clears preTickMode; subsequent save/load must not
+-- resurrect it. Untick falls back to defend.
+do
+    local postCp = State.newSession("501", "gunnercontrol")
+    postCp.shipName = "Titan"
+    postCp.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    State.seedBaseline(postCp, postCp.groups)
+    State.stageMode(postCp, "group:OLD:p:g", "attack", true)
+    State.toggleGroup(postCp, "group:OLD:p:g", true)
+    eq(postCp.staged["group:OLD:p:g"].preTickMode, "attack",
+        "post-checkpoint setup: preTickMode set before commit")
+    -- Commit (checkpoint): this clears preTickMode on checked groups.
+    State.commitStagedToBaseline(postCp)
+    assert(postCp.staged["group:OLD:p:g"].preTickMode == nil,
+        "post-checkpoint setup: commit cleared preTickMode")
+    -- Save and load after checkpoint.
+    local payload = State.encode(State.saveState(postCp))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("501", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "post-checkpoint: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "post-checkpoint: checked group remains checked after save/load")
+    eq(loaded.staged[loadKey].mode, State.TICK_MODE,
+        "post-checkpoint: staged in policy mode")
+    assert(loaded.staged[loadKey].preTickMode == nil,
+        "post-checkpoint: preTickMode NOT resurrected after commit+save/load")
+    -- Untick falls back to defend (no persisted preTickMode to restore).
+    State.toggleGroup(loaded, loadKey, true)
+    eq(loaded.staged[loadKey].mode, State.UNTICK_FALLBACK,
+        "post-checkpoint: untick falls back to defend, old attack history is not restored")
+end
+
+-- Legacy payload without preTick records still restores safely using the
+-- existing baseline-derived fallback behaviour.
+do
+    local legacyPt = { t = "session", phase = "engaged", controlMode = "direct",
+        povAnchor = "turret", povMode = "manual", autoNextTarget = "1",
+        shipID = "502", shipName = "Titan", aimTargetID = "", cameraMemberID = "" }
+    local legacyRecords = {
+        legacyPt,
+        { t = "baseline", kind = "group", shipID = "502", contextID = "OLD",
+          path = "p", group = "g", mode = "defend", armed = "1" },
+        { t = "checked", path = "p", group = "g" },
+    }
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("502", "gunnercontrol")
+    loaded.shipName = "Titan"
+    assert(State.restoreState(loaded, legacyRecords, liveGroups),
+        "legacy without preTick: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "legacy without preTick: checked group remains checked")
+    eq(loaded.staged[loadKey].mode, State.TICK_MODE,
+        "legacy without preTick: staged in default policy mode")
+    -- With no persisted preTickMode the safe fallback is UNTICK_FALLBACK;
+    -- untick falls back to defend rather than resurrecting a stale mode.
+    assert(loaded.staged[loadKey].preTickMode == nil,
+        "legacy without preTick: no preTickMode; untick falls back to defend")
+end
+
+-- Resolver seam: tick/restaging uses the resolver rather than blindly copying
+-- session.directMode. A focused test substitutes a pure resolver to return
+-- different effective modes for two checked group keys and proves membership
+-- remains unchanged while each staged mode follows its resolved result.
+do
+    local rs = State.newSession(1, "g")
+    rs.staged = {
+        k1 = { mode = "defend", armed = true },
+        k2 = { mode = "attack",  armed = false },
+    }
+    -- Save the original resolver.
+    local origResolveDirectMode = State.resolveDirectMode
+    -- Substitute a resolver that returns different effective modes per key.
+    function State.resolveDirectMode(_, groupKey)
+        if groupKey == "k1" then return "autoassist"
+        elseif groupKey == "k2" then return "attackenemies"
+        else return State.TICK_MODE end
+    end
+    -- Tick both groups via toggleGroup: applyTick must call the resolver.
+    State.toggleGroup(rs, "k1", true)
+    State.toggleGroup(rs, "k2", true)
+    assert(rs.checkedGroupKeys["k1"] == true,  "resolver: k1 checked")
+    assert(rs.checkedGroupKeys["k2"] == true,  "resolver: k2 checked")
+    eq(rs.staged["k1"].mode, "autoassist", "resolver: k1 staged in its resolved mode")
+    eq(rs.staged["k2"].mode, "attackenemies", "resolver: k2 staged in its resolved mode")
+    -- setDirectMode must also resolve each group independently.
+    State.setDirectMode(rs, "autoassist")
+    assert(rs.checkedGroupKeys["k1"] == true,  "resolver: k1 still checked after policy change")
+    assert(rs.checkedGroupKeys["k2"] == true,  "resolver: k2 still checked after policy change")
+    eq(rs.staged["k1"].mode, "autoassist", "resolver: k1 re-staged to its resolved mode")
+    eq(rs.staged["k2"].mode, "attackenemies", "resolver: k2 re-staged to its resolved mode")
+    -- Restore original resolver.
+    State.resolveDirectMode = origResolveDirectMode
 end
 
 print("gunnery_state tests passed")
