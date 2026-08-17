@@ -10,15 +10,15 @@ All notable changes to this project are documented in this file.
   settle, candidates for which every selected/evaluated turret is ENGAGEABLE
   sort ahead of the existing relationship/distance order.
 
-- Rebuild the engaged surface-element browser for large ships and stations.
-  Operational turrets, shields, and engines can be filtered by surface type and
-  installed equipment. Alternatives use explicit size-first ordering
+- Rebuild the engaged surface element browser for large ships and stations.
+  Operational turret, shield, and engine surface elements can be filtered by
+  type. Alternatives use explicit size-first ordering
   (XL → L → M → S → XS, then type, distance, stable ID), are paged 20 at a
   time, and retain the current aim point as a pinned row outside the filters.
   The pinned row refreshes distance/ENGAGEABLE independently and shows shield
   and hull percentage; the parent hull remains directly selectable from a
-  surface target. Manual refresh is retained and optional automatic refresh
-  rebuilds the surface snapshot every 10 seconds.
+  surface element target. Manual refresh is retained and optional automatic
+  refresh rebuilds the surface element snapshot every 10 seconds.
 
 - Add the current **ENGAGEABLE** geometry service for exact selected operational
   turret membership. Each known turret contributes only when its official
@@ -28,8 +28,8 @@ All notable changes to this project are documented in this file.
   denominator and are reported as **UNKNOWN** rather than being promoted by
   range/line-of-fire alone. Requests use bounded batches of at most 20 targets,
   preserve nonce/session/signature/denominator guards, reject stale replies, and
-  coalesce repaints so large station surface lists do not issue one transport
-  round-trip and full render per surface.
+  coalesce repaints so large station surface element lists do not issue one
+  transport round-trip and full render per surface element.
 
 - Standardize current player-facing fire-control terminology on **ENGAGEABLE**,
   **CANNOT BEAR**, and **LINE OF FIRE BLOCKED**. This was a terminology/service
@@ -37,10 +37,10 @@ All notable changes to this project are documented in this file.
   about readiness, authorization, moving-target intercept, or actual firing.
 
 - Add staged-vs-committed turret behavior. Console Mode/Armed edits are staged
-  for the active Gunnery Control session and are restored to the last committed
-  baseline when the player gets up, closes the console, undocks, or changes
-  ships. **Update turret behavior** explicitly commits the staged settings as
-  the new baseline instead of making every console edit permanent immediately.
+  during the Gunnery Control session. When the player gets up, closes the
+  console, undocks, or changes ships, the previous turret settings are restored
+  unless **Update turret behavior** was clicked first. That action commits the
+  current Mode/Armed settings so they persist after leaving the chair.
 
 - **Loading a save no longer loses your gunnery session.** Save/load restoration
   rebuilds the live session against the loaded ship and turret-group identities
