@@ -2387,7 +2387,7 @@ function menu.display()
     -- "Update turret behavior" (id 83): permanent commit. Writes staged to the
     -- ship AND advances committedBaseline. Greyed while staged == committedBaseline;
     -- compares against the baseline, not the ship's live state, so it stays
-    -- accurate during a temporary apply. Also available while engaged.
+    -- accurate during a temporary apply. Console-only; engaged panels omit it.
     local updateRow = tableView:addRow("update_turrets", {})
     local canUpdate = State.isStagedDirty(session)
     updateRow[1]:setColSpan(8):createButton({ active = canUpdate }):setText(text(83))

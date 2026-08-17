@@ -233,13 +233,27 @@ sess2.controlMode = "direct"
 -- the group this test installs. That gives committedBaseline something to
 -- compare against and starts the session clean, as a real sit-down would.
 X4GunneryState.seedBaseline(sess2, { group })
-X4GunneryState.stageMode(sess2, groupKey, "defend", group.armed)
 -- Make the ship appear player-owned so the console group loop runs.
 GetComponentData = function(_, key) if key == "isplayerowned" then return true end return nil end
 fix2.gcMenu.display()
--- The Update turret behavior button (id 83) must be rendered.
-local updateBtn = fix2.buttonByText("text:20991:83")
-assert(updateBtn ~= nil, "Update turret behavior button must be rendered in console display")
+-- Task 1: Update must exist while clean and be inactive (active == false).
+local State = X4GunneryState
+assert(not State.isStagedDirty(sess2), "seeded session must start clean")
+local updateBtnClean = latestButton(fix2, "text:20991:83")
+assert(updateBtnClean ~= nil,
+    "Update turret behavior button must be rendered in clean console display")
+assert(updateBtnClean.active == false,
+    "Update button must be inactive while clean (staged equals baseline)")
+
+-- Stage a divergent mode and re-display; Update must become active.
+X4GunneryState.stageMode(sess2, groupKey, "defend", group.armed)
+fix2.gcMenu.display()
+local updateBtnDirty = latestButton(fix2, "text:20991:83")
+assert(updateBtnDirty ~= nil,
+    "Update button must still render while dirty")
+assert(updateBtnDirty.active == true,
+    "Update button must be active after staged divergence")
+
 -- Exercise the dropdown onDropDownConfirmed handler (line 1769): covers stageMode closure.
 local dropDowns = fix2.getCreatedDropDowns()
 for _, dd in ipairs(dropDowns) do
@@ -262,15 +276,21 @@ for _, btn in ipairs(fix2.getCreatedButtons()) do
     end
 end
 assert(armedClicked, "console group row must expose a clickable armed toggle")
-
--- The console row handlers above edit staged only; nothing reaches the turrets
--- until a commit point. The dirty flag is what greys the Update button.
-local State = X4GunneryState
 assert(State.isStagedDirty(sess2),
     "console row handlers must leave the session dirty (staged diverges from the baseline)")
-fix2.gcMenu.display()
-assert(fix2.buttonByText("text:20991:83") ~= nil,
-    "Update turret behavior button must still render while dirty")
+
+-- Clicking the Update button writes staged to the ship and advances committedBaseline.
+local commitMark = fix2.callbackCheckpoint()
+updateBtnDirty.handlers.onClick()
+fix2.drainCallbacksSince(commitMark)
+-- Read the final staged values (armed may have been toggled by the armed button).
+local finalStaged = sess2.staged[groupKey]
+assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].mode == finalStaged.mode,
+    "committedBaseline must advance to the staged mode after clicking Update")
+assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].armed == finalStaged.armed,
+    "committedBaseline armed must match after clicking Update")
+assert(not State.isStagedDirty(sess2),
+    "session must be clean after committing staged to baseline")
 GetComponentData = function() return nil end
 
 print("runtime coverage ui tests passed")
