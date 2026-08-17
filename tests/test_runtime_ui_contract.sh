@@ -425,5 +425,10 @@ grep -Fq 'State.setDirectMode(session, value)' "$main"
 grep -Fq 'tableView:addRow("direct_mode", {})' "$main"
 grep -Fq '<t id="101">' t/0001.xml
 grep -Fq '<t id="102">' t/0001.xml
+# Issue #48 Task 3: the engaged Direct-control panel carries the same selector
+# (label + dropdown in the 2-column controls table) and applies the policy to
+# the checked groups' live modes immediately.
+grep -Fq 'controls:addRow("direct_mode", {})' "$main"
+grep -Fq 'applyDirectModeLive()' "$main"
 
 echo "runtime UI contract checks passed"

@@ -79,4 +79,85 @@ do
     GetComponentData = function() return nil end
 end
 
+-- ── Issue #48 Task 3: the engaged path applies the session policy ───────────
+-- These blocks reuse the single fixture (and its session) of this file, so
+-- they reset the session fields directly, exactly as the blocks above do.
+-- fix.C is the C table the loaded module bound, so the overrides below are
+-- visible to the production code.
+local function eventsSince(mark)
+    local fallback, watch = false, false
+    for i = mark + 1, #fix.uiTriggeredEvents do
+        local control = fix.uiTriggeredEvents[i].control
+        if control == "direct_fallback" then fallback = true end
+        if control == "direct_watch" then watch = true end
+    end
+    return fallback, watch
+end
+
+-- First engagement under the default policy. The group is checked and its
+-- staged mode follows the policy (the natural post-console state), so the
+-- staged apply writes the resolved mode and the arm step must not re-issue
+-- the same mode a second time.
+do
+    session.phase, session.controlMode = "target_select", nil
+    session.checkedGroupKeys = { g = true }
+    session.staged = { g = { mode = "attackenemies", armed = true } }
+    session.groups[1].mode, session.groups[1].armed = "attack", false
+    local modes = {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, _, mode) modes[#modes + 1] = mode end
+    fix.C.SetTurretGroupArmed = function() end
+    local mark = #fix.uiTriggeredEvents
+    assert(fix.API.engageTarget(99), "Task 3: first engagement must succeed")
+    assert(#modes == 1 and modes[1] == "attackenemies",
+        "Task 3: a checked group under attackenemies gets exactly one mode write "
+        .. "(no same-mode re-issue): " .. table.concat(modes, ","))
+    local sawFallback, sawWatch = eventsSince(mark)
+    assert(sawFallback and sawWatch,
+        "Task 3: attackenemies engagement must emit direct_fallback and direct_watch")
+end
+
+-- First engagement under the autoassist policy: the checked group is written
+-- autoassist, the ownership watch stays armed, and no script fallback list is
+-- installed (autoassist follows the soft target; a list would be a claim the
+-- engine does not make).
+do
+    session.phase, session.controlMode = "target_select", nil
+    session.checkedGroupKeys = { g = true }
+    session.staged = { g = { mode = "attack", armed = true } }
+    assert(X4GunneryState.setDirectMode(session, "autoassist"),
+        "Task 3: the policy switch to autoassist must be accepted")
+    assert(session.staged.g.mode == "autoassist",
+        "Task 3: the checked group's staged mode must follow the new policy")
+    session.groups[1].mode, session.groups[1].armed = "attack", false
+    local modes = {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, _, mode) modes[#modes + 1] = mode end
+    fix.C.SetTurretGroupArmed = function() end
+    local mark = #fix.uiTriggeredEvents
+    assert(fix.API.engageTarget(99), "Task 3: autoassist engagement must succeed")
+    assert(#modes == 1 and modes[1] == "autoassist",
+        "Task 3: a checked group under autoassist gets one autoassist write: "
+        .. table.concat(modes, ","))
+    local sawFallback, sawWatch = eventsSince(mark)
+    assert(not sawFallback,
+        "Task 3: autoassist must not install a script fallback list")
+    assert(sawWatch,
+        "Task 3: autoassist must keep the ownership watch armed")
+end
+
+-- Re-engagement (already direct) changes only the target: no mode writes, the
+-- watch is re-armed for the new target, and the fallback list is re-sent only
+-- under attackenemies.
+do
+    assert(session.phase == "engaged" and session.controlMode == "direct",
+        "Task 3 precondition: the session must still be engaged/direct")
+    local modes = {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, _, mode) modes[#modes + 1] = mode end
+    local mark = #fix.uiTriggeredEvents
+    assert(fix.API.engageTarget(123), "Task 3: re-engagement must succeed")
+    assert(#modes == 0, "Task 3: re-engagement must not re-write group modes")
+    local sawFallback, sawWatch = eventsSince(mark)
+    assert(not sawFallback and sawWatch,
+        "Task 3: re-engagement under autoassist re-arms the watch only")
+end
+
 print("runtime coverage engagement tests passed")

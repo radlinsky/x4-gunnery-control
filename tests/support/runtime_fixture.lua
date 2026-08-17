@@ -104,6 +104,12 @@ function M.load()
 
     ffiStub.C = C
     package.preload["ffi"] = function() return ffiStub end
+    -- Require caches the first fixture's ffi stub process-wide, which would
+    -- bind every later module instance to the FIRST fixture's C table and make
+    -- fix.C overrides invisible to production code (the fixture contract says
+    -- every load is a fresh environment). Drop the cache entry so this load's
+    -- require("ffi") returns THIS fixture's stub.
+    package.loaded["ffi"] = nil
 
     -- ── 2. captured log ─────────────────────────────────────────────────────
     local capturedLog = {}

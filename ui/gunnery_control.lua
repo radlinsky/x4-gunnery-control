@@ -418,20 +418,38 @@ local function vanillaModeOption(modeID)
     return nil
 end
 
+-- The Direct-control engine modes vanilla ships, in vanilla order, with the
+-- vanilla-localized option texts. Both the console selector and the
+-- engaged-panel selector copy these entries, so the two selectors and the
+-- vanilla turret-mode dropdown can never drift apart in their labels.
+local function directModeOptions()
+    local options = {}
+    for _, entry in ipairs(Helper.turretModes or {}) do
+        if State.isDirectedMode(entry.id) then
+            options[#options + 1] = { id = entry.id, text = entry.text, icon = entry.icon or "" }
+        end
+    end
+    return options
+end
+
 -- Forward-declared: restoreDirect's deferred repaint calls refresh(), which is defined below it.
 local refresh
 
 -- Give the directed groups a fallback target list for this target. The MD
 -- DirectFallback cue uses weaponmode="weaponmode.attackenemies" as its turret
--- selector; Direct-control always arms checked groups in attackenemies
--- (State.TICK_MODE), so the call always reaches them. Fire and forget: MD
--- refuses a payload it cannot resolve, and the worst case of a lost event is a
--- turret that holds fire until the next target change rather than rolling to a
--- fallback, so there is nothing here worth a retry. The fallback is re-sent on
--- every target change because the MD cue names a specific target and dies with
--- it. Live-verified 2026-08-10: attackenemies honours the supplied list even
--- when the pilot is actively fighting (aicommandraw="attackobject"); the old
--- autoassist branch for fighting pilots is now removed.
+-- selector, so the list only reaches turrets in attackenemies: it is emitted
+-- only when the session's Direct-control policy resolves to attackenemies
+-- (State.TICK_MODE). Under the autoassist policy the checked groups follow the
+-- player's soft target, and a script fallback list neither reaches them nor
+-- constrains them, so installing one would be a claim the engine does not
+-- make. Fire and forget: MD refuses a payload it cannot resolve, and the worst
+-- case of a lost event is a turret that holds fire until the next target change
+-- rather than rolling to a fallback, so there is nothing here worth a retry.
+-- The fallback is re-sent on every target change because the MD cue names a
+-- specific target and dies with it. Live-verified 2026-08-10: attackenemies
+-- honours the supplied list even when the pilot is actively fighting
+-- (aicommandraw="attackobject"); the old autoassist branch for fighting pilots
+-- is now removed.
 local function emitDirectFallback(shipID, targetID)
     if isNullID(shipID) or isNullID(targetID) then return false end
     if not session then return false end
@@ -439,16 +457,44 @@ local function emitDirectFallback(shipID, targetID)
         ["ship"]   = ConvertStringToLuaID(tostring(shipID)),
         ["target"] = ConvertStringToLuaID(tostring(targetID)),
     }
-    AddUITriggeredEvent("X4GunneryControl", "direct_fallback", payload)
-    -- Arm the ownership-change listener on this specific target. Each engage
-    -- resets the MD DirectWatch.OwnerWatch cue, so only one target is watched
-    -- at a time and the prior listener is cancelled automatically. The listener
-    -- signals X4GunneryControl.DirectTargetLost when the target's owner changes
-    -- to a faction the ship can no longer attack (surrender, capture).
-    -- Same payload as direct_fallback: ship+target, same transport contract.
+    if State.resolveDirectMode(session) == State.TICK_MODE then
+        AddUITriggeredEvent("X4GunneryControl", "direct_fallback", payload)
+    end
+    -- Arm the ownership-change listener on this specific target. The watch is
+    -- policy-independent: autoassist needs the ownership-change cease just as
+    -- attackenemies does. Each engage resets the MD DirectWatch.OwnerWatch cue,
+    -- so only one target is watched at a time and the prior listener is
+    -- cancelled automatically. The listener signals X4GunneryControl.DirectTargetLost
+    -- when the target's owner changes to a faction the ship can no longer
+    -- attack (surrender, capture). Same payload as direct_fallback: ship+target,
+    -- same transport contract.
     -- ponytail: reuses the existing payload table; no second allocation needed.
     AddUITriggeredEvent("X4GunneryControl", "direct_watch", payload)
     return true
+end
+
+-- Apply the session's Direct-control policy to the live engine state of every
+-- checked mutable group. Called only from the engaged panel's selector: the
+-- console's selector is staged-only (Task 2), and the engage path writes the
+-- resolved mode itself. A group already in its resolved mode is not written
+-- again. Only modes change here -- armed state, the engaged target, the
+-- camera, Auto-next, checkbox membership and the committed baseline are all
+-- untouched. Under attackenemies the preferred-target/fallback list is
+-- re-installed after the mode write, so the MD cue's attackenemies selector
+-- reaches the re-moded turrets.
+local function applyDirectModeLive()
+    for _, group in ipairs(State.checkedGroups(session)) do
+        if State.canMutate(group) then
+            local mode = State.resolveDirectMode(session, group.key)
+            if group.mode ~= mode then
+                setMode(group, mode)
+                group.mode = mode
+            end
+        end
+    end
+    if State.resolveDirectMode(session) == State.TICK_MODE then
+        emitDirectFallback(session.shipID, session.aimTargetID)
+    end
 end
 
 local function restoreDirect(reason)
@@ -829,17 +875,22 @@ local function engageTarget(targetID)
         end
         State.beginEngaged(session, orderable, "direct")
         -- Apply the whole staged config to the ship (temp apply, all groups).
+        -- The bookkeeping below is what makes the arm step's skip correct: it
+        -- records what the engine now actually has.
         for _, group in ipairs(session.groups or {}) do
             local s = session.staged and session.staged[group.key]
             if s and State.canMutate(group) then
                 setMode(group, s.mode); setArmed(group, s.armed)
+                group.mode, group.armed = s.mode, s.armed
             end
         end
-        -- Arm the directed (checked) groups in attackenemies. Live-verified
-        -- 2026-08-10: attackenemies honours the supplied fallback list even when
-        -- the pilot is actively fighting; the mode is now a constant.
+        -- Arm the directed (checked) groups in the session's Direct-control
+        -- mode. Live-verified 2026-08-10: attackenemies honours the supplied
+        -- fallback list even when the pilot is actively fighting.
         for _, group in ipairs(orderable) do
-            setMode(group, State.TICK_MODE); setArmed(group, true)
+            local mode = State.resolveDirectMode(session, group.key)
+            if group.mode ~= mode then setMode(group, mode); group.mode = mode end
+            if group.armed ~= true then setArmed(group, true); group.armed = true end
         end
     end
     -- Record the chosen element and its root object. aimTargetID may be a
@@ -1957,6 +2008,23 @@ function menu.display()
                 menu.display()
             end
             autoNextRow[2]:createText(text(78))
+            -- Direct-control turret mode selector (Task 3): same options, label
+            -- and help as the console's. The session is engaged, so a change
+            -- applies the policy to the checked groups' live modes immediately
+            -- instead of only re-staging.
+            local directModeRow = controls:addRow("direct_mode", {})
+            directModeRow[1]:createText(text(101))
+            directModeRow[2]:createDropDown(directModeOptions(),
+                { startOption = session.directMode, mouseOverText = text(102) })
+            directModeRow[2].handlers.onDropDownConfirmed = function(_, value)
+                log("event=direct_mode action=select location=engaged value=" .. tostring(value))
+                if not session then return end
+                if State.setDirectMode(session, value) then
+                    applyDirectModeLive()
+                    persistSession()
+                end
+                menu.display()
+            end
         end
 
         if testLabCallbacks and testLabCallbacks.open then
@@ -2310,20 +2378,13 @@ function menu.display()
     elseif #session.groups == 0 then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(8):createText(text(18), { color = Color["text_error"] })
     else
-        -- Direct-control turret mode selector (console only; the engaged panel
-        -- gets its own treatment in a later task). Offers exactly the
+        -- Direct-control turret mode selector. Offers exactly the
         -- Direct-control engine modes vanilla ships, with the vanilla-localized
         -- labels, and starts at the session's current policy. Staged/UI-only:
         -- State.setDirectMode re-stages the checked rows; nothing reaches the
-        -- turrets before a commit.
-        local selectorOptions = {}
-        for _, entry in ipairs(Helper.turretModes or {}) do
-            if State.isDirectedMode(entry.id) then
-                selectorOptions[#selectorOptions + 1] = {
-                    id = entry.id, text = entry.text, icon = entry.icon or "",
-                }
-            end
-        end
+        -- turrets before a commit. The engaged panel renders the same selector
+        -- and applies it live (see applyDirectModeLive).
+        local selectorOptions = directModeOptions()
         local directModeRow = tableView:addRow("direct_mode", {})
         directModeRow[1]:setColSpan(3):createText(text(101), { halign = "right" })
         directModeRow[4]:setColSpan(4):createDropDown(selectorOptions,
