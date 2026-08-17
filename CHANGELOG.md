@@ -4,15 +4,64 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-- Removed **Other Turrets: Prefer My Target** and **Release Other Turrets**. The Release behavior was unreachable with the X4 API: re-feeding the hostile list does not revert `defend`, `missiledefence`, or `mining` modes because those modes use a curated target list rather than the standard hostile list. Direct-control (ticking turret groups) covers directing turrets at a chosen target.
+- Enrich **Select Engagement Target** with the player-facing S/M/L/XL class (or
+  Station), localized ship type, distance, top/bottom Refresh controls, and an
+  `N / total ENGAGEABLE` result for every candidate. Once engageability results
+  settle, candidates for which every selected/evaluated turret is ENGAGEABLE
+  sort ahead of the existing relationship/distance order.
 
-- **Loading a save no longer loses your gunnery session.** You come back to the
-  same turret groups, the same turret POV and the same target, in Direct-control
-  or Auto-engage. Before, a load dumped you at the console with your turrets
-  still overridden and **Cease Engagement** unable to give them back.
+- Rebuild the engaged surface element browser for large ships and stations.
+  Operational turret, shield, and engine surface elements can be filtered by
+  type. Alternatives use explicit size-first ordering
+  (XL → L → M → S → XS, then type, distance, stable ID), are paged 20 at a
+  time, and retain the current aim point as a pinned row outside the filters.
+  The pinned row refreshes distance/ENGAGEABLE independently and shows shield
+  and hull percentage; the parent hull remains directly selectable from a
+  surface element target. Manual refresh is retained and optional automatic
+  refresh rebuilds the surface element snapshot every 10 seconds.
 
-- **Target POV works after loading.** It used to do nothing until you switched
-  to another surface element and back.
+- Add the current **ENGAGEABLE** geometry service for exact selected operational
+  turret membership. Each known turret contributes only when its official
+  traverse arc contains the aim direction, the target is within weapon range,
+  and a muzzle-origin line-of-fire check remains clear while including the
+  firing ship for self-occlusion. Unknown/modded turret arcs remain in the
+  denominator and are reported as **UNKNOWN** rather than being promoted by
+  range/line-of-fire alone. Requests use bounded batches of at most 20 targets,
+  preserve nonce/session/signature/denominator guards, reject stale replies, and
+  coalesce repaints so large station surface element lists do not issue one
+  transport round-trip and full render per surface element.
+
+- Standardize current player-facing fire-control terminology on **ENGAGEABLE**,
+  **CANNOT BEAR**, and **LINE OF FIRE BLOCKED**. This was a terminology/service
+  rename only; the accepted engagement geometry was not broadened into a claim
+  about readiness, authorization, moving-target intercept, or actual firing.
+
+- Add staged-vs-committed turret behavior. Console Mode/Armed edits are staged
+  during the Gunnery Control session. When the player gets up, closes the
+  console, undocks, or changes ships, the previous turret settings are restored
+  unless **Update turret behavior** was clicked first. That action commits the
+  current Mode/Armed settings so they persist after leaving the chair.
+
+- **Loading a save no longer loses your gunnery session.** Save/load restoration
+  rebuilds the live session against the loaded ship and turret-group identities
+  instead of trusting stale component IDs. Controlled live acceptance restored
+  the checked groups, control mode, turret POV, and active target in both
+  Direct-control and Auto-engage; the committed turret baseline is also
+  re-keyed onto live group identities for safe teardown.
+
+- **Target POV works after loading.** The restored target/camera state is now
+  re-applied so Target POV works immediately rather than only after switching to
+  another surface element and back.
+
+- Removed **Other Turrets: Prefer My Target** and **Release Other Turrets**. The
+  Release behavior was unreachable with the X4 API: re-feeding the hostile list
+  does not revert `defend`, `missiledefence`, or `mining` modes because those
+  modes use a curated target list rather than the standard hostile list.
+  Direct-control (ticking turret groups) covers directing turrets at a chosen
+  target without leaving an unrevertable ship-wide override.
+
+- Put engaged-panel target cycling controls in conventional order: **Previous**
+  on the left and **Next** on the right.
 
 ## [0.30] - 2026-08-07
 
@@ -37,7 +86,7 @@ All notable changes to this project are documented in this file.
   appeared for a split second and then dumped the player back on the console.
   `enterCamera()` asks the engine for a target view on one turret and then reads
   the view back to confirm it took. On S/M ships the engine accepts the request
-  but resolves the view to the turret's *container* — the ship — so the readback
+  but resolves the view to the turret's *container*, the ship, so the readback
   never matched the turret id, the gate declared failure, and it tore the session
   down 100 ms after the browser painted. Capital ships resolve to the turret
   component itself, which is why this was never seen there.
@@ -58,7 +107,7 @@ All notable changes to this project are documented in this file.
   Auto-engage and Direct-control.
 
   It was guarding nothing. Mode and armed commands address a group by
-  `contextID`+`path`+`group`, which `GetUpgradeGroups2` always reports exactly —
+  `contextID`+`path`+`group`, which `GetUpgradeGroups2` always reports exactly;
   the slot walk never feeds the write path. Vanilla does the same thing: it
   walks turret slots only for *ungrouped* turrets and drives grouped ones purely
   through the context ID. `canMutate()` now asks only whether the group still
@@ -68,7 +117,7 @@ All notable changes to this project are documented in this file.
   other than each group's representative all get listed under the first of them,
   so member rows can sit under the wrong group name and Direct-control may open
   the camera on a sibling group's turret. Commands still reach the right group.
-  No X4 API resolves this, and no shipped ship macro produces the case — all 53
+  No X4 API resolves this, and no shipped ship macro produces the case. All 53
   turret group declarations across the 126 stock 9.00 ship macros use path `..`
   with unique names.
 
@@ -77,7 +126,7 @@ All notable changes to this project are documented in this file.
   `"0"`. Nine guards tested `tostring(x) == "0"` and therefore never fired in
   game. `State.isNullID()` now owns the check (nil, `0`, `"0"`, `"0ULL"`) and
   all nine route through it. Comparing a raw cdata id against the number `0`
-  was always safe — LuaJIT compares boxed uint64 numerically — so the sites
+  was always safe. LuaJIT compares boxed uint64 numerically, so the sites
   written that way were never affected.
 
   This makes the soft-target restore in 0.20 real: `restoreSofttarget()` was
@@ -85,8 +134,8 @@ All notable changes to this project are documented in this file.
   session that started with no soft target, which is exactly the call that
   release said it had stopped making. See the correction under 0.20 below.
 
-  No Lua test could have caught this — every harness stubs ids as plain
-  numbers, where `tostring(0)` really is `"0"` — so `test_runtime_ui_contract.sh`
+  No Lua test could have caught this. Every harness stubs ids as plain
+  numbers, where `tostring(0)` really is `"0"`, so `test_runtime_ui_contract.sh`
   now rejects the `tostring(x) == "0"` shape outright.
 
 - Remove the post-exit diagnostic sampler. It wrote `DebugError` lines for 90
@@ -114,7 +163,7 @@ All notable changes to this project are documented in this file.
   disengaged." (Auto-engage never mutates settings). This popup is also
   load-bearing: three in-game trials confirmed that calling
   `SetPlayerCameraTargetView` from a turret seat leaves `Esc` dead after the
-  player stands up — a bug invisible to every readable engine flag — and that
+  player stands up. This is a bug invisible to every readable engine flag, and
   the `show_help` MD action cures it by forcing `CreateView`/`DisplayView` via
   `View.createView()` in `ego_viewhelper`. See
   `.agents/skills/research-x4-modding/references/ui-lua-menu-camera.md` for
@@ -122,8 +171,8 @@ All notable changes to this project are documented in this file.
 
 - Never leave X4's global soft target on the player's own ship. `enterCamera()`
   borrows the soft target to force the camera onto a turret and restores it a
-  tick later, but restored an empty one with `C.SetSofttarget(0, "")` — not a
-  documented clear, since no vanilla call ever passes 0. `RemoveSofttarget()`
+  tick later, but restored an empty one with `C.SetSofttarget(0, "")`, which is
+  not a documented clear since no vanilla call ever passes 0. `RemoveSofttarget()`
   is the engine's clear (`targetsystem.lua:1747,2097,2130`). The restore
   callback is also epoch-guarded, so a session ending inside that 0.05 s window
   never restored at all; `clearOwnShipSofttarget()` now runs on every teardown
@@ -141,8 +190,8 @@ All notable changes to this project are documented in this file.
 - Add an **Auto-next Target** checkbox to the compact Direct-control panel,
   checked by default (`session.autoNextTarget`). Checked, the death of the
   engaged object re-engages the next candidate through `engageTarget()`, so the
-  soft target, `session.targetObjectID` and the camera all move together.
-  Unchecked — or checked with no candidate left — the view resets to manual
+  soft target, `session.targetObjectID` and the camera all move together. If
+  unchecked, or checked with no candidate left, the view resets to manual
   Turret POV and the target browser reopens. Previously only
   `session.aimTargetID` moved: the camera followed the next ship while every
   overridden group stayed armed against a wreck and the panel still named the
@@ -194,7 +243,7 @@ All notable changes to this project are documented in this file.
   (direct mode only). Cycles the engaged target through the same candidate list
   and order as the target browser (enemy → hostile → nearest). Greyed when one
   candidate or fewer. Re-issuing the engagement via these buttons is also how
-  the player recovers after the current target is destroyed — Direct-control
+  the player recovers after the current target is destroyed. Direct-control
   never re-issues the turret order by itself on target death.
 - Add an upper-left **element panel** (direct mode only), titled with the
   engaged target's name. Lists Hull and every operational turret, shield, and
@@ -234,8 +283,8 @@ All notable changes to this project are documented in this file.
 - Stop hiding the HUD on every frame that takes player controls (the target
   browser, the compact panel, the element panel). A HUD hidden by such a frame
   is never restored: a logged trial that opened only the fullscreen console kept
-  its HUD, while one that opened the target browser and pressed `Esc` twice —
-  no cinematic, no engagement — lost it. Only the fullscreen console still hides
+  its HUD, while one that opened the target browser and pressed `Esc` twice with
+  no cinematic or engagement lost it. Only the fullscreen console still hides
   the HUD. A contract test rejects `keepHUDVisible = false` outright.
   Follow-up: the console kept hiding it, and the logged
   browser(`hud=true`) -> console(`hud=false`) -> exit sequence still lost the
@@ -251,18 +300,18 @@ All notable changes to this project are documented in this file.
   calls `C.GetUp()` and lets the `playerGetUp` event close the menu
   (`menu_docked.lua:283,1442`); closing synchronously unregisters our
   `keepHUDVisible=false` view in the middle of the engine's get-up transition.
-  The session state is still discarded immediately — only `Helper.closeMenu()`
+  The session state is still discarded immediately; only `Helper.closeMenu()`
   and the view unregistration wait. Still unconfirmed as the HUD fix; the
   post-exit sampler now also logs `IsExternalViewActive()` and
   `IsExternalTargetMode()`, since `GetExternalTargetViewComponent()` keeps
   returning a component after get-up.
 - Fix `Esc` out of a cinematic POV. It fell through to the ordinary close path,
-  so the cutscene — `duration 999999`, `cinematicmode="true"` — kept running
+  so the cutscene (`duration 999999`, `cinematicmode="true"`) kept running
   invisibly beneath the panels for the rest of the session, and the HUD stayed
   off because cinematic mode owns the HUD toggle. `Esc` now stops the cutscene
   and returns to the manual panel, as the README already claimed. `leaveChair()`
   also emits `cutscene_aim_stop` before `GetUp()` rather than relying on
-  `discardSession()`, whose event MD only handles a tick later — after the
+  `discardSession()`, whose event MD only handles a tick later, after the
   camera has already changed.
 - Use `": "` instead of an em dash in every composed label; the game font
   renders the em dash as a placeholder glyph.
@@ -275,14 +324,14 @@ All notable changes to this project are documented in this file.
 - Unregister our own frame views in `endSession()` before `Helper.closeMenu()`.
   `Helper.clearMenu()` skips `View.unregisterMenu()` for any frame it considers
   invalid, and a still-registered view keeps its `keepHUDVisible=false` in force
-  after the menu is gone — the suspected cause of the HUD staying hidden after
-  leaving the chair. The post-exit sampler now logs `hud=` from
+  after the menu is gone. This was the suspected cause of the HUD staying hidden
+  after leaving the chair. The post-exit sampler now logs `hud=` from
   `C.IsHUDActive()` to tell "engine says HUD off" apart from "HUD on but not
   redrawn" if the symptom survives.
 - Fix the upper-left element panel outliving its phase: `Helper.clearDataForRefresh`
   does not touch `menu.frames`, so the panel stayed registered as its own view
   (`Helper3`) and kept rendering over the target browser and the console until
-  the whole menu closed — three `Esc` presses. `menu.display()` now calls
+  the whole menu closed after three `Esc` presses. `menu.display()` now calls
   `Helper.clearFrame(menu, elementFrameLayer)` whenever it is not rebuilding the
   panel. The missing HUD after the final `Esc` is expected to share this cause
   (two views unregistering at once) and needs live confirmation.
@@ -290,7 +339,7 @@ All notable changes to this project are documented in this file.
   `ULL` suffix while `id()`-converted ones do not, causing the same component
   to compare unequal. `sameID()` now delegates to the exported `State.normID()`.
   For the same reason all `GetComponentData` calls are routed through the
-  `componentData()` wrapper, which applies `id()` first — passing a raw FFI id
+  `componentData()` wrapper, which applies `id()` first. Passing a raw FFI id
   silently returns nil for every key.
 
 - Fix `Esc` delivery in Watch and compact Engage by removing
@@ -323,15 +372,15 @@ All notable changes to this project are documented in this file.
 - Place the Engage browser over the live, unblurred turret view and collapse it
   after target selection to a compact upper-right control panel; the panel's
   Back button reopens the browser.
-- Exclude the occupied ship and its surfaces from Engage while allowing other
-  owned/friendly/neutral objects to be selected. Document that normal
+- Exclude the occupied ship and its surface elements from Engage while allowing
+  other owned/friendly/neutral objects to be selected. Document that normal
   `autoassist` still refuses targets which fail X4's `mayattack` checks.
 - Request HUD and ticker suppression without changing persistent notification
   settings; document that transient Messages/notifications can still appear.
 - Rename Direct to Engage and add an in-console current-sector known
   ship/station browser limited by the player's ship radar range, followed by a
-  hull or operational turret/shield/engine surface-element choice. Station
-  modules are included when enumerating station surfaces.
+  hull or operational turret/shield/engine surface element choice. Station
+  modules are included when enumerating station surface elements.
 - Engage now arms the selected linked group in `autoassist`; X4 remains
   responsible for aiming, firing, and `mayattack` legality.
 - Resolve the current ship through the player's enclosing container when X4
