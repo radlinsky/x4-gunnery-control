@@ -137,11 +137,11 @@ Once the version (e.g. `0.21`) and today's date are confirmed, make these edits
 
 After editing, read all three files back and show the changed lines to the user.
 
-The version lives in two places that serve different audiences: `content.xml`
-is the machine-readable source that CI, packaging, and the X4 launcher read;
-`NEWS.md` is the player-facing history whose top heading is intentionally
-versioned so users can see what ship appeared in each release.
-CHANGELOG.md carries the parallel technical record. If you ever find a version
+The release version is recorded in three files for different audiences:
+`content.xml` is the machine-readable source that CI, packaging, and the X4
+launcher read; `NEWS.md` is the player-facing history whose top heading is
+intentionally versioned so users can see what shipped in each release.
+`CHANGELOG.md` carries the parallel technical record. If you ever find a version
 number hardcoded anywhere else outside these three files, delete it rather than
 bump it — a second copy is what silently breaks CI one commit later.
 
@@ -156,9 +156,9 @@ solely to audit whether any **evergreen** content — current behaviour
 description, requirements, limitations, installation steps, or links — has
 become inaccurate since the last release.
 
-If `RELEASE_NOTES.md` does not match the current release entry in `NEWS.md`,
-update it so the two are aligned. Show the diff and ask the user to confirm
-before saving.
+If `release/RELEASE_NOTES.md` does not match the current release entry in
+`NEWS.md`, update it so the two are aligned. Show the diff and ask the user to
+confirm before saving.
 
 Do **not** ask whether features changed or whether release notes should be
 copied into store descriptions. Nexus and Workshop descriptions are evergreen
@@ -322,6 +322,6 @@ After both platforms are live:
   `main` so the next feature branch has somewhere to record changes for maintainers.
 
 ```bash
-# Add the empty unreleased heading after confirming the release is live
-# Edit CHANGELOG.md manually or ask the agent to prepend the heading
+# Add the empty unreleased headings after confirming the release is live
+# Edit NEWS.md and CHANGELOG.md manually or ask the agent to prepend both headings
 ```
