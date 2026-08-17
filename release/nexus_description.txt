@@ -21,22 +21,34 @@ Once you select at least one group, two buttons light up:
 entering the camera it writes your checked groups' staged console settings to the
 ship (so ticking a group, which sets its Mode to [b]Attack all enemies[/b], does take
 effect for the duration). The camera cycles only through the turrets of the
-checked groups, not every turret on the ship. Everything is reverted when you get
-up.
+checked groups, not every turret on the ship. When you get up, Gunnery Control
+restores the last settings you made permanent with [b]Update turret behavior[/b].
 
 [b]Direct-control[/b]: you tell the checked groups exactly what to shoot.
-The [b]Select Engagement Target[/b] menu lists the ships and stations in radar range; click
-one and its hull is engaged immediately, but you can instead
-mark a specific surface element (e.g. turret, shield, engine).
+The [b]Select Engagement Target[/b] menu lists ships and stations in radar range,
+shows each candidate's S/M/L/XL class (or Station), localized type, distance and
+[b]N / total ENGAGEABLE[/b] count, and lists fully ENGAGEABLE candidates first.
+Click a ship or station to engage its hull immediately, or switch to one of its
+surface elements.
 
-[b]Engageable ratio.[/b] Gunnery Control shows an [b]N / total ENGAGEABLE[/b] count for
-your selected target. This is a mod-computed geometry check — not a guarantee
-the turret will fire. The numerator counts turrets that currently pass
-Gunnery Control's geometry check: known traverse arc covering the aim direction,
-target within weapon range, and a clear line of fire past your own ship.
-Unknown-arc turrets stay in the denominator and are reported separately as
-[b]UNKNOWN[/b]. Readiness, fire authorization, an intercept solution, and actual
-firing are all separate states that this ratio does not measure.
+[b]Surface-element browser.[/b] While engaged, the upper-left panel keeps the
+current hull/surface aim point pinned and lets you switch between the parent hull
+and operational turrets, shields and engines. Filter surfaces by
+[b]Turret / Shield / Engine[/b] and by installed equipment. Alternatives are
+ordered largest-first (XL → L → M → S → XS), then by type and distance, and are
+paged 20 at a time. Every listed surface shows distance and its own ENGAGEABLE
+count; the pinned aim point also shows shield and hull status. You can refresh
+manually or enable an optional 10-second automatic refresh.
+
+[b]Engageable ratio.[/b] Gunnery Control shows an [b]N / total ENGAGEABLE[/b] count
+for each evaluated target or surface. This is a mod-computed geometry check — not
+a guarantee the turret will fire. The numerator counts selected operational
+turrets that currently pass Gunnery Control's geometry check: known traverse arc
+covering the aim direction, target within weapon range, and a clear
+muzzle-to-target line of fire past your own ship. Unknown-arc turrets stay in the
+denominator and are reported separately as [b]UNKNOWN[/b]. Readiness, fire
+authorization, an intercept solution, and actual firing are all separate states
+that this ratio does not measure.
 
 For example, [b]3 / 4 ENGAGEABLE[/b] means 3 of the 4 selected/evaluated turrets
 pass that geometry check. UNKNOWN-arc members remain in the denominator and are
@@ -65,7 +77,7 @@ Saving and loading keeps your seat: load a save while engaged and the game puts 
 [*][b]On some S/M ships, turret target view can resolve to a wider ship-level camera framing instead of a tight turret view.[/b] Direct-control, target selection, and Auto-engage still work; only the camera framing is less specific.[/*]
 [*][b]Turret POV cinematic often clips the camera into your own hull.[/b] It looks rough. Target POV cinematic is the better-looking of the two.[/*]
 [*]The confirmation popup that appears when you stand up also works around an X4 bug that leaves [b]Esc[/b] dead after a camera session. If you have turned help texts off in the game options, that popup never shows — and the workaround goes with it. Press [b]Esc[/b] once after standing up; it stays unresponsive until any other menu opens and closes (e.g. M for map).[/*]
-[*][b]The Engageable ratio is a targeting aid, not a firing guarantee.[/b] It checks geometry only. A turret can show ENGAGEABLE and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. Conversely, [b]UNKNOWN[/b] turrets may still fire if their arc data are unavailable even though they could shoot.[/*]
+[*][b]The ENGAGEABLE ratio is a targeting aid, not a firing guarantee.[/b] A turret can pass the geometry check and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. Conversely, [b]UNKNOWN[/b] turrets may still fire when their arc data are unavailable even though the mod cannot classify their geometry.[/*]
 [*][b]Duplicate-named groups can mislabel members in the UI.[/b] If two turret groups share the same name, some member rows or camera representative selection can appear under a sibling same-named group; commands still apply to the correct group.[/*]
 [/list]
 

@@ -4,15 +4,64 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-- Removed **Other Turrets: Prefer My Target** and **Release Other Turrets**. The Release behavior was unreachable with the X4 API: re-feeding the hostile list does not revert `defend`, `missiledefence`, or `mining` modes because those modes use a curated target list rather than the standard hostile list. Direct-control (ticking turret groups) covers directing turrets at a chosen target.
+- Enrich **Select Engagement Target** with the player-facing S/M/L/XL class (or
+  Station), localized ship type, distance, top/bottom Refresh controls, and an
+  `N / total ENGAGEABLE` result for every candidate. Once engageability results
+  settle, candidates for which every selected/evaluated turret is ENGAGEABLE
+  sort ahead of the existing relationship/distance order.
 
-- **Loading a save no longer loses your gunnery session.** You come back to the
-  same turret groups, the same turret POV and the same target, in Direct-control
-  or Auto-engage. Before, a load dumped you at the console with your turrets
-  still overridden and **Cease Engagement** unable to give them back.
+- Rebuild the engaged surface-element browser for large ships and stations.
+  Operational turrets, shields, and engines can be filtered by surface type and
+  installed equipment. Alternatives use explicit size-first ordering
+  (XL → L → M → S → XS, then type, distance, stable ID), are paged 20 at a
+  time, and retain the current aim point as a pinned row outside the filters.
+  The pinned row refreshes distance/ENGAGEABLE independently and shows shield
+  and hull percentage; the parent hull remains directly selectable from a
+  surface target. Manual refresh is retained and optional automatic refresh
+  rebuilds the surface snapshot every 10 seconds.
 
-- **Target POV works after loading.** It used to do nothing until you switched
-  to another surface element and back.
+- Add the current **ENGAGEABLE** geometry service for exact selected operational
+  turret membership. Each known turret contributes only when its official
+  traverse arc contains the aim direction, the target is within weapon range,
+  and a muzzle-origin line-of-fire check remains clear while including the
+  firing ship for self-occlusion. Unknown/modded turret arcs remain in the
+  denominator and are reported as **UNKNOWN** rather than being promoted by
+  range/line-of-fire alone. Requests use bounded batches of at most 20 targets,
+  preserve nonce/session/signature/denominator guards, reject stale replies, and
+  coalesce repaints so large station surface lists do not issue one transport
+  round-trip and full render per surface.
+
+- Standardize current player-facing fire-control terminology on **ENGAGEABLE**,
+  **CANNOT BEAR**, and **LINE OF FIRE BLOCKED**. This was a terminology/service
+  rename only; the accepted engagement geometry was not broadened into a claim
+  about readiness, authorization, moving-target intercept, or actual firing.
+
+- Add staged-vs-committed turret behavior. Console Mode/Armed edits are staged
+  for the active Gunnery Control session and are restored to the last committed
+  baseline when the player gets up, closes the console, undocks, or changes
+  ships. **Update turret behavior** explicitly commits the staged settings as
+  the new baseline instead of making every console edit permanent immediately.
+
+- **Loading a save no longer loses your gunnery session.** Save/load restoration
+  rebuilds the live session against the loaded ship and turret-group identities
+  instead of trusting stale component IDs. Controlled live acceptance restored
+  the checked groups, control mode, turret POV, and active target in both
+  Direct-control and Auto-engage; the committed turret baseline is also
+  re-keyed onto live group identities for safe teardown.
+
+- **Target POV works after loading.** The restored target/camera state is now
+  re-applied so Target POV works immediately rather than only after switching to
+  another surface element and back.
+
+- Removed **Other Turrets: Prefer My Target** and **Release Other Turrets**. The
+  Release behavior was unreachable with the X4 API: re-feeding the hostile list
+  does not revert `defend`, `missiledefence`, or `mining` modes because those
+  modes use a curated target list rather than the standard hostile list.
+  Direct-control (ticking turret groups) covers directing turrets at a chosen
+  target without leaving an unrevertable ship-wide override.
+
+- Put engaged-panel target cycling controls in conventional order: **Previous**
+  on the left and **Next** on the right.
 
 ## [0.30] - 2026-08-07
 
