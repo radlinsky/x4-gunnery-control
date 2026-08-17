@@ -32,7 +32,7 @@ The situations that matter for this mod. Each is checked against **your target**
 
 | Situation | What it means |
 |---|---|
-| **ENGAGEABLE** | The turret can aim at the target, the target is in range, and nothing blocks the shot. A clean shot. |
+| **ENGAGEABLE** | Generic fire-control condition: adequate track, the turret can aim at the target, the target is in range, nothing blocks the shot, and a valid firing/intercept solution exists. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
 | **LINE OF FIRE BLOCKED** | The turret is aimed right at the target, but part of your own ship is between the turret and the target, blocking the shot. |
@@ -129,9 +129,9 @@ For readers who want the mechanism.
 
 What the game itself checks, per situation, for a ticked turret:
 
-| Situation | What the game checks | Result | Confidence |
+| Condition | What the game checks | Result | Confidence |
 |---|---|---|---|
-| **ENGAGEABLE** | Can aim, in range, shot clear | Shoots your target | LIVE |
+| **AIM / RANGE / LINE CLEAR** | Can aim, in range, shot clear | Shoots your target | LIVE |
 | **OUT OF RANGE** | Distance vs the turret's reach | Switches to another target in range | LIVE |
 | **CANNOT BEAR** | Can the turret aim that far | Switches to another target it can aim at | LIVE |
 | **LINE OF FIRE BLOCKED** | Is the shot path clear of your own ship | Stays aimed, holds fire, does not switch | LIVE |
