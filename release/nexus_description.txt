@@ -31,12 +31,16 @@ mark a specific surface element (e.g. turret, shield, engine).
 
 [b]Engageable ratio.[/b] Gunnery Control shows an [b]N / total ENGAGEABLE[/b] count for
 your selected target. This is a mod-computed geometry check — not a guarantee
-the turret will fire. The numerator counts turrets that currently have a clean
-shot: known traverse arc covering the aim direction, target within weapon range,
-and a clear line of fire past your own ship. Unknown-arc turrets stay in the
-denominator and are reported separately as [b]UNKNOWN[/b]. Readiness, fire
-authorization, an intercept solution, and actual firing are all separate states
-that this ratio does not measure.
+the turret will fire. The numerator counts turrets that currently pass
+Gunnery Control's geometry check: known traverse arc covering the aim direction,
+target within weapon range, and a clear line of fire past your own ship.
+Unknown-arc turrets stay in the denominator and are reported separately as
+[b]UNKNOWN[/b]. Readiness, fire authorization, an intercept solution, and actual
+firing are all separate states that this ratio does not measure.
+
+For example, [b]3 / 4 ENGAGEABLE[/b] means 3 of the 4 selected/evaluated turrets
+pass that geometry check. UNKNOWN-arc members remain in the denominator and are
+reported UNKNOWN.
 
 [list]
 [*][b]Auto-next Target when destroyed[/b] is checked by default: when the target dies, the turret(s) and camera automatically select the next target. Uncheck it, and the turret(s) will sit idly by until you pick the next target yourself, which is closer to actually manning the gun.[/*]
@@ -62,6 +66,7 @@ Saving and loading keeps your seat: load a save while engaged and the game puts 
 [*][b]Turret POV cinematic often clips the camera into your own hull.[/b] It looks rough. Target POV cinematic is the better-looking of the two.[/*]
 [*]The confirmation popup that appears when you stand up also works around an X4 bug that leaves [b]Esc[/b] dead after a camera session. If you have turned help texts off in the game options, that popup never shows — and the workaround goes with it. Press [b]Esc[/b] once after standing up; it stays unresponsive until any other menu opens and closes (e.g. M for map).[/*]
 [*][b]The Engageable ratio is a targeting aid, not a firing guarantee.[/b] It checks geometry only. A turret can show ENGAGEABLE and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. Conversely, [b]UNKNOWN[/b] turrets may still fire if their arc data are unavailable even though they could shoot.[/*]
+[*][b]Duplicate-named groups can mislabel members in the UI.[/b] If two turret groups share the same name, some member rows or camera representative selection can appear under a sibling same-named group; commands still apply to the correct group.[/*]
 [/list]
 
 [size=4][b]Requirements[/b][/size]
@@ -77,7 +82,7 @@ This extension replaces no vanilla game files, no UI Extensions files, and no co
 
 [b]Vortex[/b]: install the two required extensions first, then install the ZIP without changing its top-level [b]x4_gunnery_control[/b] folder.
 
-[b]Manual[/b]: extract the archive so you end up with [b]X4 Foundations/extensions/x4_gunnery_control/[/b], then enable all installed extensions in the Extensions menu and load a save.
+[b]Manual[/b]: extract the archive so you end up with [b]X4 Foundations/extensions/x4_gunnery_control/[/b], then enable Gunnery Control and both required extensions in the Extensions menu and load a save.
 
 [size=4][b]Source[/b][/size]
 
