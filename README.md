@@ -12,7 +12,7 @@ Sitting down opens the console. Every turret group gets a checkbox, or you can u
 
 Once you select at least one group, two controls become available.
 
-**Auto-engage** issues no fire orders. Your turrets still choose their own targets. Before entering the camera, Gunnery Control applies the selected groups' current console settings for the session. The camera cycles only through turrets in the selected groups.
+**Auto-engage** issues no fire orders. Your turrets still choose their own targets. The camera cycles only through turrets in the selected groups.
 
 **Direct-control** lets you tell the selected groups what to shoot. Select Engagement Target lists ships and stations in radar range, along with class/type, distance, and an N / total ENGAGEABLE count. Fully ENGAGEABLE candidates are listed first. Select a ship or station to engage its hull, or switch to one of its surface elements.
 
