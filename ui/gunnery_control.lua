@@ -404,6 +404,20 @@ local function isDirectedGroup(group)
     return session.checkedGroupKeys and session.checkedGroupKeys[group.key] == true
 end
 
+-- Vanilla 9.00 ships the turret-mode option list as Helper.turretModes
+-- (ui/addons/ego_detailmonitorhelper/helper.lua): one entry per engine mode,
+-- with the game-localized option text (ReadText(1001, ...)). The Direct-control
+-- selector and the constrained row dropdowns copy those entries, so their
+-- labels can never drift from the vanilla turret-mode dropdown.
+local function vanillaModeOption(modeID)
+    for _, entry in ipairs(Helper.turretModes or {}) do
+        if entry.id == modeID then
+            return { id = entry.id, text = entry.text, icon = entry.icon or "" }
+        end
+    end
+    return nil
+end
+
 -- Forward-declared: restoreDirect's deferred repaint calls refresh(), which is defined below it.
 local refresh
 
@@ -2296,6 +2310,30 @@ function menu.display()
     elseif #session.groups == 0 then
         local row = tableView:addRow(false, {}); row[1]:setColSpan(8):createText(text(18), { color = Color["text_error"] })
     else
+        -- Direct-control turret mode selector (console only; the engaged panel
+        -- gets its own treatment in a later task). Offers exactly the
+        -- Direct-control engine modes vanilla ships, with the vanilla-localized
+        -- labels, and starts at the session's current policy. Staged/UI-only:
+        -- State.setDirectMode re-stages the checked rows; nothing reaches the
+        -- turrets before a commit.
+        local selectorOptions = {}
+        for _, entry in ipairs(Helper.turretModes or {}) do
+            if State.isDirectedMode(entry.id) then
+                selectorOptions[#selectorOptions + 1] = {
+                    id = entry.id, text = entry.text, icon = entry.icon or "",
+                }
+            end
+        end
+        local directModeRow = tableView:addRow("direct_mode", {})
+        directModeRow[1]:setColSpan(3):createText(text(101), { halign = "right" })
+        directModeRow[4]:setColSpan(4):createDropDown(selectorOptions,
+            { startOption = session.directMode, mouseOverText = text(102) })
+        directModeRow[8]:createText("")
+        directModeRow[4].handlers.onDropDownConfirmed = function(_, value)
+            log("event=direct_mode action=select value=" .. tostring(value))
+            State.setDirectMode(session, value)
+            menu.display()
+        end
         -- Header: col 1 = (checkbox label), 2-4 = group name, 5 = count, 6 = mode,
         -- 7 = armed, 8 = empty. The name spans three columns because turret group
         -- labels carry both a location and a name and were being truncated at 1/8
@@ -2329,7 +2367,29 @@ function menu.display()
             row[5]:createText(tostring(group.operationalCount) .. " / " .. tostring(group.totalCount))
             -- Mode and armed edit the staged config, not the ship directly.
             local stagedMode = s.mode
-            row[6]:createDropDown(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key), { startOption = function() return stagedMode end, active = active })
+            -- Constrained mode list: every ordinary vanilla mode plus the
+            -- session's current Direct-control policy, and never the other
+            -- Direct-control mode. The shipped Helper dropdown carries no
+            -- per-option disable (options only hold id/icon/text), so the
+            -- conflicting mode is omitted rather than greyed out.
+            local rowModes = {}
+            for _, entry in ipairs(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key)) do
+                if not (State.isDirectedMode(entry.id) and entry.id ~= session.directMode) then
+                    rowModes[#rowModes + 1] = entry
+                end
+            end
+            -- The current Direct-control mode must stay selectable even if the
+            -- engine-compatibility filter dropped it: a checked row displays
+            -- that mode, and the startOption must exist in the list.
+            local offersCurrentDirectMode = false
+            for _, entry in ipairs(rowModes) do
+                if entry.id == session.directMode then offersCurrentDirectMode = true; break end
+            end
+            if not offersCurrentDirectMode then
+                local directOption = vanillaModeOption(session.directMode)
+                if directOption then rowModes[#rowModes + 1] = directOption end
+            end
+            row[6]:createDropDown(rowModes, { startOption = function() return stagedMode end, active = active })
             row[6].handlers.onDropDownConfirmed = function(_, value)
                 -- Pass the other field through so a group with no staged entry
                 -- yet is created from its live state, never from a constant.

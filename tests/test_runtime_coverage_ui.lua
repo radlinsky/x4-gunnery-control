@@ -312,6 +312,167 @@ assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].armed == finalS
     "committedBaseline armed must match after clicking Update")
 assert(not State.isStagedDirty(sess2),
     "session must be clean after committing staged to baseline")
-GetComponentData = function() return nil end
+-- Issue #48 Task 2: the console Direct-control turret mode selector and the
+-- constrained per-row mode dropdowns. Shipped 9.00 Helper dropdowns carry no
+-- per-option disable (options only hold id/icon/text), so the conflicting
+-- Direct-control mode is omitted from every row rather than greyed out.
+do
+    local fixD = dofile("tests/support/runtime_fixture.lua").load()
+    local keyA = X4GunneryState.groupKey(5, "pA", "gA")
+    local keyB = X4GunneryState.groupKey(5, "pB", "gB")
+    local groupA = {
+        key = keyA, kind = "group", contextID = 5, path = "pA", group = "gA",
+        componentID = 27, displayName = "GA", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 27, displayName = "TA", operational = true, cameraSupported = true } },
+    }
+    local groupB = {
+        key = keyB, kind = "group", contextID = 5, path = "pB", group = "gB",
+        componentID = 28, displayName = "GB", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 28, displayName = "TB", operational = true, cameraSupported = true } },
+    }
+    fixD.gcMenu.onShowMenu()
+    local sessD = fixD.API.getSession()
+    sessD.groups = { groupA, groupB }
+    X4GunneryState.seedBaseline(sessD, { groupA, groupB })
+    -- Real tick of group A through the accepted API: staged follows the
+    -- session's Direct-control policy, exactly as a real sit-down+tick would.
+    X4GunneryState.toggleGroup(sessD, keyA, groupA.armed)
+    GetComponentData = function(_, key) if key == "isplayerowned" then return true end return nil end
+
+    local function latestRowDropDown(fixture, rowID)
+        local found
+        for _, dd in ipairs(fixture.getCreatedDropDowns()) do
+            if dd.row == rowID then found = dd end
+        end
+        return found
+    end
+    local function optionIDs(dd)
+        local ids = {}
+        for _, option in ipairs(dd.options or {}) do ids[#ids + 1] = option.id end
+        return ids
+    end
+    local function hasID(ids, wanted)
+        for _, id in ipairs(ids) do if id == wanted then return true end end
+        return false
+    end
+    local function startValue(dd)
+        local start = dd.startOption
+        return type(start) == "function" and start() or start
+    end
+
+    fixD.gcMenu.display()
+
+    -- Selector: rendered on the console with exactly the two Direct-control
+    -- ids, the vanilla Helper option texts, and the localized label/help.
+    local selDD = latestRowDropDown(fixD, "direct_mode")
+    assert(selDD, "console must render the direct_mode selector dropdown")
+    local selIDs = optionIDs(selDD)
+    assert(#selIDs == 2 and selIDs[1] == "attackenemies" and selIDs[2] == "autoassist",
+        "selector must offer exactly the two Direct-control modes in vanilla order")
+    local vanillaText = {}
+    for _, entry in ipairs(Helper.turretModes) do vanillaText[entry.id] = entry.text end
+    assert(selDD.options[1].text == vanillaText.attackenemies
+        and selDD.options[2].text == vanillaText.autoassist,
+        "selector options must reuse the vanilla Helper option texts, not hardcoded labels")
+    assert(selDD.startOption == "attackenemies" and sessD.directMode == "attackenemies",
+        "selector must start at session.directMode (attackenemies)")
+    local selLabel
+    for _, entry in ipairs(fixD.getCreatedTexts()) do
+        if entry.row == "direct_mode" and entry.column == 1 then selLabel = entry.text end
+    end
+    assert(selLabel == ReadText(20991, 101),
+        "selector label must come from localization id 101, not hardcoded English")
+    assert(selDD.mouseOverText == ReadText(20991, 102),
+        "selector help text must come from localization id 102, not hardcoded English")
+
+    -- Rows under attackenemies (checked and unchecked): the current Direct
+    -- mode is offered, the other one is not, ordinary modes stay available.
+    for _, rowKey in ipairs({ keyA, keyB }) do
+        local ids = optionIDs(latestRowDropDown(fixD, rowKey))
+        assert(hasID(ids, "attackenemies"), "row must offer the current Direct mode (" .. rowKey .. ")")
+        assert(not hasID(ids, "autoassist"),
+            "under attackenemies the row must not offer autoassist (" .. rowKey .. ")")
+        assert(hasID(ids, "defend") and hasID(ids, "mining") and hasID(ids, "towing"),
+            "ordinary vanilla modes must stay available (" .. rowKey .. ")")
+    end
+    assert(startValue(latestRowDropDown(fixD, keyA)) == "attackenemies",
+        "checked row displays the staged Direct-control mode")
+
+    -- Selector change: policy + checked staging update, repaint follows, and
+    -- no live turret state is written (Task 2 is staged/UI-only).
+    local liveC = require("ffi").C
+    local liveWrites = {}
+    local liveSaves = {}
+    for _, name in ipairs({ "SetTurretGroupMode2", "SetTurretGroupArmed", "SetWeaponMode", "SetWeaponArmed" }) do
+        liveSaves[name] = rawget(liveC, name)
+        liveC[name] = function(...) liveWrites[#liveWrites + 1] = name end
+    end
+    selDD.handlers.onDropDownConfirmed(nil, "autoassist")
+    for _, name in ipairs({ "SetTurretGroupMode2", "SetTurretGroupArmed", "SetWeaponMode", "SetWeaponArmed" }) do
+        liveC[name] = liveSaves[name]
+    end
+    assert(#liveWrites == 0,
+        "selector change must not write live turret state: " .. table.concat(liveWrites, ","))
+    assert(sessD.directMode == "autoassist", "selector change must set session.directMode")
+    assert(sessD.staged[keyA].mode == "autoassist",
+        "setDirectMode must re-stage the checked row in the new mode")
+
+    fixD.gcMenu.display()
+    assert(startValue(latestRowDropDown(fixD, keyA)) == "autoassist",
+        "checked row must repaint in the new Direct-control mode")
+
+    -- Rows under autoassist (checked and unchecked): attackenemies is now the
+    -- omitted mode; ordinary modes remain.
+    for _, rowKey in ipairs({ keyA, keyB }) do
+        local ids = optionIDs(latestRowDropDown(fixD, rowKey))
+        assert(hasID(ids, "autoassist"), "row must offer the current Direct mode (" .. rowKey .. ")")
+        assert(not hasID(ids, "attackenemies"),
+            "under autoassist the row must not offer attackenemies (" .. rowKey .. ")")
+        assert(hasID(ids, "defend") and hasID(ids, "mining"),
+            "ordinary vanilla modes must stay available (" .. rowKey .. ")")
+    end
+
+    -- The engine-compatibility filter can drop the current Direct mode from a
+    -- row's vanilla list; the row must still offer it, or a checked row could
+    -- display a mode its dropdown cannot select.
+    fixD.C.IsWeaponModeCompatible = function(_, _, modeID) return modeID ~= "autoassist" end
+    fixD.gcMenu.display()
+    local compatIDs = optionIDs(latestRowDropDown(fixD, keyA))
+    assert(hasID(compatIDs, "autoassist"),
+        "row must still offer the current Direct mode when compatibility filtered it out")
+    assert(not hasID(compatIDs, "attackenemies"), "the conflicting Direct mode stays excluded")
+    fixD.C.IsWeaponModeCompatible = nil
+
+    -- Checked row -> explicit ordinary mode: unticks the row and keeps the
+    -- chosen ordinary mode (State.stageMode membership contract).
+    latestRowDropDown(fixD, keyA).handlers.onDropDownConfirmed(nil, "defend")
+    assert(sessD.checkedGroupKeys[keyA] == nil,
+        "choosing an ordinary mode on a checked row must untick it")
+    assert(sessD.staged[keyA].mode == "defend",
+        "the unticked row must keep the explicitly chosen ordinary mode")
+    assert(sessD.directMode == "autoassist",
+        "an ordinary row selection must not move the session policy")
+
+    -- Unchecked row -> another ordinary mode: stays unchecked, mode applied.
+    latestRowDropDown(fixD, keyB).handlers.onDropDownConfirmed(nil, "mining")
+    assert(sessD.checkedGroupKeys[keyB] == nil,
+        "changing an unchecked row to another ordinary mode must keep it unchecked")
+    assert(sessD.staged[keyB].mode == "mining",
+        "the unchecked row must keep the selected ordinary mode")
+
+    -- Degraded Helper table: the selector degrades to what vanilla ships and
+    -- the ensure-present fallback resolves to nil without raising.
+    local savedModes = Helper.turretModes
+    Helper.turretModes = {}
+    fixD.gcMenu.display()
+    assert(#optionIDs(latestRowDropDown(fixD, "direct_mode")) == 0,
+        "with no vanilla entries the selector offers no options")
+    assert(#optionIDs(latestRowDropDown(fixD, keyA)) == 0,
+        "with no vanilla entries the row offers no options")
+    Helper.turretModes = savedModes
+    GetComponentData = function() return nil end
+end
 
 print("runtime coverage ui tests passed")
