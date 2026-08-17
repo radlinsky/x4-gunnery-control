@@ -31,6 +31,19 @@ The **Select Engagement Target** menu lists the ships and stations in radar rang
 one and its hull is engaged immediately, but you can instead
 mark a specific surface element (e.g. turret, shield, engine).
 
+**Engageable ratio.** Gunnery Control shows an **N / total ENGAGEABLE** count for
+your selected target. This is a mod-computed geometry check — not a guarantee
+the turret will fire. The numerator counts turrets that currently pass
+Gunnery Control's geometry check: known traverse arc covering the aim direction,
+target within weapon range, and a clear line of fire past your own ship.
+Unknown-arc turrets stay in the denominator and are reported separately as
+**UNKNOWN**. Readiness, fire authorization, an intercept solution, and actual
+firing are all separate states that this ratio does not measure.
+
+For example, **3 / 4 ENGAGEABLE** means 3 of the 4 selected/evaluated turrets
+pass that geometry check. UNKNOWN-arc members remain in the denominator and are
+reported UNKNOWN.
+
 - **Auto-next Target when destroyed** is checked by default: when the target
   dies, the turret(s) and camera automatically select the next target.
   Uncheck it, and the turret(s) will sit idly by until you pick
@@ -62,10 +75,10 @@ back at the same turret, watching the same target, with the same groups checked.
 
 - **This is not manual aiming.** Direct-control tells the turrets
   *what* to hit, not *how*. The engine exposes no way to man a turret yourself.
-- **On small ships the camera watches the whole ship, not the turret.** X4
-  resolves a turret camera on S/M ships to the ship itself. Everything still
-  works — Direct-control, target selection, auto-engage — the view is just less
-  specific than it is on a capital ship.
+- **On some S/M ships, a turret-target camera request can resolve to a wider
+  ship-level view instead of a tight turret component view.** Direct-control,
+  target selection, and Auto-engage still work; only the camera framing is less
+  specific.
 - **Turret POV cinematic often clips the camera into your own hull.** It looks
   rough. Target POV cinematic is the better-looking of the two.
 - The confirmation popup that appears when you stand up also works around an X4
@@ -73,26 +86,32 @@ back at the same turret, watching the same target, with the same groups checked.
   texts off in the game options, that popup never shows — and the workaround
   goes with it. Press `Esc` once after standing up; it stays unresponsive until
   any other menu opens and closes (e.g. M for map).
+- **Duplicate-named groups can mislabel members in the UI.** If two turret groups
+  share the same name, member rows or camera representative selection can appear
+  under a sibling same-named group; commands still reach the correct group.
 
 ## Requirements
 
 - X4 Foundations 9.00 or newer.
-- [kuertee UI Extensions and HUD](https://www.nexusmods.com/x4foundations/mods/552).
-  Leave Protected UI Mode active as its instructions recommend.
+- **Nexus**: [UI Extensions and HUD](https://www.nexusmods.com/x4foundations/mods/552)
+  and [Print Extension List](https://www.nexusmods.com/x4foundations/mods/2191).
+  Leave Protected UI Mode active as UI Extensions' instructions recommend.
+- **Steam**: [UI Extensions and HUD](https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743)
+  and [Print Extension List](https://steamcommunity.com/sharedfiles/filedetails/?id=3770927339).
 
 The extension replaces no vanilla game files, no UI Extensions files, and no
 combat AI scripts.
 
 ## Installation
 
-**Nexus / Vortex**: install UI Extensions and HUD first, then install the ZIP
+**Nexus / Vortex**: install both required extensions first, then install the ZIP
 without changing its top-level `x4_gunnery_control` folder.
 
 **Steam Workshop**:
 [subscribe](https://steamcommunity.com/sharedfiles/filedetails/?id=3778864325).
-The Workshop build depends on the
-[Workshop repackage of UI Extensions and HUD](https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743),
-so Steam pulls that in for you.
+The Workshop build depends on two required Workshop items — [UI Extensions and HUD](https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743)
+and [Print Extension List](https://steamcommunity.com/sharedfiles/filedetails/?id=3770927339) —
+so Steam pulls both in for you.
 
 **Manual** — extract the archive so you end up with:
 
@@ -100,7 +119,7 @@ so Steam pulls that in for you.
 X4 Foundations/extensions/x4_gunnery_control/
 ```
 
-Launch X4, enable both extensions in the Extensions menu, and load a save.
+Launch X4, enable Gunnery Control and both required extensions in the Extensions menu, and load a save.
 
 ## Shout-outs
 
