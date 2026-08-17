@@ -280,9 +280,30 @@ assert(State.isStagedDirty(sess2),
     "console row handlers must leave the session dirty (staged diverges from the baseline)")
 
 -- Clicking the Update button writes staged to the ship and advances committedBaseline.
+-- Intercept the live C table the loaded module actually bound at load time, so
+-- SetTurretGroupMode2 and SetTurretGroupArmed calls are captured rather than
+-- silently dispatched to stubs. Each fixture.load() builds a fresh C and
+-- gunnery_control captures ffi.C once; fix2.C is only the fixture's copy.
+local liveC = require("ffi").C
+local stagedMode = sess2.staged[groupKey] and sess2.staged[groupKey].mode or "attack"
+local stagedArmed = sess2.staged[groupKey] and sess2.staged[groupKey].armed or false
+local modeWrites = {}
+local armedWrites = {}
+local origSetMode = rawget(liveC, "SetTurretGroupMode2")
+local origSetArmed = rawget(liveC, "SetTurretGroupArmed")
+liveC.SetTurretGroupMode2 = function(_, _, _, _, mode) modeWrites[#modeWrites + 1] = tostring(mode) end
+liveC.SetTurretGroupArmed = function(_, _, _, _, armed) armedWrites[#armedWrites + 1] = armed end
 local commitMark = fix2.callbackCheckpoint()
 updateBtnDirty.handlers.onClick()
 fix2.drainCallbacksSince(commitMark)
+liveC.SetTurretGroupMode2 = origSetMode
+liveC.SetTurretGroupArmed = origSetArmed
+assert(#modeWrites == 1 and modeWrites[1] == stagedMode,
+    "Update must push exactly one SetTurretGroupMode2 for the staged mode; got "
+    .. table.concat(modeWrites, ","))
+assert(#armedWrites == 1 and armedWrites[1] == stagedArmed,
+    "Update must push exactly one SetTurretGroupArmed for the staged armed value; got "
+    .. tostring(armedWrites[1]))
 -- Read the final staged values (armed may have been toggled by the armed button).
 local finalStaged = sess2.staged[groupKey]
 assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].mode == finalStaged.mode,
