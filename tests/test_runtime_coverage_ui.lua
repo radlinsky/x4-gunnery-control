@@ -65,34 +65,11 @@ for _, controlMode in ipairs({ "auto", "direct" }) do
     X4GunneryState.seedBaseline(sessE, { grpE })
 
     fixE.gcMenu.display()
-    local cleanBtn = latestButton(fixE, "text:20991:83")
-    assert(cleanBtn ~= nil,
-        "engaged/" .. controlMode .. " panel must render the Update turret behavior button")
-    assert(cleanBtn.active == false,
-        "engaged/" .. controlMode .. ": Update must be greyed while staged matches the baseline")
-
-    X4GunneryState.stageMode(sessE, key, "defend", grpE.armed)
-    fixE.gcMenu.display()
-    local dirtyBtn = latestButton(fixE, "text:20991:83")
-    assert(dirtyBtn.active == true,
-        "engaged/" .. controlMode .. ": Update must be active once staged diverges")
-
-    -- Capture the turret write on the C table the loaded module actually holds.
-    -- Each fixture load() builds a fresh C, and gunnery_control binds ffi.C once
-    -- at load, so a later fixture's .C is not the one production calls through.
-    local liveC = require("ffi").C
-    local writesE = {}
-    local origMode = rawget(liveC, "SetTurretGroupMode2")
-    liveC.SetTurretGroupMode2 = function(_, _, _, _, mode) writesE[#writesE + 1] = tostring(mode) end
-    dirtyBtn.handlers.onClick()
-    liveC.SetTurretGroupMode2 = origMode
-    assert(#writesE == 1 and writesE[1] == "defend",
-        "engaged/" .. controlMode .. ": Update must push the staged mode immediately; wrote "
-        .. table.concat(writesE, ","))
-    assert(sessE.committedBaseline[1].mode == "defend",
-        "engaged/" .. controlMode .. ": Update must advance the committed baseline")
-    assert(not X4GunneryState.isStagedDirty(sessE),
-        "engaged/" .. controlMode .. ": Update must leave the session clean")
+    -- Task 1: engaged panels (auto and direct) must NOT render Update turret
+    -- behavior; the button lives on the main console only.
+    local engagedUpdateBtn = latestButton(fixE, "text:20991:83")
+    assert(engagedUpdateBtn == nil,
+        "engaged/" .. controlMode .. " panel must NOT render the Update turret behavior button")
     -- #18: Previous on the left, Next on the right (cycle_turret is shared).
     local dirCycleBtns = {}
     for _, b in ipairs(fixE.getCreatedButtons()) do

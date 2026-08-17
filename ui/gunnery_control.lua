@@ -869,9 +869,8 @@ end
 
 -- "Update turret behavior" commit. Writes the staged config to every mutable
 -- group and advances committedBaseline so a later stand-up reverts to this new
--- state rather than to what the ship looked like at sit-down. Shared verbatim by
--- the console action row and the engaged panel: the button is a commit point by
--- definition, so it must behave identically wherever it is pressed.
+-- state rather than to what the ship looked like at sit-down. Only the main
+-- console renders this button; engaged panels omit it.
 local function commitStagedTurretBehavior()
     if not session then return end
     local written = 0
@@ -1945,13 +1944,7 @@ function menu.display()
             end
             autoNextRow[2]:createText(text(78))
         end
-        -- "Update turret behavior" (id 83), same button as the console action
-        -- row. A commit point is valid in any phase: pressing it here pushes the
-        -- staged config immediately and makes it the new revert target, so the
-        -- player does not have to stand up to keep a change made mid-engagement.
-        local engagedUpdateRow = controls:addRow("update_turrets", {})
-        engagedUpdateRow[1]:setColSpan(2):createButton({ active = State.isStagedDirty(session) }):setText(text(83))
-        engagedUpdateRow[1].handlers.onClick = commitStagedTurretBehavior
+
         if testLabCallbacks and testLabCallbacks.open then
             local testLabRow = controls:addRow("testlab", {})
             testLabRow[1]:setColSpan(2):createButton({}):setText(text(32))
