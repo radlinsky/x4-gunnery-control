@@ -8,8 +8,8 @@
 
 ## 0.30 — 2026-08-07
 
-- **New: "All Turrets: Prefer My Target."** During Direct-control every turret on the ship shoots your chosen target when it can, and something else in range otherwise. Checked groups stay on your target; unchecked groups return to their own modes. Mining and towing turrets are left alone in both directions.
-- **Direct-control works on S/M ships again.** The camera now opens normally instead of kicking you back to the console. On some smaller ships the view may resolve to a wider ship-level perspective rather than a tight turret frame — you can still see and aim, just from farther away.
+- **New: "All Turrets: Prefer My Target."** During Direct-control every applicable turret prefers your chosen target when it can, and may shoot something else in range otherwise. This is separate from "Release Other Turrets," which was the action that handed unchecked/rest-of-ship turrets back while checked groups remained directed at the chosen target. Mining and towing turrets are left alone in both directions.
+- **Direct-control works on S/M ships again.** The camera now opens normally instead of kicking you back to the console. On some smaller ships the view may resolve to a wider ship-level perspective rather than a tight turret frame — target selection and control still work, just from farther away.
 - **Duplicate-named turret groups are now controllable.** Previously, two groups sharing a name caused both to be greyed out. Groups remain controllable, but member rows and camera representative selection can still resolve under a sibling group; commands still reach the correct group.
 - **The Mode column now updates correctly** after you cease an engagement.
 
