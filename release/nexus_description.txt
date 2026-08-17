@@ -62,7 +62,7 @@ Saving and loading keeps your seat: load a save while engaged and the game puts 
 
 [list]
 [*][b]This is not manual aiming.[/b] Direct-control tells the turrets [i]what[/i] to hit, not [i]how[/i]. The engine exposes no way to man a turret yourself.[/*]
-[*][b]On small ships the camera watches the whole ship, not the turret.[/b] X4 resolves a turret camera on S/M ships to the ship itself. Everything still works — Direct-control, target selection, auto-engage — the view is just less specific than on a capital ship.[/*]
+[*][b]On some S/M ships, turret target view can resolve to a wider ship-level camera framing instead of a tight turret view.[/b] Direct-control, target selection, and Auto-engage still work; only the camera framing is less specific.[/*]
 [*][b]Turret POV cinematic often clips the camera into your own hull.[/b] It looks rough. Target POV cinematic is the better-looking of the two.[/*]
 [*]The confirmation popup that appears when you stand up also works around an X4 bug that leaves [b]Esc[/b] dead after a camera session. If you have turned help texts off in the game options, that popup never shows — and the workaround goes with it. Press [b]Esc[/b] once after standing up; it stays unresponsive until any other menu opens and closes (e.g. M for map).[/*]
 [*][b]The Engageable ratio is a targeting aid, not a firing guarantee.[/b] It checks geometry only. A turret can show ENGAGEABLE and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. Conversely, [b]UNKNOWN[/b] turrets may still fire if their arc data are unavailable even though they could shoot.[/*]
