@@ -888,7 +888,8 @@ local function engageTarget(targetID)
         session.phase, session.controlMode = "engaged", "direct"
     else
         -- First engagement: write staged to the ship (temporary commit point),
-        -- then arm only the checked mutable groups in attackenemies.
+        -- then arm only the checked mutable groups in the session's resolved
+        -- Direct-control mode.
         -- committedBaseline is NOT updated here — that is reserved for the
         -- "Update turret behavior" commit.
         local orderable = {}
@@ -2452,9 +2453,9 @@ function menu.display()
             local stagedMode = s.mode
             -- Constrained mode list: every ordinary vanilla mode plus the
             -- session's current Direct-control policy, and never the other
-            -- Direct-control mode. The shipped Helper dropdown carries no
-            -- per-option disable (options only hold id/icon/text), so the
-            -- conflicting mode is omitted rather than greyed out.
+            -- Direct-control mode. The shipped Helper dropdown has no supported
+            -- per-option disabled state, so the conflicting mode is omitted
+            -- rather than greyed out.
             local rowModes = {}
             for _, entry in ipairs(Helper.getTurretModes(group.componentID, nil, "x4gc_mode_" .. group.key)) do
                 if not (State.isDirectedMode(entry.id) and entry.id ~= session.directMode) then
