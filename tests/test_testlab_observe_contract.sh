@@ -70,6 +70,8 @@ ship_missiles=$(grep -Fc "in=\"\$Ship.missileturrets.operational.list\"" "$md")
 # loops, and the stale "distance plus half the target's size" framing is gone.
 inrange=$(grep -Fc "(\$Weapon.bboxdistanceto.{\$Target} le \$Weapon.maxfirerange)" "$md" || true)
 [[ "$inrange" -eq 2 ]] || fail "expected bboxdistanceto inrange in both snapshot loops, found $inrange"
+bboxdist=$(grep -Fc "' bboxdist=' + \$Weapon.bboxdistanceto.{\$Target}" "$md" || true)
+[[ "$bboxdist" -eq 2 ]] || fail "expected bboxdist diagnostic in both snapshot loops, found $bboxdist"
 if grep -Fq "(\$Dist + (\$Target.size / 2) lt \$Weapon.maxfirerange)" "$md"; then
   fail "inrange still uses the old distanceto + target.size/2 predicate"
 fi
