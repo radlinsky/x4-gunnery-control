@@ -998,12 +998,13 @@ assert(sess39.povAnchor == "turret" and sess39.povMode == "manual",
 -- ── 42. Direct target loss: asynchronous same-root fallback (Issue #45 Task 5) ─
 -- The production path is updateAimTarget() on the 0.25 s tick. A dead surface
 -- element with Auto-next on must NOT be answered with an immediate choice:
--- onDirectTargetLost() records a session-scoped resolution
--- (session.targetFallback), and each later tick re-queries the current stage
--- through the standard ENGAGEABLE request path and applies one
--- State.planEngageFallback decision: ranked same-root surfaces in pages, then
--- the target's hull, then ranked other objects. The assertions below fail on a
--- synchronous pick at the loss tick, a browser fallback before the planner has
+-- onDirectTargetLost() refreshes the root's surface snapshot, records the
+-- ranked unfiltered same-root surfaces in session.targetFallback (page 1),
+-- and issues the page-1 ENGAGEABLE query immediately. Each later tick consumes
+-- the pending/accepted readings through one State.planEngageFallback decision:
+-- ranked same-root surfaces in pages, then the target's hull, then ranked
+-- other objects. The assertions below fail on a synchronous pick at the loss
+-- tick, a deferred page-1 query, a browser fallback before the planner has
 -- exhausted every stage, re-implemented enumeration/ordering logic, or a
 -- request that bypasses the checked operational turret membership.
 -- Distinct stub IDs keep every assertion discriminating: 600 root, 701+
@@ -1191,15 +1192,20 @@ do
         return n
     end
 
-    -- A. The loss tick only starts the resolution: no choice, no sweep, and
-    -- no ENGAGEABLE request until the next refresh.
+    -- A. Task 5A: the loss tick refreshes the same-root surface snapshot,
+    -- ranks the unfiltered alternatives of its allSurfaces, and immediately
+    -- issues exactly one page-1 ENGAGEABLE batch for the checked operational
+    -- turrets. It still makes no choice and runs no object sweep; the next
+    -- tick consumes the pending readings without re-requesting.
     do
         resetCounts42()
-        slotCount42 = 2                       -- 701 (dead), 702 (alive)
-        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
+        slotCount42 = 3                       -- 701 (dead), 702/703 (alive)
+        operational42 = { ["600"] = true, ["702"] = true, ["703"] = true,
+            ["98"] = true }
         sectorShips42 = { 98 }
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
+        sess.surfaceTypeFilter = "engine"     -- browser filter: must not narrow the fallback
         clock = 500
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
@@ -1213,37 +1219,73 @@ do
             .. tostring(sess.targetObjectID) .. " phase=" .. tostring(sess.phase))
         assert(#softtargetCalls42 == 0,
             "no re-engage may happen on the loss tick itself")
-        assert(surfaceScanCalls42 >= 1,
-            "the resolution must rank root 600 through the surface reader")
         assert(objectSweepCalls42 == 0,
             "the object sweep belongs to the planner's objects stage, not the loss tick; "
             .. objectSweepCalls42 .. " call(s)")
-        assert(#fix.uiTriggeredEvents == mark,
-            "no ENGAGEABLE request may be emitted on the loss tick")
+        -- The surface snapshot for the root is refreshed on the loss tick...
+        assert(sess.surfaceBrowser ~= nil
+            and X4GunneryState.normID(sess.surfaceBrowser.rootID) == "600"
+            and (sess.surfaceBrowser.generation or 0) >= 1,
+            "the surface snapshot for root 600 must be refreshed on the loss tick; "
+            .. "generation="
+            .. tostring(sess.surfaceBrowser and sess.surfaceBrowser.generation))
+        assert(fix.logContains("event=surface_snapshot action=create reason=auto_next"),
+            "the loss-tick snapshot refresh must be logged with the auto_next reason")
+        assert(#sess.surfaceBrowser.allSurfaces == 2,
+            "the refreshed snapshot must hold the unfiltered operational surfaces; "
+            .. "got " .. tostring(#sess.surfaceBrowser.allSurfaces))
+        -- ...and the fallback ranks the unfiltered same-root alternatives of
+        -- exactly that snapshot (the user's engine filter would leave the
+        -- browser none of them).
+        local expected = X4GunneryState.surfaceAlternatives(
+            sess.surfaceBrowser.allSurfaces, sess.aimTargetID, "any", "any")
+        table.sort(expected, function(a, b)
+            return X4GunneryState.surfaceMetadataLess(a, b, "size_first")
+        end)
+        local expectedIDs = {}
+        for _, surface in ipairs(expected) do
+            expectedIDs[#expectedIDs + 1] = X4GunneryState.normID(surface.componentID)
+        end
         assert(sess.targetFallback.stage == "surfaces" and sess.targetFallback.page == 1
-            and sess.targetFallback.orderedIDs[1] == "702"
-            and #sess.targetFallback.orderedIDs == 1,
-            "the fallback state must hold the ranked same-root surfaces; stage="
+            and #sess.targetFallback.orderedIDs == #expectedIDs
+            and table.concat(sess.targetFallback.orderedIDs, ",")
+                == table.concat(expectedIDs, ","),
+            "the fallback must start at surfaces page 1 ranked from the refreshed "
+            .. "unfiltered allSurfaces; stage="
             .. tostring(sess.targetFallback.stage)
-            .. " ids=" .. table.concat(sess.targetFallback.orderedIDs, ","))
+            .. " page=" .. tostring(sess.targetFallback.page)
+            .. " ids=" .. table.concat(sess.targetFallback.orderedIDs, ",")
+            .. " expected=" .. table.concat(expectedIDs, ","))
+        assert(surfaceScanCalls42 >= 1,
+            "the resolution must rank root 600 through the surface reader")
         assert(fix.logContains("event=auto_next_fallback action=start"),
             "the fallback start must be logged")
-
-        -- First resolution tick: one ENGAGEABLE query for the survivor page,
-        -- still no choice.
-        mark = #fix.uiTriggeredEvents
-        tick42()
+        -- ...and page 1 is queried immediately through the checked turrets.
         local batches = batchesSince42(mark)
         assert(#batches == 1,
-            "the first resolution tick must issue exactly one ENGAGEABLE batch; got "
+            "the loss tick must issue exactly one page-1 ENGAGEABLE batch; got "
             .. tostring(#batches))
+        assert(#batches[1].targets <= 20,
+            "a page-1 batch must hold at most 20 ranked targets; got "
+            .. tostring(#batches[1].targets))
         assert(batches[1].members == 1 and #batches[1].memberIDs == 1
-            and batches[1].memberIDs[1] == 27 and #batches[1].targets == 1
-            and batches[1].targets[1] == "702",
-            "the batch must query exactly page 1 for the checked operational "
-            .. "turret; members=" .. tostring(batches[1].members)
-            .. " members_list=" .. table.concat(batches[1].memberIDs, ",")
-            .. " targets=" .. table.concat(batches[1].targets, ","))
+            and batches[1].memberIDs[1] == 27,
+            "the batch must carry exactly the checked operational turret; members="
+            .. tostring(batches[1].members)
+            .. " members_list=" .. table.concat(batches[1].memberIDs, ","))
+        assert(#batches[1].targets == 2 and batches[1].targets[1] == "702"
+            and batches[1].targets[2] == "703",
+            "page 1 must query the ranked same-root surfaces; targets="
+            .. table.concat(batches[1].targets, ","))
+        assert(#softtargetCalls42 == 0,
+            "no choice may be made before a result is accepted")
+
+        -- Next tick: the batch is still pending inside the cache window, so
+        -- the planner waits without re-requesting, and still makes no choice.
+        mark = #fix.uiTriggeredEvents
+        tick42()
+        assert(#batchesSince42(mark) == 0,
+            "a still-pending page-1 batch must not be re-requested on the next tick")
         assert(#softtargetCalls42 == 0,
             "no choice may be made before a result is accepted")
     end
@@ -1259,11 +1301,10 @@ do
         sess.targetObjectID, sess.aimTargetID = 600, 701
         sess.povAnchor, sess.povMode = "turret", "cinematic"
         clock = 500
-        API.updateAimTarget()
         local mark = #fix.uiTriggeredEvents
-        tick42()
+        API.updateAimTarget()
         local batches = batchesSince42(mark)
-        assert(#batches == 1, "expected the page-1 batch")
+        assert(#batches == 1, "the loss tick must issue the page-1 batch")
         deliver42(batches[1], { ["702"] = "1:1:1" })
         softtargetCalls42 = {}
         tick42()
@@ -1307,9 +1348,8 @@ do
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
         clock = 500
-        API.updateAimTarget()
         local mark = #fix.uiTriggeredEvents
-        tick42()
+        API.updateAimTarget()
         local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 20
             and batches[1].targets[1] == "702" and batches[1].targets[20] == "721",
@@ -1573,9 +1613,8 @@ do
         local sess = freshDirectSession42(groups)
         sess.targetObjectID, sess.aimTargetID = 600, 701
         clock = 500
-        API.updateAimTarget()
         local mark = #fix.uiTriggeredEvents
-        tick42()
+        API.updateAimTarget()
         local batches = batchesSince42(mark)
         assert(#batches == 1 and batches[1].members == 1
             and #batches[1].memberIDs == 1 and batches[1].memberIDs[1] == 27,
@@ -1600,12 +1639,11 @@ do
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
         clock = 500
-        API.updateAimTarget()
         local mark = #fix.uiTriggeredEvents
-        tick42()
+        API.updateAimTarget()
         local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 2,
-            "the first resolution tick must query both surviving surfaces")
+            "the loss tick must query both surviving surfaces")
         -- The whole root goes down before any result arrives.
         operational42 = { ["98"] = true }
         objectSweepCalls42 = 0
@@ -1636,13 +1674,12 @@ do
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
         clock = 500
+        local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         assert(sess.targetFallback ~= nil, "setup: the fallback must be running")
-        local mark = #fix.uiTriggeredEvents
-        tick42()
         local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 1,
-            "expected the single-surface batch")
+            "the loss tick must issue the single-surface batch")
         deliver42(batches[1], { ["702"] = "1:1:1" })
         local savedRefuseSoft = C.SetSofttarget
         C.SetSofttarget = function(target)

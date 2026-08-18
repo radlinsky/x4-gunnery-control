@@ -1689,15 +1689,17 @@ end
 local fallbackPageSize = engageabilityBatchSize
 
 -- Session-scoped asynchronous resolution of a Direct surface loss
--- (Issue #45 Task 5). onDirectTargetLost() records the ranked same-root
--- surfaces in session.targetFallback and returns without choosing anything.
--- Each 0.25 s tick, updateTargetFallback() re-queries the current stage's
--- batch through the standard engageability path and applies one
--- State.planEngageFallback decision: ranked surfaces in pages, then the
--- target's hull, then ranked other objects. Only accepted results reach the
--- planner: requestEngageabilities() owns epoch, signature and staleness (a
--- stale reading comes back as a fresh pending entry, and the planner yields
--- "wait" for it), so no second staleness model lives here.
+-- (Issue #45 Task 5). onDirectTargetLost() refreshes the root's surface
+-- snapshot, records the ranked unfiltered same-root surfaces in
+-- session.targetFallback (page 1), issues the page-1 ENGAGEABLE query at
+-- once, and returns without choosing anything. Each later 0.25 s tick,
+-- updateTargetFallback() re-queries the current stage's batch through the
+-- standard engageability path and applies one State.planEngageFallback
+-- decision: ranked surfaces in pages, then the target's hull, then ranked
+-- other objects. Only accepted results reach the planner:
+-- requestEngageabilities() owns epoch, signature and staleness (a stale
+-- reading comes back as a fresh pending entry, and the planner yields "wait"
+-- for it), so no second staleness model lives here.
 
 -- Asks the checked turrets' ENGAGEABLE for `ids` and reshapes the positional
 -- cache entries into the normID -> accepted result map the planner consumes.
@@ -1749,11 +1751,15 @@ local function handleObjectLoss()
 end
 
 local function startTargetFallback(lostID, root)
-    -- readSurfaceTargets() stays the sole enumeration path, surfaceCrossType
-    -- policy the same ordering the surface browser uses, and State.
-    -- surfaceAlternatives the same lost-entry exclusion the browser's pinned
-    -- row gets -- so no enumeration or ordering logic is duplicated here.
-    local alternatives = State.surfaceAlternatives(readSurfaceTargets(id(root)),
+    -- Task 5A: the loss tick refreshes the root's surface snapshot through
+    -- the browser's own rebuild path (fresh generation, logged reason),
+    -- then ranks the UNFILTERED same-root alternatives of that snapshot's
+    -- allSurfaces -- the user's browser filters never narrow auto-next --
+    -- under the same cross-type policy the browser sorts with, starting at
+    -- page 1. The page-1 batch enters the standard ENGAGEABLE path
+    -- immediately; the loss tick itself still makes no choice.
+    local browser = rebuildSurfaceSnapshot("auto_next")
+    local alternatives = State.surfaceAlternatives(browser.allSurfaces,
         lostID, "any", "any")
     table.sort(alternatives, function(a, b)
         return State.surfaceMetadataLess(a, b, surfaceCrossTypePolicy)
@@ -1766,9 +1772,12 @@ local function startTargetFallback(lostID, root)
         stage = "surfaces", root = root, lostID = lostID,
         orderedIDs = orderedIDs, page = 1,
     }
+    local pageIDs = State.surfacePage(orderedIDs, 1, fallbackPageSize)
+    queryFallbackBatch(pageIDs)
     log("event=auto_next_fallback action=start root=" .. tostring(root)
         .. " lost=" .. tostring(lostID)
-        .. " surfaces=" .. tostring(#orderedIDs))
+        .. " surfaces=" .. tostring(#orderedIDs)
+        .. " snapshot_generation=" .. tostring(browser.generation))
 end
 
 -- Direct-control lost what it was engaging. Setting aimTargetID alone would
