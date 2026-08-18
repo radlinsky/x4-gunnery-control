@@ -195,11 +195,12 @@
                   <check_line_of_sight name="$MuzzleLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="true" useaimtarget="true"/>
                   <check_line_of_sight name="$MuzzleLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="false" useaimtarget="true"/>
                   <!-- The engine's own definition of in-range, verbatim from
-                       shipped combat AI: distance plus half the target's size
-                       under max fire range.  There is no arc term anywhere in
+                       shipped combat AI: bounding-box distance under max fire
+                       range, no size term.  There is no arc term anywhere in
                        vanilla's firing-solution test, which is why CANNOT BEAR
                        has to be read off as "aimable but never firing" rather
-                       than measured directly. -->
+                       than measured directly.  $Dist keeps the raw
+                       component-distance reading for comparison. -->
                   <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>
                   <set_value name="$Relative" exact="$Target.relativeposition.{$Weapon}"/>
                   <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
@@ -233,7 +234,8 @@
                     + ' barrel_x=' + $Barrel.x
                     + ' barrel_y=' + $Barrel.y
                     + ' barrel_z=' + $Barrel.z
-                    + ' inrange=' + ($Dist + ($Target.size / 2) lt $Weapon.maxfirerange)
+                    + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
+                    + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
                 </do_for_each>
@@ -270,7 +272,8 @@
                     + ' barrel_x=' + $Barrel.x
                     + ' barrel_y=' + $Barrel.y
                     + ' barrel_z=' + $Barrel.z
-                    + ' inrange=' + ($Dist + ($Target.size / 2) lt $Weapon.maxfirerange)
+                    + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
+                    + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
                 </do_for_each>
