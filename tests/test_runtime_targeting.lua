@@ -995,6 +995,225 @@ assert(sess39.povAnchor == "turret" and sess39.povMode == "manual",
     "with auto-next off the view must reset to manual Turret POV; got "
     .. tostring(sess39.povAnchor) .. "/" .. tostring(sess39.povMode))
 
+-- ── 42. Direct target loss: same-root surface fallback (Issue #45 Task 2) ────
+-- The production path is updateAimTarget(): a dead surface element must not
+-- drop the directed turrets to the next object in the sector. With Auto-next
+-- on, the best surviving operational surface on the same root is re-engaged
+-- through engageTarget(), the root is preserved, and the object-target sweep
+-- is never consulted. Distinct stub IDs keep every assertion discriminating:
+-- 600 root, 701 dead surface, 702 live surface, 500 ordinary object, 98 ship.
+do
+    -- Save the stubs this block replaces; nil restores the fixture's C
+    -- metatable fallbacks.
+    local savedClass42 = C.IsComponentClass
+    local savedNumSlots42 = C.GetNumUpgradeSlots
+    local savedSlotComp42 = C.GetUpgradeSlotCurrentComponent
+    local savedSlotMacro42 = C.GetUpgradeSlotCurrentMacro
+    local savedSetName42 = C.GetComponentName
+    local savedDist42 = C.GetDistanceBetween
+    local savedCtxClass42 = C.GetContextByClass
+    local savedOperational42 = C.IsComponentOperational
+    local savedSoft42 = C.SetSofttarget
+    local savedMacroData42 = GetMacroData
+    local savedCompData42 = GetComponentData
+    local savedShips42 = GetContainedShips
+    local savedStations42 = GetContainedStations
+    local savedSector42 = GetPlayerContextByClass
+
+    C.IsComponentClass = function(component, class)
+        if class == "ship" then return true end
+        return false
+    end
+    -- Surfaces 70x resolve to their root 600; every other component (the
+    -- ship, hostile object 98) resolves to itself.
+    C.GetContextByClass = function(component)
+        local n = tonumber(tostring(component))
+        if n and n >= 700 and n <= 799 then return 600 end
+        return component
+    end
+    C.GetDistanceBetween = function() return 1000 end
+    C.GetComponentName = function(component) return "Target " .. tostring(component) end
+    C.GetUpgradeSlotCurrentMacro = function() return "" end
+    GetMacroData = function() return "" end
+    GetPlayerContextByClass = function() return 1 end
+    -- The sector sweep that chooseAimTarget() runs: counting these proves (or
+    -- disproves) that the object-target sweep was consulted.
+    local surfaceScanCalls42 = 0
+    local objectSweepCalls42 = 0
+    GetContainedShips = function()
+        objectSweepCalls42 = objectSweepCalls42 + 1
+        return { 98 }
+    end
+    GetContainedStations = function()
+        objectSweepCalls42 = objectSweepCalls42 + 1
+        return {}
+    end
+    local softtargetCalls42 = {}
+    C.SetSofttarget = function(target, conn)
+        softtargetCalls42[#softtargetCalls42 + 1] = target
+        return true
+    end
+    GetComponentData = function(component, ...)
+        local keys, vals = {...}, {}
+        for _, k in ipairs(keys) do
+            if k == "isenemy" then vals[#vals + 1] = true
+            elseif k == "isknown" then vals[#vals + 1] = true
+            elseif k == "isradarvisible" then vals[#vals + 1] = true
+            elseif k == "maxradarrange" then vals[#vals + 1] = 40000
+            elseif k == "isplayerowned" then vals[#vals + 1] = false
+            else vals[#vals + 1] = false
+            end
+        end
+        return unpack(vals)
+    end
+
+    -- Root 600 is a plain (non-station) object carrying turret slots 701 and
+    -- 702; hostile object 98 is also in the sector.
+    local function installSurfaceSlots42(count)
+        -- Every slot query counts, whatever the destructible: a surface scan
+        -- of root 500 during an ordinary object-level loss must be visible
+        -- even though only root 600 actually carries slots.
+        C.GetNumUpgradeSlots = function(destructible, _, upgrade)
+            surfaceScanCalls42 = surfaceScanCalls42 + 1
+            if tonumber(tostring(destructible)) ~= 600 then return 0 end
+            if upgrade ~= "turret" then return 0 end
+            return count
+        end
+        C.GetUpgradeSlotCurrentComponent = function(destructible, _, slot)
+            return tonumber(tostring(destructible)) == 600 and (700 + slot) or 0
+        end
+    end
+
+    gcMenu.onShowMenu()
+    local sess42 = API.getSession()
+    assert(sess42 ~= nil, "expected session for same-root fallback test")
+    assert(sess42.autoNextTarget == true, "Auto-next Target must default to on")
+    local grp42 = { key = "grp42", kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 27, displayName = "G42", totalCount = 1, operationalCount = 1,
+        mode = "attack", armed = false, members = {
+            { componentID = 27, displayName = "T1", operational = true,
+              cameraSupported = true, componentKey = "27" }
+        } }
+    sess42.groups = { grp42 }
+    sess42.checkedGroupKeys = { ["grp42"] = true }
+    sess42.phase = "engaged"
+    sess42.controlMode = "direct"
+    sess42.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
+        shipID = sess42.shipID, mode = "attack", armed = false } }
+    sess42.cameraMemberID = 27
+    sess42.povAnchor, sess42.povMode = "turret", "manual"
+
+    -- A: surface 701 on root 600 dies while 702 is still operational and the
+    -- hostile object 98 is also available.
+    installSurfaceSlots42(2)
+    C.IsComponentOperational = function(cid)
+        local s = tostring(cid)
+        return s == "702" or s == "98"
+    end
+    sess42.targetObjectID, sess42.aimTargetID = 600, 701
+    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
+    API.updateAimTarget()
+    assert(tostring(sess42.aimTargetID) == "702",
+        "a dead surface must fall back to the surviving same-root surface; aim is "
+        .. tostring(sess42.aimTargetID))
+    assert(tostring(sess42.targetObjectID) == "600",
+        "same-root fallback must preserve the root object; targetObjectID is "
+        .. tostring(sess42.targetObjectID))
+    assert(sess42.phase == "engaged",
+        "same-root fallback must stay engaged; phase is " .. tostring(sess42.phase))
+    assert(#softtargetCalls42 >= 1 and softtargetCalls42[#softtargetCalls42] == 702,
+        "same-root fallback must move the soft target to 702; got "
+        .. tostring(softtargetCalls42[#softtargetCalls42]))
+    assert(surfaceScanCalls42 >= 1,
+        "same-root fallback must enumerate root 600 through the surface reader")
+    assert(objectSweepCalls42 == 0,
+        "same-root fallback must not consult the object-target sweep; the sweep ran "
+        .. objectSweepCalls42 .. " time(s)")
+
+    -- B: no operational same-root alternative remains, so the existing object
+    -- fallback takes hostile object 98.
+    installSurfaceSlots42(1)   -- only the dead slot 701 remains on root 600
+    sess42.targetObjectID, sess42.aimTargetID = 600, 701
+    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
+    API.updateAimTarget()
+    assert(tostring(sess42.aimTargetID) == "98",
+        "without a same-root alternative the object fallback must take 98; aim is "
+        .. tostring(sess42.aimTargetID))
+    assert(tostring(sess42.targetObjectID) == "98",
+        "the object fallback must re-root the engagement on 98; targetObjectID is "
+        .. tostring(sess42.targetObjectID))
+    assert(sess42.phase == "engaged",
+        "the object fallback must stay engaged; phase is " .. tostring(sess42.phase))
+    assert(surfaceScanCalls42 >= 1,
+        "a surface loss with no alternative must still enumerate the same root")
+    assert(objectSweepCalls42 >= 1,
+        "the object fallback must run the sweep to find 98")
+
+    -- C: ordinary object-level loss (aimTargetID == targetObjectID) skips the
+    -- surface enumeration entirely and keeps the existing object fallback.
+    installSurfaceSlots42(2)
+    C.IsComponentOperational = function(cid) return tostring(cid) == "98" end
+    sess42.targetObjectID, sess42.aimTargetID = 500, 500
+    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
+    API.updateAimTarget()
+    assert(tostring(sess42.aimTargetID) == "98",
+        "an ordinary dead object must fall back to the next object; aim is "
+        .. tostring(sess42.aimTargetID))
+    assert(tostring(sess42.targetObjectID) == "98",
+        "the object fallback must re-root the engagement on 98; targetObjectID is "
+        .. tostring(sess42.targetObjectID))
+    assert(sess42.phase == "engaged",
+        "the object fallback must stay engaged; phase is " .. tostring(sess42.phase))
+    assert(surfaceScanCalls42 == 0,
+        "ordinary object-level loss must not enumerate surfaces; the surface reader ran "
+        .. surfaceScanCalls42 .. " time(s)")
+    assert(objectSweepCalls42 >= 1,
+        "the object fallback must run the sweep to find 98")
+
+    -- D: Auto-next off during a surface loss -> target browser, with neither a
+    -- same-root re-engage nor an object re-engage attempted. The browser's own
+    -- rendering may still sweep; what must not happen is any engageTarget, and
+    -- every engageTarget writes the soft target.
+    C.IsComponentOperational = function(cid)
+        local s = tostring(cid)
+        return s == "702" or s == "98"
+    end
+    installSurfaceSlots42(2)
+    sess42.autoNextTarget = false
+    sess42.phase = "engaged"
+    sess42.controlMode = "direct"
+    sess42.targetObjectID, sess42.aimTargetID = 600, 701
+    sess42.povAnchor, sess42.povMode = "target", "cinematic"
+    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
+    API.updateAimTarget()
+    assert(sess42.phase == "target_select",
+        "with auto-next off a dead surface must reopen the target browser; phase is "
+        .. tostring(sess42.phase))
+    assert(sess42.aimTargetID == nil and sess42.targetObjectID == nil,
+        "the browser fallback must clear the lost aim and root")
+    assert(sess42.povAnchor == "turret" and sess42.povMode == "manual",
+        "the browser fallback must reset the view to manual Turret POV; got "
+        .. tostring(sess42.povAnchor) .. "/" .. tostring(sess42.povMode))
+    assert(#softtargetCalls42 == 0,
+        "auto-next off must not re-engage any surface or object")
+
+    -- Restore the pre-block stubs (nil hands C back to its fallbacks).
+    C.IsComponentClass = savedClass42
+    C.GetNumUpgradeSlots = savedNumSlots42
+    C.GetUpgradeSlotCurrentComponent = savedSlotComp42
+    C.GetUpgradeSlotCurrentMacro = savedSlotMacro42
+    C.GetComponentName = savedSetName42
+    C.GetDistanceBetween = savedDist42
+    C.GetContextByClass = savedCtxClass42
+    C.IsComponentOperational = savedOperational42
+    C.SetSofttarget = savedSoft42
+    GetMacroData = savedMacroData42
+    GetComponentData = savedCompData42
+    GetContainedShips = savedShips42
+    GetContainedStations = savedStations42
+    GetPlayerContextByClass = savedSector42
+end
+
 -- ── 51. hasMultipleTargets memo: two quick repaints share one sweep ─────────
 -- readTargetCandidates() is always fresh (no full-list cache).  Only the
 -- target-count boolean used by the cycle-target buttons is memoised via

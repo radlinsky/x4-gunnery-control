@@ -1679,14 +1679,30 @@ local function chooseAimTarget()
     return nil
 end
 
--- Direct-control lost the object it was engaging. Setting aimTargetID alone
--- would move only the camera and leave every checked group armed against a
--- wreck, so follow with engageTarget(), which repoints the soft target,
--- targetObjectID and camera together. With Auto-next Target off -- or on with
--- nothing left to shoot -- reset the view and hand the choice back to the
--- player at the target browser.
+-- Direct-control lost what it was engaging. Setting aimTargetID alone would
+-- move only the camera and leave every checked group armed against a wreck,
+-- so follow with engageTarget(), which repoints the soft target,
+-- targetObjectID and camera together. When the lost aim was a surface element
+-- (lost ID differs from the root), the best surviving operational surface on
+-- the same root is tried before the object-level fallback. With Auto-next
+-- Target off -- or on with nothing left to shoot -- reset the view and hand
+-- the choice back to the player at the target browser.
 local function onDirectTargetLost()
-    local nextTarget = (session.autoNextTarget ~= false) and chooseAimTarget() or nil
+    local lostID, root = session.aimTargetID, session.targetObjectID
+    local nextTarget
+    if session.autoNextTarget ~= false then
+        -- Surface-element loss: re-engage a same-root surface before dropping
+        -- to another object. readSurfaceTargets() stays the sole enumeration
+        -- path and surfaceCrossTypePolicy is the same ordering the surface
+        -- browser uses, so neither ordering nor enumeration is duplicated here.
+        if not isNullID(lostID) and not isNullID(root) and not sameID(lostID, root) then
+            nextTarget = State.nextSameRootSurface(readSurfaceTargets(id(root)),
+                lostID, root, surfaceCrossTypePolicy)
+        end
+        -- Ordinary object-level loss (aimTargetID == targetObjectID) skips the
+        -- surface enumeration and goes straight to the existing object sweep.
+        if nextTarget == nil then nextTarget = chooseAimTarget() end
+    end
     if nextTarget and engageTarget(nextTarget) then
         if (session.povMode or "manual") == "cinematic" then
             -- A running cutscene cannot be re-aimed; same stop/restart cut the
