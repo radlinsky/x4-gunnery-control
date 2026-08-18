@@ -76,9 +76,13 @@ grep -Fq "EngageabilityService.\$arcmaxs.{\$weaponindex} * 1deg" "$md"
 # Issue #54 Task 2: the firing-range gate mirrors shipped combat-AI
 # reachability — bounding-box distance, no size term
 # (move.attack.object.capital.xml:656,680; md-ai.md).
+# The negative is scoped to the old EngageabilityService weapon-reach
+# predicate — point distance plus half the target's size, the
+# asteroid-mining approach form. Unrelated point-distance calculations
+# elsewhere in this MD (e.g. camera framing) stay legal.
 grep -Fq "\$weapon.bboxdistanceto.{\$target} le \$weapon.maxfirerange" "$md"
-if grep -Eq '(^|[^[:lower:]])distanceto' "$md"; then
-  echo "production MD reintroduced a point-distance (distanceto) firing-range predicate" >&2
+if grep -Eq "\\\$weapon\.distanceto\.\{\\\$target\}[[:space:]]*\+[[:space:]]*\(?[[:space:]]*\\\$target\.size[[:space:]]*/[[:space:]]*2" "$md"; then
+  echo "production MD reintroduced the point-distance (distanceto + target.size/2) firing-range predicate" >&2
   exit 1
 fi
 assert_md_xpath "1" "count(//check_line_of_sight[parent::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
