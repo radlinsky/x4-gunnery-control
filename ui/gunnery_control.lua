@@ -1832,6 +1832,20 @@ local function updateTargetFallback()
     end
     if decision.action == "wait" then return end
     if decision.action == "engage" then
+        -- A positive reading proves the surface was ENGAGEABLE when the
+        -- answer was accepted, not that it is alive on this tick: the surface
+        -- may have died in between. Re-verify immediately before committing.
+        -- A dead surface is neither engaged nor a proven zero, so there is no
+        -- hull/browser fallthrough: restart the same-root surface stage from
+        -- a fresh snapshot, where the dead surface has dropped out of the
+        -- ranking and the new page 1 is requested at once (5A behaviour).
+        if fb.stage == "surfaces"
+            and not C.IsComponentOperational(id(decision.targetID)) then
+            log("event=auto_next_fallback action=stale_surface_restart root="
+                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID))
+            startTargetFallback(fb.lostID, fb.root)
+            return
+        end
         if engageTarget(decision.targetID) then
             -- engageTarget cleared the fallback state; log from fb while it
             -- is still in hand.

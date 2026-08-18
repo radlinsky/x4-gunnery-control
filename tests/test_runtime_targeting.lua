@@ -1728,6 +1728,90 @@ do
             "a mode switch must not issue ENGAGEABLE requests")
     end
 
+    -- M. A surface that dies after its positive ENGAGEABLE result was
+    -- accepted must never be engaged: the consume tick must skip engageTarget
+    -- entirely (no hull/browser fallthrough) and restart the same-root
+    -- surface stage from a fresh snapshot, whose immediate page-1 request
+    -- then targets only the survivor.
+    do
+        resetCounts42()
+        slotCount42 = 3                       -- 701 (dead), 702/703 (alive)
+        operational42 = { ["600"] = true, ["702"] = true, ["703"] = true,
+            ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        local mark = #fix.uiTriggeredEvents
+        API.updateAimTarget()
+        -- 1. Surfaces 702 and 703 survive the loss snapshot.
+        assert(#sess.surfaceBrowser.allSurfaces == 2
+            and sess.surfaceBrowser.allSurfaces[1].componentID == 702
+            and sess.surfaceBrowser.allSurfaces[2].componentID == 703,
+            "surfaces 702 and 703 must survive the loss snapshot; got "
+            .. tostring(#sess.surfaceBrowser.allSurfaces))
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 2
+            and batches[1].targets[1] == "702" and batches[1].targets[2] == "703",
+            "the loss tick must query both surviving surfaces; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        -- 2. The page result proves 702 positive (and settles 703 so the
+        -- planner can decide).
+        deliver42(batches[1], { ["702"] = "1:1:1", ["703"] = "1:1:1" })
+        -- 3. Before the consume tick, 702 dies; the root and 703 stay alive.
+        operational42["702"] = false
+        softtargetCalls42 = {}
+        tick42()
+        -- 4. The consume tick must NOT engage the dead surface.
+        local engaged702 = false
+        for _, target in ipairs(softtargetCalls42) do
+            if tostring(target) == "702" then engaged702 = true end
+        end
+        assert(not engaged702,
+            "a surface that died after its positive result must not be engaged")
+        -- 5. The fallback stays active on the surfaces stage, restarted from
+        -- the fresh snapshot: the refreshed candidates exclude 702 and the
+        -- immediate page-1 request targets 703.
+        assert(sess.targetFallback ~= nil
+            and sess.targetFallback.stage == "surfaces"
+            and sess.targetFallback.page == 1,
+            "the stale restart must keep the resolution active on surfaces "
+            .. "page 1; stage="
+            .. tostring(sess.targetFallback and sess.targetFallback.stage))
+        assert(#sess.targetFallback.orderedIDs == 1
+            and X4GunneryState.normID(sess.targetFallback.orderedIDs[1]) == "703",
+            "the refreshed candidates must exclude the dead 702 and the "
+            .. "page-1 request must target 703; ids="
+            .. table.concat(sess.targetFallback.orderedIDs, ","))
+        assert(sess.phase == "engaged" and tostring(sess.aimTargetID) == "701"
+            and tostring(sess.targetObjectID) == "600",
+            "the stale restart must choose nothing; aim="
+            .. tostring(sess.aimTargetID) .. " root=" .. tostring(sess.targetObjectID))
+        assert(objectSweepCalls42 == 0,
+            "a dead surface must not escalate to the object sweep or browser; "
+            .. objectSweepCalls42 .. " sweep call(s)")
+        local restarts = 0
+        for _, line in ipairs(fix.getCapturedLog()) do
+            if string.find(line,
+                "event=auto_next_fallback action=stale_surface_restart", 1, true)
+            then restarts = restarts + 1 end
+        end
+        assert(restarts == 1,
+            "the stale/dead surface restart must be logged exactly once")
+        -- 6. With the positive result for 703 on file, the next consume tick
+        -- engages 703.
+        softtargetCalls42 = {}
+        tick42()
+        assert(tostring(sess.aimTargetID) == "703"
+            and tostring(sess.targetObjectID) == "600",
+            "the next consume tick must engage the surviving 703; aim="
+            .. tostring(sess.aimTargetID))
+        assert(sess.phase == "engaged" and sess.targetFallback == nil,
+            "the 703 engage must stay engaged and clear the fallback")
+        assert(softtargetCalls42[#softtargetCalls42] == 703,
+            "the engaged 703 must become the soft target")
+    end
+
     -- Restore the pre-block stubs (nil hands C back to its fallbacks).
     C.IsComponentClass = savedClass42
     C.GetNumUpgradeSlots = savedNumSlots42
