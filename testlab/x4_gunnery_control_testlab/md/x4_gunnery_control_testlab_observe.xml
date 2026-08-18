@@ -235,6 +235,7 @@
                     + ' barrel_y=' + $Barrel.y
                     + ' barrel_z=' + $Barrel.z
                     + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
+                    + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
                 </do_for_each>
@@ -272,6 +273,7 @@
                     + ' barrel_y=' + $Barrel.y
                     + ' barrel_z=' + $Barrel.z
                     + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
+                    + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
                 </do_for_each>
