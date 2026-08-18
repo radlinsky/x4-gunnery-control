@@ -783,7 +783,18 @@ local function startAutoEngage(groups)
     for _, group in ipairs(session.groups or {}) do
         local s = session.staged and session.staged[group.key]
         if s and State.canMutate(group) then
-            setMode(group, s.mode); setArmed(group, s.armed)
+            -- A checked group's staged mode is the session's Direct-control
+            -- policy, but Auto-engage has no Direct-control target selection,
+            -- so it must not arm that policy live: every checked group goes
+            -- live in the plain attackenemies engine mode (State.TICK_MODE),
+            -- whatever session.directMode currently is. The staged entry is
+            -- left untouched -- policy mode and preTickMode included -- so a
+            -- later Direct-control engage re-resolves session.directMode
+            -- exactly as before.
+            local checked = session.checkedGroupKeys
+                and session.checkedGroupKeys[group.key] == true
+            local mode = checked and State.TICK_MODE or s.mode
+            setMode(group, mode); setArmed(group, s.armed)
         end
     end
     State.beginEngaged(session, groups, "auto")

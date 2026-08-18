@@ -160,4 +160,104 @@ do
         "Task 3: re-engagement under autoassist re-arms the watch only")
 end
 
+-- ── Issue #48 Task 3 correction: Auto-engage never applies autoassist ─────
+-- Auto-engage has no Direct-control target selection, so starting it must arm
+-- every checked mutable group in the plain attackenemies engine mode live,
+-- whatever the session's Direct-control policy is. The staged bookkeeping
+-- (policy mode, preTickMode), the policy itself, and checkbox membership must
+-- come back untouched so later Direct-control use keeps working.
+local groupB = {
+    key = "gb", kind = "group", contextID = 6, path = "p", group = "b",
+    componentID = 28, operationalCount = 1, totalCount = 1, mode = "defend", armed = true,
+    members = { { componentID = 28, operational = true, cameraSupported = true } },
+}
+do
+    -- Back at the console with the directMode the player picked earlier.
+    session.phase, session.controlMode = "console", nil
+    session.groups = { group, groupB }
+    session.checkedGroupKeys = { g = true }
+    -- Natural post-console state under the autoassist policy: the checked row
+    -- staged autoassist with its displaced ordinary mode remembered, the
+    -- unchecked row an ordinary staged mode.
+    session.directMode = "autoassist"
+    session.staged = {
+        g = { mode = "autoassist", armed = false, preTickMode = "attack" },
+        [groupB.key] = { mode = "defend", armed = true },
+    }
+    -- Live engine state as of sit-down (stale until startAutoEngage writes).
+    session.groups[1].mode, session.groups[1].armed = "attack", false
+    session.groups[2].mode, session.groups[2].armed = "defend", true
+
+    local modeWrites, armedWrites = {}, {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, grp, mode)
+        modeWrites[grp] = modeWrites[grp] or {}
+        modeWrites[grp][#modeWrites[grp] + 1] = mode
+    end
+    fix.C.SetTurretGroupArmed = function(_, _, _, grp, armed)
+        armedWrites[grp] = armedWrites[grp] or {}
+        armedWrites[grp][#armedWrites[grp] + 1] = armed
+    end
+
+    assert(fix.API.startAutoEngage(X4GunneryState.checkedGroups(session)),
+        "Task 3 fix: auto entry under the autoassist policy must succeed")
+
+    -- The checked group goes live in attackenemies, never the staged autoassist.
+    assert(#modeWrites["g"] == 1 and modeWrites["g"][1] == "attackenemies",
+        "Task 3 fix: the checked group's live write must be attackenemies "
+        .. "even when the staged Direct-control mode is autoassist: "
+        .. table.concat(modeWrites["g"] or {}, ","))
+    -- The unchecked group keeps its ordinary staged setting, exactly as before.
+    assert(#modeWrites["b"] == 1 and modeWrites["b"][1] == "defend",
+        "Task 3 fix: the unchecked group must keep its ordinary staged mode (defend)")
+    assert(#armedWrites["g"] == 1 and armedWrites["g"][1] == false,
+        "Task 3 fix: the checked group's staged armed state is still applied")
+    assert(#armedWrites["b"] == 1 and armedWrites["b"][1] == true,
+        "Task 3 fix: the unchecked group's staged armed state is still applied")
+
+    -- The policy, the staged bookkeeping, and checkbox membership are untouched.
+    assert(session.directMode == "autoassist",
+        "Task 3 fix: Auto-engage must not change the Direct-control policy")
+    assert(session.staged.g.mode == "autoassist" and session.staged.g.preTickMode == "attack",
+        "Task 3 fix: the checked staged row must keep its policy mode and preTickMode")
+    assert(session.staged[groupB.key].mode == "defend" and session.staged[groupB.key].armed == true,
+        "Task 3 fix: the unchecked staged row must stay untouched")
+    assert(session.checkedGroupKeys.g == true and session.checkedGroupKeys[groupB.key] == nil,
+        "Task 3 fix: checkbox membership must stay untouched")
+    assert(session.phase == "engaged" and session.controlMode == "auto",
+        "Task 3 fix: Auto-engage still ends engaged/auto")
+end
+
+-- Under the attackenemies policy the checked group's staged mode already is
+-- attackenemies; the live write stays attackenemies and the unchecked group
+-- still takes its ordinary staged mode.
+do
+    session.phase, session.controlMode = "console", nil
+    session.directMode = "attackenemies"
+    session.checkedGroupKeys = { g = true }
+    session.staged = {
+        g = { mode = "attackenemies", armed = true, preTickMode = "attack" },
+        [groupB.key] = { mode = "mining", armed = false },
+    }
+    session.groups[1].mode, session.groups[1].armed = "attack", false
+    session.groups[2].mode, session.groups[2].armed = "mining", false
+
+    local modeWrites = {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, grp, mode)
+        modeWrites[grp] = modeWrites[grp] or {}
+        modeWrites[grp][#modeWrites[grp] + 1] = mode
+    end
+
+    assert(fix.API.startAutoEngage(X4GunneryState.checkedGroups(session)),
+        "Task 3 fix: auto entry under the attackenemies policy must succeed")
+
+    assert(#modeWrites["g"] == 1 and modeWrites["g"][1] == "attackenemies",
+        "Task 3 fix: under attackenemies the checked group is written attackenemies once")
+    assert(#modeWrites["b"] == 1 and modeWrites["b"][1] == "mining",
+        "Task 3 fix: under attackenemies the unchecked group keeps its staged mode (mining)")
+    assert(session.directMode == "attackenemies",
+        "Task 3 fix: the attackenemies policy must stay put")
+    assert(session.staged.g.mode == "attackenemies" and session.staged.g.preTickMode == "attack",
+        "Task 3 fix: the checked staged row must keep its policy mode and preTickMode")
+end
+
 print("runtime coverage engagement tests passed")
