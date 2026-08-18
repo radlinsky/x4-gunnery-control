@@ -1980,12 +1980,12 @@ end
 -- or lacking a numeric engageable count must yield wait -- never advance a
 -- page, hand off a stage, or be read as a manufactured zero.
 do
-    local function zero() return { engageable = 0, total = 4 } end
+    local function zero() return { engageable = 0, known = 4, total = 4 } end
     local function pending() return { pending = true, total = 4 } end
 
     -- First ranked positive wins, never the largest engageable count.
     local ids = { "1", "2", "3" }
-    local results = { ["1"] = { engageable = 0, total = 4 },
+    local results = { ["1"] = { engageable = 0, known = 4, total = 4 },
                       ["2"] = { engageable = 1, total = 4 },
                       ["3"] = { engageable = 4, total = 4 } }
     local action = State.planEngageFallback("surfaces", ids, 1, 20, results)
@@ -2017,7 +2017,7 @@ do
     for i = 1, 21 do
         local id = tostring(i)
         many[i] = id
-        manyResults[id] = { engageable = 0, total = 4 }
+        manyResults[id] = { engageable = 0, known = 4, total = 4 }
     end
     eq(State.planEngageFallback("surfaces", many, 1, 20, manyResults).action, "next_page",
         "planner: all-zero first page with ranked entries remaining advances")
@@ -2044,7 +2044,7 @@ do
     eq(hullAction.action, "engage", "planner: settled positive hull engages")
     eq(hullAction.targetID, "600", "planner: hull ID is the engage target")
     eq(State.planEngageFallback("hull", hull, 1, 20,
-        { ["600"] = { engageable = 0, total = 4 } }).action, "objects",
+        { ["600"] = { engageable = 0, known = 4, total = 4 } }).action, "objects",
         "planner: settled zero hull falls to objects")
     eq(State.planEngageFallback("hull", hull, 1, 20, { ["600"] = pending() }).action, "wait",
         "planner: pending hull waits")
@@ -2054,7 +2054,7 @@ do
     -- Objects stage: same ranked/page behaviour; final all-zero batch => none.
     local objIDs = { "700", "701", "702" }
     local objAction = State.planEngageFallback("objects", objIDs, 1, 20, {
-        ["700"] = { engageable = 0, total = 4 },
+        ["700"] = { engageable = 0, known = 4, total = 4 },
         ["701"] = { engageable = 1, total = 4 },
         ["702"] = { engageable = 5, total = 4 },
     })
@@ -2067,7 +2067,7 @@ do
     for i = 1, 21 do
         local id = "o" .. i
         manyObjs[i] = id
-        manyObjResults[id] = { engageable = 0, total = 4 }
+        manyObjResults[id] = { engageable = 0, known = 4, total = 4 }
     end
     eq(State.planEngageFallback("objects", manyObjs, 1, 20, manyObjResults).action, "next_page",
         "planner: all-zero objects page advances like surfaces")
@@ -2099,6 +2099,82 @@ do
         { ["600"] = { engageable = 1, total = 2 } })
     eq(u.action, "engage", "planner: ULL-suffixed ID matches the normalized key")
     eq(u.targetID, "600ULL", "planner: returns the caller's own ID form")
+
+    -- Issue #45 Task 4 correction: an incomplete-coverage zero is
+    -- unresolved, never a proven zero. engageable == 0 settles only when
+    -- total == 0 or known == total (both numeric); known < total, a missing
+    -- known while total > 0, or any other incomplete coverage waits like a
+    -- pending.
+    local function incompleteZero() return { engageable = 0, known = 3, total = 4 } end
+
+    -- surfaces: the incomplete zero holds the decision on the final page
+    -- (never hull) and on an earlier page (never next_page).
+    eq(State.planEngageFallback("surfaces", { "1", "2" }, 1, 20,
+        { ["1"] = zero(), ["2"] = incompleteZero() }).action, "wait",
+        "planner: incomplete zero on the final surface page waits, never hull")
+    local incSurfaces, incSurfaceResults = {}, {}
+    for i = 1, 21 do
+        local id = tostring(i)
+        incSurfaces[i] = id
+        incSurfaceResults[id] = zero()
+    end
+    incSurfaceResults["7"] = incompleteZero()
+    eq(State.planEngageFallback("surfaces", incSurfaces, 1, 20, incSurfaceResults).action,
+        "wait",
+        "planner: incomplete zero on an earlier surface page waits, never next_page")
+
+    -- hull: the same incomplete zero waits, never objects.
+    eq(State.planEngageFallback("hull", { "600" }, 1, 20,
+        { ["600"] = incompleteZero() }).action, "wait",
+        "planner: incomplete zero hull waits, never objects")
+
+    -- objects: the same incomplete zero waits, never none (final batch) or
+    -- next_page (earlier page).
+    eq(State.planEngageFallback("objects", { "700", "701" }, 1, 20,
+        { ["700"] = zero(), ["701"] = incompleteZero() }).action, "wait",
+        "planner: incomplete zero in the final object batch waits, never none")
+    local incObjects, incObjectResults = {}, {}
+    for i = 1, 21 do
+        local id = "o" .. i
+        incObjects[i] = id
+        incObjectResults[id] = zero()
+    end
+    incObjectResults["o7"] = incompleteZero()
+    eq(State.planEngageFallback("objects", incObjects, 1, 20, incObjectResults).action,
+        "wait",
+        "planner: incomplete zero on an earlier object page waits, never next_page")
+
+    -- A positive still qualifies under partial coverage: engageable > 0 has
+    -- already proven at least one ENGAGEABLE. An unresolved row ahead of it
+    -- still waits first (same priority as pending).
+    local partialPositive = State.planEngageFallback("surfaces", { "1", "2" }, 1, 20,
+        { ["1"] = zero(), ["2"] = { engageable = 1, known = 1, total = 4 } })
+    eq(partialPositive.action, "engage",
+        "planner: a partial-coverage positive still engages")
+    eq(partialPositive.targetID, "2",
+        "planner: the partial-coverage positive is the engage target")
+    eq(State.planEngageFallback("surfaces", { "1", "2" }, 1, 20,
+        { ["1"] = incompleteZero(),
+          ["2"] = { engageable = 1, known = 1, total = 4 } }).action, "wait",
+        "planner: an incomplete zero waits ahead of a later positive")
+
+    -- engageable == 0 with total == 0 remains a settled zero: a group
+    -- reporting no components cannot wait forever.
+    eq(State.planEngageFallback("surfaces", { "1" }, 1, 20,
+        { ["1"] = { engageable = 0, total = 0 } }).action, "hull",
+        "planner: zero with total = 0 settles, so nothing waits forever")
+    eq(State.planEngageFallback("hull", { "600" }, 1, 20,
+        { ["600"] = { engageable = 0, total = 0 } }).action, "objects",
+        "planner: a zero-total hull settles to objects")
+
+    -- A zero with known == total (both numeric) is proven; a zero with
+    -- missing known while total > 0 is not.
+    eq(State.planEngageFallback("surfaces", { "1" }, 1, 20,
+        { ["1"] = zero() }).action, "hull",
+        "planner: a zero with known == total settles and hands off")
+    eq(State.planEngageFallback("surfaces", { "1" }, 1, 20,
+        { ["1"] = { engageable = 0, total = 4 } }).action, "wait",
+        "planner: a zero with missing known and total > 0 waits")
 
     -- Inputs are never mutated.
     local inIDs = { "1", "2" }

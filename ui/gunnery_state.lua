@@ -298,13 +298,21 @@ end
 -- The runtime owns epoch/signature validation and timeouts: only ACCEPTED
 -- results may reach this planner. A stale, signature-mismatched, or timed-out
 -- reading must arrive as an absent or pending entry so it yields wait, never
--- a manufactured zero. Within the current page/batch the first ranked ID
+-- a manufactured zero. An incomplete-coverage reading is unresolved in the
+-- same sense: an accepted engageable == 0 is a proven zero only when total ==
+-- 0 or known and total are both numeric and known == total; a zero with
+-- known < total, a missing known while total > 0, or any other incomplete
+-- coverage waits instead of masquerading as a proven zero. A positive
+-- engages even when known < total, because engageable > 0 has already proven
+-- at least one ENGAGEABLE.
+-- Within the current page/batch the first ranked ID
 -- with a settled engageable > 0 is engaged; the largest count never wins.
 -- Inputs are never mutated.
 --
 -- Returns exactly one action table:
 --   { action = "wait" }       a current-page/batch result is missing, pending,
---                             or lacks a numeric engageable count
+--                             lacks a numeric engageable count, or is a zero
+--                             with incomplete coverage
 --   { action = "engage", targetID = id }   first ranked positive ID, verbatim
 --   { action = "next_page" }  all-zero page with ranked entries remaining
 --   { action = "hull" }       surfaces exhausted (final all-zero page)
@@ -322,16 +330,27 @@ function State.planEngageFallback(stage, orderedIDs, page, pageSize, results)
         batch, currentPage, pageCount = State.surfacePage(orderedIDs, page, pageSize)
     end
     local results = results or {}
-    local function settledEngageable(id)
+    -- Classifies one accepted result. "positive": engageable > 0, proven even
+    -- under partial coverage. "zero": engageable == 0 with complete coverage
+    -- (total == 0, or known and total numeric with known == total). "wait":
+    -- missing, pending, nonnumeric, negative, or an incomplete-coverage zero.
+    local function classify(id)
         local result = results[normID(id)]
-        if result == nil or result.pending then return nil end
-        return tonumber(result.engageable)
+        if result == nil or result.pending then return "wait" end
+        local engageable = tonumber(result.engageable)
+        if engageable == nil or engageable < 0 then return "wait" end
+        if engageable > 0 then return "positive" end
+        local known = tonumber(result.known)
+        local total = tonumber(result.total)
+        if total == 0 then return "zero" end
+        if known ~= nil and total ~= nil and known == total then return "zero" end
+        return "wait"
     end
     for _, id in ipairs(batch) do
-        if settledEngageable(id) == nil then return { action = "wait" } end
+        if classify(id) == "wait" then return { action = "wait" } end
     end
     for _, id in ipairs(batch) do
-        if settledEngageable(id) > 0 then return { action = "engage", targetID = id } end
+        if classify(id) == "positive" then return { action = "engage", targetID = id } end
     end
     if stage == "hull" then return { action = "objects" } end
     if currentPage < pageCount then return { action = "next_page" } end
