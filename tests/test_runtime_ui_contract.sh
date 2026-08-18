@@ -73,8 +73,15 @@ grep -Fq "EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable 
 grep -Fq "\$target.relativeposition.{\$weapon}.rotation.pitch" "$md"
 grep -Fq "EngageabilityService.\$arcmins.{\$weaponindex} * 1deg" "$md"
 grep -Fq "EngageabilityService.\$arcmaxs.{\$weaponindex} * 1deg" "$md"
-grep -Fq "(\$weapon.distanceto.{\$target} + (\$target.size / 2)) lt \$weapon.maxfirerange" "$md"
-assert_md_xpath "1" "count(//check_line_of_sight[parent::do_if[contains(@value, 'distanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
+# Issue #54 Task 2: the firing-range gate mirrors shipped combat-AI
+# reachability — bounding-box distance, no size term
+# (move.attack.object.capital.xml:656,680; md-ai.md).
+grep -Fq "\$weapon.bboxdistanceto.{\$target} le \$weapon.maxfirerange" "$md"
+if grep -Eq '(^|[^[:lower:]])distanceto' "$md"; then
+  echo "production MD reintroduced a point-distance (distanceto) firing-range predicate" >&2
+  exit 1
+fi
+assert_md_xpath "1" "count(//check_line_of_sight[parent::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityMember']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'weapons.count lt')][contains(@value, 'not EngageabilityService.\$weapons.indexof')])" "member nonce/count/duplicate guards"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityTarget']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'targets.count lt')][contains(@value, 'not EngageabilityService.\$targets.indexof')])" "target nonce/count/duplicate guards"
 grep -Fq "[@event.param3.\$targets, 20].min" "$md"

@@ -65,6 +65,18 @@ ship_missiles=$(grep -Fc "in=\"\$Ship.missileturrets.operational.list\"" "$md")
 [[ "$ship_weapons" -eq 1 ]] || fail "expected one census weapons loop, found $ship_weapons"
 [[ "$ship_missiles" -eq 1 ]] || fail "expected one census missile-turret loop, found $ship_missiles"
 
+# Issue #54 Task 2: inrange must mirror shipped combat-AI reachability —
+# bounding-box distance under maxfirerange, no size term — in both snapshot
+# loops, and the stale "distance plus half the target's size" framing is gone.
+inrange=$(grep -Fc "(\$Weapon.bboxdistanceto.{\$Target} le \$Weapon.maxfirerange)" "$md" || true)
+[[ "$inrange" -eq 2 ]] || fail "expected bboxdistanceto inrange in both snapshot loops, found $inrange"
+if grep -Fq "(\$Dist + (\$Target.size / 2) lt \$Weapon.maxfirerange)" "$md"; then
+  fail "inrange still uses the old distanceto + target.size/2 predicate"
+fi
+if grep -Fq "distance plus half the target" "$md"; then
+  fail "stale comment still claims distance plus half the target's size is the in-range definition"
+fi
+
 # The scenario owns both a persistent group of safe fixtures and a numeric
 # acknowledgement count. Reusing one MD variable name for both would serialize
 # the group into x4gct4, so Lua would reject the acknowledgement and never arm
