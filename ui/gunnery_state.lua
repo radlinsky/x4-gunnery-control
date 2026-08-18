@@ -250,6 +250,25 @@ function State.surfaceAlternatives(surfaces, pinnedID, typeFilter, macroFilter)
     return alternatives
 end
 
+-- Pure same-root surface-element fallback selection (Issue #45). `surfaces` is
+-- the already-operational same-root list readSurfaceTargets() supplies, so no
+-- operational-state or enumeration logic is repeated here. When the lost ID is
+-- the root itself (compared normalized) this was an ordinary object-level
+-- target loss, not a surface-element loss, and there is no same-root
+-- fallback to hand back. Otherwise the best remaining surface under the
+-- caller's cross-type policy wins; the lost surface is excluded by
+-- surfaceAlternatives, and neither the supplied list nor its entries is
+-- mutated, because surfaceAlternatives works on a copy.
+function State.nextSameRootSurface(surfaces, lostTargetID, targetRootID, crossTypePolicy)
+    if State.isNullID(lostTargetID) or State.isNullID(targetRootID) then return nil end
+    if normID(lostTargetID) == normID(targetRootID) then return nil end
+    local alternatives = State.surfaceAlternatives(surfaces, lostTargetID, "any", "any")
+    table.sort(alternatives, function(a, b)
+        return State.surfaceMetadataLess(a, b, crossTypePolicy)
+    end)
+    return alternatives[1] and alternatives[1].componentID or nil
+end
+
 function State.surfacePage(entries, page, pageSize)
     pageSize = math.max(1, math.floor(tonumber(pageSize) or 20))
     local pageCount = math.max(1, math.ceil(#(entries or {}) / pageSize))

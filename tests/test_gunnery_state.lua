@@ -1897,4 +1897,79 @@ do
     State.resolveDirectMode = origResolveDirectMode
 end
 
+-- Issue #45 Task 1: pure same-root surface-element fallback selection.
+-- State.nextSameRootSurface(surfaces, lostTargetID, targetRootID, crossTypePolicy)
+-- returns the componentID to fall back to when a single surface element is lost.
+do
+    local root = "800"
+
+    -- Another operational same-root surface exists: it is chosen according to
+    -- the existing size_first ordering, not merely input order. The type_first
+    -- twin case proves the policy is forwarded to the comparator: with these
+    -- sizes a turret-first ordering would pick the other surface.
+    local ordered = {
+        { componentID = "20ULL", kindKey = "turret", size = "M", distance = 100 },
+        { componentID = "30ULL", kindKey = "shield", size = "XL", distance = 100 },
+    }
+    eq(State.nextSameRootSurface(ordered, "99ULL", root, "size_first"), "30ULL",
+        "nextSameRootSurface: size_first picks the XL shield although it is second in input order")
+    eq(State.nextSameRootSurface(ordered, "99ULL", root, "type_first"), "20ULL",
+        "nextSameRootSurface: type_first picks the turret, so the policy reaches the comparator")
+
+    -- The lost surface is excluded from candidacy even while still present in
+    -- the supplied list and even when it would otherwise win the ordering.
+    local withLost = {
+        { componentID = "50ULL", kindKey = "turret", size = "XS", distance = 100 },
+        { componentID = "51ULL", kindKey = "turret", size = "XL", distance = 100 },
+    }
+    eq(State.nextSameRootSurface(withLost, "51ULL", root, "size_first"), "50ULL",
+        "nextSameRootSurface: the lost surface itself is never re-selected")
+
+    -- Only non-operational surfaces remain: the existing runtime operational
+    -- filter is represented as an empty supplied list -> nil.
+    eq(State.nextSameRootSurface({}, "99ULL", root, "size_first"), nil,
+        "nextSameRootSurface: an empty operational list returns nil")
+    -- No same-root surfaces exist at all (a nil list is tolerated) -> nil.
+    eq(State.nextSameRootSurface(nil, "99ULL", root, "size_first"), nil,
+        "nextSameRootSurface: a nil surface list returns nil")
+
+    -- Ordinary object-level loss: lost ID equals root ID, including the
+    -- normalized ULL/plain forms -> nil even when candidate surfaces exist.
+    local candidates = {
+        { componentID = "40ULL", kindKey = "turret", size = "XL", distance = 100 },
+        { componentID = "41ULL", kindKey = "shield", size = "M", distance = 100 },
+    }
+    eq(State.nextSameRootSurface(candidates, "800", "800", "size_first"), nil,
+        "nextSameRootSurface: plain/plain same ID is ordinary object-level loss")
+    eq(State.nextSameRootSurface(candidates, "800ULL", "800", "size_first"), nil,
+        "nextSameRootSurface: ULL/plain same ID is ordinary object-level loss")
+    eq(State.nextSameRootSurface(candidates, "800", "800ULL", "size_first"), nil,
+        "nextSameRootSurface: plain/ULL same ID is ordinary object-level loss")
+    eq(State.nextSameRootSurface(candidates, "800ULL", "800ULL", "size_first"), nil,
+        "nextSameRootSurface: ULL/ULL same ID is ordinary object-level loss")
+
+    -- Null or zero IDs on either side mean there is no selection context -> nil.
+    eq(State.nextSameRootSurface(candidates, nil, root, "size_first"), nil,
+        "nextSameRootSurface: nil lost ID returns nil")
+    eq(State.nextSameRootSurface(candidates, "900", nil, "size_first"), nil,
+        "nextSameRootSurface: nil root ID returns nil")
+    eq(State.nextSameRootSurface(candidates, "0", root, "size_first"), nil,
+        "nextSameRootSurface: zero lost ID returns nil")
+    eq(State.nextSameRootSurface(candidates, "0ULL", root, "size_first"), nil,
+        "nextSameRootSurface: zero ULL lost ID returns nil")
+
+    -- The supplied surface list is never mutated by the call.
+    local orderCheck = {
+        { componentID = "60ULL", kindKey = "turret", size = "M", distance = 100 },
+        { componentID = "61ULL", kindKey = "shield", size = "XL", distance = 100 },
+    }
+    eq(State.nextSameRootSurface(orderCheck, "99ULL", root, "size_first"), "61ULL",
+        "nextSameRootSurface: XL candidate is returned first")
+    eq(State.normID(orderCheck[1].componentID), "60",
+        "nextSameRootSurface: supplied list order is not mutated (first entry)")
+    eq(State.normID(orderCheck[2].componentID), "61",
+        "nextSameRootSurface: supplied list order is not mutated (second entry)")
+    eq(#orderCheck, 2, "nextSameRootSurface: supplied list length is not mutated")
+end
+
 print("gunnery_state tests passed")
