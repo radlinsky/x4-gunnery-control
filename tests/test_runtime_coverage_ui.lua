@@ -378,6 +378,15 @@ do
         "selector options must reuse the vanilla Helper option texts, not hardcoded labels")
     assert(selDD.startOption == "attackenemies" and sessD.directMode == "attackenemies",
         "selector must start at session.directMode (attackenemies)")
+    -- X4's createDropDown aborts the whole frame on an option without a
+    -- boolean displayremoveoption (live 9.00: "Invalid dropdown descriptor.
+    -- Given displayremoveoption is missing or not a bool."), so every selector
+    -- option must carry the descriptor field, not just id/text/icon.
+    for i, option in ipairs(selDD.options) do
+        assert(type(option.displayremoveoption) == "boolean",
+            "console selector option " .. i .. " (" .. tostring(option.id) .. ") must carry a "
+            .. "boolean displayremoveoption for X4's createDropDown")
+    end
     local selLabel
     for _, entry in ipairs(fixD.getCreatedTexts()) do
         if entry.row == "direct_mode" and entry.column == 1 then selLabel = entry.text end
@@ -443,6 +452,22 @@ do
     assert(hasID(compatIDs, "autoassist"),
         "row must still offer the current Direct mode when compatibility filtered it out")
     assert(not hasID(compatIDs, "attackenemies"), "the conflicting Direct mode stays excluded")
+    -- The surviving autoassist option was force-added by vanillaModeOption,
+    -- the exact path a checked row takes when the compatibility filter drops
+    -- the current Direct mode. It must be a valid X4 dropdown descriptor too,
+    -- or the same live abort hits the row instead of the selector.
+    for _, rowKey in ipairs({ keyA, keyB }) do
+        local foundForced = false
+        for _, option in ipairs(latestRowDropDown(fixD, rowKey).options) do
+            if option.id == "autoassist" then
+                foundForced = true
+                assert(type(option.displayremoveoption) == "boolean",
+                    "force-added Direct mode option on row " .. rowKey
+                    .. " must carry a boolean displayremoveoption for X4's createDropDown")
+            end
+        end
+        assert(foundForced, "row " .. rowKey .. " must offer the force-added Direct mode")
+    end
     fixD.C.IsWeaponModeCompatible = nil
 
     -- Checked row -> explicit ordinary mode: unticks the row and keeps the
@@ -539,6 +564,11 @@ do
     assert(sel.options[1].text == vanillaText.attackenemies
         and sel.options[2].text == vanillaText.autoassist,
         "engaged selector options must reuse the vanilla Helper option texts")
+    for i, option in ipairs(sel.options) do
+        assert(type(option.displayremoveoption) == "boolean",
+            "engaged selector option " .. i .. " (" .. tostring(option.id) .. ") must carry a "
+            .. "boolean displayremoveoption for X4's createDropDown")
+    end
     assert(sel.startOption == "attackenemies" and sess.directMode == "attackenemies",
         "engaged selector must start at session.directMode")
     local selLabel

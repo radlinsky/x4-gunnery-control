@@ -409,10 +409,21 @@ end
 -- with the game-localized option text (ReadText(1001, ...)). The Direct-control
 -- selector and the constrained row dropdowns copy those entries, so their
 -- labels can never drift from the vanilla turret-mode dropdown.
+--
+-- X4's createDropDown aborts the whole frame on an option without a boolean
+-- displayremoveoption (live 9.00: "Invalid dropdown descriptor. Given
+-- displayremoveoption is missing or not a bool."), which is why vanilla's own
+-- getTurretModes passes a full table copy of each entry, field for field. Our
+-- copies must keep the same descriptor fields, not just id/text/icon.
+local function copyTurretModeOption(entry)
+    return { id = entry.id, text = entry.text, icon = entry.icon or "",
+             displayremoveoption = entry.displayremoveoption, forall = entry.forall }
+end
+
 local function vanillaModeOption(modeID)
     for _, entry in ipairs(Helper.turretModes or {}) do
         if entry.id == modeID then
-            return { id = entry.id, text = entry.text, icon = entry.icon or "" }
+            return copyTurretModeOption(entry)
         end
     end
     return nil
@@ -426,7 +437,7 @@ local function directModeOptions()
     local options = {}
     for _, entry in ipairs(Helper.turretModes or {}) do
         if State.isDirectedMode(entry.id) then
-            options[#options + 1] = { id = entry.id, text = entry.text, icon = entry.icon or "" }
+            options[#options + 1] = copyTurretModeOption(entry)
         end
     end
     return options
