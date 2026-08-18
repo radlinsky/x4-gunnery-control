@@ -35,7 +35,7 @@
     <t id="68">Auto-engage</t><t id="69">Direct-control</t>
     <t id="70">Select at least one turret group.</t>
     <t id="71">Next Turret</t><t id="72">Previous Turret</t><t id="73">Engaged Target</t>
-    <t id="74">1. Tick the turret groups you want to work with. 2. Auto-engage watches them without giving orders; Direct-control lets you pick their target. 3. Ticking a group sets it to Attack all enemies. That and any other change here is undone when you get up, unless you press Update turret behavior.</t>
+    <t id="74">1. Tick the turret groups you want to work with. 2. Auto-engage watches them without giving orders; Direct-control lets you pick their target. 3. Ticking a group applies the selected Direct-control turret mode to it. That and any other change here is undone when you get up, unless you press Update turret behavior.</t>
     <t id="75">Next Target</t><t id="76">Previous Target</t><t id="77">Select all</t>
     <t id="78">Auto-next Target when destroyed</t>
     <t id="79">Turret groups restored to their previous settings.</t>
@@ -48,5 +48,7 @@
     <t id="94">Previous Page</t><t id="95">Next Page</t><t id="96">Page</t>
     <t id="97">Refresh every 10 seconds</t><t id="98">Shield</t><t id="99">Hull</t>
     <t id="100">UNKNOWN</t>
+    <t id="101">Direct-control turret mode</t>
+    <t id="102">The engine mode Direct-control arms checked turret groups with. Selecting an ordinary mode on a checked group takes that group out of Direct-control.</t>
   </page>
 </language>

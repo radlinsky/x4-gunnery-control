@@ -1524,17 +1524,22 @@ do
         return ""
     end
     gcMenu.display()
+    local function rowDropdown(fixture, rowID)
+        for _, dropdown in ipairs(fixture.getCreatedDropDowns()) do
+            if dropdown.row == rowID then return dropdown end
+        end
+    end
     local dropdowns57 = fix.getCreatedDropDowns()
     assert(#dropdowns57 >= 2, "57: surface panel needs type and macro dropdowns")
-    assert(dropdowns57[1].row == "surface_type_filter" and dropdowns57[1].startOption == "any",
+    assert(rowDropdown(fix, "surface_type_filter").startOption == "any",
         "57: surface type filter must render at Any")
-    assert(dropdowns57[2].row == "surface_macro_filter" and #dropdowns57[2].options == 3,
+    assert(#rowDropdown(fix, "surface_macro_filter").options == 3,
         "57: surface equipment filter must offer Any plus both localized turret names")
-    dropdowns57[1].handlers.onDropDownConfirmed(nil, "turret")
+    rowDropdown(fix, "surface_type_filter").handlers.onDropDownConfirmed(nil, "turret")
     assert(sess57.surfaceTypeFilter == "turret" and sess57.surfaceMacroFilter == "any",
         "57: changing type must apply it and reset macro to Any")
-    dropdowns57 = fix.getCreatedDropDowns()
-    dropdowns57[2].handlers.onDropDownConfirmed(nil, "turret_l")
+    gcMenu.display()
+    rowDropdown(fix, "surface_macro_filter").handlers.onDropDownConfirmed(nil, "turret_l")
     assert(sess57.surfaceMacroFilter == "turret_l", "57: macro lock was not retained")
     local surfaceRefresh57
     for _, button in ipairs(fix.getCreatedButtons()) do

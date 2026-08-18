@@ -408,6 +408,69 @@
   `holdfire` are not members of `weaponmodelookup` (`common.xsd:2334-2421`) and are
   invalid values for the attribute in the sweep direction.
 
+### Autoassist fires at a directly selected ship or station surface element
+- X4: 9.00
+- Status: live-tested
+- Source: controlled live runs 2026-08-17, extension `x4_gunnery_control`
+  (Direct-control, checked turret groups armed `autoassist`) plus the Test Lab
+  observer; game `debug.log`; Issue #48 Task 5 live checkpoint (2026-08-17)
+- Live test: yes — 2026-08-17, X4 9.00, one controlled run per target kind
+- Observer fields, so the evidence is checkable: `aimed=` is the designated
+  component label for the shot, `hitcomp` is the attacked component from the
+  same event payload (`event.param3.{1}`, sibling of the firing weapon at
+  `param3.{2}` — see the attribution record above), and `istgt=1` means the
+  struck component EQUALS the designated one.
+- Finding: an armed `autoassist` group fires at the surface element the player
+  has directly selected, on a ship AND on a station, and the engine keeps the
+  fire at that element. In both runs the designation was the surface-element
+  component itself, not the parent ship or station root:
+  - **Ship surface:** selected Osaka surface component `0x17989d`; a census
+    confirmed the checked turrets were in `autoassist`. Post-selection FIRED
+    records carry `aimed=0x17989d`, and attributed HIT records land on
+    `hitcomp=0x17989d` with `istgt=1`.
+  - **Station surface:** selected component `0x6c588`, a station surface
+    element on the XEN Xenon Defence Platform. Post-selection FIRED records are
+    `mode=autoassist aimed=0x6c588`, and attributed turret HIT records land on
+    `hitcomp=0x6c588` with `istgt=1`.
+  The root-versus-component distinction is what makes this element-granularity
+  evidence: with the element designated, hits registered on the element itself
+  (`istgt=1`), not on the root object or on a neighbouring component.
+- The assignment proof is post-boundary shot/hit evidence (FIRED `aimed=`, HIT
+  `hitcomp=` plus `istgt=1`), not a line-of-sight or firing-solution
+  measurement. That is why this stands as a live-tested targeting result even
+  though no firing-solution field was consulted.
+- **This supersedes the earlier inference that station surface elements are
+  inherently unusable as fire targets.** That inference grew out of a
+  2026-08-17 research-branch run on a station under `attackenemies` (n=1): the
+  element was supplied as the script preferred target, the turrets fired at a
+  different station component instead (0/239 shots within 0.05 rad of the
+  element), and the run was read as a likely engine limitation on stations. The
+  autoassist evidence refutes the generalized claim: a station surface element
+  IS an effective per-turret fire target when it is the player's selected
+  target. Superseded is the "inherently unusable" generalization, not the
+  underlying n=1 `attackenemies` observation — that run used a different mode
+  with a different acquisition path (record above), and nothing here
+  re-establishes that `attackenemies` honours a script-supplied preferred
+  element.
+- Boundaries so the result is not over-read:
+  - This does NOT claim every checked turret fires. Consistent with "Autoassist
+    turrets track a target they cannot hit, and stay silent" (record above), a
+    turret that cannot bear the selected element may remain idle; the live
+    result is that the shots fired were aimed at, and landed on, the selected
+    component.
+  - The shipped-source finding that `autoassist` discards script-supplied
+    fallback lists (record above) is PRESERVED and is consistent with this
+    result: the element was engaged because it was the selected target the
+    engine's own acquisition follows, not because any script-supplied list named
+    it.
+  - The same controlled run produced post-boundary `attackenemies` fire and
+    hits on the selected preferred target (`mode=attackenemies`). Expected
+    fallback behaviour was additionally confirmed by the owner in play; that
+    confirmation is recorded as an owner observation for this run, not as a new
+    live-tested engine result, and it does not extend the durable live-tested
+    fallback findings (OUT OF RANGE / CANNOT BEAR fall back; LINE OF FIRE
+    BLOCKED holds — record below).
+
 ### Vanilla's fight loop does NOT overwrite mod-supplied attackenemies targets
 - X4: 9.00
 - Status: live-tested

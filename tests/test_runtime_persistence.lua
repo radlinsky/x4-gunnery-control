@@ -383,4 +383,92 @@ do
     end
 end
 
+-- ── 71. Stand-up after a restored Direct session reverts the committed baseline ──
+-- A save/load during an active Direct engagement must rebuild the whole
+-- session -- checked membership, policy, committed baseline, and the ordinary
+-- preTickMode -- and the *normal* stand-up afterwards must write the ship
+-- back to the committed baseline, never the temporary Direct state the
+-- engagement was flying in nor the preTickMode that travelled with the
+-- payload. Proven under both Direct-control policies.
+local function eq71(a, b, label)
+    assert(a == b, label .. ": " .. tostring(a) .. " ~= " .. tostring(b))
+end
+for _, policy in ipairs({ "attackenemies", "autoassist" }) do
+    local localFix = dofile("tests/support/runtime_fixture.lua").load()
+    local C, State = localFix.C, X4GunneryState
+    -- The group must exist before onShowMenu's readGroups runs.
+    local groupBuffer = { [0] = { path = "p", group = "g", contextid = 5 } }
+    C.GetNumUpgradeGroups, C.GetUpgradeGroups2 = function() return 1 end, function() return 1 end
+    C.GetUpgradeGroupInfo2 = function()
+        return { count = 1, currentcomponent = 27, currentmacro = "", slotsize = "",
+            total = 1, operational = 1 }
+    end
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 27 end
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+    C.IsComponentOperational = function() return true end
+    C.IsPlayerCameraTargetViewPossible = function() return true end
+    C.GetExternalTargetViewComponent = function() return 27 end
+    C.GetTurretGroupMode2 = function() return "attack" end
+    C.IsTurretGroupArmed = function() return false end
+    localFix.ffiStub.new = function() return groupBuffer end
+    localFix.gcMenu.onShowMenu()
+
+    -- The live Direct session as the player saved it: the committed baseline
+    -- still holds the pre-engage mode, the staged row holds the temporary
+    -- Direct state with its displaced ordinary preTickMode.
+    local sess = localFix.API.getSession()
+    local group = sess.groups[1]
+    local key = group.key
+    sess.phase, sess.controlMode = "engaged", "direct"
+    sess.directMode = policy
+    sess.checkedGroupKeys = { [key] = true }
+    sess.committedBaseline = { {
+        shipID = sess.shipID, kind = "group", contextID = group.contextID,
+        path = group.path, group = group.group, mode = "defend", armed = true,
+    } }
+    sess.staged = { [key] = { mode = policy, armed = true, preTickMode = "attack" } }
+    sess.cameraMemberID = 27
+    local payload = State.encode(State.saveState(sess))
+
+    -- Restore it the way a save/load delivers it, into the open menu.
+    localFix.gcMenu.shown = true
+    localFix.API.onRestoreEnvelope({ generation = 71, target = 0, payload = payload })
+    local restored = localFix.API.getSession()
+    assert(restored ~= sess, "task4 restore " .. policy .. " must swap in the restored session")
+    eq71(restored.phase, "engaged", "task4 restore " .. policy .. " phase")
+    eq71(restored.controlMode, "direct", "task4 restore " .. policy .. " control mode")
+    eq71(restored.directMode, policy, "task4 restore " .. policy .. " policy")
+    assert(restored.checkedGroupKeys[key] == true,
+        "task4 restore " .. policy .. ": checked membership restored")
+    eq71(#restored.committedBaseline, 1, "task4 restore " .. policy .. " baseline count")
+    eq71(restored.committedBaseline[1].mode, "defend",
+        "task4 restore " .. policy .. ": committed baseline mode")
+    eq71(restored.committedBaseline[1].armed, true,
+        "task4 restore " .. policy .. ": committed baseline armed")
+    eq71(restored.staged[key].mode, policy, "task4 restore " .. policy .. " staged in the policy")
+    eq71(restored.staged[key].preTickMode, "attack",
+        "task4 restore " .. policy .. ": ordinary preTickMode restored")
+
+    -- Normal stand-up (the playerGetUp route): the ship must come back to the
+    -- committed baseline, exactly once, in neither the staged policy mode nor
+    -- the displaced ordinary mode.
+    local modes, armeds = {}, {}
+    C.SetTurretGroupMode2 = function(_, _, _, _, mode) modes[#modes + 1] = mode end
+    C.SetTurretGroupArmed = function(_, _, _, _, armed) armeds[#armeds + 1] = armed end
+    local eventsBefore = #localFix.uiTriggeredEvents
+    localFix.API.endForMovement()
+    assert(#modes == 1 and modes[1] == "defend",
+        "task4 stand-up " .. policy .. ": writes the committed baseline mode, not the "
+        .. "temporary Direct state or the preTickMode (got: " .. table.concat(modes, ",") .. ")")
+    assert(#armeds == 1 and armeds[1] == true,
+        "task4 stand-up " .. policy .. ": writes the committed baseline armed state")
+    local sawEnd = false
+    for i = eventsBefore + 1, #localFix.uiTriggeredEvents do
+        if localFix.uiTriggeredEvents[i].control == "session_end" then sawEnd = true end
+    end
+    assert(sawEnd, "task4 stand-up " .. policy .. ": teardown clears the parked MD snapshot")
+    assert(localFix.API.getSession() == nil, "task4 stand-up " .. policy .. ": session discarded")
+end
+
 print("runtime persistence tests passed")

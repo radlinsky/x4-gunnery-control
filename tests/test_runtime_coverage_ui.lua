@@ -312,6 +312,349 @@ assert(sess2.committedBaseline[1] and sess2.committedBaseline[1].armed == finalS
     "committedBaseline armed must match after clicking Update")
 assert(not State.isStagedDirty(sess2),
     "session must be clean after committing staged to baseline")
-GetComponentData = function() return nil end
+-- Issue #48 Task 2: the console Direct-control turret mode selector and the
+-- constrained per-row mode dropdowns. Shipped 9.00 Helper dropdowns carry no
+-- per-option disable (options only hold id/icon/text), so the conflicting
+-- Direct-control mode is omitted from every row rather than greyed out.
+do
+    local fixD = dofile("tests/support/runtime_fixture.lua").load()
+    local keyA = X4GunneryState.groupKey(5, "pA", "gA")
+    local keyB = X4GunneryState.groupKey(5, "pB", "gB")
+    local groupA = {
+        key = keyA, kind = "group", contextID = 5, path = "pA", group = "gA",
+        componentID = 27, displayName = "GA", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 27, displayName = "TA", operational = true, cameraSupported = true } },
+    }
+    local groupB = {
+        key = keyB, kind = "group", contextID = 5, path = "pB", group = "gB",
+        componentID = 28, displayName = "GB", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 28, displayName = "TB", operational = true, cameraSupported = true } },
+    }
+    fixD.gcMenu.onShowMenu()
+    local sessD = fixD.API.getSession()
+    sessD.groups = { groupA, groupB }
+    X4GunneryState.seedBaseline(sessD, { groupA, groupB })
+    -- Real tick of group A through the accepted API: staged follows the
+    -- session's Direct-control policy, exactly as a real sit-down+tick would.
+    X4GunneryState.toggleGroup(sessD, keyA, groupA.armed)
+    GetComponentData = function(_, key) if key == "isplayerowned" then return true end return nil end
+
+    local function latestRowDropDown(fixture, rowID)
+        local found
+        for _, dd in ipairs(fixture.getCreatedDropDowns()) do
+            if dd.row == rowID then found = dd end
+        end
+        return found
+    end
+    local function optionIDs(dd)
+        local ids = {}
+        for _, option in ipairs(dd.options or {}) do ids[#ids + 1] = option.id end
+        return ids
+    end
+    local function hasID(ids, wanted)
+        for _, id in ipairs(ids) do if id == wanted then return true end end
+        return false
+    end
+    local function startValue(dd)
+        local start = dd.startOption
+        return type(start) == "function" and start() or start
+    end
+
+    fixD.gcMenu.display()
+
+    -- Selector: rendered on the console with exactly the two Direct-control
+    -- ids, the vanilla Helper option texts, and the localized label/help.
+    local selDD = latestRowDropDown(fixD, "direct_mode")
+    assert(selDD, "console must render the direct_mode selector dropdown")
+    local selIDs = optionIDs(selDD)
+    assert(#selIDs == 2 and selIDs[1] == "attackenemies" and selIDs[2] == "autoassist",
+        "selector must offer exactly the two Direct-control modes in vanilla order")
+    local vanillaText = {}
+    for _, entry in ipairs(Helper.turretModes) do vanillaText[entry.id] = entry.text end
+    assert(selDD.options[1].text == vanillaText.attackenemies
+        and selDD.options[2].text == vanillaText.autoassist,
+        "selector options must reuse the vanilla Helper option texts, not hardcoded labels")
+    assert(selDD.startOption == "attackenemies" and sessD.directMode == "attackenemies",
+        "selector must start at session.directMode (attackenemies)")
+    -- X4's createDropDown aborts the whole frame on an option without a
+    -- boolean displayremoveoption (live 9.00: "Invalid dropdown descriptor.
+    -- Given displayremoveoption is missing or not a bool."), so every selector
+    -- option must carry the descriptor field, not just id/text/icon.
+    for i, option in ipairs(selDD.options) do
+        assert(type(option.displayremoveoption) == "boolean",
+            "console selector option " .. i .. " (" .. tostring(option.id) .. ") must carry a "
+            .. "boolean displayremoveoption for X4's createDropDown")
+    end
+    local selLabel
+    for _, entry in ipairs(fixD.getCreatedTexts()) do
+        if entry.row == "direct_mode" and entry.column == 1 then selLabel = entry.text end
+    end
+    assert(selLabel == ReadText(20991, 101),
+        "selector label must come from localization id 101, not hardcoded English")
+    assert(selDD.mouseOverText == ReadText(20991, 102),
+        "selector help text must come from localization id 102, not hardcoded English")
+
+    -- Rows under attackenemies (checked and unchecked): the current Direct
+    -- mode is offered, the other one is not, ordinary modes stay available.
+    for _, rowKey in ipairs({ keyA, keyB }) do
+        local ids = optionIDs(latestRowDropDown(fixD, rowKey))
+        assert(hasID(ids, "attackenemies"), "row must offer the current Direct mode (" .. rowKey .. ")")
+        assert(not hasID(ids, "autoassist"),
+            "under attackenemies the row must not offer autoassist (" .. rowKey .. ")")
+        assert(hasID(ids, "defend") and hasID(ids, "mining") and hasID(ids, "towing"),
+            "ordinary vanilla modes must stay available (" .. rowKey .. ")")
+    end
+    assert(startValue(latestRowDropDown(fixD, keyA)) == "attackenemies",
+        "checked row displays the staged Direct-control mode")
+
+    -- Selector change: policy + checked staging update, repaint follows, and
+    -- no live turret state is written (Task 2 is staged/UI-only).
+    local liveC = require("ffi").C
+    local liveWrites = {}
+    local liveSaves = {}
+    for _, name in ipairs({ "SetTurretGroupMode2", "SetTurretGroupArmed", "SetWeaponMode", "SetWeaponArmed" }) do
+        liveSaves[name] = rawget(liveC, name)
+        liveC[name] = function(...) liveWrites[#liveWrites + 1] = name end
+    end
+    selDD.handlers.onDropDownConfirmed(nil, "autoassist")
+    for _, name in ipairs({ "SetTurretGroupMode2", "SetTurretGroupArmed", "SetWeaponMode", "SetWeaponArmed" }) do
+        liveC[name] = liveSaves[name]
+    end
+    assert(#liveWrites == 0,
+        "selector change must not write live turret state: " .. table.concat(liveWrites, ","))
+    assert(sessD.directMode == "autoassist", "selector change must set session.directMode")
+    assert(sessD.staged[keyA].mode == "autoassist",
+        "setDirectMode must re-stage the checked row in the new mode")
+
+    fixD.gcMenu.display()
+    assert(startValue(latestRowDropDown(fixD, keyA)) == "autoassist",
+        "checked row must repaint in the new Direct-control mode")
+
+    -- Rows under autoassist (checked and unchecked): attackenemies is now the
+    -- omitted mode; ordinary modes remain.
+    for _, rowKey in ipairs({ keyA, keyB }) do
+        local ids = optionIDs(latestRowDropDown(fixD, rowKey))
+        assert(hasID(ids, "autoassist"), "row must offer the current Direct mode (" .. rowKey .. ")")
+        assert(not hasID(ids, "attackenemies"),
+            "under autoassist the row must not offer attackenemies (" .. rowKey .. ")")
+        assert(hasID(ids, "defend") and hasID(ids, "mining"),
+            "ordinary vanilla modes must stay available (" .. rowKey .. ")")
+    end
+
+    -- The engine-compatibility filter can drop the current Direct mode from a
+    -- row's vanilla list; the row must still offer it, or a checked row could
+    -- display a mode its dropdown cannot select.
+    fixD.C.IsWeaponModeCompatible = function(_, _, modeID) return modeID ~= "autoassist" end
+    fixD.gcMenu.display()
+    local compatIDs = optionIDs(latestRowDropDown(fixD, keyA))
+    assert(hasID(compatIDs, "autoassist"),
+        "row must still offer the current Direct mode when compatibility filtered it out")
+    assert(not hasID(compatIDs, "attackenemies"), "the conflicting Direct mode stays excluded")
+    -- The surviving autoassist option was force-added by vanillaModeOption,
+    -- the exact path a checked row takes when the compatibility filter drops
+    -- the current Direct mode. It must be a valid X4 dropdown descriptor too,
+    -- or the same live abort hits the row instead of the selector.
+    for _, rowKey in ipairs({ keyA, keyB }) do
+        local foundForced = false
+        for _, option in ipairs(latestRowDropDown(fixD, rowKey).options) do
+            if option.id == "autoassist" then
+                foundForced = true
+                assert(type(option.displayremoveoption) == "boolean",
+                    "force-added Direct mode option on row " .. rowKey
+                    .. " must carry a boolean displayremoveoption for X4's createDropDown")
+            end
+        end
+        assert(foundForced, "row " .. rowKey .. " must offer the force-added Direct mode")
+    end
+    fixD.C.IsWeaponModeCompatible = nil
+
+    -- Checked row -> explicit ordinary mode: unticks the row and keeps the
+    -- chosen ordinary mode (State.stageMode membership contract).
+    latestRowDropDown(fixD, keyA).handlers.onDropDownConfirmed(nil, "defend")
+    assert(sessD.checkedGroupKeys[keyA] == nil,
+        "choosing an ordinary mode on a checked row must untick it")
+    assert(sessD.staged[keyA].mode == "defend",
+        "the unticked row must keep the explicitly chosen ordinary mode")
+    assert(sessD.directMode == "autoassist",
+        "an ordinary row selection must not move the session policy")
+
+    -- Unchecked row -> another ordinary mode: stays unchecked, mode applied.
+    latestRowDropDown(fixD, keyB).handlers.onDropDownConfirmed(nil, "mining")
+    assert(sessD.checkedGroupKeys[keyB] == nil,
+        "changing an unchecked row to another ordinary mode must keep it unchecked")
+    assert(sessD.staged[keyB].mode == "mining",
+        "the unchecked row must keep the selected ordinary mode")
+
+    -- Degraded Helper table: the selector degrades to what vanilla ships and
+    -- the ensure-present fallback resolves to nil without raising.
+    local savedModes = Helper.turretModes
+    Helper.turretModes = {}
+    fixD.gcMenu.display()
+    assert(#optionIDs(latestRowDropDown(fixD, "direct_mode")) == 0,
+        "with no vanilla entries the selector offers no options")
+    assert(#optionIDs(latestRowDropDown(fixD, keyA)) == 0,
+        "with no vanilla entries the row offers no options")
+    Helper.turretModes = savedModes
+    GetComponentData = function() return nil end
+end
 
 print("runtime coverage ui tests passed")
+
+-- Issue #48 Task 3: the Direct-control engaged panel carries the same
+-- selector as the console, and changing it while engaged applies the policy
+-- to the checked groups' live modes immediately, without touching target,
+-- camera, Auto-next, checkbox membership or the committed baseline.
+do
+    local fixE = dofile("tests/support/runtime_fixture.lua").load()
+    local key = X4GunneryState.groupKey(5, "p", "g")
+    local grp = {
+        key = key, kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
+    }
+    fixE.gcMenu.onShowMenu()
+    local sess = fixE.API.getSession()
+    sess.groups = { grp }
+    sess.cameraMemberID = 27
+    X4GunneryState.seedBaseline(sess, { grp })
+    X4GunneryState.toggleGroup(sess, key, grp.armed)
+    sess.phase, sess.controlMode = "engaged", "direct"
+    sess.aimTargetID = 77
+    sess.autoNextTarget = true
+
+    -- This fixture's module instance binds its own C table (the fixture clears
+    -- the require cache on every load), so overrides on fixE.C are visible to
+    -- the production code exactly as the fixture contract documents.
+    local liveModes, liveArmed = {}, {}
+    local savedSetMode, savedSetArmed = rawget(fixE.C, "SetTurretGroupMode2"), rawget(fixE.C, "SetTurretGroupArmed")
+    fixE.C.SetTurretGroupMode2 = function(_, _, _, _, mode) liveModes[#liveModes + 1] = mode end
+    fixE.C.SetTurretGroupArmed = function(_, _, _, _, armed) liveArmed[#liveArmed + 1] = armed end
+    local function eventsSince(mark)
+        local fallback, watch = false, false
+        for i = mark + 1, #fixE.uiTriggeredEvents do
+            local control = fixE.uiTriggeredEvents[i].control
+            if control == "direct_fallback" then fallback = true end
+            if control == "direct_watch" then watch = true end
+        end
+        return fallback, watch
+    end
+    local function latestRow(fixture, rowID)
+        local found
+        for _, dd in ipairs(fixture.getCreatedDropDowns()) do
+            if dd.row == rowID then found = dd end
+        end
+        return found
+    end
+
+    fixE.gcMenu.display()
+
+    -- The selector renders with the same options, label and help as the
+    -- console's, and starts at the session policy.
+    local sel = latestRow(fixE, "direct_mode")
+    assert(sel, "engaged panel must render the direct_mode selector dropdown")
+    local selIDs = {}
+    for _, option in ipairs(sel.options) do selIDs[#selIDs + 1] = option.id end
+    assert(#selIDs == 2 and selIDs[1] == "attackenemies" and selIDs[2] == "autoassist",
+        "engaged selector must offer exactly the two Direct-control modes in vanilla order")
+    local vanillaText = {}
+    for _, entry in ipairs(Helper.turretModes) do vanillaText[entry.id] = entry.text end
+    assert(sel.options[1].text == vanillaText.attackenemies
+        and sel.options[2].text == vanillaText.autoassist,
+        "engaged selector options must reuse the vanilla Helper option texts")
+    for i, option in ipairs(sel.options) do
+        assert(type(option.displayremoveoption) == "boolean",
+            "engaged selector option " .. i .. " (" .. tostring(option.id) .. ") must carry a "
+            .. "boolean displayremoveoption for X4's createDropDown")
+    end
+    assert(sel.startOption == "attackenemies" and sess.directMode == "attackenemies",
+        "engaged selector must start at session.directMode")
+    local selLabel
+    for _, entry in ipairs(fixE.getCreatedTexts()) do
+        if entry.row == "direct_mode" and entry.column == 1 then selLabel = entry.text end
+    end
+    assert(selLabel == ReadText(20991, 101),
+        "engaged selector label must come from localization id 101")
+    assert(sel.mouseOverText == ReadText(20991, 102),
+        "engaged selector help must come from localization id 102")
+
+    -- Switch to autoassist while engaged: the checked group's live mode is
+    -- written, no fallback list is installed, the watch is untouched, and the
+    -- session keeps its target, camera, Auto-next, checkbox and baseline.
+    local mark = #fixE.uiTriggeredEvents
+    sel.handlers.onDropDownConfirmed(nil, "autoassist")
+    assert(#liveModes == 1 and liveModes[1] == "autoassist",
+        "engaged selector change must write the checked group's live mode: "
+        .. table.concat(liveModes, ","))
+    assert(#liveArmed == 0, "a policy switch must not touch armed state")
+    local sawFallback, sawWatch = eventsSince(mark)
+    assert(not sawFallback and not sawWatch,
+        "switching to autoassist must not install a fallback list or re-arm the watch")
+    assert(sess.directMode == "autoassist", "selector change must set session.directMode")
+    assert(sess.aimTargetID == 77, "policy switch must not move the engaged target")
+    assert(sess.cameraMemberID == 27, "policy switch must not move the camera")
+    assert(sess.autoNextTarget == true, "policy switch must not touch Auto-next")
+    assert(sess.checkedGroupKeys[key] == true, "policy switch must not touch checkbox membership")
+    assert(sess.committedBaseline[1].mode == "attack",
+        "policy switch must not touch the committed baseline")
+    assert(sess.phase == "engaged" and sess.controlMode == "direct",
+        "policy switch must not change the session phase")
+    assert(sess.staged[key].mode == "autoassist",
+        "the checked row's staged mode must follow the new policy")
+    assert(grp.mode == "autoassist",
+        "the live-mode bookkeeping must track the applied mode")
+
+    -- Repaint: the selector now starts at the new policy.
+    fixE.gcMenu.display()
+    assert(latestRow(fixE, "direct_mode").startOption == "autoassist",
+        "the selector must repaint at the new policy")
+
+    -- Switch back to attackenemies: the live mode is written again and the
+    -- preferred-target/fallback list is re-installed for the current target.
+    mark = #fixE.uiTriggeredEvents
+    latestRow(fixE, "direct_mode").handlers.onDropDownConfirmed(nil, "attackenemies")
+    assert(#liveModes == 2 and liveModes[2] == "attackenemies",
+        "switching back must re-mode the checked group once: " .. table.concat(liveModes, ","))
+    sawFallback, sawWatch = eventsSince(mark)
+    assert(sawFallback and sawWatch,
+        "switching back to attackenemies must re-install the fallback list and keep the watch")
+    assert(sess.directMode == "attackenemies", "selector must end at attackenemies")
+
+    -- Re-confirming the current policy is a no-op: no live writes, no events.
+    mark = #fixE.uiTriggeredEvents
+    latestRow(fixE, "direct_mode").handlers.onDropDownConfirmed(nil, "attackenemies")
+    assert(#liveModes == 2, "re-confirming the current policy must not write the live mode")
+    sawFallback, sawWatch = eventsSince(mark)
+    assert(not sawFallback and not sawWatch,
+        "re-confirming the current policy must not re-issue MD events")
+
+    fixE.C.SetTurretGroupMode2, fixE.C.SetTurretGroupArmed = savedSetMode, savedSetArmed
+end
+
+-- The auto-engage panel is not a Direct-control panel: no selector there.
+do
+    local fixA = dofile("tests/support/runtime_fixture.lua").load()
+    local key = X4GunneryState.groupKey(5, "p", "g")
+    local grp = {
+        key = key, kind = "group", contextID = 5, path = "p", group = "g",
+        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
+        mode = "attack", armed = false,
+        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
+    }
+    fixA.gcMenu.onShowMenu()
+    local sessA = fixA.API.getSession()
+    sessA.groups = { grp }
+    sessA.cameraMemberID = 27
+    X4GunneryState.seedBaseline(sessA, { grp })
+    X4GunneryState.toggleGroup(sessA, key, grp.armed)
+    sessA.phase, sessA.controlMode = "engaged", "auto"
+    fixA.gcMenu.display()
+    local foundSelector
+    for _, dd in ipairs(fixA.getCreatedDropDowns()) do
+        if dd.row == "direct_mode" then foundSelector = dd end
+    end
+    assert(foundSelector == nil,
+        "the auto-engage panel must not render the Direct-control selector")
+end

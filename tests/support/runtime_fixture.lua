@@ -104,6 +104,12 @@ function M.load()
 
     ffiStub.C = C
     package.preload["ffi"] = function() return ffiStub end
+    -- Require caches the first fixture's ffi stub process-wide, which would
+    -- bind every later module instance to the FIRST fixture's C table and make
+    -- fix.C overrides invisible to production code (the fixture contract says
+    -- every load is a fresh environment). Drop the cache entry so this load's
+    -- require("ffi") returns THIS fixture's stub.
+    package.loaded["ffi"] = nil
 
     -- ── 2. captured log ─────────────────────────────────────────────────────
     local capturedLog = {}
@@ -322,6 +328,7 @@ function M.load()
                                             column = column,
                                             options = options,
                                             startOption = (props or {}).startOption,
+                                            mouseOverText = (props or {}).mouseOverText,
                                         }
                                     end
                                     rawset(t, column, cell)
@@ -351,7 +358,6 @@ function M.load()
         end,
         getMenu                 = function() return nil end,
         closeMenuAndOpenNewMenu = function() end,
-        getTurretModes          = function() return {} end,
         scaleX                  = function(x) return x end,
         scaleY                  = function(y) return y end,
         viewWidth               = 1920,
@@ -376,6 +382,45 @@ function M.load()
     Menus               = {}
     ReadText            = function(page, id)
         return "text:" .. tostring(page) .. ":" .. tostring(id)
+    end
+    -- Realistic vanilla dropdown surface: the shipped 9.00 Helper defines
+    -- Helper.turretModes (one entry per engine mode, with the game-localized
+    -- option text) and Helper.getTurretModes(turret, forall, helpoverlayprefix)
+    -- filters that list by engine compatibility. Mirror both so the option-list
+    -- tests consume the same shapes production does. (ui/addons/
+    -- ego_detailmonitorhelper/helper.lua)
+    Helper.turretModes = {
+        { id = "defend",          text = ReadText(1001, 8613), icon = "", displayremoveoption = false, forall = true },
+        { id = "attackenemies",   text = ReadText(1001, 8614), icon = "", displayremoveoption = false, forall = true },
+        { id = "attackcapital",   text = ReadText(1001, 8634), icon = "", displayremoveoption = false, forall = true },
+        { id = "prefercapital",   text = ReadText(1001, 8637), icon = "", displayremoveoption = false, forall = true },
+        { id = "attackfighters",  text = ReadText(1001, 8635), icon = "", displayremoveoption = false, forall = true },
+        { id = "preferfighters",  text = ReadText(1001, 8638), icon = "", displayremoveoption = false, forall = true },
+        { id = "missiledefence",  text = ReadText(1001, 8636), icon = "", displayremoveoption = false, forall = true },
+        { id = "prefermissiles",  text = ReadText(1001, 8639), icon = "", displayremoveoption = false, forall = true },
+        { id = "autoassist",      text = ReadText(1001, 8617), icon = "", displayremoveoption = false, forall = true },
+        { id = "mining",          text = ReadText(1001, 8616), icon = "", displayremoveoption = false, forall = true },
+        { id = "towing",          text = ReadText(1001, 8633), icon = "", displayremoveoption = false, forall = false },
+    }
+    Helper.getTurretModes = function(turret, forall, helpoverlayprefix, counter)
+        local options = {}
+        for _, entry in ipairs(Helper.turretModes) do
+            if (not forall) or (forall == entry.forall) then
+                if (turret == nil) or C.IsWeaponModeCompatible(turret, "", entry.id) then
+                    local copy = {
+                        id = entry.id, text = entry.text, icon = entry.icon,
+                        displayremoveoption = entry.displayremoveoption, forall = entry.forall,
+                    }
+                    if helpoverlayprefix then
+                        copy.helpOverlayID = helpoverlayprefix .. entry.id .. (counter or "")
+                        copy.helpOverlayText = " "
+                        copy.helpOverlayHighlightOnly = true
+                    end
+                    options[#options + 1] = copy
+                end
+            end
+        end
+        return options
     end
     -- RegisterEvent is set above (section 5).
     registerForEvent    = function(name, _, handler)
