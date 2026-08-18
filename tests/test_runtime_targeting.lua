@@ -1192,22 +1192,50 @@ do
         return n
     end
 
-    -- A. Task 5A: the loss tick refreshes the same-root surface snapshot,
-    -- ranks the unfiltered alternatives of its allSurfaces, and immediately
-    -- issues exactly one page-1 ENGAGEABLE batch for the checked operational
+    -- A. Task 5A: the loss tick supersedes a REAL pre-existing surface
+    -- snapshot of the same root (one generation later), ranks the unfiltered
+    -- alternatives of its refreshed allSurfaces, and immediately issues
+    -- exactly one page-1 ENGAGEABLE batch for the checked operational
     -- turrets. It still makes no choice and runs no object sweep; the next
     -- tick consumes the pending readings without re-requesting.
     do
         resetCounts42()
-        slotCount42 = 3                       -- 701 (dead), 702/703 (alive)
-        operational42 = { ["600"] = true, ["702"] = true, ["703"] = true,
-            ["98"] = true }
+        slotCount42 = 3                       -- 701/702/703 all alive at first
+        operational42 = { ["600"] = true, ["701"] = true, ["702"] = true,
+            ["703"] = true, ["98"] = true }
         sectorShips42 = { 98 }
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
         sess.surfaceTypeFilter = "engine"     -- browser filter: must not narrow the fallback
         clock = 500
+        -- 1. Establish a REAL pre-existing snapshot: render the element panel
+        -- the way an engaged direct-control player sees it, aiming at the
+        -- live surface 701. The loss tick below must then supersede this
+        -- live browser snapshot rather than create one from scratch.
+        local okA, errA = pcall(function() gcMenu.display() end)
+        assert(okA, "setup display raised: " .. tostring(errA))
+        assert(sess.surfaceBrowser ~= nil
+            and X4GunneryState.normID(sess.surfaceBrowser.rootID) == "600"
+            and (sess.surfaceBrowser.generation or 0) >= 1,
+            "setup: the element panel render must create a real snapshot for "
+            .. "root 600; generation="
+            .. tostring(sess.surfaceBrowser and sess.surfaceBrowser.generation))
+        local genBefore = sess.surfaceBrowser.generation
+        local oldAllSurfaces = {}
+        for _, surface in ipairs(sess.surfaceBrowser.allSurfaces or {}) do
+            oldAllSurfaces[#oldAllSurfaces + 1] = X4GunneryState.normID(surface.componentID)
+        end
+        assert(table.concat(oldAllSurfaces, ",") == "701,702,703",
+            "setup: the pre-existing snapshot must hold all three operational "
+            .. "surfaces; got " .. table.concat(oldAllSurfaces, ","))
+        -- ENGAGEABLE traffic from that setup render (the pinned row's batch)
+        -- must not satisfy the loss-tick assertions: mark only now.
         local mark = #fix.uiTriggeredEvents
+        local sweepsAtMark = objectSweepCalls42
+        softtargetCalls42 = {}
+        -- 2. 701 dies while the browser still lists it: the pre-existing
+        -- snapshot is now stale.
+        operational42["701"] = false
         API.updateAimTarget()
         assert(sess.targetFallback ~= nil,
             "surface loss with auto-next on must start a session-scoped resolution")
@@ -1219,22 +1247,31 @@ do
             .. tostring(sess.targetObjectID) .. " phase=" .. tostring(sess.phase))
         assert(#softtargetCalls42 == 0,
             "no re-engage may happen on the loss tick itself")
-        assert(objectSweepCalls42 == 0,
+        assert(objectSweepCalls42 == sweepsAtMark,
             "the object sweep belongs to the planner's objects stage, not the loss tick; "
-            .. objectSweepCalls42 .. " call(s)")
-        -- The surface snapshot for the root is refreshed on the loss tick...
-        assert(sess.surfaceBrowser ~= nil
-            and X4GunneryState.normID(sess.surfaceBrowser.rootID) == "600"
-            and (sess.surfaceBrowser.generation or 0) >= 1,
-            "the surface snapshot for root 600 must be refreshed on the loss tick; "
-            .. "generation="
-            .. tostring(sess.surfaceBrowser and sess.surfaceBrowser.generation))
+            .. (objectSweepCalls42 - sweepsAtMark) .. " extra call(s)")
+        -- The surface snapshot for the root is the SAME browser object,
+        -- advanced by exactly one generation on the loss tick...
+        assert(sess.surfaceBrowser.generation == genBefore + 1,
+            "the loss tick must advance the pre-existing snapshot by exactly "
+            .. "one generation; before=" .. tostring(genBefore)
+            .. " after=" .. tostring(sess.surfaceBrowser.generation))
         assert(fix.logContains("event=surface_snapshot action=create reason=auto_next"),
             "the loss-tick snapshot refresh must be logged with the auto_next reason")
-        assert(#sess.surfaceBrowser.allSurfaces == 2,
-            "the refreshed snapshot must hold the unfiltered operational surfaces; "
-            .. "got " .. tostring(#sess.surfaceBrowser.allSurfaces))
-        -- ...and the fallback ranks the unfiltered same-root alternatives of
+        -- ...and its allSurfaces now reflect the changed population instead
+        -- of the stale setup snapshot.
+        local newAllSurfaces = {}
+        for _, surface in ipairs(sess.surfaceBrowser.allSurfaces or {}) do
+            newAllSurfaces[#newAllSurfaces + 1] = X4GunneryState.normID(surface.componentID)
+        end
+        assert(table.concat(newAllSurfaces, ",") == "702,703",
+            "the refreshed snapshot must hold the unfiltered operational surfaces "
+            .. "after 701 died; got " .. table.concat(newAllSurfaces, ","))
+        assert(table.concat(newAllSurfaces, ",") ~= table.concat(oldAllSurfaces, ","),
+            "the refreshed allSurfaces must differ from the stale setup snapshot; old="
+            .. table.concat(oldAllSurfaces, ",")
+            .. " new=" .. table.concat(newAllSurfaces, ","))
+        -- and the fallback ranks the unfiltered same-root alternatives of
         -- exactly that snapshot (the user's engine filter would leave the
         -- browser none of them).
         local expected = X4GunneryState.surfaceAlternatives(
@@ -1731,7 +1768,7 @@ do
     -- M. A surface that dies after its positive ENGAGEABLE result was
     -- accepted must never be engaged: the consume tick must skip engageTarget
     -- entirely (no hull/browser fallthrough) and restart the same-root
-    -- surface stage from a fresh snapshot, whose immediate page-1 request
+    -- surface stage from a fresh snapshot, whose immediate page-1 evaluation
     -- then targets only the survivor.
     do
         resetCounts42()
@@ -1755,6 +1792,9 @@ do
             and batches[1].targets[1] == "702" and batches[1].targets[2] == "703",
             "the loss tick must query both surviving surfaces; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        -- Record this snapshot's generation before 702 dies: the stale
+        -- restart must advance exactly this snapshot by one generation.
+        local genBeforeRestart = sess.surfaceBrowser.generation
         -- 2. The page result proves 702 positive (and settles 703 so the
         -- planner can decide).
         deliver42(batches[1], { ["702"] = "1:1:1", ["703"] = "1:1:1" })
@@ -1770,8 +1810,20 @@ do
         assert(not engaged702,
             "a surface that died after its positive result must not be engaged")
         -- 5. The fallback stays active on the surfaces stage, restarted from
-        -- the fresh snapshot: the refreshed candidates exclude 702 and the
-        -- immediate page-1 request targets 703.
+        -- the fresh snapshot: the snapshot advanced by exactly one
+        -- generation, the refreshed allSurfaces exclude 702 and keep the
+        -- surviving 703, and the immediate page-1 evaluation targets 703.
+        assert(sess.surfaceBrowser.generation == genBeforeRestart + 1,
+            "the stale restart must advance the snapshot by exactly one "
+            .. "generation; before=" .. tostring(genBeforeRestart)
+            .. " after=" .. tostring(sess.surfaceBrowser.generation))
+        local restartedAllSurfaces = {}
+        for _, surface in ipairs(sess.surfaceBrowser.allSurfaces or {}) do
+            restartedAllSurfaces[#restartedAllSurfaces + 1] = X4GunneryState.normID(surface.componentID)
+        end
+        assert(table.concat(restartedAllSurfaces, ",") == "703",
+            "the restarted snapshot must exclude the dead 702 and keep the "
+            .. "surviving 703; got " .. table.concat(restartedAllSurfaces, ","))
         assert(sess.targetFallback ~= nil
             and sess.targetFallback.stage == "surfaces"
             and sess.targetFallback.page == 1,
@@ -1781,7 +1833,7 @@ do
         assert(#sess.targetFallback.orderedIDs == 1
             and X4GunneryState.normID(sess.targetFallback.orderedIDs[1]) == "703",
             "the refreshed candidates must exclude the dead 702 and the "
-            .. "page-1 request must target 703; ids="
+            .. "page-1 evaluation must target 703; ids="
             .. table.concat(sess.targetFallback.orderedIDs, ","))
         assert(sess.phase == "engaged" and tostring(sess.aimTargetID) == "701"
             and tostring(sess.targetObjectID) == "600",
