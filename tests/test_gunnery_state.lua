@@ -1715,6 +1715,153 @@ do
         "legacy without preTick: no preTickMode; untick falls back to defend")
 end
 
+-- Issue #48 Task 4: Direct-control persistence, checkpoint, teardown,
+-- and legacy compatibility. The cases above prove the transport pieces;
+-- these round trips each prove one whole required behaviour end to end,
+-- asserting every element that must survive together.
+
+-- Active Direct save/load under attackenemies restores checked membership,
+-- the policy, the committed baseline (not the temporary Direct state), and a
+-- valid ordinary preTickMode; a later untick returns the ordinary mode.
+do
+    local saved = State.newSession("600", "gunnercontrol")
+    saved.shipName = "Behemoth"
+    saved.phase, saved.controlMode = "engaged", "direct"
+    saved.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    State.seedBaseline(saved, saved.groups)
+    State.stageMode(saved, "group:OLD:p:g", "attack", true)
+    State.toggleGroup(saved, "group:OLD:p:g", true)
+    eq(saved.staged["group:OLD:p:g"].preTickMode, "attack", "task4 active setup: ordinary preTickMode recorded")
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("600", "gunnercontrol")
+    loaded.shipName = "Behemoth"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "task4 active attackenemies: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "task4 active attackenemies: checked membership restored")
+    eq(loaded.directMode, "attackenemies", "task4 active attackenemies: policy restored")
+    eq(#loaded.committedBaseline, 1, "task4 active attackenemies: committed baseline restored")
+    eq(loaded.committedBaseline[1].mode, "defend",
+        "task4 active attackenemies: committed baseline keeps the pre-engage mode, not the temporary Direct state")
+    eq(loaded.committedBaseline[1].armed, true, "task4 active attackenemies: committed baseline armed restored")
+    eq(loaded.staged[loadKey].mode, State.TICK_MODE, "task4 active attackenemies: checked group staged in the policy")
+    eq(loaded.staged[loadKey].preTickMode, "attack", "task4 active attackenemies: valid ordinary preTickMode restored")
+    State.toggleGroup(loaded, loadKey, true)
+    eq(loaded.staged[loadKey].mode, "attack",
+        "task4 active attackenemies: untick after restore returns the ordinary mode")
+    assert(loaded.checkedGroupKeys[loadKey] == nil, "task4 active attackenemies: untick clears membership")
+end
+
+-- The same active save/load round trip under the autoassist policy: the
+-- restored session must stage the checked group in autoassist, keep the
+-- committed baseline intact, and let a later untick restore the ordinary mode.
+do
+    local saved = State.newSession("601", "gunnercontrol")
+    saved.shipName = "Behemoth"
+    saved.directMode = "autoassist"
+    saved.phase, saved.controlMode = "engaged", "direct"
+    saved.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    State.seedBaseline(saved, saved.groups)
+    State.stageMode(saved, "group:OLD:p:g", "attack", true)
+    State.toggleGroup(saved, "group:OLD:p:g", true)
+    eq(saved.staged["group:OLD:p:g"].mode, "autoassist", "task4 active autoassist setup: tick stages the policy")
+    eq(saved.staged["group:OLD:p:g"].preTickMode, "attack", "task4 active autoassist setup: ordinary preTickMode recorded")
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("601", "gunnercontrol")
+    loaded.shipName = "Behemoth"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "task4 active autoassist: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    assert(loaded.checkedGroupKeys[loadKey] == true,
+        "task4 active autoassist: checked membership restored")
+    eq(loaded.directMode, "autoassist", "task4 active autoassist: policy restored")
+    eq(#loaded.committedBaseline, 1, "task4 active autoassist: committed baseline restored")
+    eq(loaded.committedBaseline[1].mode, "defend",
+        "task4 active autoassist: committed baseline keeps the pre-engage mode, not the temporary Direct state")
+    eq(loaded.committedBaseline[1].armed, true, "task4 active autoassist: committed baseline armed restored")
+    eq(loaded.staged[loadKey].mode, "autoassist", "task4 active autoassist: checked group staged in the restored policy")
+    eq(loaded.staged[loadKey].preTickMode, "attack", "task4 active autoassist: valid ordinary preTickMode restored")
+    State.toggleGroup(loaded, loadKey, true)
+    eq(loaded.staged[loadKey].mode, "attack",
+        "task4 active autoassist: untick after restore returns the ordinary mode")
+    assert(loaded.checkedGroupKeys[loadKey] == nil, "task4 active autoassist: untick clears membership")
+end
+
+-- "Update turret behavior" is one action with two observable effects that a
+-- single scenario must prove together: committedBaseline advances to the
+-- staged Direct state AND the checked group's preTickMode is cleared, so a
+-- later untick uses the Defend fallback instead of resurrecting the displaced
+-- ordinary mode.
+do
+    local s = State.newSession("602", "gunnercontrol")
+    s.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    State.seedBaseline(s, s.groups)
+    State.stageMode(s, "group:OLD:p:g", "attack", true)
+    State.toggleGroup(s, "group:OLD:p:g", true)
+    eq(s.staged["group:OLD:p:g"].preTickMode, "attack", "task4 checkpoint setup: preTickMode before the commit")
+    State.commitStagedToBaseline(s)
+    eq(s.committedBaseline[1].mode, State.TICK_MODE,
+        "task4 checkpoint: committedBaseline advances to the staged Direct mode")
+    eq(s.committedBaseline[1].armed, true, "task4 checkpoint: committedBaseline advances armed with the staged state")
+    assert(s.staged["group:OLD:p:g"].preTickMode == nil, "task4 checkpoint: preTickMode cleared on the checked group")
+    assert(not State.isStagedDirty(s), "task4 checkpoint: session is clean after the commit")
+    State.toggleGroup(s, "group:OLD:p:g", true)
+    eq(s.staged["group:OLD:p:g"].mode, State.UNTICK_FALLBACK,
+        "task4 checkpoint: untick after the commit uses the Defend fallback")
+end
+
+-- A save/load taken after the checkpoint must not resurrect the cleared
+-- preTickMode, and a later untick uses Defend -- under the autoassist policy
+-- as well, so the fallback is proven policy-independent.
+do
+    local saved = State.newSession("603", "gunnercontrol")
+    saved.shipName = "Behemoth"
+    saved.directMode = "autoassist"
+    saved.phase, saved.controlMode = "engaged", "direct"
+    saved.groups = {
+        { key = "group:OLD:p:g", contextID = "OLD", path = "p", group = "g",
+          kind = "group", componentID = "C1", mode = "defend", armed = true,
+          operationalCount = 1, totalCount = 1 },
+    }
+    State.seedBaseline(saved, saved.groups)
+    State.stageMode(saved, "group:OLD:p:g", "attack", true)
+    State.toggleGroup(saved, "group:OLD:p:g", true)
+    State.commitStagedToBaseline(saved)
+    assert(saved.staged["group:OLD:p:g"].preTickMode == nil,
+        "task4 post-cp autoassist setup: the commit cleared preTickMode")
+    local payload = State.encode(State.saveState(saved))
+    local liveGroups = { { key = "group:NEW:p:g", contextID = "NEW", path = "p", group = "g" } }
+    local loaded = State.newSession("603", "gunnercontrol")
+    loaded.shipName = "Behemoth"
+    assert(State.restoreState(loaded, State.decode(payload), liveGroups),
+        "task4 post-cp autoassist: restore succeeds")
+    local loadKey = "group:NEW:p:g"
+    eq(loaded.directMode, "autoassist", "task4 post-cp autoassist: policy restored")
+    assert(loaded.checkedGroupKeys[loadKey] == true, "task4 post-cp autoassist: checked membership restored")
+    eq(loaded.committedBaseline[1].mode, "autoassist",
+        "task4 post-cp autoassist: the committed Direct mode is now the baseline")
+    assert(loaded.staged[loadKey].preTickMode == nil,
+        "task4 post-cp autoassist: the checkpointed preTickMode is not resurrected")
+    State.toggleGroup(loaded, loadKey, true)
+    eq(loaded.staged[loadKey].mode, State.UNTICK_FALLBACK,
+        "task4 post-cp autoassist: untick after the checkpoint uses Defend")
+end
+
 -- Resolver seam: tick/restaging uses the resolver rather than blindly copying
 -- session.directMode. A focused test substitutes a pure resolver to return
 -- different effective modes for two checked group keys and proves membership
