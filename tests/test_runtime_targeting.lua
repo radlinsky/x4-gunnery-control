@@ -995,13 +995,19 @@ assert(sess39.povAnchor == "turret" and sess39.povMode == "manual",
     "with auto-next off the view must reset to manual Turret POV; got "
     .. tostring(sess39.povAnchor) .. "/" .. tostring(sess39.povMode))
 
--- ── 42. Direct target loss: same-root surface fallback (Issue #45 Task 2) ────
--- The production path is updateAimTarget(): a dead surface element must not
--- drop the directed turrets to the next object in the sector. With Auto-next
--- on, the best surviving operational surface on the same root is re-engaged
--- through engageTarget(), the root is preserved, and the object-target sweep
--- is never consulted. Distinct stub IDs keep every assertion discriminating:
--- 600 root, 701 dead surface, 702 live surface, 500 ordinary object, 98 ship.
+-- ── 42. Direct target loss: asynchronous same-root fallback (Issue #45 Task 5) ─
+-- The production path is updateAimTarget() on the 0.25 s tick. A dead surface
+-- element with Auto-next on must NOT be answered with an immediate choice:
+-- onDirectTargetLost() records a session-scoped resolution
+-- (session.targetFallback), and each later tick re-queries the current stage
+-- through the standard ENGAGEABLE request path and applies one
+-- State.planEngageFallback decision: ranked same-root surfaces in pages, then
+-- the target's hull, then ranked other objects. The assertions below fail on a
+-- synchronous pick at the loss tick, a browser fallback before the planner has
+-- exhausted every stage, re-implemented enumeration/ordering logic, or a
+-- request that bypasses the checked operational turret membership.
+-- Distinct stub IDs keep every assertion discriminating: 600 root, 701+
+-- surfaces, 98/99 hostile objects, 500 ordinary object.
 do
     -- Save the stubs this block replaces; nil restores the fixture's C
     -- metatable fallbacks.
@@ -1019,13 +1025,21 @@ do
     local savedShips42 = GetContainedShips
     local savedStations42 = GetContainedStations
     local savedSector42 = GetPlayerContextByClass
+    local savedAdd42 = AddUITriggeredEvent
+    -- Earlier blocks left their own AddUITriggeredEvent stubs installed; this
+    -- block captures into the fixture list so the batch helpers can read it.
+    AddUITriggeredEvent = function(screen, control, params)
+        fix.uiTriggeredEvents[#fix.uiTriggeredEvents + 1] = {
+            screen = screen, control = control, params = params,
+        }
+    end
 
     C.IsComponentClass = function(component, class)
         if class == "ship" then return true end
         return false
     end
     -- Surfaces 70x resolve to their root 600; every other component (the
-    -- ship, hostile object 98) resolves to itself.
+    -- ship, hostile objects 98/99, ordinary object 500) resolves to itself.
     C.GetContextByClass = function(component)
         local n = tonumber(tostring(component))
         if n and n >= 700 and n <= 799 then return 600 end
@@ -1036,13 +1050,33 @@ do
     C.GetUpgradeSlotCurrentMacro = function() return "" end
     GetMacroData = function() return "" end
     GetPlayerContextByClass = function() return 1 end
-    -- The sector sweep that chooseAimTarget() runs: counting these proves (or
-    -- disproves) that the object-target sweep was consulted.
+    -- Root 600 is a plain (non-station) object carrying turret slots 701..N.
+    local slotCount42 = 0
+    -- Only surface scans of root 600 count: readGroups() also queries
+    -- GetNumUpgradeSlots for the ship's own turret groups, which is not a
+    -- surface enumeration.
     local surfaceScanCalls42 = 0
+    C.GetNumUpgradeSlots = function(destructible, _, upgrade)
+        if tonumber(tostring(destructible)) ~= 600 then return 0 end
+        if upgrade ~= "turret" then return 0 end
+        surfaceScanCalls42 = surfaceScanCalls42 + 1
+        return slotCount42
+    end
+    C.GetUpgradeSlotCurrentComponent = function(destructible, _, slot)
+        return tonumber(tostring(destructible)) == 600 and (700 + slot) or 0
+    end
+    local operational42 = {}
+    C.IsComponentOperational = function(cid)
+        return operational42[tostring(cid)] == true
+    end
+    -- The sector sweep that chooseAimTarget()/readTargetCandidates() run:
+    -- counting these proves (or disproves) that the object sweep was
+    -- consulted, and when.
     local objectSweepCalls42 = 0
+    local sectorShips42 = {}
     GetContainedShips = function()
         objectSweepCalls42 = objectSweepCalls42 + 1
-        return { 98 }
+        return sectorShips42
     end
     GetContainedStations = function()
         objectSweepCalls42 = objectSweepCalls42 + 1
@@ -1067,135 +1101,595 @@ do
         return unpack(vals)
     end
 
-    -- Root 600 is a plain (non-station) object carrying turret slots 701 and
-    -- 702; hostile object 98 is also in the sector.
-    local function installSurfaceSlots42(count)
-        -- Every slot query counts, whatever the destructible: a surface scan
-        -- of root 500 during an ordinary object-level loss must be visible
-        -- even though only root 600 actually carries slots.
-        C.GetNumUpgradeSlots = function(destructible, _, upgrade)
-            surfaceScanCalls42 = surfaceScanCalls42 + 1
-            if tonumber(tostring(destructible)) ~= 600 then return 0 end
-            if upgrade ~= "turret" then return 0 end
-            return count
+    -- ── shared helpers ────────────────────────────────────────────────────
+    local function group42(key, memberID, operational)
+        return { key = key, kind = "group", contextID = 5, path = "p", group = "g",
+            componentID = memberID, displayName = "G" .. key, totalCount = 1,
+            operationalCount = operational and 1 or 0, mode = "attack", armed = false,
+            members = { { componentID = memberID, displayName = "T",
+                           operational = operational, cameraSupported = true,
+                           componentKey = tostring(memberID) } } }
+    end
+    local grp42 = group42("grp42", 27, true)
+
+    -- A fresh engaged/direct session; the given groups are the checked ones.
+    local function freshDirectSession42(groups)
+        gcMenu.onShowMenu()
+        local sess = API.getSession()
+        assert(sess ~= nil, "expected a fresh session")
+        local keys = {}
+        for _, g in ipairs(groups) do keys[g.key] = true end
+        sess.groups, sess.checkedGroupKeys = groups, keys
+        sess.phase, sess.controlMode = "engaged", "direct"
+        sess.committedBaseline = { { kind = "group", contextID = 5, path = "p",
+            group = "g", shipID = sess.shipID, mode = "attack", armed = false } }
+        sess.cameraMemberID = 27
+        sess.povAnchor, sess.povMode = "turret", "manual"
+        return sess
+    end
+
+    -- ENGAGEABLE batches emitted after uiTriggeredEvents index `mark`.
+    local function batchesSince42(mark)
+        local batches, current = {}, nil
+        for i = mark + 1, #fix.uiTriggeredEvents do
+            local e = fix.uiTriggeredEvents[i]
+            if e.control == "engageability_begin" then
+                current = { nonce = e.params.nonce, members = e.params.members,
+                             memberIDs = {}, targets = {} }
+                batches[#batches + 1] = current
+            elseif current ~= nil and e.params and e.params.nonce == current.nonce then
+                if e.control == "engageability_member" then
+                    current.memberIDs[#current.memberIDs + 1] = e.params.weapon
+                elseif e.control == "engageability_target" then
+                    current.targets[#current.targets + 1] = X4GunneryState.normID(e.params.target)
+                elseif e.control == "engageability_commit" then
+                    current = nil
+                end
+            end
         end
-        C.GetUpgradeSlotCurrentComponent = function(destructible, _, slot)
-            return tonumber(tostring(destructible)) == 600 and (700 + slot) or 0
+        return batches
+    end
+
+    -- Deliver MD's reply for one batch: an EngageabilityResult per target it
+    -- has a reading for ("engageable:known:total"), then the batch complete.
+    local function deliver42(batch, resultsByKey)
+        for _, key in ipairs(batch.targets) do
+            local counts = resultsByKey[key]
+            if counts then
+                fix.fireEvent("X4GunneryControl.EngageabilityResult",
+                    "x4gce3:" .. batch.nonce .. ":" .. key .. ":" .. counts)
+            end
         end
+        fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
+            "x4gce2c:" .. batch.nonce .. ":" .. tostring(#batch.targets) .. ":"
+                .. tostring(#batch.targets))
     end
 
-    gcMenu.onShowMenu()
-    local sess42 = API.getSession()
-    assert(sess42 ~= nil, "expected session for same-root fallback test")
-    assert(sess42.autoNextTarget == true, "Auto-next Target must default to on")
-    local grp42 = { key = "grp42", kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G42", totalCount = 1, operationalCount = 1,
-        mode = "attack", armed = false, members = {
-            { componentID = 27, displayName = "T1", operational = true,
-              cameraSupported = true, componentKey = "27" }
-        } }
-    sess42.groups = { grp42 }
-    sess42.checkedGroupKeys = { ["grp42"] = true }
-    sess42.phase = "engaged"
-    sess42.controlMode = "direct"
-    sess42.committedBaseline = { { kind = "group", contextID = 5, path = "p", group = "g",
-        shipID = sess42.shipID, mode = "attack", armed = false } }
-    sess42.cameraMemberID = 27
-    sess42.povAnchor, sess42.povMode = "turret", "manual"
-
-    -- A: surface 701 on root 600 dies while 702 is still operational and the
-    -- hostile object 98 is also available.
-    installSurfaceSlots42(2)
-    C.IsComponentOperational = function(cid)
-        local s = tostring(cid)
-        return s == "702" or s == "98"
+    local function resetCounts42()
+        slotCount42 = 0
+        sectorShips42 = {}
+        operational42 = {}
+        surfaceScanCalls42 = 0
+        objectSweepCalls42 = 0
+        softtargetCalls42 = {}
     end
-    sess42.targetObjectID, sess42.aimTargetID = 600, 701
-    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
-    API.updateAimTarget()
-    assert(tostring(sess42.aimTargetID) == "702",
-        "a dead surface must fall back to the surviving same-root surface; aim is "
-        .. tostring(sess42.aimTargetID))
-    assert(tostring(sess42.targetObjectID) == "600",
-        "same-root fallback must preserve the root object; targetObjectID is "
-        .. tostring(sess42.targetObjectID))
-    assert(sess42.phase == "engaged",
-        "same-root fallback must stay engaged; phase is " .. tostring(sess42.phase))
-    assert(#softtargetCalls42 >= 1 and softtargetCalls42[#softtargetCalls42] == 702,
-        "same-root fallback must move the soft target to 702; got "
-        .. tostring(softtargetCalls42[#softtargetCalls42]))
-    assert(surfaceScanCalls42 >= 1,
-        "same-root fallback must enumerate root 600 through the surface reader")
-    assert(objectSweepCalls42 == 0,
-        "same-root fallback must not consult the object-target sweep; the sweep ran "
-        .. objectSweepCalls42 .. " time(s)")
 
-    -- B: no operational same-root alternative remains, so the existing object
-    -- fallback takes hostile object 98.
-    installSurfaceSlots42(1)   -- only the dead slot 701 remains on root 600
-    sess42.targetObjectID, sess42.aimTargetID = 600, 701
-    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
-    API.updateAimTarget()
-    assert(tostring(sess42.aimTargetID) == "98",
-        "without a same-root alternative the object fallback must take 98; aim is "
-        .. tostring(sess42.aimTargetID))
-    assert(tostring(sess42.targetObjectID) == "98",
-        "the object fallback must re-root the engagement on 98; targetObjectID is "
-        .. tostring(sess42.targetObjectID))
-    assert(sess42.phase == "engaged",
-        "the object fallback must stay engaged; phase is " .. tostring(sess42.phase))
-    assert(surfaceScanCalls42 >= 1,
-        "a surface loss with no alternative must still enumerate the same root")
-    assert(objectSweepCalls42 >= 1,
-        "the object fallback must run the sweep to find 98")
-
-    -- C: ordinary object-level loss (aimTargetID == targetObjectID) skips the
-    -- surface enumeration entirely and keeps the existing object fallback.
-    installSurfaceSlots42(2)
-    C.IsComponentOperational = function(cid) return tostring(cid) == "98" end
-    sess42.targetObjectID, sess42.aimTargetID = 500, 500
-    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
-    API.updateAimTarget()
-    assert(tostring(sess42.aimTargetID) == "98",
-        "an ordinary dead object must fall back to the next object; aim is "
-        .. tostring(sess42.aimTargetID))
-    assert(tostring(sess42.targetObjectID) == "98",
-        "the object fallback must re-root the engagement on 98; targetObjectID is "
-        .. tostring(sess42.targetObjectID))
-    assert(sess42.phase == "engaged",
-        "the object fallback must stay engaged; phase is " .. tostring(sess42.phase))
-    assert(surfaceScanCalls42 == 0,
-        "ordinary object-level loss must not enumerate surfaces; the surface reader ran "
-        .. surfaceScanCalls42 .. " time(s)")
-    assert(objectSweepCalls42 >= 1,
-        "the object fallback must run the sweep to find 98")
-
-    -- D: Auto-next off during a surface loss -> target browser, with neither a
-    -- same-root re-engage nor an object re-engage attempted. The browser's own
-    -- rendering may still sweep; what must not happen is any engageTarget, and
-    -- every engageTarget writes the soft target.
-    C.IsComponentOperational = function(cid)
-        local s = tostring(cid)
-        return s == "702" or s == "98"
+    local function tick42()
+        clock = clock + 0.25
+        API.updateAimTarget()
     end
-    installSurfaceSlots42(2)
-    sess42.autoNextTarget = false
-    sess42.phase = "engaged"
-    sess42.controlMode = "direct"
-    sess42.targetObjectID, sess42.aimTargetID = 600, 701
-    sess42.povAnchor, sess42.povMode = "target", "cinematic"
-    surfaceScanCalls42 = 0; objectSweepCalls42 = 0; softtargetCalls42 = {}
-    API.updateAimTarget()
-    assert(sess42.phase == "target_select",
-        "with auto-next off a dead surface must reopen the target browser; phase is "
-        .. tostring(sess42.phase))
-    assert(sess42.aimTargetID == nil and sess42.targetObjectID == nil,
-        "the browser fallback must clear the lost aim and root")
-    assert(sess42.povAnchor == "turret" and sess42.povMode == "manual",
-        "the browser fallback must reset the view to manual Turret POV; got "
-        .. tostring(sess42.povAnchor) .. "/" .. tostring(sess42.povMode))
-    assert(#softtargetCalls42 == 0,
-        "auto-next off must not re-engage any surface or object")
+
+    -- Count only engageability transport events since `mark`: an engage also
+    -- emits its direct_fallback cue, which is expected, not a violation.
+    local function engageabilityEventsSince42(mark)
+        local n = 0
+        for i = mark + 1, #fix.uiTriggeredEvents do
+            if tostring(fix.uiTriggeredEvents[i].control):match("^engageability_") then
+                n = n + 1
+            end
+        end
+        return n
+    end
+
+    -- A. The loss tick only starts the resolution: no choice, no sweep, and
+    -- no ENGAGEABLE request until the next refresh.
+    do
+        resetCounts42()
+        slotCount42 = 2                       -- 701 (dead), 702 (alive)
+        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        local mark = #fix.uiTriggeredEvents
+        API.updateAimTarget()
+        assert(sess.targetFallback ~= nil,
+            "surface loss with auto-next on must start a session-scoped resolution")
+        assert(tostring(sess.aimTargetID) == "701",
+            "no immediate choice: the aim must stay on the lost surface; aim is "
+            .. tostring(sess.aimTargetID))
+        assert(tostring(sess.targetObjectID) == "600" and sess.phase == "engaged",
+            "the resolution must preserve the root and stay engaged; root="
+            .. tostring(sess.targetObjectID) .. " phase=" .. tostring(sess.phase))
+        assert(#softtargetCalls42 == 0,
+            "no re-engage may happen on the loss tick itself")
+        assert(surfaceScanCalls42 >= 1,
+            "the resolution must rank root 600 through the surface reader")
+        assert(objectSweepCalls42 == 0,
+            "the object sweep belongs to the planner's objects stage, not the loss tick; "
+            .. objectSweepCalls42 .. " call(s)")
+        assert(#fix.uiTriggeredEvents == mark,
+            "no ENGAGEABLE request may be emitted on the loss tick")
+        assert(sess.targetFallback.stage == "surfaces" and sess.targetFallback.page == 1
+            and sess.targetFallback.orderedIDs[1] == "702"
+            and #sess.targetFallback.orderedIDs == 1,
+            "the fallback state must hold the ranked same-root surfaces; stage="
+            .. tostring(sess.targetFallback.stage)
+            .. " ids=" .. table.concat(sess.targetFallback.orderedIDs, ","))
+        assert(fix.logContains("event=auto_next_fallback action=start"),
+            "the fallback start must be logged")
+
+        -- First resolution tick: one ENGAGEABLE query for the survivor page,
+        -- still no choice.
+        mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1,
+            "the first resolution tick must issue exactly one ENGAGEABLE batch; got "
+            .. tostring(#batches))
+        assert(batches[1].members == 1 and #batches[1].memberIDs == 1
+            and batches[1].memberIDs[1] == 27 and #batches[1].targets == 1
+            and batches[1].targets[1] == "702",
+            "the batch must query exactly page 1 for the checked operational "
+            .. "turret; members=" .. tostring(batches[1].members)
+            .. " members_list=" .. table.concat(batches[1].memberIDs, ",")
+            .. " targets=" .. table.concat(batches[1].targets, ","))
+        assert(#softtargetCalls42 == 0,
+            "no choice may be made before a result is accepted")
+    end
+
+    -- B. An accepted positive result engages the surviving surface and ends
+    -- the resolution; the root is preserved.
+    do
+        resetCounts42()
+        slotCount42 = 2
+        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        sess.povAnchor, sess.povMode = "turret", "cinematic"
+        clock = 500
+        API.updateAimTarget()
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1, "expected the page-1 batch")
+        deliver42(batches[1], { ["702"] = "1:1:1" })
+        softtargetCalls42 = {}
+        tick42()
+        assert(tostring(sess.aimTargetID) == "702",
+            "the accepted positive surface must be engaged; aim is "
+            .. tostring(sess.aimTargetID))
+        assert(tostring(sess.targetObjectID) == "600",
+            "same-root fallback must preserve the root object; targetObjectID is "
+            .. tostring(sess.targetObjectID))
+        assert(sess.phase == "engaged",
+            "the resolution must stay engaged; phase is " .. tostring(sess.phase))
+        assert(sess.targetFallback == nil,
+            "an engaged resolution must clear the fallback state")
+        assert(#softtargetCalls42 >= 1 and softtargetCalls42[#softtargetCalls42] == 702,
+            "the engaged surface must become the soft target; got "
+            .. tostring(softtargetCalls42[#softtargetCalls42]))
+        local stops, starts = 0, 0
+        for i = mark + 1, #fix.uiTriggeredEvents do
+            local e = fix.uiTriggeredEvents[i]
+            if e.control == "cutscene_aim_stop" then stops = stops + 1 end
+            if e.control == "cutscene_aim_start" then starts = starts + 1 end
+        end
+        assert(stops == 1 and starts == 1,
+            "a cinematic POV must be stopped and restarted around the engage; "
+            .. "stops=" .. stops .. " starts=" .. starts)
+        assert(fix.logContains("auto-next engaged"),
+            "the auto-next engage must keep its session log line")
+    end
+
+    -- C. Pages advance only when every reading on the page is a proven zero;
+    -- the next page is queried as a fresh batch and the first ranked positive
+    -- on it wins. Cached page-1 readings must not be re-requested within the
+    -- cache window.
+    do
+        resetCounts42()
+        slotCount42 = 24                      -- 701 dead, 702..724 alive
+        for n = 702, 724 do operational42[tostring(n)] = true end
+        operational42["600"] = true
+        operational42["98"] = true
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 20
+            and batches[1].targets[1] == "702" and batches[1].targets[20] == "721",
+            "page 1 must be the first 20 ranked surfaces; got "
+            .. tostring(#batches) .. " batch(es), "
+            .. tostring(#(batches[1] and batches[1].targets or {})) .. " target(s)")
+        local zeros = {}
+        for _, key in ipairs(batches[1].targets) do zeros[key] = "0:1:1" end
+        deliver42(batches[1], zeros)
+        mark = #fix.uiTriggeredEvents
+        tick42()
+        assert(sess.targetFallback ~= nil and sess.targetFallback.page == 2,
+            "an all-zero page must advance to page 2; page is "
+            .. tostring(sess.targetFallback and sess.targetFallback.page))
+        assert(#batchesSince42(mark) == 0,
+            "page 2 must not be requested on the same tick as the page advance")
+        tick42()
+        batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 3
+            and batches[1].targets[1] == "722" and batches[1].targets[3] == "724",
+            "page 2 must be a fresh batch for the remaining ranked surfaces; got "
+            .. tostring(#batches) .. " batch(es), targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        local seen702 = 0
+        for i = mark, #fix.uiTriggeredEvents do
+            local e = fix.uiTriggeredEvents[i]
+            if e.control == "engageability_target"
+                and X4GunneryState.normID(e.params.target) == "702" then
+                seen702 = seen702 + 1
+            end
+        end
+        assert(seen702 == 0,
+            "page-1 targets must be served from the cache, not re-requested")
+        deliver42(batches[1], { ["722"] = "0:1:1", ["723"] = "0:1:1", ["724"] = "1:1:1" })
+        softtargetCalls42 = {}
+        tick42()
+        assert(tostring(sess.aimTargetID) == "724" and tostring(sess.targetObjectID) == "600",
+            "the first ranked positive on page 2 must be engaged; aim="
+            .. tostring(sess.aimTargetID) .. " root=" .. tostring(sess.targetObjectID))
+        assert(sess.phase == "engaged" and sess.targetFallback == nil,
+            "page-2 engage must stay engaged and clear the fallback")
+        assert(softtargetCalls42[#softtargetCalls42] == 724,
+            "the engaged page-2 surface must become the soft target")
+    end
+
+    -- D. With no surviving same-root surface, the planner escalates to the
+    -- target's hull, and a positive hull reading engages the hull itself.
+    do
+        resetCounts42()
+        slotCount42 = 1                       -- only the dead 701 remains
+        operational42 = { ["600"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        tick42()
+        assert(sess.targetFallback.stage == "hull",
+            "an empty surface stage must escalate to the hull stage; stage is "
+            .. tostring(sess.targetFallback.stage))
+        assert(X4GunneryState.normID(sess.targetFallback.orderedIDs[1]) == "600"
+            and #sess.targetFallback.orderedIDs == 1,
+            "the hull stage must query exactly the root object")
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "600",
+            "the hull stage must issue one ENGAGEABLE query for the root")
+        deliver42(batches[1], { ["600"] = "1:1:1" })
+        softtargetCalls42 = {}
+        tick42()
+        assert(tostring(sess.aimTargetID) == "600" and tostring(sess.targetObjectID) == "600",
+            "a positive hull reading must engage the root hull; aim="
+            .. tostring(sess.aimTargetID))
+        assert(sess.phase == "engaged" and sess.targetFallback == nil,
+            "the hull engage must stay engaged and clear the fallback")
+        assert(softtargetCalls42[#softtargetCalls42] == 600,
+            "the hull must become the soft target")
+    end
+
+    -- E. A proven-zero hull escalates to ranked other objects; the planner
+    -- walks the ranking and engages the first positive, skipping proven zeros.
+    do
+        resetCounts42()
+        slotCount42 = 1
+        operational42 = { ["600"] = true, ["98"] = true, ["99"] = true }
+        sectorShips42 = { 98, 99 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        tick42()
+        assert(sess.targetFallback.stage == "hull", "expected hull stage")
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and batches[1].targets[1] == "600", "expected the hull query")
+        deliver42(batches[1], { ["600"] = "0:1:1" })
+        tick42()
+        assert(sess.targetFallback.stage == "objects",
+            "a proven-zero hull must escalate to the objects stage; stage is "
+            .. tostring(sess.targetFallback.stage))
+        assert(objectSweepCalls42 >= 1,
+            "the objects stage must rank through the sector sweep")
+        mark = #fix.uiTriggeredEvents
+        tick42()
+        batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 2
+            and batches[1].targets[1] == "98" and batches[1].targets[2] == "99",
+            "the objects stage must query the ranked candidates without the lost root; "
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        deliver42(batches[1], { ["98"] = "0:1:1", ["99"] = "1:1:1" })
+        softtargetCalls42 = {}
+        tick42()
+        assert(tostring(sess.aimTargetID) == "99" and tostring(sess.targetObjectID) == "99",
+            "the first ranked positive object must be engaged, skipping the "
+            .. "proven-zero 98; aim=" .. tostring(sess.aimTargetID))
+        assert(sess.phase == "engaged" and sess.targetFallback == nil,
+            "the object engage must stay engaged and clear the fallback")
+        assert(softtargetCalls42[#softtargetCalls42] == 99,
+            "the engaged object must become the soft target")
+    end
+
+    -- F. Surfaces, hull and every other object proven zero: the resolution
+    -- exhausts and hands the choice back at the target browser.
+    do
+        resetCounts42()
+        slotCount42 = 1
+        operational42 = { ["600"] = true }
+        sectorShips42 = {}
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        sess.povAnchor, sess.povMode = "target", "cinematic"
+        clock = 500
+        API.updateAimTarget()
+        tick42()
+        assert(sess.targetFallback.stage == "hull", "expected hull stage")
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        deliver42(batches[1], { ["600"] = "0:1:1" })
+        tick42()
+        assert(sess.targetFallback.stage == "objects",
+            "expected objects stage after a proven-zero hull")
+        assert(#sess.targetFallback.orderedIDs == 0,
+            "with no other objects the objects stage must be empty")
+        tick42()
+        assert(sess.phase == "target_select",
+            "an exhausted resolution must reopen the target browser; phase is "
+            .. tostring(sess.phase))
+        assert(sess.aimTargetID == nil and sess.targetObjectID == nil,
+            "the browser fallback must clear the lost aim and root")
+        assert(sess.povAnchor == "turret" and sess.povMode == "manual",
+            "the browser fallback must reset the view to manual Turret POV; got "
+            .. tostring(sess.povAnchor) .. "/" .. tostring(sess.povMode))
+        assert(sess.targetFallback == nil,
+            "the exhausted resolution must clear the fallback state")
+        assert(#softtargetCalls42 == 0,
+            "an exhausted resolution must not re-engage anything")
+        assert(fix.logContains("event=auto_next_fallback action=exhausted"),
+            "the exhausted resolution must be logged")
+    end
+
+    -- G. Ordinary object-level loss (aimTargetID == targetObjectID) keeps the
+    -- existing synchronous object sweep: no fallback state, no surface
+    -- enumeration, no ENGAGEABLE request.
+    do
+        resetCounts42()
+        slotCount42 = 2
+        operational42 = { ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 500, 500
+        sess.povAnchor, sess.povMode = "turret", "cinematic"
+        clock = 500
+        local mark = #fix.uiTriggeredEvents
+        API.updateAimTarget()
+        assert(sess.targetFallback == nil,
+            "ordinary object loss must not start the surface fallback")
+        assert(tostring(sess.aimTargetID) == "98" and tostring(sess.targetObjectID) == "98",
+            "an ordinary dead object must fall back to the next object; aim="
+            .. tostring(sess.aimTargetID))
+        assert(sess.phase == "engaged",
+            "the object fallback must stay engaged; phase is " .. tostring(sess.phase))
+        assert(surfaceScanCalls42 == 0,
+            "ordinary object-level loss must not enumerate surfaces; the surface "
+            .. "reader ran " .. surfaceScanCalls42 .. " time(s)")
+        assert(objectSweepCalls42 >= 1,
+            "the object fallback must run the sweep to find 98")
+        assert(engageabilityEventsSince42(mark) == 0,
+            "ordinary object loss must not issue ENGAGEABLE requests")
+        assert(softtargetCalls42[#softtargetCalls42] == 98,
+            "the sweep's survivor must become the soft target")
+        local stopsG, startsG = 0, 0
+        for i = mark + 1, #fix.uiTriggeredEvents do
+            local e = fix.uiTriggeredEvents[i]
+            if e.control == "cutscene_aim_stop" then stopsG = stopsG + 1 end
+            if e.control == "cutscene_aim_start" then startsG = startsG + 1 end
+        end
+        assert(stopsG == 1 and startsG == 1,
+            "the object-loss engage must stop/restart a running cinematic; "
+            .. "stops=" .. stopsG .. " starts=" .. startsG)
+    end
+
+    -- H. Auto-next off during a surface loss: straight to the browser, with
+    -- neither a fallback state nor any enumeration.
+    do
+        resetCounts42()
+        slotCount42 = 2
+        operational42 = { ["702"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.autoNextTarget = false
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        sess.povAnchor, sess.povMode = "target", "cinematic"
+        clock = 500
+        local mark = #fix.uiTriggeredEvents
+        API.updateAimTarget()
+        assert(sess.phase == "target_select",
+            "with auto-next off a dead surface must reopen the target browser; phase is "
+            .. tostring(sess.phase))
+        assert(sess.aimTargetID == nil and sess.targetObjectID == nil,
+            "the browser fallback must clear the lost aim and root")
+        assert(sess.povAnchor == "turret" and sess.povMode == "manual",
+            "the browser fallback must reset the view to manual Turret POV; got "
+            .. tostring(sess.povAnchor) .. "/" .. tostring(sess.povMode))
+        assert(sess.targetFallback == nil,
+            "auto-next off must not start the fallback resolution")
+        assert(#softtargetCalls42 == 0,
+            "auto-next off must not re-engage any surface or object")
+        assert(surfaceScanCalls42 == 0,
+            "auto-next off must not enumerate surfaces; the reader ran "
+            .. surfaceScanCalls42 .. " time(s)")
+        local seen702H = 0
+        for i = mark + 1, #fix.uiTriggeredEvents do
+            local e = fix.uiTriggeredEvents[i]
+            if e.control == "engageability_target"
+                and X4GunneryState.normID(e.params.target) == "702" then
+                seen702H = seen702H + 1
+            end
+        end
+        assert(seen702H == 0,
+            "auto-next off must not run the surface fallback (702 was queried "
+            .. seen702H .. " time(s)); browser-row queries for other objects are "
+            .. "legitimate")
+    end
+
+    -- I. The resolution's ENGAGEABLE requests carry exactly the checked
+    -- operational turrets: a checked group whose member is not operational
+    -- contributes nothing to the batch.
+    do
+        resetCounts42()
+        slotCount42 = 2
+        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local groups = {
+            group42("grpI_A", 27, true),
+            group42("grpI_B", 28, false),
+        }
+        local sess = freshDirectSession42(groups)
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and batches[1].members == 1
+            and #batches[1].memberIDs == 1 and batches[1].memberIDs[1] == 27,
+            "the batch must list only the checked operational turret; members="
+            .. tostring(batches[1] and batches[1].members)
+            .. " members_list=" .. table.concat(
+                (batches[1] and batches[1].memberIDs) or {}, ","))
+        deliver42(batches[1], { ["702"] = "1:1:1" })
+        tick42()
+        assert(tostring(sess.aimTargetID) == "702",
+            "membership filtering must not block the resolve; aim is "
+            .. tostring(sess.aimTargetID))
+    end
+
+    -- J. The root dying mid-resolution aborts the fallback to the ordinary
+    -- object loss: the sweep runs and the survivor is engaged.
+    do
+        resetCounts42()
+        slotCount42 = 3                       -- 701 dead, 702/703 alive
+        operational42 = { ["600"] = true, ["702"] = true, ["703"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 2,
+            "the first resolution tick must query both surviving surfaces")
+        -- The whole root goes down before any result arrives.
+        operational42 = { ["98"] = true }
+        objectSweepCalls42 = 0
+        softtargetCalls42 = {}
+        tick42()
+        assert(sess.targetFallback == nil,
+            "a dead root must abort the fallback resolution")
+        assert(objectSweepCalls42 >= 1,
+            "the abort must fall through to the ordinary object sweep")
+        assert(tostring(sess.aimTargetID) == "98" and tostring(sess.targetObjectID) == "98",
+            "the sweep's survivor must be engaged; aim=" .. tostring(sess.aimTargetID))
+        assert(sess.phase == "engaged",
+            "the abort must stay engaged; phase is " .. tostring(sess.phase))
+        assert(softtargetCalls42[#softtargetCalls42] == 98,
+            "the survivor must become the soft target")
+        assert(fix.logContains("event=auto_next_fallback action=root_lost_abort"),
+            "the root-loss abort must be logged")
+    end
+
+    -- K. The planner picks a positive surface but engageTarget refuses it
+    -- (the soft-target write fails): the resolution hands the choice back at
+    -- the browser instead of retrying the refused engage forever.
+    do
+        resetCounts42()
+        slotCount42 = 2
+        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        assert(sess.targetFallback ~= nil, "setup: the fallback must be running")
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 1,
+            "expected the single-surface batch")
+        deliver42(batches[1], { ["702"] = "1:1:1" })
+        local savedRefuseSoft = C.SetSofttarget
+        C.SetSofttarget = function(target)
+            softtargetCalls42[#softtargetCalls42 + 1] = target
+            return false
+        end
+        softtargetCalls42 = {}
+        tick42()
+        C.SetSofttarget = savedRefuseSoft
+        assert(softtargetCalls42[#softtargetCalls42] == 702,
+            "the planner's positive pick must be attempted as an engage")
+        assert(sess.phase == "target_select",
+            "a refused engage must fall back to the target browser; phase is "
+            .. tostring(sess.phase))
+        assert(sess.aimTargetID == nil and sess.targetObjectID == nil,
+            "the browser fallback must clear the lost aim and root")
+        assert(sess.targetFallback == nil,
+            "a refused engage must clear the fallback state")
+        assert(sess.povAnchor == "turret" and sess.povMode == "manual",
+            "the browser fallback must reset the view to manual Turret POV")
+        assert(fix.logContains("back to target selection"),
+            "the browser fallback must keep its session log line")
+    end
+
+    -- L. A control-mode switch away from direct mid-resolution drops the
+    -- fallback state quietly: no ENGAGEABLE query, no engage, no browser.
+    do
+        resetCounts42()
+        slotCount42 = 2
+        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
+        sectorShips42 = { 98 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        assert(sess.targetFallback ~= nil, "setup: the fallback must be running")
+        sess.controlMode = nil               -- e.g. a restoreDirect transition
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        assert(sess.targetFallback == nil,
+            "a non-direct control mode must drop the pending fallback state")
+        assert(tostring(sess.aimTargetID) == "701",
+            "the mode switch must not choose a replacement; aim is "
+            .. tostring(sess.aimTargetID))
+        assert(engageabilityEventsSince42(mark) == 0,
+            "a mode switch must not issue ENGAGEABLE requests")
+    end
 
     -- Restore the pre-block stubs (nil hands C back to its fallbacks).
     C.IsComponentClass = savedClass42
@@ -1212,6 +1706,7 @@ do
     GetContainedShips = savedShips42
     GetContainedStations = savedStations42
     GetPlayerContextByClass = savedSector42
+    AddUITriggeredEvent = savedAdd42
 end
 
 -- ── 51. hasMultipleTargets memo: two quick repaints share one sweep ─────────
