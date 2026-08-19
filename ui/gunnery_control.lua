@@ -1837,19 +1837,27 @@ local function updateTargetFallback()
     -- A dead objects-stage candidate whose ENGAGEABLE evidence is still
     -- pending (or was never queried this epoch) can never settle, and the
     -- planner would keep yielding "wait" for the whole page even while a
-    -- surviving sibling proved positive (5B2c). Dead candidates with SETTLED
-    -- evidence stay on the ordinary path: a fresh positive is re-verified by
-    -- the engage-time recheck (5B2b) and a proven zero is just a zero.
-    -- Rebuild the ranked list exactly as the stage entry does (the dead
-    -- object drops out) and let ordinary evaluation resume from page 1 on
-    -- the next tick.
+    -- surviving sibling proved positive (5B2c). A dead candidate whose
+    -- evidence SETTLED TO ZERO is equally stale: the planner would read its
+    -- zero from the outdated list, conclude "none", and fall to the browser
+    -- even though a newly operational object now exists (5B2c). Only a dead
+    -- candidate whose cached result is settled and ENGAGEABLE-positive stays
+    -- on the ordinary path, where the engage-time recheck (5B2b) re-verifies
+    -- and restarts. A restart rebuilds the ranked list exactly as the stage
+    -- entry does (the dead object drops out, any new operational object
+    -- ranks) and lets ordinary evaluation resume from page 1 on the next
+    -- tick.
     if fb.stage == "objects" then
         local deadParts = {}
         for _, componentID in ipairs(fb.orderedIDs) do
             if not C.IsComponentOperational(id(componentID)) then
                 local cached = engageabilityCache[
                     tostring(sessionEpoch) .. ":" .. State.normID(componentID)]
-                if cached == nil or cached.pending then
+                -- Settled and positive is the only dead evidence that may
+                -- keep its batch slot (5B2b owns it); anything else --
+                -- missing, pending, or settled zero -- is a stale list.
+                if cached == nil or cached.pending
+                        or (cached.engageable or 0) <= 0 then
                     deadParts[#deadParts + 1] = tostring(componentID)
                 end
             end
