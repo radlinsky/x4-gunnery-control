@@ -31,8 +31,10 @@ elif command -v luac >/dev/null; then
 else
   echo "warning: Lua compiler unavailable; skipped Lua syntax validation" >&2
 fi
-if command -v lua5.1 >/dev/null; then for file in tests/*.lua; do lua5.1 "$file"; done
-elif command -v lua >/dev/null; then for file in tests/*.lua; do lua "$file"; done
+# Tests are independent processes (fresh fixture each), so run them in parallel.
+# xargs propagates a non-zero exit from any test, failing the pipeline under -e.
+if command -v lua5.1 >/dev/null; then printf '%s\n' tests/*.lua | xargs -P"$(nproc)" -I{} lua5.1 {}
+elif command -v lua >/dev/null; then printf '%s\n' tests/*.lua | xargs -P"$(nproc)" -I{} lua {}
 else echo "warning: Lua runtime unavailable; skipped unit tests" >&2; fi
 ./scripts/check-coverage.sh
 if command -v shellcheck >/dev/null; then
@@ -40,7 +42,7 @@ if command -v shellcheck >/dev/null; then
 else
   echo "warning: shellcheck unavailable; skipped shell validation" >&2
 fi
-for file in tests/*.sh; do "$file"; done
+printf '%s\n' tests/*.sh | xargs -P"$(nproc)" -I{} bash {}
 # Line 19 runs the test scripts directly, so a .sh committed as 100644 fails
 # validation on a fresh clone (it only worked where a local chmod +x was left).
 if git ls-files -s '*.sh' | grep -v '^100755'; then
