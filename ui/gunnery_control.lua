@@ -42,7 +42,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-13-turret-arcs-2"
+local runtimeBuild = "2026-08-18-auto-next-async-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -863,6 +863,7 @@ end
 
 local function openTargetBrowser()
     if not session or session.controlMode ~= "direct" then return false end
+    session.targetFallback = nil
     session.phase = "target_select"
     menu.display()
     return true
@@ -919,8 +920,11 @@ local function engageTarget(targetID)
     -- Record the chosen element and its root object. aimTargetID may be a
     -- surface element; targetObjectID is always the ship/station root so that
     -- cycleTarget and the element panel can identify the engaged object.
+    -- Any pending async fallback is superseded by an explicit engage, whether
+    -- the planner made this call or the player cycled or picked a target.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    session.targetFallback = nil
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
@@ -1680,14 +1684,74 @@ local function chooseAimTarget()
     return nil
 end
 
--- Direct-control lost the object it was engaging. Setting aimTargetID alone
--- would move only the camera and leave every checked group armed against a
--- wreck, so follow with engageTarget(), which repoints the soft target,
--- targetObjectID and camera together. With Auto-next Target off -- or on with
--- nothing left to shoot -- reset the view and hand the choice back to the
--- player at the target browser.
-local function onDirectTargetLost()
-    local nextTarget = (session.autoNextTarget ~= false) and chooseAimTarget() or nil
+-- One planner page is one MD batch: never let a fallback page span the
+-- engageability batch size.
+local fallbackPageSize = engageabilityBatchSize
+
+-- Session-scoped asynchronous resolution of a Direct surface loss
+-- (Issue #45 Task 5). onDirectTargetLost() refreshes the root's surface
+-- snapshot, records the ranked unfiltered same-root surfaces in
+-- session.targetFallback (page 1), issues the page-1 ENGAGEABLE query at
+-- once, and returns without choosing anything. Each later 0.25 s tick,
+-- updateTargetFallback() re-queries the current stage's batch through the
+-- standard engageability path and applies one State.planEngageFallback
+-- decision: ranked surfaces in pages, then the target's hull, then ranked
+-- other objects. Only accepted results reach the planner:
+-- requestEngageabilities() owns epoch, signature and staleness (a stale
+-- reading comes back as a fresh pending entry, and the planner yields "wait"
+-- for it), so no second staleness model lives here.
+
+-- Asks the checked turrets' ENGAGEABLE for `ids` and reshapes the positional
+-- cache entries into the normID -> accepted result map the planner consumes.
+local function queryFallbackBatch(ids)
+    local raw = requestEngageabilities(ids, "auto_next_fallback")
+    local results = {}
+    for position, target in ipairs(ids) do
+        local cached = raw[position]
+        if cached ~= nil and not State.isNullID(target) then
+            results[State.normID(target)] = cached
+        end
+    end
+    return results
+end
+
+-- The ranked other-objects fallback list: readTargetCandidates()'s own order
+-- with the lost root and every non-operational candidate dropped, so a dead
+-- object neither enters orderedIDs nor burns an ENGAGEABLE batch slot.
+local function rankFallbackObjects(root)
+    local objects = {}
+    for _, candidate in ipairs(readTargetCandidates()) do
+        local component = candidate.componentID
+        if not sameID(component, root)
+                and C.IsComponentOperational(id(component)) then
+            objects[#objects + 1] = component
+        end
+    end
+    return objects
+end
+
+-- Last resort for both fallback paths: reset the view, clear the engagement,
+-- hand the choice back at the target browser.
+local function fallbackToBrowser()
+    -- applyPov() only acts while the phase is still "engaged", so reset the view
+    -- before openTargetBrowser() moves the phase on.
+    session.aimTargetID, session.targetObjectID = nil, nil
+    session.povAnchor, session.povMode = "turret", "manual"
+    session.targetFallback = nil
+    applyPov()
+    openTargetBrowser()
+    persistSession()
+    logSession("engaged target lost; back to target selection")
+end
+
+-- Ordinary object-level loss (aimTargetID == targetObjectID), or a surface
+-- fallback aborted on a dead root: the existing object sweep, then the
+-- browser. With Auto-next Target off there is no sweep at all.
+local function handleObjectLoss()
+    local nextTarget
+    if session.autoNextTarget ~= false then
+        nextTarget = chooseAimTarget()
+    end
     if nextTarget and engageTarget(nextTarget) then
         if (session.povMode or "manual") == "cinematic" then
             -- A running cutscene cannot be re-aimed; same stop/restart cut the
@@ -1698,14 +1762,212 @@ local function onDirectTargetLost()
         logSession("engaged target lost; auto-next engaged " .. tostring(nextTarget))
         return
     end
-    -- applyPov() only acts while the phase is still "engaged", so reset the view
-    -- before openTargetBrowser() moves the phase on.
-    session.aimTargetID, session.targetObjectID = nil, nil
-    session.povAnchor, session.povMode = "turret", "manual"
-    applyPov()
-    openTargetBrowser()
-    persistSession()
-    logSession("engaged target lost; back to target selection")
+    fallbackToBrowser()
+end
+
+local function startTargetFallback(lostID, root)
+    -- Task 5A: the loss tick refreshes the root's surface snapshot through
+    -- the browser's own rebuild path (fresh generation, logged reason),
+    -- then ranks the UNFILTERED same-root alternatives of that snapshot's
+    -- allSurfaces -- the user's browser filters never narrow auto-next --
+    -- under the same cross-type policy the browser sorts with, starting at
+    -- page 1. The page-1 batch enters the standard ENGAGEABLE path
+    -- immediately; the loss tick itself still makes no choice.
+    local browser = rebuildSurfaceSnapshot("auto_next")
+    local alternatives = State.surfaceAlternatives(browser.allSurfaces,
+        lostID, "any", "any")
+    table.sort(alternatives, function(a, b)
+        return State.surfaceMetadataLess(a, b, surfaceCrossTypePolicy)
+    end)
+    local orderedIDs = {}
+    for _, surface in ipairs(alternatives) do
+        orderedIDs[#orderedIDs + 1] = State.normID(surface.componentID)
+    end
+    session.targetFallback = {
+        stage = "surfaces", root = root, lostID = lostID,
+        orderedIDs = orderedIDs, page = 1,
+    }
+    local pageIDs = State.surfacePage(orderedIDs, 1, fallbackPageSize)
+    queryFallbackBatch(pageIDs)
+    log("event=auto_next_fallback action=start root=" .. tostring(root)
+        .. " lost=" .. tostring(lostID)
+        .. " surfaces=" .. tostring(#orderedIDs)
+        .. " snapshot_generation=" .. tostring(browser.generation))
+end
+
+-- Direct-control lost what it was engaging. Setting aimTargetID alone would
+-- move only the camera and leave every checked group armed against a wreck,
+-- so the replacement always goes through engageTarget(), which repoints the
+-- soft target, targetObjectID and camera together. When the lost aim was a
+-- surface element (lost ID differs from the root) and Auto-next Target is on,
+-- the choice is deferred to the asynchronous resolution; everything else
+-- keeps the ordinary object fallback. With Auto-next off -- or on with
+-- nothing left to shoot -- reset the view and hand the choice back to the
+-- player at the target browser.
+local function onDirectTargetLost()
+    local lostID, root = session.aimTargetID, session.targetObjectID
+    if session.autoNextTarget ~= false
+            and not isNullID(lostID) and not isNullID(root)
+            and not sameID(lostID, root) then
+        startTargetFallback(lostID, root)
+        return
+    end
+    handleObjectLoss()
+end
+
+-- Runs on every 0.25 s update tick while session.targetFallback is set.
+-- One planner decision per tick; a "wait" simply re-queries on the next tick,
+-- so pending and stale readings settle without a dedicated timer.
+local function updateTargetFallback()
+    local fb = session.targetFallback
+    if not fb then return end
+    -- Leaving Direct cancels the resolution quietly: the mode switch itself
+    -- owns the hand-off, so no browser transition of our own. Checked before
+    -- the Auto-next-off path so a session that left Direct while the checkbox
+    -- was off is not forced into a browser it never asked for.
+    if session.controlMode ~= "direct" then
+        session.targetFallback = nil
+        return
+    end
+    -- Task 5C: the player switched Auto-next Target off while a resolution
+    -- was in flight. Cancel the automatic resolution and hand the choice
+    -- back at the browser through the existing browser-fallback path; never
+    -- engage a replacement after the switch.
+    if session.autoNextTarget == false then
+        log("event=auto_next_fallback action=auto_next_off_cancel root="
+            .. tostring(fb.root) .. " stage=" .. tostring(fb.stage))
+        fallbackToBrowser()
+        return
+    end
+    -- The whole chain is evidence about this one root: if the root itself is
+    -- gone mid-resolution the surface and hull evidence is stale, so abort to
+    -- the ordinary object loss.
+    if not C.IsComponentOperational(id(fb.root)) then
+        log("event=auto_next_fallback action=root_lost_abort root=" .. tostring(fb.root))
+        session.targetFallback = nil
+        handleObjectLoss()
+        return
+    end
+    -- A dead objects-stage candidate whose ENGAGEABLE evidence is still
+    -- pending (or was never queried this epoch) can never settle, and the
+    -- planner would keep yielding "wait" for the whole page even while a
+    -- surviving sibling proved positive (5B2c). A dead candidate whose
+    -- evidence SETTLED TO ZERO is equally stale: the planner would read its
+    -- zero from the outdated list, conclude "none", and fall to the browser
+    -- even though a newly operational object now exists (5B2c). Only a dead
+    -- candidate whose cached result is settled and ENGAGEABLE-positive stays
+    -- on the ordinary path, where the engage-time recheck (5B2b) re-verifies
+    -- and restarts. A restart rebuilds the ranked list exactly as the stage
+    -- entry does (the dead object drops out, any new operational object
+    -- ranks) and lets ordinary evaluation resume from page 1 on the next
+    -- tick.
+    if fb.stage == "objects" then
+        local deadParts = {}
+        for _, componentID in ipairs(fb.orderedIDs) do
+            if not C.IsComponentOperational(id(componentID)) then
+                local cached = engageabilityCache[
+                    tostring(sessionEpoch) .. ":" .. State.normID(componentID)]
+                -- Settled and positive is the only dead evidence that may
+                -- keep its batch slot (5B2b owns it); anything else --
+                -- missing, pending, or settled zero -- is a stale list.
+                if cached == nil or cached.pending
+                        or (cached.engageable or 0) <= 0 then
+                    deadParts[#deadParts + 1] = tostring(componentID)
+                end
+            end
+        end
+        if #deadParts > 0 then
+            fb.orderedIDs = rankFallbackObjects(fb.root)
+            fb.page = 1
+            log("event=auto_next_fallback action=stale_object_list_restart root="
+                .. tostring(fb.root) .. " dead=" .. table.concat(deadParts, ",")
+                .. " ranked=" .. tostring(#fb.orderedIDs))
+            return
+        end
+    end
+    local orderedIDs = fb.orderedIDs
+    local decision
+    if fb.stage == "hull" then
+        decision = State.planEngageFallback("hull", orderedIDs, 1, fallbackPageSize,
+            queryFallbackBatch(orderedIDs))
+    else
+        local pageIDs, page = State.surfacePage(orderedIDs, fb.page, fallbackPageSize)
+        fb.page = page
+        decision = State.planEngageFallback(fb.stage, orderedIDs, page, fallbackPageSize,
+            queryFallbackBatch(pageIDs))
+    end
+    if decision.action == "wait" then return end
+    if decision.action == "engage" then
+        -- A positive reading proves the surface was ENGAGEABLE when the
+        -- answer was accepted, not that it is alive on this tick: the surface
+        -- may have died in between. Re-verify immediately before committing.
+        -- A dead surface is neither engaged nor a proven zero, so there is no
+        -- hull/browser fallthrough: restart the same-root surface stage from
+        -- a fresh snapshot, where the dead surface has dropped out of the
+        -- ranking and the new page 1 is requested at once (5A behaviour).
+        if fb.stage == "surfaces"
+            and not C.IsComponentOperational(id(decision.targetID)) then
+            log("event=auto_next_fallback action=stale_surface_restart root="
+                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID))
+            startTargetFallback(fb.lostID, fb.root)
+            return
+        end
+        -- The same stale-proof for objects-stage targets (5B2b): a positive
+        -- reading proves ENGAGEABLE at acceptance, not on this tick. A dead
+        -- object is neither engaged nor a proven zero, so there is no browser
+        -- fallthrough either: rebuild the ranked objects list exactly as the
+        -- stage entry does and resume the ordinary evaluation from page 1.
+        if fb.stage == "objects"
+            and not C.IsComponentOperational(id(decision.targetID)) then
+            fb.orderedIDs = rankFallbackObjects(fb.root)
+            fb.page = 1
+            log("event=auto_next_fallback action=stale_object_restart root="
+                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID)
+                .. " ranked=" .. tostring(#fb.orderedIDs))
+            return
+        end
+        if engageTarget(decision.targetID) then
+            -- engageTarget cleared the fallback state; log from fb while it
+            -- is still in hand.
+            if (session.povMode or "manual") == "cinematic" then
+                sendCutsceneAimStop()
+                sendCutsceneAimStart(session.povAnchor or "turret")
+            end
+            log("event=auto_next_fallback action=engage stage=" .. fb.stage
+                .. " target=" .. tostring(decision.targetID))
+            logSession("engaged target lost; auto-next engaged " .. tostring(decision.targetID))
+            return
+        end
+        -- The planner's pick could not be engaged (eligibility or camera
+        -- refusal): hand the choice back the way a failed sync engage did.
+        fallbackToBrowser()
+        return
+    end
+    if decision.action == "next_page" then
+        fb.page = fb.page + 1
+        log("event=auto_next_fallback action=next_page stage=" .. fb.stage
+            .. " page=" .. tostring(fb.page))
+        return
+    end
+    if decision.action == "hull" then
+        fb.stage, fb.page = "hull", 1
+        fb.orderedIDs = { fb.root }
+        log("event=auto_next_fallback action=stage stage=hull root=" .. tostring(fb.root))
+        return
+    end
+    if decision.action == "objects" then
+        -- Keep readTargetCandidates() ranking intact; the planner must not
+        -- burn an ENGAGEABLE batch slot on a candidate that is already dead,
+        -- so a non-operational candidate is dropped alongside the lost root.
+        fb.stage, fb.page = "objects", 1
+        fb.orderedIDs = rankFallbackObjects(fb.root)
+        log("event=auto_next_fallback action=stage stage=objects ranked="
+            .. tostring(#fb.orderedIDs))
+        return
+    end
+    -- "none": every stage proved zero engageable; nothing left to shoot.
+    log("event=auto_next_fallback action=exhausted root=" .. tostring(fb.root))
+    fallbackToBrowser()
 end
 
 -- Fired by MD (X4GunneryControl.DirectTargetLost) when the engaged target's
@@ -1739,6 +2001,12 @@ end
 local nextAimScan = 0
 local function updateAimTarget()
     if not session or session.phase ~= "engaged" then return end
+    -- A surface-loss resolution in flight (Issue #45 Task 5) owns the tick:
+    -- each 0.25 s refresh walks the planner exactly one decision.
+    if session.targetFallback ~= nil then
+        updateTargetFallback()
+        return
+    end
     local prev = session.aimTargetID
     local now = getElapsedTime()
     local hadTarget = not isNullID(prev)
@@ -1886,9 +2154,15 @@ function menu.onShowMenu()
     -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
     -- so the mode guard is required: dropping it would create a reticule Auto
     -- never otherwise shows.
+    -- This explicit resume handoff also grants the one bounded retry: live Task
+    -- 6 runs showed the engine refusing the resume's first SetSofttarget while
+    -- it settles after the menu transition, then accepting the same write
+    -- moments later. Granting it only here keeps the generic refusal-abandons
+    -- contract for every other re-point origin (restore envelope, tests).
     if (resuming or mapSuspendResume) and session.phase == "engaged"
         and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
         session.repointTargetID = session.aimTargetID
+        session.repointResumeRetry = session.aimTargetID
     end
     menu.display()
 end
@@ -2789,14 +3063,40 @@ reopenSuspendedSession = function(reason)
 end
 
 -- Re-points the engine soft target at a restored target. A normal success is
--- intentionally silent. A false return is a refusal and must not be retried;
--- an exception gets one retry because reload-time FFI calls can be transient.
+-- intentionally silent. Refusal handling depends on origin:
+--
+-- A Direct engaged resume (Test Lab reopen / Map reopen) carries
+-- session.repointResumeRetry. The engine refuses the FIRST SetSofttarget of
+-- such a resume while it is still settling after the menu transition, and
+-- accepts the identical write on the next watchdog tick. So the first normal
+-- refusal re-arms the re-point for exactly one later tick; the allowance is
+-- one-shot, and a second refusal abandons like any other. Every other re-point
+-- keeps the standing contract: a normal refusal abandons immediately.
+-- An FFI exception keeps its own standing contract: one immediate retry, because
+-- reload-time FFI calls can be transient; a terminal failure there abandons and
+-- drops any resume allowance with it.
 local function attemptRepoint()
     local targetID = session.repointTargetID
     session.repointTargetID = nil
+    local resumeGrant = session.repointResumeRetry ~= nil
+    local retryArmed = session.repointRetryArmed ~= nil
+    session.repointResumeRetry = nil
+    session.repointRetryArmed = nil
     local callOK, setOK = pcall(function() return C.SetSofttarget(targetID, "") end)
     if callOK then
-        if not setOK then log("re-point target refused; abandoning") end
+        if setOK then return end
+        if resumeGrant and not retryArmed then
+            -- First normal refusal of a resume: one bounded retry on the next
+            -- watchdog tick. session.repointResumeRetry stays bound to the
+            -- target so the watchdog cancels the retry if the session, aim
+            -- target, or control mode drifts before it fires.
+            session.repointResumeRetry = targetID
+            session.repointRetryArmed = true
+            session.repointTargetID = targetID
+            log("re-point target refused; retrying once on the next watchdog tick")
+        else
+            log("re-point target refused; abandoning")
+        end
         return
     end
     local retryCallOK, retrySetOK = pcall(function() return C.SetSofttarget(targetID, "") end)
@@ -2811,6 +3111,19 @@ TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
     if session then
+        -- The resume re-point retry grant is bound to the exact aim target and
+        -- Direct control mode it was granted for (attemptRepoint). Any drift
+        -- cancels the pending retry and drops the queued re-point, so a
+        -- re-targeted or mode-changed session is never written back to the
+        -- stale target. Replacing the session table drops the grant with it.
+        if session.repointResumeRetry ~= nil
+            and (session.controlMode ~= "direct"
+                 or isNullID(session.aimTargetID)
+                 or not sameID(session.repointResumeRetry, session.aimTargetID)) then
+            session.repointResumeRetry = nil
+            session.repointRetryArmed = nil
+            session.repointTargetID = nil
+        end
         -- Giving a pilot a fly-there order means opening the Map, and writing
         -- the soft target under the player while they are picking things on it
         -- would fight them for their own selection.

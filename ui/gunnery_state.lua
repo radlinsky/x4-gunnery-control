@@ -250,6 +250,25 @@ function State.surfaceAlternatives(surfaces, pinnedID, typeFilter, macroFilter)
     return alternatives
 end
 
+-- Pure same-root surface-element fallback selection (Issue #45). `surfaces` is
+-- the already-operational same-root list readSurfaceTargets() supplies, so no
+-- operational-state or enumeration logic is repeated here. When the lost ID is
+-- the root itself (compared normalized) this was an ordinary object-level
+-- target loss, not a surface-element loss, and there is no same-root
+-- fallback to hand back. Otherwise the best remaining surface under the
+-- caller's cross-type policy wins; the lost surface is excluded by
+-- surfaceAlternatives, and neither the supplied list nor its entries is
+-- mutated, because surfaceAlternatives works on a copy.
+function State.nextSameRootSurface(surfaces, lostTargetID, targetRootID, crossTypePolicy)
+    if State.isNullID(lostTargetID) or State.isNullID(targetRootID) then return nil end
+    if normID(lostTargetID) == normID(targetRootID) then return nil end
+    local alternatives = State.surfaceAlternatives(surfaces, lostTargetID, "any", "any")
+    table.sort(alternatives, function(a, b)
+        return State.surfaceMetadataLess(a, b, crossTypePolicy)
+    end)
+    return alternatives[1] and alternatives[1].componentID or nil
+end
+
 function State.surfacePage(entries, page, pageSize)
     pageSize = math.max(1, math.floor(tonumber(pageSize) or 20))
     local pageCount = math.max(1, math.ceil(#(entries or {}) / pageSize))
@@ -265,6 +284,77 @@ function State.surfacePageKey(generation, entries)
     local ids = {}
     for _, entry in ipairs(entries or {}) do ids[#ids + 1] = normID(entry.componentID) end
     return tostring(generation or 0) .. ":" .. table.concat(ids, ",")
+end
+
+-- Pure OFFLINE planner for the ENGAGEABLE-aware fallback sequence
+-- (Issue #45 Task 4): ranked same-root surfaces in pages, then the target's
+-- hull, then ranked other objects. stage is "surfaces", "hull", or
+-- "objects"; orderedIDs are the ranked IDs for that stage (any ID form; the
+-- result lookup is normalized); page/pageSize address the current page of
+-- orderedIDs (pageSize defaults to 20 through surfacePage) and are ignored
+-- for "hull", which plans all supplied IDs as one batch; results maps
+-- normalized ID -> accepted ENGAGEABLE result.
+--
+-- The runtime owns epoch/signature validation and timeouts: only ACCEPTED
+-- results may reach this planner. A stale, signature-mismatched, or timed-out
+-- reading must arrive as an absent or pending entry so it yields wait, never
+-- a manufactured zero. An incomplete-coverage reading is unresolved in the
+-- same sense: an accepted engageable == 0 is a proven zero only when total ==
+-- 0 or known and total are both numeric and known == total; a zero with
+-- known < total, a missing known while total > 0, or any other incomplete
+-- coverage waits instead of masquerading as a proven zero. A positive
+-- engages even when known < total, because engageable > 0 has already proven
+-- at least one ENGAGEABLE.
+-- Within the current page/batch the first ranked ID
+-- with a settled engageable > 0 is engaged; the largest count never wins.
+-- Inputs are never mutated.
+--
+-- Returns exactly one action table:
+--   { action = "wait" }       a current-page/batch result is missing, pending,
+--                             lacks a numeric engageable count, or is a zero
+--                             with incomplete coverage
+--   { action = "engage", targetID = id }   first ranked positive ID, verbatim
+--   { action = "next_page" }  all-zero page with ranked entries remaining
+--   { action = "hull" }       surfaces exhausted (final all-zero page)
+--   { action = "objects" }    hull settled with zero engageable
+--   { action = "none" }       objects exhausted (final all-zero batch)
+function State.planEngageFallback(stage, orderedIDs, page, pageSize, results)
+    if stage ~= "surfaces" and stage ~= "hull" and stage ~= "objects" then
+        error("unknown fallback stage: " .. tostring(stage))
+    end
+    local batch, currentPage, pageCount
+    if stage == "hull" then
+        batch, currentPage, pageCount = {}, 1, 1
+        for _, id in ipairs(orderedIDs or {}) do batch[#batch + 1] = id end
+    else
+        batch, currentPage, pageCount = State.surfacePage(orderedIDs, page, pageSize)
+    end
+    local results = results or {}
+    -- Classifies one accepted result. "positive": engageable > 0, proven even
+    -- under partial coverage. "zero": engageable == 0 with complete coverage
+    -- (total == 0, or known and total numeric with known == total). "wait":
+    -- missing, pending, nonnumeric, negative, or an incomplete-coverage zero.
+    local function classify(id)
+        local result = results[normID(id)]
+        if result == nil or result.pending then return "wait" end
+        local engageable = tonumber(result.engageable)
+        if engageable == nil or engageable < 0 then return "wait" end
+        if engageable > 0 then return "positive" end
+        local known = tonumber(result.known)
+        local total = tonumber(result.total)
+        if total == 0 then return "zero" end
+        if known ~= nil and total ~= nil and known == total then return "zero" end
+        return "wait"
+    end
+    for _, id in ipairs(batch) do
+        if classify(id) == "wait" then return { action = "wait" } end
+    end
+    for _, id in ipairs(batch) do
+        if classify(id) == "positive" then return { action = "engage", targetID = id } end
+    end
+    if stage == "hull" then return { action = "objects" } end
+    if currentPage < pageCount then return { action = "next_page" } end
+    return { action = stage == "surfaces" and "hull" or "none" }
 end
 
 function State.newSurfaceBrowser(rootID)

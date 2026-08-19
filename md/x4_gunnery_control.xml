@@ -216,9 +216,25 @@
                            Mirror vanilla move.attack.object.capital (9.00): on a
                            modular target whose root has no line of fire, fall back
                            to per-module line of fire. First visible module counts
-                           this weapon as engageable, matching engine behaviour. -->
+                           this weapon as engageable, matching engine behaviour.
+                           Only when $target IS the whole defensible root: vanilla
+                           only ever feeds this loop a whole-object attack target
+                           (it retargets to a visible module), and on a whole object
+                           .defensible is the object itself. A player-selected
+                           surface element's .defensible resolves to its parent
+                           station, so without this guard the fallback would count
+                           any weapon that can see ANY station module as engageable
+                           against that one element, inflating the count (#62).
+                           canhaveattackablemodules (ship datatype, @-guarded so a
+                           station root safely reads null) extends the same root
+                           fallback to the rare capital ships whose macro embeds a
+                           targetable defence module, matching vanilla target
+                           selection (lib.target.selection ismodular or
+                           canhaveattackablemodules); harmless where a ship's
+                           defence modules are not exposed via .modules. -->
                       <do_if value="not $lineoffireclear
-                                    and $target.defensible.ismodular
+                                    and $target == $target.defensible
+                                    and ($target.defensible.ismodular or @$target.canhaveattackablemodules)
                                     and $target.defensible.modules.operational.count gt 1">
                         <set_value name="$modules" exact="$target.defensible.modules.operational.list"/>
                         <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
