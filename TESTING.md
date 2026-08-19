@@ -3,6 +3,91 @@
 Test Lab is a separate **developer-only** extension. It is not included in the
 normal Nexus ZIP and should not be installed by ordinary players.
 
+This document has two halves. **Automated tests** below is the offline suite
+that runs on every PR and on pushes to `main`/`develop`. Everything from
+**Open live checks** onward is manual in-game verification that the offline
+tests cannot settle.
+
+# Automated tests
+
+`./scripts/validate.sh` is the Linux validation gate — the main check while you
+work, and the first thing CI runs. It does, in order: whitespace/newline checks,
+`xmllint` on every XML file, Lua syntax (`luac -p`), the Lua unit tests, the
+executable-line coverage gate (`scripts/check-coverage.sh`), `shellcheck`, the
+shell tests, and the version/packaging contracts. The Lua and shell tests run in
+**parallel** (`xargs -P`/background jobs), so never rely on execution order or on
+a fixed temp path — use `mktemp`. Each test file is an independent process.
+
+A local `validate.sh` pass does not by itself mean all of CI is green: the
+`validate` job also builds the extension archives (`package.sh`,
+`package-testlab.sh`), and a separate `windows-contract` job runs
+`scripts/validate-windows.ps1` on a Windows runner — neither is exercised here.
+
+Run the whole thing:
+
+```bash
+./scripts/validate.sh
+```
+
+Run one Lua test on its own while iterating:
+
+```bash
+lua5.1 tests/test_runtime_targeting.lua
+```
+
+## The coverage gate is a canary
+
+`ui/gunnery_state.lua` and `ui/gunnery_persistence.lua` must have **100%**
+executable-line coverage; changed lines in `ui/gunnery_control.lua` must be
+covered against the PR base. The pass line prints the denominators, e.g.
+`coverage passed: state 735/735, persistence 84/84`. Those numbers are a canary:
+after a refactor or a file split they must be **unchanged**. If `state`/`persistence`
+drops, a test lost a line it used to cover; if it rises, you duplicated a block.
+A genuinely engine-only unreachable line goes in
+`tests/support/coverage_exclusions.txt` as `ui/gunnery_control.lua:<line>  # reason`
+— never a blanket waiver.
+
+## How to add a test (and keep files small)
+
+- **Use the shared fixture.** `local fix = dofile("tests/support/runtime_fixture.lua").load()`
+  gives a fresh stubbed environment (ffi, Helper, events, the loaded module).
+  Read its header for the full API.
+- **Build groups with `fix.makeGroup{ ...overrides }`** — do not hand-write group
+  literals. Pass only the fields that differ from the defaults.
+- **Match UI buttons by intent**, never by raw id: `fix.buttonByLabel("nextTurret")`
+  or `fix.LABEL.<name>`. Do not write `text:20991:NN`; if you need a new label,
+  add it to `LABEL_ID` in the fixture (ids come from `t/0001.xml`).
+- **End every file with a unique** `print("<area> tests passed")`.
+- **Keep each test file under ~600 lines.** A file the local tooling can't open is
+  a file that stops getting maintained. When one grows past that, split it by
+  concern into sibling files named `test_<area>_<concern>.lua` (e.g.
+  `test_runtime_targeting_pov.lua`, `test_gunnery_state_surface.lua`). Splits are
+  discovered automatically — `validate.sh` runs `tests/*.lua`, and the coverage
+  runner globs `tests/test_gunnery_state*.lua`, `tests/test_gunnery_persistence.lua`,
+  and `tests/test_runtime_*.lua`, so a new name matching those is picked up with no
+  script change. When splitting: never cut inside a `do ... end` block or a
+  function; copy the shared top-of-file preamble and any helpers into each part
+  (duplication across test files is fine); confirm each part runs standalone with
+  `lua5.1 tests/<file>.lua`; and confirm the coverage denominators are unchanged.
+
+## Things that will bite you
+
+- **No line-level `# shellcheck disable` directives in shell contract tests**
+  (`tests/*contract*.sh`). The contract guard
+  (`.agents/hooks/shellcheck-disable-contract-guard.sh`) rejects them there — fix
+  the shell expression instead, e.g. use a bash function or background jobs rather
+  than a `bash -c '...'` string that trips SC2016. The guard is scoped to those
+  files only; it does not inspect Lua or any other shell script.
+- **Shell test files must be executable** (mode `100755`). `validate.sh` invokes
+  each shell test with `bash`, but it also enforces the mode with a Git check
+  (`git ls-files -s '*.sh'` must be `100755`) and fails a fresh clone otherwise, so
+  `git update-index --chmod=+x` any new shell test.
+- **CI runs each job once per PR.** `.github/workflows/ci.yml` filters `push` to
+  `main`/`develop` and keeps `pull_request`, so a feature-branch push with an open
+  PR does not run every job twice. Do **not** revert it to `on: [push, pull_request]`.
+  Both CI jobs carry a `timeout-minutes` so a hung runner fails fast instead of
+  burning the 6-hour default — keep those.
+
 ## Open live checks
 
 A queue, not a matrix. Each entry is something the offline tests cannot settle,
