@@ -42,7 +42,7 @@ All notable changes to this project are documented in this file.
   canhaveattackablemodules`, which follows vanilla target selection
   (`lib.target.selection`) rather than the capital attack move itself, so the
   rare capital ship with an embedded targetable defence module is covered too.
-  An individually selected surface element keeps its own direct root
+  An individually selected surface element keeps its own direct
   line-of-fire test and never triggers the module fallback (#62). The range
   predicate, deliberate own-hull masking, arc handling, and denominator/
   membership are unchanged.
