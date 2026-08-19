@@ -1821,6 +1821,14 @@ end
 local function updateTargetFallback()
     local fb = session.targetFallback
     if not fb then return end
+    -- Leaving Direct cancels the resolution quietly: the mode switch itself
+    -- owns the hand-off, so no browser transition of our own. Checked before
+    -- the Auto-next-off path so a session that left Direct while the checkbox
+    -- was off is not forced into a browser it never asked for.
+    if session.controlMode ~= "direct" then
+        session.targetFallback = nil
+        return
+    end
     -- Task 5C: the player switched Auto-next Target off while a resolution
     -- was in flight. Cancel the automatic resolution and hand the choice
     -- back at the browser through the existing browser-fallback path; never
@@ -1829,10 +1837,6 @@ local function updateTargetFallback()
         log("event=auto_next_fallback action=auto_next_off_cancel root="
             .. tostring(fb.root) .. " stage=" .. tostring(fb.stage))
         fallbackToBrowser()
-        return
-    end
-    if session.controlMode ~= "direct" then
-        session.targetFallback = nil
         return
     end
     -- The whole chain is evidence about this one root: if the root itself is

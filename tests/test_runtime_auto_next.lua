@@ -780,7 +780,9 @@ do
     end
 
     -- L. A control-mode switch away from direct mid-resolution drops the
-    -- fallback state quietly: no ENGAGEABLE query, no engage, no browser.
+    -- fallback state quietly: no ENGAGEABLE query, no engage, no browser --
+    -- even with Auto-next off on the same tick, which must lose the
+    -- precedence to the control-mode cancellation.
     do
         local sess = scenario42({
             slotCount42 = 2,
@@ -789,6 +791,9 @@ do
         API.updateAimTarget()
         assert(sess.targetFallback ~= nil, "setup: the fallback must be running")
         sess.controlMode = nil               -- e.g. a restoreDirect transition
+        sess.autoNextTarget = false          -- off on the same tick; the mode
+                                              -- switch must win over the
+                                              -- browser fallback
         local mark = #fix.uiTriggeredEvents
         tick42()
         assert(sess.targetFallback == nil,
@@ -796,6 +801,9 @@ do
         assert(tostring(sess.aimTargetID) == "701",
             "the mode switch must not choose a replacement; aim is "
             .. tostring(sess.aimTargetID))
+        assert(sess.phase ~= "target_select",
+            "a mode switch must not open the target browser; phase is "
+            .. tostring(sess.phase))
         assert(engageabilityEventsSince42(mark) == 0,
             "a mode switch must not issue ENGAGEABLE requests")
     end
