@@ -30,20 +30,30 @@ All notable changes to this project are documented in this file.
 
 - Add a per-module line-of-fire fallback to the ENGAGEABLE probe. A raycast is
   point-to-point and `useaimtarget` can resolve to a target's bounding-box
-  centre, which for a station sits inside its own hull and self-blocks. When the
-  root line of sight fails and the target is a modular defensible with more than
-  one operational module, the probe walks operational + construction modules
-  (bounded) and re-checks line of fire, counting the weapon engageable on the
-  first visible module — mirroring vanilla `move.attack.object.capital`. The
-  range predicate, deliberate own-hull masking, arc handling, and
-  denominator/membership are unchanged.
+  centre, which for a station root sits inside its own hull and self-blocks the
+  root ray even while turrets fire at its modules. When the root line of sight
+  fails, and only when the evaluated target is the whole defensible root
+  (`$target == $target.defensible`) with more than one operational module, the
+  probe scans that root's operational then construction modules and re-checks
+  line of fire, stopping at the first visible in-range module or when the list is
+  exhausted (no module-count cap). The module loop mirrors vanilla
+  `move.attack.object.capital`, which retargets a whole-object attack to a
+  visible module; admitting the root is gated on `defensible.ismodular or
+  canhaveattackablemodules`, which follows vanilla target selection
+  (`lib.target.selection`) rather than the capital attack move itself, so the
+  rare capital ship with an embedded targetable defence module is covered too.
+  An individually selected surface element keeps its own direct root
+  line-of-fire test and never triggers the module fallback (#62). The range
+  predicate, deliberate own-hull masking, arc handling, and denominator/
+  membership are unchanged.
 
 - Resolve Direct-control surface-element loss asynchronously. On loss the
   same-root surface snapshot is refreshed and the next candidate is chosen in
-  order: the other ENGAGEABLE surface elements on the same modular root, ranked
-  and paged 20 at a time; then the root hull; then the ranked other objects in
-  range. An incomplete-coverage ENGAGEABLE zero is never treated as a settled
-  zero, a candidate that died after its positive evidence is never engaged, and
+  order: the other ENGAGEABLE surface elements on the same ship or station root,
+  ranked and paged 20 at a time; then the root hull; then the ranked other
+  objects in range. An incomplete-coverage ENGAGEABLE zero is never treated as a
+  settled zero, a candidate that died after its positive evidence is never
+  engaged, and
   turning Auto-next off or leaving Direct-control mid-resolution cancels the
   pending fallback.
 
