@@ -4,6 +4,49 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Add a selectable Direct-control turret policy with two manual modes,
+  `attackenemies` and `autoassist`, surfaced as the **Direct-control turret
+  mode** selector on both the main console and the Direct-control engaged panel.
+  `attackenemies` keeps the preferred-target/fallback-list path; `autoassist`
+  follows the player's selected soft target/surface element and installs no
+  script fallback list, so unable-to-engage turrets may remain idle. Checkbox
+  membership stays authoritative and separate from policy/effective-mode
+  resolution. Changing policy while Direct-control is engaged immediately
+  re-modes the checked groups. Auto-engage is independent and continues to use
+  `attackenemies` for checked groups. Active sessions persist and restore the
+  selected policy; legacy saves without the field default to **Attack all
+  enemies**.
+
+- Remove **Update turret behavior** from the Auto-engaged and Direct-control
+  engaged views. The permanent commit action now lives only on the main
+  Gunnery Control console, with its existing dirty/clean enablement and commit
+  semantics unchanged.
+
+- Change the ENGAGEABLE weapon-reach gate from the mining-style
+  `distanceto + size/2` heuristic to combat `bboxdistanceto le maxfirerange`, so
+  reachable hull or modules on large roots (e.g. station roots) are no longer
+  rejected as out of range. Test Lab `inrange` diagnostics were aligned with the
+  production calculation.
+
+- Add a per-module line-of-fire fallback to the ENGAGEABLE probe. A raycast is
+  point-to-point and `useaimtarget` can resolve to a target's bounding-box
+  centre, which for a station sits inside its own hull and self-blocks. When the
+  root line of sight fails and the target is a modular defensible with more than
+  one operational module, the probe walks operational + construction modules
+  (bounded) and re-checks line of fire, counting the weapon engageable on the
+  first visible module — mirroring vanilla `move.attack.object.capital`. The
+  range predicate, deliberate own-hull masking, arc handling, and
+  denominator/membership are unchanged.
+
+- Resolve Direct-control surface-element loss asynchronously. On loss the
+  same-root surface snapshot is refreshed and the next candidate is chosen in
+  order: the other ENGAGEABLE surface elements on the same modular root, ranked
+  and paged 20 at a time; then the root hull; then the ranked other objects in
+  range. An incomplete-coverage ENGAGEABLE zero is never treated as a settled
+  zero, a candidate that died after its positive evidence is never engaged, and
+  turning Auto-next off or leaving Direct-control mid-resolution cancels the
+  pending fallback.
+
 - Enrich **Select Engagement Target** with the player-facing S/M/L/XL class (or
   Station), localized ship type, distance, top/bottom Refresh controls, and an
   `N / total ENGAGEABLE` result for every candidate. Once engageability results

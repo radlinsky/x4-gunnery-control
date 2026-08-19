@@ -24,8 +24,8 @@ For example, 3 / 4 ENGAGEABLE means 3 of the 4 selected/evaluated turrets curren
 
 - Auto-next Target when destroyed is on by default. When the current target dies, the turrets and camera automatically select the next target (or surface element). Turn it off if you prefer to choose the next one yourself.
 - Next Target / Previous Target step through the same candidate list without reopening the browser.
-- Ticking a group's checkbox sets that group's Mode to Attack all enemies.
-- Your previous turret settings are restored when you stand up, unless you click **Update turret behavior** first. That makes the current Mode/Armed settings stick after you leave the chair.
+- Choose the Direct-control turret mode, on the main console or the Direct-control panel: **Attack all enemies** keeps your target as the preferred target with the other enemies in range as fallback, or **Attack my current enemy** sticks strictly to your selected target (turrets that cannot engage it may sit idle).
+- Your previous turret settings are restored when you stand up, unless you click **Update turret behavior** on the main console first. That makes the current Mode/Armed settings stick after you leave the chair.
 
 Saving and loading keeps your seat. Save while engaged and loading that save puts you back at the same turret, watching the same target, with the same groups selected.
 
