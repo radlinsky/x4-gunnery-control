@@ -4,18 +4,24 @@ Test Lab is a separate **developer-only** extension. It is not included in the
 normal Nexus ZIP and should not be installed by ordinary players.
 
 This document has two halves. **Automated tests** below is the offline suite
-that runs on every push and PR. Everything from **Open live checks** onward is
-manual in-game verification that the offline tests cannot settle.
+that runs on every PR and on pushes to `main`/`develop`. Everything from
+**Open live checks** onward is manual in-game verification that the offline
+tests cannot settle.
 
 # Automated tests
 
-`./scripts/validate.sh` is the single gate. It is exactly what CI runs, so if it
-passes locally it passes in CI. It does, in order: whitespace/newline checks,
+`./scripts/validate.sh` is the Linux validation gate — the main check while you
+work, and the first thing CI runs. It does, in order: whitespace/newline checks,
 `xmllint` on every XML file, Lua syntax (`luac -p`), the Lua unit tests, the
 executable-line coverage gate (`scripts/check-coverage.sh`), `shellcheck`, the
 shell tests, and the version/packaging contracts. The Lua and shell tests run in
 **parallel** (`xargs -P`/background jobs), so never rely on execution order or on
 a fixed temp path — use `mktemp`. Each test file is an independent process.
+
+A local `validate.sh` pass does not by itself mean all of CI is green: the
+`validate` job also builds the extension archives (`package.sh`,
+`package-testlab.sh`), and a separate `windows-contract` job runs
+`scripts/validate-windows.ps1` on a Windows runner — neither is exercised here.
 
 Run the whole thing:
 
@@ -66,12 +72,16 @@ A genuinely engine-only unreachable line goes in
 
 ## Things that will bite you
 
-- **No `# shellcheck disable` comments.** A committed contract guard
-  (`.agents/hooks/shellcheck-disable-contract-guard.sh`) rejects them and its test
-  will fail. Restructure the shell instead — e.g. use a bash function or background
-  jobs rather than a `bash -c '...'` string that trips SC2016.
-- **Shell test files must be executable** (mode `100755`); `validate.sh` runs them
-  directly and fails a fresh clone otherwise. `git update-index --chmod=+x` them.
+- **No line-level `# shellcheck disable` directives in shell contract tests**
+  (`tests/*contract*.sh`). The contract guard
+  (`.agents/hooks/shellcheck-disable-contract-guard.sh`) rejects them there — fix
+  the shell expression instead, e.g. use a bash function or background jobs rather
+  than a `bash -c '...'` string that trips SC2016. The guard is scoped to those
+  files only; it does not inspect Lua or any other shell script.
+- **Shell test files must be executable** (mode `100755`). `validate.sh` invokes
+  each shell test with `bash`, but it also enforces the mode with a Git check
+  (`git ls-files -s '*.sh'` must be `100755`) and fails a fresh clone otherwise, so
+  `git update-index --chmod=+x` any new shell test.
 - **CI runs each job once per PR.** `.github/workflows/ci.yml` filters `push` to
   `main`/`develop` and keeps `pull_request`, so a feature-branch push with an open
   PR does not run every job twice. Do **not** revert it to `on: [push, pull_request]`.
