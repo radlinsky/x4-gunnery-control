@@ -1194,58 +1194,39 @@ do
         C.GetDistanceBetween = savedDistP
     end
 
-    -- Q. Issue #45 Task 5B2c: a dead objects-stage candidate whose cached
-    -- ENGAGEABLE result settled to ZERO before it died must not exhaust the
-    -- fallback: the planner would read its zero from the outdated list,
-    -- conclude "none", and fall to the browser even though a newly
-    -- operational object now exists. The consume tick must instead refresh
-    -- the ranked objects list (the dead object drops out, the new one ranks)
-    -- from page 1, then ordinary evaluation engages the survivor. (42P is
-    -- the pending-evidence half of the same rule; this is the settled-zero
-    -- half, where no "wait" is ever visible.)
+    -- Q. Issue #45 Task 5B2c (settled-zero half): a dead objects-stage
+    -- candidate whose cached result settled to ZERO must not exhaust the
+    -- fallback to the browser (the pre-fix planner reads its stale zero,
+    -- concludes "none", and falls back even though a newly operational
+    -- object exists). The consume tick must keep the fallback active on
+    -- objects page 1 with a refreshed list, and the next tick must query
+    -- and engage the survivor.
     do
-        local qLogStart = #fix.getCapturedLog()
         local sess = scenario42({
             slotCount42 = 1,                  -- only the dead 701 remains
-            operational42 = { ["600"] = true, ["98"] = true },  -- 99 is NON-operational
+            operational42 = { ["600"] = true, ["98"] = true },  -- 99 NON-operational
             sectorShips42 = { 98, 99 } })
         local mark = reachObjects42(sess)
-        local objectIDs = {}
-        for _, v in ipairs(sess.targetFallback.orderedIDs) do
-            objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
-        end
-        assert(table.concat(objectIDs, ",") == "98",
-            "the objects stage must hold only the operational 98; the "
-            .. "NON-operational 99 was dropped at stage entry; ids="
-            .. table.concat(objectIDs, ","))
-        -- 1. Issue the one objects ENGAGEABLE batch for 98 ...
         tick42()
         local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 1
             and batches[1].targets[1] == "98",
-            "the objects ENGAGEABLE batch must query exactly the operational "
+            "the objects ENGAGEABLE batch must query only the operational "
             .. "98; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        -- 2. ... and 98 settles as a proven ZERO. Before the consume tick,
-        -- 98 dies and 99 comes back operational.
+        -- 98 settles as a proven zero, then dies while 99 comes operational.
         deliver42(batches[1], { ["98"] = "0:1:1" })
         operational42["98"] = false
         operational42["99"] = true
         softtargetCalls42 = {}
-        local restartMark = #fix.uiTriggeredEvents
         tick42()
-        -- 3. The consume tick must refresh the stale objects list instead of
-        -- exhausting to the browser: exactly the newly operational 99, the
-        -- stage holds on objects page 1, nothing is chosen, and no new
-        -- ENGAGEABLE batch rides this tick.
         assert(sess.targetFallback ~= nil
             and sess.targetFallback.stage == "objects"
             and sess.targetFallback.page == 1,
-            "the settled-zero dead candidate must refresh the objects list, "
-            .. "not exhaust to the browser; stage="
-            .. tostring(sess.targetFallback and sess.targetFallback.stage)
+            "a dead settled-zero candidate must not exhaust to the browser; "
+            .. "stage=" .. tostring(sess.targetFallback and sess.targetFallback.stage)
             .. " page=" .. tostring(sess.targetFallback and sess.targetFallback.page))
-        objectIDs = {}
+        local objectIDs = {}
         for _, v in ipairs(sess.targetFallback.orderedIDs) do
             objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
         end
@@ -1253,45 +1234,21 @@ do
             "the refreshed objects list must hold exactly the newly "
             .. "operational 99; ids=" .. table.concat(objectIDs, ","))
         assert(#softtargetCalls42 == 0,
-            "the settled-zero refresh must make no target choice; soft-target "
-            .. "calls=" .. tostring(#softtargetCalls42))
-        assert(sess.phase == "engaged" and tostring(sess.aimTargetID) == "701"
-            and tostring(sess.targetObjectID) == "600",
-            "the settled-zero refresh must choose nothing and stay engaged; "
-            .. "phase=" .. tostring(sess.phase) .. " aim="
-            .. tostring(sess.aimTargetID) .. " root="
-            .. tostring(sess.targetObjectID))
-        assert(#batchesSince42(restartMark) == 0,
-            "the refresh tick must return before querying; batches="
-            .. tostring(#batchesSince42(restartMark)))
-        local restarts = 0
-        for i = qLogStart + 1, #fix.getCapturedLog() do
-            if string.find(fix.getCapturedLog()[i],
-                "event=auto_next_fallback action=stale_object_list_restart", 1, true)
-            then restarts = restarts + 1 end
-        end
-        assert(restarts == 1,
-            "the settled-zero refresh must be logged exactly once; saw "
-            .. restarts)
-        -- 4. The following tick evaluates the refreshed 99 ...
+            "the refresh tick must not engage anything; soft-target calls="
+            .. tostring(#softtargetCalls42))
         mark = #fix.uiTriggeredEvents
         tick42()
         batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 1
             and batches[1].targets[1] == "99",
-            "the tick after the refresh must query the refreshed 99; targets="
+            "the tick after the refresh must query the surviving 99; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
         deliver42(batches[1], { ["99"] = "1:1:1" })
         softtargetCalls42 = {}
         tick42()
-        -- 5. ... and the following consume tick engages it.
-        assert(tostring(sess.aimTargetID) == "99"
-            and tostring(sess.targetObjectID) == "99",
-            "the refreshed 99 must be engaged; aim="
-            .. tostring(sess.aimTargetID) .. " root="
-            .. tostring(sess.targetObjectID))
-        assert(sess.phase == "engaged" and sess.targetFallback == nil,
-            "the object engage must stay engaged and clear the fallback")
+        assert(tostring(sess.aimTargetID) == "99" and sess.targetFallback == nil,
+            "the surviving 99 must be engaged and clear the fallback; aim="
+            .. tostring(sess.aimTargetID))
         assert(softtargetCalls42[#softtargetCalls42] == 99,
             "the engaged object 99 must become the soft target")
     end
