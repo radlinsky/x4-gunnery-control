@@ -205,7 +205,7 @@
                     <set_value name="$aimpitch" exact="$target.relativeposition.{$weapon}.rotation.pitch"/>
                     <do_if value="$aimpitch ge (EngageabilityService.$arcmins.{$weaponindex} * 1deg)
                                   and $aimpitch le (EngageabilityService.$arcmaxs.{$weaponindex} * 1deg)
-                                  and ($weapon.distanceto.{$target} + ($target.size / 2)) lt $weapon.maxfirerange">
+                                  and $weapon.bboxdistanceto.{$target} le $weapon.maxfirerange">
                       <!-- Start at the live muzzle and include the firing ship
                            so its own hull can mask an otherwise clear ray. -->
                       <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="false" useaimtarget="true"/>
