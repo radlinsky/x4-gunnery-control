@@ -1911,6 +1911,61 @@ do
             "the engaged 703 must become the soft target")
     end
 
+    -- N. Issue #45 Task 5B2a: when surfaces and the hull prove zero, the
+    -- objects stage keeps readTargetCandidates() ranking (98 ranked before
+    -- 99) but must drop non-operational candidates up front: the dead 98
+    -- never enters orderedIDs, never rides the ENGAGEABLE batch, and the
+    -- operational 99 is still engaged on a positive reading.
+    do
+        resetCounts42()
+        slotCount42 = 1                       -- only the dead 701 remains
+        operational42 = { ["600"] = true, ["99"] = true }   -- 98 is NON-operational
+        sectorShips42 = { 98, 99 }
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        tick42()
+        assert(sess.targetFallback.stage == "hull",
+            "an empty surface stage must escalate to the hull stage; stage is "
+            .. tostring(sess.targetFallback.stage))
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and batches[1].targets[1] == "600",
+            "expected the hull query")
+        deliver42(batches[1], { ["600"] = "0:1:1" })
+        tick42()
+        assert(sess.targetFallback.stage == "objects",
+            "a proven-zero hull must escalate to the objects stage; stage is "
+            .. tostring(sess.targetFallback.stage))
+        assert(#sess.targetFallback.orderedIDs == 1
+            and X4GunneryState.normID(sess.targetFallback.orderedIDs[1]) == "99",
+            "the objects stage must keep the readTargetCandidates() ranking "
+            .. "with the non-operational 98 dropped and 99 kept; ids="
+            .. table.concat(sess.targetFallback.orderedIDs, ","))
+        mark = #fix.uiTriggeredEvents
+        tick42()
+        batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "99",
+            "the objects ENGAGEABLE batch must query only the operational 99 "
+            .. "and never the non-operational 98; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        deliver42(batches[1], { ["99"] = "1:1:1" })
+        softtargetCalls42 = {}
+        tick42()
+        assert(tostring(sess.aimTargetID) == "99"
+            and tostring(sess.targetObjectID) == "99",
+            "the operational candidate 99 must be engaged; aim="
+            .. tostring(sess.aimTargetID) .. " root="
+            .. tostring(sess.targetObjectID))
+        assert(sess.phase == "engaged" and sess.targetFallback == nil,
+            "the object engage must stay engaged and clear the fallback")
+        assert(softtargetCalls42[#softtargetCalls42] == 99,
+            "the engaged object 99 must become the soft target")
+    end
+
     -- Restore the pre-block stubs (nil hands C back to its fallbacks).
     C.IsComponentClass = savedClass42
     C.GetNumUpgradeSlots = savedNumSlots42

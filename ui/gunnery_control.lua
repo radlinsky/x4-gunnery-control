@@ -1876,10 +1876,15 @@ local function updateTargetFallback()
         return
     end
     if decision.action == "objects" then
+        -- Keep readTargetCandidates() ranking intact; the planner must not
+        -- burn an ENGAGEABLE batch slot on a candidate that is already dead,
+        -- so a non-operational candidate is dropped alongside the lost root.
         local objects = {}
         for _, candidate in ipairs(readTargetCandidates()) do
-            if not sameID(candidate.componentID, fb.root) then
-                objects[#objects + 1] = candidate.componentID
+            local component = candidate.componentID
+            if not sameID(component, fb.root)
+                    and C.IsComponentOperational(id(component)) then
+                objects[#objects + 1] = component
             end
         end
         fb.stage, fb.page = "objects", 1
