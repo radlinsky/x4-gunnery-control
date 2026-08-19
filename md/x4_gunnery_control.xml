@@ -222,10 +222,7 @@
                                     and $target.defensible.modules.operational.count gt 1">
                         <set_value name="$modules" exact="$target.defensible.modules.operational.list"/>
                         <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
-                        <do_for_each name="$module" in="$modules" counter="$moduleindex">
-                          <do_if value="$moduleindex gt 10">
-                            <break/>
-                          </do_if>
+                        <do_for_each name="$module" in="$modules">
                           <do_if value="$weapon.bboxdistanceto.{$module} le $weapon.maxfirerange">
                             <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$module" excludeself="false" useaimtarget="true"/>
                             <do_if value="$lineoffireclear">

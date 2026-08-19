@@ -47,9 +47,15 @@ has "\$target.defensible.modules.operational.list" \
 has "target=\"\$module\"" \
   || note "module fallback must check_line_of_sight against \$module"
 
-# 4. The module scan is bounded (no unbounded per-target cost inside the batch).
-{ has "\$moduleindex" && has "<break/>"; } \
-  || note "module scan must be bounded by a counter break"
+# 4. The scan breaks on the first visible in-range module and does NOT cap the
+#    module count: shipped move.attack.object.capital's 10-module cap is an NPC
+#    nearest-first performance heuristic, not a correctness guarantee, so a
+#    shootable module later in the list must not be ignored. That leaves exactly
+#    one break in the cue (the first-visible-module break); a reintroduced index
+#    cap adds a second and fails here.
+breaks=$(printf '%s\n' "$block" | grep -Fc "<break/>")
+[ "$breaks" -eq 1 ] \
+  || note "module fallback must break only on the first visible in-range module (found $breaks breaks; an arbitrary module cap is not shipped-source-supported)"
 
 # 5. Per-module range still reuses the #54 bbox predicate (no size term / no
 #    reintroduction of the pre-#54 component-distance predicate for modules).
