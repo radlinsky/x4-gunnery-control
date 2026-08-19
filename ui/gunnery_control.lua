@@ -1715,6 +1715,21 @@ local function queryFallbackBatch(ids)
     return results
 end
 
+-- The ranked other-objects fallback list: readTargetCandidates()'s own order
+-- with the lost root and every non-operational candidate dropped, so a dead
+-- object neither enters orderedIDs nor burns an ENGAGEABLE batch slot.
+local function rankFallbackObjects(root)
+    local objects = {}
+    for _, candidate in ipairs(readTargetCandidates()) do
+        local component = candidate.componentID
+        if not sameID(component, root)
+                and C.IsComponentOperational(id(component)) then
+            objects[#objects + 1] = component
+        end
+    end
+    return objects
+end
+
 -- Last resort for both fallback paths: reset the view, clear the engagement,
 -- hand the choice back at the target browser.
 local function fallbackToBrowser()
@@ -1846,6 +1861,20 @@ local function updateTargetFallback()
             startTargetFallback(fb.lostID, fb.root)
             return
         end
+        -- The same stale-proof for objects-stage targets (5B2b): a positive
+        -- reading proves ENGAGEABLE at acceptance, not on this tick. A dead
+        -- object is neither engaged nor a proven zero, so there is no browser
+        -- fallthrough either: rebuild the ranked objects list exactly as the
+        -- stage entry does and resume the ordinary evaluation from page 1.
+        if fb.stage == "objects"
+            and not C.IsComponentOperational(id(decision.targetID)) then
+            fb.orderedIDs = rankFallbackObjects(fb.root)
+            fb.page = 1
+            log("event=auto_next_fallback action=stale_object_restart root="
+                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID)
+                .. " ranked=" .. tostring(#fb.orderedIDs))
+            return
+        end
         if engageTarget(decision.targetID) then
             -- engageTarget cleared the fallback state; log from fb while it
             -- is still in hand.
@@ -1879,18 +1908,10 @@ local function updateTargetFallback()
         -- Keep readTargetCandidates() ranking intact; the planner must not
         -- burn an ENGAGEABLE batch slot on a candidate that is already dead,
         -- so a non-operational candidate is dropped alongside the lost root.
-        local objects = {}
-        for _, candidate in ipairs(readTargetCandidates()) do
-            local component = candidate.componentID
-            if not sameID(component, fb.root)
-                    and C.IsComponentOperational(id(component)) then
-                objects[#objects + 1] = component
-            end
-        end
         fb.stage, fb.page = "objects", 1
-        fb.orderedIDs = objects
+        fb.orderedIDs = rankFallbackObjects(fb.root)
         log("event=auto_next_fallback action=stage stage=objects ranked="
-            .. tostring(#objects))
+            .. tostring(#fb.orderedIDs))
         return
     end
     -- "none": every stage proved zero engageable; nothing left to shoot.
