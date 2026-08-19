@@ -196,6 +196,22 @@ do
         API.updateAimTarget()
     end
 
+    -- The common scenario preamble: reset the counters, install the fixture
+    -- values, create the fresh direct session on the checked groups
+    -- (default { grp42 }), aim target/root at 600/701, move the clock to
+    -- 500, and return the session. Behavioral steps stay in each scenario.
+    local function scenario42(opts)
+        resetCounts42()
+        slotCount42 = opts.slotCount42
+        operational42 = opts.operational42
+        sectorShips42 = opts.sectorShips42
+        local sess = freshDirectSession42(opts.groups or { grp42 })
+        sess.targetObjectID, sess.aimTargetID =
+            opts.targetObjectID or 600, opts.aimTargetID or 701
+        clock = opts.clock or 500
+        return sess
+    end
+
     -- Count only engageability transport events since `mark`: an engage also
     -- emits its direct_fallback cue, which is expected, not a violation.
     local function engageabilityEventsSince42(mark)
@@ -215,15 +231,12 @@ do
     -- turrets. It still makes no choice and runs no object sweep; the next
     -- tick consumes the pending readings without re-requesting.
     do
-        resetCounts42()
-        slotCount42 = 3                       -- 701/702/703 all alive at first
-        operational42 = { ["600"] = true, ["701"] = true, ["702"] = true,
-            ["703"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
+        local sess = scenario42({
+            slotCount42 = 3,                  -- 701/702/703 all alive at first
+            operational42 = { ["600"] = true, ["701"] = true, ["702"] = true,
+                ["703"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         sess.surfaceTypeFilter = "engine"     -- browser filter: must not narrow the fallback
-        clock = 500
         -- 1. Establish a REAL pre-existing snapshot: render the element panel
         -- the way an engaged direct-control player sees it, aiming at the
         -- live surface 701. The loss tick below must then supersede this
@@ -372,14 +385,11 @@ do
     -- B. An accepted positive result engages the surviving surface and ends
     -- the resolution; the root is preserved.
     do
-        resetCounts42()
-        slotCount42 = 2
-        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["600"] = true, ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         sess.povAnchor, sess.povMode = "turret", "cinematic"
-        clock = 500
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         local batches = batchesSince42(mark)
@@ -418,15 +428,12 @@ do
     -- on it wins. Cached page-1 readings must not be re-requested within the
     -- cache window.
     do
-        resetCounts42()
-        slotCount42 = 24                      -- 701 dead, 702..724 alive
-        for n = 702, 724 do operational42[tostring(n)] = true end
-        operational42["600"] = true
-        operational42["98"] = true
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local operationalC = { ["600"] = true, ["98"] = true }
+        for n = 702, 724 do operationalC[tostring(n)] = true end
+        local sess = scenario42({
+            slotCount42 = 24,                 -- 701 dead, 702..724 alive
+            operational42 = operationalC,
+            sectorShips42 = { 98 } })
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         local batches = batchesSince42(mark)
@@ -477,13 +484,10 @@ do
     -- D. With no surviving same-root surface, the planner escalates to the
     -- target's hull, and a positive hull reading engages the hull itself.
     do
-        resetCounts42()
-        slotCount42 = 1                       -- only the dead 701 remains
-        operational42 = { ["600"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 1,                  -- only the dead 701 remains
+            operational42 = { ["600"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         API.updateAimTarget()
         tick42()
         assert(sess.targetFallback.stage == "hull",
@@ -513,13 +517,10 @@ do
     -- E. A proven-zero hull escalates to ranked other objects; the planner
     -- walks the ranking and engages the first positive, skipping proven zeros.
     do
-        resetCounts42()
-        slotCount42 = 1
-        operational42 = { ["600"] = true, ["98"] = true, ["99"] = true }
-        sectorShips42 = { 98, 99 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 1,
+            operational42 = { ["600"] = true, ["98"] = true, ["99"] = true },
+            sectorShips42 = { 98, 99 } })
         API.updateAimTarget()
         tick42()
         assert(sess.targetFallback.stage == "hull", "expected hull stage")
@@ -556,14 +557,11 @@ do
     -- F. Surfaces, hull and every other object proven zero: the resolution
     -- exhausts and hands the choice back at the target browser.
     do
-        resetCounts42()
-        slotCount42 = 1
-        operational42 = { ["600"] = true }
-        sectorShips42 = {}
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
+        local sess = scenario42({
+            slotCount42 = 1,
+            operational42 = { ["600"] = true },
+            sectorShips42 = {} })
         sess.povAnchor, sess.povMode = "target", "cinematic"
-        clock = 500
         API.updateAimTarget()
         tick42()
         assert(sess.targetFallback.stage == "hull", "expected hull stage")
@@ -597,14 +595,12 @@ do
     -- existing synchronous object sweep: no fallback state, no surface
     -- enumeration, no ENGAGEABLE request.
     do
-        resetCounts42()
-        slotCount42 = 2
-        operational42 = { ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 500, 500
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["98"] = true },
+            sectorShips42 = { 98 },
+            targetObjectID = 500, aimTargetID = 500 })
         sess.povAnchor, sess.povMode = "turret", "cinematic"
-        clock = 500
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         assert(sess.targetFallback == nil,
@@ -637,15 +633,12 @@ do
     -- H. Auto-next off during a surface loss: straight to the browser, with
     -- neither a fallback state nor any enumeration.
     do
-        resetCounts42()
-        slotCount42 = 2
-        operational42 = { ["702"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         sess.autoNextTarget = false
-        sess.targetObjectID, sess.aimTargetID = 600, 701
         sess.povAnchor, sess.povMode = "target", "cinematic"
-        clock = 500
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         assert(sess.phase == "target_select",
@@ -681,17 +674,14 @@ do
     -- operational turrets: a checked group whose member is not operational
     -- contributes nothing to the batch.
     do
-        resetCounts42()
-        slotCount42 = 2
-        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
         local groups = {
             group42("grpI_A", 27, true),
             group42("grpI_B", 28, false),
         }
-        local sess = freshDirectSession42(groups)
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["600"] = true, ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 }, groups = groups })
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         local batches = batchesSince42(mark)
@@ -711,13 +701,11 @@ do
     -- J. The root dying mid-resolution aborts the fallback to the ordinary
     -- object loss: the sweep runs and the survivor is engaged.
     do
-        resetCounts42()
-        slotCount42 = 3                       -- 701 dead, 702/703 alive
-        operational42 = { ["600"] = true, ["702"] = true, ["703"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 3,                  -- 701 dead, 702/703 alive
+            operational42 = { ["600"] = true, ["702"] = true, ["703"] = true,
+                ["98"] = true },
+            sectorShips42 = { 98 } })
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         local batches = batchesSince42(mark)
@@ -746,13 +734,10 @@ do
     -- (the soft-target write fails): the resolution hands the choice back at
     -- the browser instead of retrying the refused engage forever.
     do
-        resetCounts42()
-        slotCount42 = 2
-        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["600"] = true, ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         assert(sess.targetFallback ~= nil, "setup: the fallback must be running")
@@ -786,13 +771,10 @@ do
     -- L. A control-mode switch away from direct mid-resolution drops the
     -- fallback state quietly: no ENGAGEABLE query, no engage, no browser.
     do
-        resetCounts42()
-        slotCount42 = 2
-        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["600"] = true, ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         API.updateAimTarget()
         assert(sess.targetFallback ~= nil, "setup: the fallback must be running")
         sess.controlMode = nil               -- e.g. a restoreDirect transition
@@ -819,14 +801,11 @@ do
     -- query): the UI-event mark recorded right before the consume tick fails
     -- if that query were deferred to a later tick.
     do
-        resetCounts42()
         local mLogStart = #fix.getCapturedLog()
-        slotCount42 = 3                       -- 701 (dead), 702 alive, 703 not yet operational
-        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
-        sectorShips42 = { 98 }
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 3,                  -- 701 (dead), 702 alive, 703 not yet operational
+            operational42 = { ["600"] = true, ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
         -- 1. The loss snapshot holds 702 as the only surviving alternative;
@@ -939,10 +918,6 @@ do
     -- 99, 100 and never 98; and with 99 positive and 100 proven zero the
     -- ranked-first positive 99 is what gets engaged.
     do
-        resetCounts42()
-        slotCount42 = 1                       -- only the dead 701 remains
-        operational42 = { ["600"] = true, ["99"] = true, ["100"] = true }
-        sectorShips42 = { 98, 99, 100 }       -- 98 is NON-operational
         -- The block-level distance stub returns one constant for every
         -- object, so override it here: distinct distances make 98, 99, 100
         -- the only possible ranking order of the sector sweep.
@@ -954,9 +929,10 @@ do
             if n == 100 then return 3000 end
             return 1000
         end
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 1,                  -- only the dead 701 remains
+            operational42 = { ["600"] = true, ["99"] = true, ["100"] = true },
+            sectorShips42 = { 98, 99, 100 } })   -- 98 is NON-operational
         API.updateAimTarget()
         tick42()
         assert(sess.targetFallback.stage == "hull",
@@ -1014,11 +990,7 @@ do
     -- sweep -- where the dead object has dropped out -- and resume the
     -- ordinary next-tick evaluation from page 1.
     do
-        resetCounts42()
         local oLogStart = #fix.getCapturedLog()
-        slotCount42 = 1                       -- only the dead 701 remains
-        operational42 = { ["600"] = true, ["98"] = true }   -- 99 is NON-operational
-        sectorShips42 = { 98, 99 }
         -- Distinct distances make the sector ranking 98, 99 distance-decided,
         -- never a priority/name tie (as in 42N).
         local savedDistO = C.GetDistanceBetween
@@ -1028,9 +1000,10 @@ do
             if n == 99 then return 2000 end
             return 1000
         end
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 1,                  -- only the dead 701 remains
+            operational42 = { ["600"] = true, ["98"] = true },  -- 99 is NON-operational
+            sectorShips42 = { 98, 99 } })
         API.updateAimTarget()
         tick42()
         assert(sess.targetFallback.stage == "hull",
@@ -1148,11 +1121,7 @@ do
     -- where the sibling's cached positive reading may be reused without a
     -- new transport batch.
     do
-        resetCounts42()
         local pLogStart = #fix.getCapturedLog()
-        slotCount42 = 1                       -- only the dead 701 remains
-        operational42 = { ["600"] = true, ["98"] = true, ["99"] = true }
-        sectorShips42 = { 98, 99 }
         -- Distinct distances make the sector ranking 98, 99 distance-decided,
         -- never a priority/name tie (as in 42N/42O).
         local savedDistP = C.GetDistanceBetween
@@ -1162,9 +1131,10 @@ do
             if n == 99 then return 2000 end
             return 1000
         end
-        local sess = freshDirectSession42({ grp42 })
-        sess.targetObjectID, sess.aimTargetID = 600, 701
-        clock = 500
+        local sess = scenario42({
+            slotCount42 = 1,                  -- only the dead 701 remains
+            operational42 = { ["600"] = true, ["98"] = true, ["99"] = true },
+            sectorShips42 = { 98, 99 } })
         API.updateAimTarget()
         tick42()
         assert(sess.targetFallback.stage == "hull",
