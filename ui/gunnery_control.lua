@@ -1821,6 +1821,16 @@ end
 local function updateTargetFallback()
     local fb = session.targetFallback
     if not fb then return end
+    -- Task 5C: the player switched Auto-next Target off while a resolution
+    -- was in flight. Cancel the automatic resolution and hand the choice
+    -- back at the browser through the existing browser-fallback path; never
+    -- engage a replacement after the switch.
+    if session.autoNextTarget == false then
+        log("event=auto_next_fallback action=auto_next_off_cancel root="
+            .. tostring(fb.root) .. " stage=" .. tostring(fb.stage))
+        fallbackToBrowser()
+        return
+    end
     if session.controlMode ~= "direct" then
         session.targetFallback = nil
         return

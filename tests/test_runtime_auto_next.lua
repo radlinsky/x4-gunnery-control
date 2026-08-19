@@ -1253,6 +1253,62 @@ do
             "the engaged object 99 must become the soft target")
     end
 
+    -- R. Issue #45 Task 5C: turning Auto-next off while a resolution is in
+    -- flight cancels the asynchronous fallback: the next tick clears
+    -- targetFallback, hands the choice back at the target browser through the
+    -- existing browser-fallback path, and makes no soft-target engage call --
+    -- even though a positive ENGAGEABLE reading is sitting in the cache, ready
+    -- for a fallback that the player has just switched off.
+    do
+        local sess = scenario42({
+            slotCount42 = 2,
+            operational42 = { ["600"] = true, ["702"] = true, ["98"] = true },
+            sectorShips42 = { 98 } })
+        sess.povAnchor, sess.povMode = "target", "cinematic"
+        -- 1. Start the surface-loss fallback with Auto-next enabled and prove
+        -- it is active on surfaces page 1 with the page-1 batch out the door.
+        local mark = #fix.uiTriggeredEvents
+        API.updateAimTarget()
+        assert(sess.targetFallback ~= nil,
+            "setup: a surface loss with auto-next on must start the resolution")
+        assert(sess.targetFallback.stage == "surfaces"
+            and sess.targetFallback.page == 1,
+            "setup: the resolution must sit on surfaces page 1; stage="
+            .. tostring(sess.targetFallback.stage)
+            .. " page=" .. tostring(sess.targetFallback.page))
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "702",
+            "the loss tick must issue the single-surface batch; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        -- 2. The positive reading settles in the cache ... and the player
+        -- disables Auto-next before the consume tick.
+        deliver42(batches[1], { ["702"] = "1:1:1" })
+        sess.autoNextTarget = false
+        softtargetCalls42 = {}
+        tick42()
+        -- 3. The cancelled resolution must clear the fallback, hand the
+        -- choice back at the browser, and engage nothing.
+        assert(sess.targetFallback == nil,
+            "turning auto-next off mid-resolution must clear the fallback; "
+            .. "stage=" .. tostring(sess.targetFallback and sess.targetFallback.stage))
+        assert(sess.phase == "target_select",
+            "the cancelled resolution must hand the choice back at the target "
+            .. "browser; phase is " .. tostring(sess.phase))
+        assert(sess.aimTargetID == nil and sess.targetObjectID == nil,
+            "the browser fallback must clear the lost aim and root; aim="
+            .. tostring(sess.aimTargetID) .. " root=" .. tostring(sess.targetObjectID))
+        assert(sess.povAnchor == "turret" and sess.povMode == "manual",
+            "the browser fallback must reset the view to manual Turret POV; got "
+            .. tostring(sess.povAnchor) .. "/" .. tostring(sess.povMode))
+        assert(#softtargetCalls42 == 0,
+            "the cancellation must make no soft-target engage call, even with "
+            .. "a positive reading cached; soft-target calls="
+            .. tostring(#softtargetCalls42))
+        assert(fix.logContains("event=auto_next_fallback action=auto_next_off_cancel"),
+            "the auto-next-off cancellation must be logged")
+    end
+
     -- Restore the pre-block stubs (nil hands C back to its fallbacks).
     C.IsComponentClass = savedClass42
     C.GetNumUpgradeSlots = savedNumSlots42
