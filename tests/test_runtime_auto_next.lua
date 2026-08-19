@@ -212,6 +212,38 @@ do
         return sess
     end
 
+    -- E/F/N/O/P preamble: from a fresh session aimed at the dead surface
+    -- 701 of root 600 with no other root surface alive, drive the existing
+    -- production path to the objects stage: the loss tick, the empty-
+    -- surfaces escalation to the hull stage, the hull ENGAGEABLE query
+    -- (exactly root 600), the proven-zero "0:1:1" reading, and the
+    -- escalation to objects. Returns the UI-event mark of the moment the
+    -- objects stage is entered; object-stage batches, results, and actions
+    -- stay in the calling scenario.
+    local function reachObjects42(sess)
+        API.updateAimTarget()
+        tick42()
+        assert(sess.targetFallback ~= nil
+            and sess.targetFallback.stage == "hull",
+            "an empty surface stage must escalate to the hull stage; stage is "
+            .. tostring(sess.targetFallback and sess.targetFallback.stage))
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "600",
+            "the hull stage must issue one ENGAGEABLE query for exactly the "
+            .. "root 600; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        deliver42(batches[1], { ["600"] = "0:1:1" })
+        tick42()
+        assert(sess.targetFallback ~= nil
+            and sess.targetFallback.stage == "objects",
+            "a proven-zero hull must escalate to the objects stage; stage is "
+            .. tostring(sess.targetFallback and sess.targetFallback.stage))
+        return #fix.uiTriggeredEvents
+    end
+
     -- Count only engageability transport events since `mark`: an engage also
     -- emits its direct_fallback cue, which is expected, not a violation.
     local function engageabilityEventsSince42(mark)
@@ -521,23 +553,11 @@ do
             slotCount42 = 1,
             operational42 = { ["600"] = true, ["98"] = true, ["99"] = true },
             sectorShips42 = { 98, 99 } })
-        API.updateAimTarget()
-        tick42()
-        assert(sess.targetFallback.stage == "hull", "expected hull stage")
-        local mark = #fix.uiTriggeredEvents
-        tick42()
-        local batches = batchesSince42(mark)
-        assert(#batches == 1 and batches[1].targets[1] == "600", "expected the hull query")
-        deliver42(batches[1], { ["600"] = "0:1:1" })
-        tick42()
-        assert(sess.targetFallback.stage == "objects",
-            "a proven-zero hull must escalate to the objects stage; stage is "
-            .. tostring(sess.targetFallback.stage))
+        local mark = reachObjects42(sess)
         assert(objectSweepCalls42 >= 1,
             "the objects stage must rank through the sector sweep")
-        mark = #fix.uiTriggeredEvents
         tick42()
-        batches = batchesSince42(mark)
+        local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 2
             and batches[1].targets[1] == "98" and batches[1].targets[2] == "99",
             "the objects stage must query the ranked candidates without the lost root; "
@@ -562,16 +582,7 @@ do
             operational42 = { ["600"] = true },
             sectorShips42 = {} })
         sess.povAnchor, sess.povMode = "target", "cinematic"
-        API.updateAimTarget()
-        tick42()
-        assert(sess.targetFallback.stage == "hull", "expected hull stage")
-        local mark = #fix.uiTriggeredEvents
-        tick42()
-        local batches = batchesSince42(mark)
-        deliver42(batches[1], { ["600"] = "0:1:1" })
-        tick42()
-        assert(sess.targetFallback.stage == "objects",
-            "expected objects stage after a proven-zero hull")
+        reachObjects42(sess)
         assert(#sess.targetFallback.orderedIDs == 0,
             "with no other objects the objects stage must be empty")
         tick42()
@@ -933,23 +944,7 @@ do
             slotCount42 = 1,                  -- only the dead 701 remains
             operational42 = { ["600"] = true, ["99"] = true, ["100"] = true },
             sectorShips42 = { 98, 99, 100 } })   -- 98 is NON-operational
-        API.updateAimTarget()
-        tick42()
-        assert(sess.targetFallback.stage == "hull",
-            "an empty surface stage must escalate to the hull stage; stage is "
-            .. tostring(sess.targetFallback.stage))
-        local mark = #fix.uiTriggeredEvents
-        tick42()
-        local batches = batchesSince42(mark)
-        assert(#batches == 1 and #batches[1].targets == 1
-            and batches[1].targets[1] == "600",
-            "the hull stage must query exactly the root 600; targets="
-            .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["600"] = "0:1:1" })
-        tick42()
-        assert(sess.targetFallback.stage == "objects",
-            "a proven-zero hull must escalate to the objects stage; stage is "
-            .. tostring(sess.targetFallback.stage))
+        local mark = reachObjects42(sess)
         local objectIDs = {}
         for _, v in ipairs(sess.targetFallback.orderedIDs) do
             objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
@@ -959,9 +954,8 @@ do
             .. "98, 99, 100 with only the non-operational 98 dropped, so "
             .. "exactly 99, 100 survive in that relative order; ids="
             .. table.concat(objectIDs, ","))
-        mark = #fix.uiTriggeredEvents
         tick42()
-        batches = batchesSince42(mark)
+        local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 2
             and batches[1].targets[1] == "99" and batches[1].targets[2] == "100",
             "the objects ENGAGEABLE batch must query exactly 99, 100 and "
@@ -1004,23 +998,7 @@ do
             slotCount42 = 1,                  -- only the dead 701 remains
             operational42 = { ["600"] = true, ["98"] = true },  -- 99 is NON-operational
             sectorShips42 = { 98, 99 } })
-        API.updateAimTarget()
-        tick42()
-        assert(sess.targetFallback.stage == "hull",
-            "an empty surface stage must escalate to the hull stage; stage is "
-            .. tostring(sess.targetFallback.stage))
-        local mark = #fix.uiTriggeredEvents
-        tick42()
-        local batches = batchesSince42(mark)
-        assert(#batches == 1 and #batches[1].targets == 1
-            and batches[1].targets[1] == "600",
-            "the hull stage must query exactly the root 600; targets="
-            .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["600"] = "0:1:1" })
-        tick42()
-        assert(sess.targetFallback.stage == "objects",
-            "a proven-zero hull must escalate to the objects stage; stage is "
-            .. tostring(sess.targetFallback.stage))
+        local mark = reachObjects42(sess)
         local entryIDs = {}
         for _, v in ipairs(sess.targetFallback.orderedIDs) do
             entryIDs[#entryIDs + 1] = X4GunneryState.normID(v)
@@ -1028,9 +1006,8 @@ do
         assert(table.concat(entryIDs, ",") == "98",
             "the objects stage must hold 98 as the only operational ordinary "
             .. "candidate; ids=" .. table.concat(entryIDs, ","))
-        mark = #fix.uiTriggeredEvents
         tick42()
-        batches = batchesSince42(mark)
+        local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 1
             and batches[1].targets[1] == "98",
             "the objects ENGAGEABLE batch must query exactly the operational "
@@ -1135,23 +1112,7 @@ do
             slotCount42 = 1,                  -- only the dead 701 remains
             operational42 = { ["600"] = true, ["98"] = true, ["99"] = true },
             sectorShips42 = { 98, 99 } })
-        API.updateAimTarget()
-        tick42()
-        assert(sess.targetFallback.stage == "hull",
-            "an empty surface stage must escalate to the hull stage; stage is "
-            .. tostring(sess.targetFallback.stage))
-        local mark = #fix.uiTriggeredEvents
-        tick42()
-        local batches = batchesSince42(mark)
-        assert(#batches == 1 and #batches[1].targets == 1
-            and batches[1].targets[1] == "600",
-            "the hull stage must query exactly the root 600; targets="
-            .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["600"] = "0:1:1" })
-        tick42()
-        assert(sess.targetFallback.stage == "objects",
-            "a proven-zero hull must escalate to the objects stage; stage is "
-            .. tostring(sess.targetFallback.stage))
+        local mark = reachObjects42(sess)
         local objectIDs = {}
         for _, v in ipairs(sess.targetFallback.orderedIDs) do
             objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
@@ -1160,9 +1121,8 @@ do
             "the objects stage must rank the operational candidates 98, 99; "
             .. "ids=" .. table.concat(objectIDs, ","))
         -- 1. Issue the one objects ENGAGEABLE batch for 98, 99.
-        mark = #fix.uiTriggeredEvents
         tick42()
-        batches = batchesSince42(mark)
+        local batches = batchesSince42(mark)
         assert(#batches == 1 and #batches[1].targets == 2
             and batches[1].targets[1] == "98" and batches[1].targets[2] == "99",
             "the objects ENGAGEABLE batch must query exactly 98, 99; targets="
