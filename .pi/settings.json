@@ -1,8 +1,5 @@
 {
-  "skills": [
-    "/home/pc/.pi/agent/skills/caveman/SKILL.md",
-    "-/home/pc/.pi/agent/skills/caveman/SKILL.md"
-  ],
+  "skills": [],
   "packages": [
     {
       "source": "npm:pi-lens",
