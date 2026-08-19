@@ -1246,6 +1246,7 @@ do
         -- 2. 701 dies while the browser still lists it: the pre-existing
         -- snapshot is now stale.
         operational42["701"] = false
+        local lossLogStart = #fix.getCapturedLog()
         API.updateAimTarget()
         assert(sess.targetFallback ~= nil,
             "surface loss with auto-next on must start a session-scoped resolution")
@@ -1269,7 +1270,19 @@ do
             "the loss tick must advance the pre-existing snapshot by exactly "
             .. "one generation; before=" .. tostring(genBefore)
             .. " after=" .. tostring(sess.surfaceBrowser.generation))
-        assert(fix.logContains("event=surface_snapshot action=create reason=auto_next"),
+        local sawSnapshotLog, sawFallbackStartLog = false, false
+        for i = lossLogStart + 1, #fix.getCapturedLog() do
+            local line = fix.getCapturedLog()[i]
+            if string.find(line,
+                "event=surface_snapshot action=create reason=auto_next", 1, true) then
+                sawSnapshotLog = true
+            end
+            if string.find(line,
+                "event=auto_next_fallback action=start", 1, true) then
+                sawFallbackStartLog = true
+            end
+        end
+        assert(sawSnapshotLog,
             "the loss-tick snapshot refresh must be logged with the auto_next reason")
         -- ...and its allSurfaces now reflect the changed population instead
         -- of the stale setup snapshot.
@@ -1308,8 +1321,8 @@ do
             .. " expected=" .. table.concat(expectedIDs, ","))
         assert(surfaceScanCalls42 >= 1,
             "the resolution must rank root 600 through the surface reader")
-        assert(fix.logContains("event=auto_next_fallback action=start"),
-            "the fallback start must be logged")
+        assert(sawFallbackStartLog,
+            "the fallback start must be logged on this loss tick")
         -- ...and page 1 is queried immediately through the checked turrets.
         local batches = batchesSince42(mark)
         assert(#batches == 1,
