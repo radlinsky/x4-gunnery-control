@@ -40,6 +40,8 @@ has "\$target == \$target.defensible" \
   || note "module fallback must be gated on \$target == \$target.defensible (whole-root only, #62)"
 has "\$target.defensible.ismodular" \
   || note "module fallback must be gated on \$target.defensible.ismodular"
+has "@\$target.canhaveattackablemodules" \
+  || note "module fallback must also admit ships with attackable defence modules (@\$target.canhaveattackablemodules)"
 has "\$target.defensible.modules.operational.count" \
   || note "module fallback must guard on modules.operational.count"
 

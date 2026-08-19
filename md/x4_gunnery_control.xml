@@ -224,10 +224,17 @@
                            surface element's .defensible resolves to its parent
                            station, so without this guard the fallback would count
                            any weapon that can see ANY station module as engageable
-                           against that one element, inflating the count (#62). -->
+                           against that one element, inflating the count (#62).
+                           canhaveattackablemodules (ship datatype, @-guarded so a
+                           station root safely reads null) extends the same root
+                           fallback to the rare capital ships whose macro embeds a
+                           targetable defence module, matching vanilla target
+                           selection (lib.target.selection ismodular or
+                           canhaveattackablemodules); harmless where a ship's
+                           defence modules are not exposed via .modules. -->
                       <do_if value="not $lineoffireclear
                                     and $target == $target.defensible
-                                    and $target.defensible.ismodular
+                                    and ($target.defensible.ismodular or @$target.canhaveattackablemodules)
                                     and $target.defensible.modules.operational.count gt 1">
                         <set_value name="$modules" exact="$target.defensible.modules.operational.list"/>
                         <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
