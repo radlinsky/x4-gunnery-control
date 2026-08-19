@@ -2154,9 +2154,15 @@ function menu.onShowMenu()
     -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
     -- so the mode guard is required: dropping it would create a reticule Auto
     -- never otherwise shows.
+    -- This explicit resume handoff also grants the one bounded retry: live Task
+    -- 6 runs showed the engine refusing the resume's first SetSofttarget while
+    -- it settles after the menu transition, then accepting the same write
+    -- moments later. Granting it only here keeps the generic refusal-abandons
+    -- contract for every other re-point origin (restore envelope, tests).
     if (resuming or mapSuspendResume) and session.phase == "engaged"
         and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
         session.repointTargetID = session.aimTargetID
+        session.repointResumeRetry = session.aimTargetID
     end
     menu.display()
 end
@@ -3057,14 +3063,40 @@ reopenSuspendedSession = function(reason)
 end
 
 -- Re-points the engine soft target at a restored target. A normal success is
--- intentionally silent. A false return is a refusal and must not be retried;
--- an exception gets one retry because reload-time FFI calls can be transient.
+-- intentionally silent. Refusal handling depends on origin:
+--
+-- A Direct engaged resume (Test Lab reopen / Map reopen) carries
+-- session.repointResumeRetry. The engine refuses the FIRST SetSofttarget of
+-- such a resume while it is still settling after the menu transition, and
+-- accepts the identical write on the next watchdog tick. So the first normal
+-- refusal re-arms the re-point for exactly one later tick; the allowance is
+-- one-shot, and a second refusal abandons like any other. Every other re-point
+-- keeps the standing contract: a normal refusal abandons immediately.
+-- An FFI exception keeps its own standing contract: one immediate retry, because
+-- reload-time FFI calls can be transient; a terminal failure there abandons and
+-- drops any resume allowance with it.
 local function attemptRepoint()
     local targetID = session.repointTargetID
     session.repointTargetID = nil
+    local resumeGrant = session.repointResumeRetry ~= nil
+    local retryArmed = session.repointRetryArmed ~= nil
+    session.repointResumeRetry = nil
+    session.repointRetryArmed = nil
     local callOK, setOK = pcall(function() return C.SetSofttarget(targetID, "") end)
     if callOK then
-        if not setOK then log("re-point target refused; abandoning") end
+        if setOK then return end
+        if resumeGrant and not retryArmed then
+            -- First normal refusal of a resume: one bounded retry on the next
+            -- watchdog tick. session.repointResumeRetry stays bound to the
+            -- target so the watchdog cancels the retry if the session, aim
+            -- target, or control mode drifts before it fires.
+            session.repointResumeRetry = targetID
+            session.repointRetryArmed = true
+            session.repointTargetID = targetID
+            log("re-point target refused; retrying once on the next watchdog tick")
+        else
+            log("re-point target refused; abandoning")
+        end
         return
     end
     local retryCallOK, retrySetOK = pcall(function() return C.SetSofttarget(targetID, "") end)
@@ -3079,6 +3111,19 @@ TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
     if session then
+        -- The resume re-point retry grant is bound to the exact aim target and
+        -- Direct control mode it was granted for (attemptRepoint). Any drift
+        -- cancels the pending retry and drops the queued re-point, so a
+        -- re-targeted or mode-changed session is never written back to the
+        -- stale target. Replacing the session table drops the grant with it.
+        if session.repointResumeRetry ~= nil
+            and (session.controlMode ~= "direct"
+                 or isNullID(session.aimTargetID)
+                 or not sameID(session.repointResumeRetry, session.aimTargetID)) then
+            session.repointResumeRetry = nil
+            session.repointRetryArmed = nil
+            session.repointTargetID = nil
+        end
         -- Giving a pilot a fly-there order means opening the Map, and writing
         -- the soft target under the player while they are picking things on it
         -- would fight them for their own selection.
