@@ -1912,15 +1912,32 @@ do
     end
 
     -- N. Issue #45 Task 5B2a: when surfaces and the hull prove zero, the
-    -- objects stage keeps readTargetCandidates() ranking (98 ranked before
-    -- 99) but must drop non-operational candidates up front: the dead 98
-    -- never enters orderedIDs, never rides the ENGAGEABLE batch, and the
-    -- operational 99 is still engaged on a positive reading.
+    -- objects stage keeps readTargetCandidates() ranking but must drop
+    -- non-operational candidates up front. The fixture is deliberately
+    -- discriminating: 98 (NON-operational), 99 and 100 (operational) each
+    -- get a distinct distance, so the raw ranking 98, 99, 100 is decided by
+    -- distance alone -- never by an accidental priority/name tie (the
+    -- constant-distance stub would tie them and the name tiebreak alone
+    -- yields 100, 98, 99). Dropping dead 98 must leave orderedIDs exactly
+    -- 99, 100 in that relative order; the ENGAGEABLE batch must ride exactly
+    -- 99, 100 and never 98; and with 99 positive and 100 proven zero the
+    -- ranked-first positive 99 is what gets engaged.
     do
         resetCounts42()
         slotCount42 = 1                       -- only the dead 701 remains
-        operational42 = { ["600"] = true, ["99"] = true }   -- 98 is NON-operational
-        sectorShips42 = { 98, 99 }
+        operational42 = { ["600"] = true, ["99"] = true, ["100"] = true }
+        sectorShips42 = { 98, 99, 100 }       -- 98 is NON-operational
+        -- The block-level distance stub returns one constant for every
+        -- object, so override it here: distinct distances make 98, 99, 100
+        -- the only possible ranking order of the sector sweep.
+        local savedDistN = C.GetDistanceBetween
+        C.GetDistanceBetween = function(_, component)
+            local n = tonumber(tostring(component))
+            if n == 98 then return 1000 end
+            if n == 99 then return 2000 end
+            if n == 100 then return 3000 end
+            return 1000
+        end
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
         clock = 500
@@ -1932,38 +1949,46 @@ do
         local mark = #fix.uiTriggeredEvents
         tick42()
         local batches = batchesSince42(mark)
-        assert(#batches == 1 and batches[1].targets[1] == "600",
-            "expected the hull query")
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "600",
+            "the hull stage must query exactly the root 600; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
         deliver42(batches[1], { ["600"] = "0:1:1" })
         tick42()
         assert(sess.targetFallback.stage == "objects",
             "a proven-zero hull must escalate to the objects stage; stage is "
             .. tostring(sess.targetFallback.stage))
-        assert(#sess.targetFallback.orderedIDs == 1
-            and X4GunneryState.normID(sess.targetFallback.orderedIDs[1]) == "99",
+        local objectIDs = {}
+        for _, v in ipairs(sess.targetFallback.orderedIDs) do
+            objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
+        end
+        assert(table.concat(objectIDs, ",") == "99,100",
             "the objects stage must keep the readTargetCandidates() ranking "
-            .. "with the non-operational 98 dropped and 99 kept; ids="
-            .. table.concat(sess.targetFallback.orderedIDs, ","))
+            .. "98, 99, 100 with only the non-operational 98 dropped, so "
+            .. "exactly 99, 100 survive in that relative order; ids="
+            .. table.concat(objectIDs, ","))
         mark = #fix.uiTriggeredEvents
         tick42()
         batches = batchesSince42(mark)
-        assert(#batches == 1 and #batches[1].targets == 1
-            and batches[1].targets[1] == "99",
-            "the objects ENGAGEABLE batch must query only the operational 99 "
-            .. "and never the non-operational 98; targets="
+        assert(#batches == 1 and #batches[1].targets == 2
+            and batches[1].targets[1] == "99" and batches[1].targets[2] == "100",
+            "the objects ENGAGEABLE batch must query exactly 99, 100 and "
+            .. "never the non-operational 98; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["99"] = "1:1:1" })
+        -- Settle the WHOLE batch: 99 proven positive, 100 proven zero.
+        deliver42(batches[1], { ["99"] = "1:1:1", ["100"] = "0:1:1" })
         softtargetCalls42 = {}
         tick42()
         assert(tostring(sess.aimTargetID) == "99"
             and tostring(sess.targetObjectID) == "99",
-            "the operational candidate 99 must be engaged; aim="
+            "the ranked-first positive 99 must be engaged; aim="
             .. tostring(sess.aimTargetID) .. " root="
             .. tostring(sess.targetObjectID))
         assert(sess.phase == "engaged" and sess.targetFallback == nil,
             "the object engage must stay engaged and clear the fallback")
         assert(softtargetCalls42[#softtargetCalls42] == 99,
             "the engaged object 99 must become the soft target")
+        C.GetDistanceBetween = savedDistN
     end
 
     -- Restore the pre-block stubs (nil hands C back to its fallbacks).
