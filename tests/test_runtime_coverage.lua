@@ -3,13 +3,7 @@
 -- runtime suites; no production-only behavior is simulated here.
 local function fresh()
     local fix = dofile("tests/support/runtime_fixture.lua").load()
-    local group = {
-        key = "g", kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", totalCount = 1, operationalCount = 1,
-        mode = "attack", armed = false, members = {
-            { componentID = 27, displayName = "T", operational = true, cameraSupported = true },
-        },
-    }
+    local group = fix.makeGroup{ key = "g" }
     fix.gcMenu.onShowMenu()
     local session = fix.API.getSession()
     session.groups, session.checkedGroupKeys = { group }, { g = true }

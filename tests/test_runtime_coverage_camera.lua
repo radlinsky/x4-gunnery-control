@@ -2,9 +2,8 @@
 -- the behavior under test, and the coverage runner executes every suite that
 -- way too.
 local fix = dofile("tests/support/runtime_fixture.lua").load()
-local group = {
-    key = "g", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, operationalCount = 1, totalCount = 1, mode = "attack", armed = false,
+local group = fix.makeGroup{
+    key = "g",
     members = { { componentID = 27, operational = true, cameraSupported = true } },
 }
 fix.gcMenu.onShowMenu()

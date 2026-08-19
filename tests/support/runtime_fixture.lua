@@ -222,6 +222,42 @@ function M.load()
         end
     end
 
+    -- Human names for the page-20991 UI strings the menu builds, so tests can
+    -- match buttons by intent instead of by a raw text id. The ReadText stub
+    -- echoes "text:<page>:<id>", so a menu label reads back as "text:20991:71".
+    -- Ids are the mod's own strings from t/0001.xml; keep this in sync with it.
+    local LABEL_ID = {
+        armed = 6, disarmed = 7, getUp = 14, backToGunnery = 54,
+        autoEngage = 68, nextTurret = 71, prevTurret = 72,
+        nextTarget = 75, prevTarget = 76, updateBehavior = 83, engageable = 89,
+    }
+    local LABEL = {}
+    for name, id in pairs(LABEL_ID) do LABEL[name] = "text:20991:" .. id end
+    local function buttonByLabel(name)
+        return buttonByText(assert(LABEL[name], "unknown UI label: " .. tostring(name)))
+    end
+
+    -- Build a menu group table with the fields the runtime tests almost always
+    -- use. Overrides shallow-merge over these defaults; `key` is derived from
+    -- contextID/path/group unless the caller overrides it. Pass `members` to
+    -- replace the default single-turret member list. This centralises the
+    -- group literal that ~35 call sites otherwise repeat verbatim.
+    local function makeGroup(overrides)
+        overrides = overrides or {}
+        local contextID = overrides.contextID or 5
+        local path = overrides.path or "p"
+        local grp = overrides.group or "g"
+        local g = {
+            key = X4GunneryState.groupKey(contextID, path, grp),
+            kind = "group", contextID = contextID, path = path, group = grp,
+            componentID = 27, displayName = "G",
+            operationalCount = 1, totalCount = 1, mode = "attack", armed = false,
+            members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
+        }
+        for k, v in pairs(overrides) do g[k] = v end
+        return g
+    end
+
     -- ── 5. RegisterEvent stub (records + allows fireEvent) ───────────────────
     -- The original stub was `RegisterEvent = function() end`, which threw every
     -- registered handler away.  This stub records them so tests can fire events
@@ -494,6 +530,9 @@ function M.load()
         ffiStub           = ffiStub,
         logContains       = logContains,
         buttonByText      = buttonByText,
+        buttonByLabel     = buttonByLabel,
+        LABEL             = LABEL,
+        makeGroup         = makeGroup,
         fireEvent         = fireEvent,
         fireUIEvent       = fireUIEvent,
         callbackCheckpoint = callbackCheckpoint,

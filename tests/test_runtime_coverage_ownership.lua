@@ -11,10 +11,8 @@ fix.gcMenu.onShowMenu()
 local session = fix.API.getSession()
 
 -- Build a minimal group so engageTarget can succeed later.
-local grp = {
-    key = "grp", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, displayName = "G", totalCount = 1, operationalCount = 1,
-    mode = "attackenemies", armed = true,
+local grp = fix.makeGroup{
+    key = "grp", mode = "attackenemies", armed = true,
     members = { { componentID = 27, displayName = "T1", operational = true,
                   cameraSupported = true, componentKey = "27" } },
 }

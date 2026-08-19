@@ -1,7 +1,6 @@
 local fix = dofile("tests/support/runtime_fixture.lua").load()
-local group = {
-    key = "g", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, operationalCount = 1, totalCount = 1, mode = "attack", armed = false,
+local group = fix.makeGroup{
+    key = "g",
     members = { { componentID = 27, operational = true, cameraSupported = true } },
 }
 fix.gcMenu.onShowMenu()
@@ -166,9 +165,9 @@ end
 -- whatever the session's Direct-control policy is. The staged bookkeeping
 -- (policy mode, preTickMode), the policy itself, and checkbox membership must
 -- come back untouched so later Direct-control use keeps working.
-local groupB = {
-    key = "gb", kind = "group", contextID = 6, path = "p", group = "b",
-    componentID = 28, operationalCount = 1, totalCount = 1, mode = "defend", armed = true,
+local groupB = fix.makeGroup{
+    key = "gb", contextID = 6, group = "b",
+    componentID = 28, mode = "defend", armed = true,
     members = { { componentID = 28, operational = true, cameraSupported = true } },
 }
 do

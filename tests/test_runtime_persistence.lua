@@ -172,10 +172,7 @@ do
     local function payload59(controlMode, phase, missingSavedCamera)
         local source = State.newSession(42, "gunnercontrol")
         source.shipName, source.phase, source.controlMode = "0", phase or "engaged", controlMode
-        source.groups = { {
-            key = State.groupKey(5, "p", "g"), kind = "group", contextID = 5,
-            path = "p", group = "g", componentID = 27, mode = "attack", armed = false,
-            operationalCount = 1, totalCount = 1,
+        source.groups = { fix.makeGroup{
             members = { { componentID = 27, operational = true, cameraSupported = true } },
         } }
         if missingSavedCamera then
@@ -267,10 +264,10 @@ local function povFixture61()
     local localFix = dofile("tests/support/runtime_fixture.lua").load()
     localFix.gcMenu.onShowMenu()
     local localSession = localFix.API.getSession()
-    local group = {
-        key = "pov61", kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 10, displayName = "Camera group", totalCount = 3,
-        operationalCount = 3, mode = "attack", armed = false, members = {
+    local group = localFix.makeGroup{
+        key = "pov61", componentID = 10, displayName = "Camera group",
+        totalCount = 3, operationalCount = 3,
+        members = {
             { componentID = 10, displayName = "T1", operational = true, cameraSupported = true },
             { componentID = 11, displayName = "T2", operational = true, cameraSupported = true },
             { componentID = 12, displayName = "T3", operational = true, cameraSupported = true },
@@ -327,13 +324,13 @@ for _, case in ipairs({
 end
 
 for _, case in ipairs({
-    { button = 71, cameraMemberID = 12, label = "Next Turret" },
-    { button = 72, cameraMemberID = 10, label = "Previous Turret" },
+    { button = 71, labelName = "nextTurret", cameraMemberID = 12, label = "Next Turret" },
+    { button = 72, labelName = "prevTurret", cameraMemberID = 10, label = "Previous Turret" },
 }) do
     local localFix, localSession, group = povFixture61()
     localSession.povAnchor, localSession.povMode = "target", "cinematic"
     localFix.gcMenu.display()
-    local button = localFix.buttonByText("text:20991:" .. tostring(case.button))
+    local button = localFix.buttonByLabel(case.labelName)
     assert(button and button.active and type(button.handlers.onClick) == "function",
         case.label .. " must be a selectable real UI button")
     localFix.resetUITriggeredEvents()
