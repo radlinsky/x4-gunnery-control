@@ -2120,6 +2120,134 @@ do
         C.GetDistanceBetween = savedDistO
     end
 
+    -- P. Issue #45 Task 5B2c: an objects-stage candidate that dies AFTER the
+    -- stage was built, while its ENGAGEABLE result is still pending, must not
+    -- hold its batch slot open forever. The consume tick would otherwise keep
+    -- handing the planner a page whose dead member can never settle: the
+    -- planner yields "wait" on the pending reading and never reaches the
+    -- surviving sibling's positive proof. The fix detects the death before
+    -- paging/querying/planning, rebuilds the ranked objects list exactly as
+    -- the stage entry does (the dead object drops out), resets page 1, logs
+    -- one restart event, and lets ordinary evaluation resume next tick --
+    -- where the sibling's cached positive reading may be reused without a
+    -- new transport batch.
+    do
+        resetCounts42()
+        local pLogStart = #fix.getCapturedLog()
+        slotCount42 = 1                       -- only the dead 701 remains
+        operational42 = { ["600"] = true, ["98"] = true, ["99"] = true }
+        sectorShips42 = { 98, 99 }
+        -- Distinct distances make the sector ranking 98, 99 distance-decided,
+        -- never a priority/name tie (as in 42N/42O).
+        local savedDistP = C.GetDistanceBetween
+        C.GetDistanceBetween = function(_, component)
+            local n = tonumber(tostring(component))
+            if n == 98 then return 1000 end
+            if n == 99 then return 2000 end
+            return 1000
+        end
+        local sess = freshDirectSession42({ grp42 })
+        sess.targetObjectID, sess.aimTargetID = 600, 701
+        clock = 500
+        API.updateAimTarget()
+        tick42()
+        assert(sess.targetFallback.stage == "hull",
+            "an empty surface stage must escalate to the hull stage; stage is "
+            .. tostring(sess.targetFallback.stage))
+        local mark = #fix.uiTriggeredEvents
+        tick42()
+        local batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "600",
+            "the hull stage must query exactly the root 600; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        deliver42(batches[1], { ["600"] = "0:1:1" })
+        tick42()
+        assert(sess.targetFallback.stage == "objects",
+            "a proven-zero hull must escalate to the objects stage; stage is "
+            .. tostring(sess.targetFallback.stage))
+        local objectIDs = {}
+        for _, v in ipairs(sess.targetFallback.orderedIDs) do
+            objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
+        end
+        assert(table.concat(objectIDs, ",") == "98,99",
+            "the objects stage must rank the operational candidates 98, 99; "
+            .. "ids=" .. table.concat(objectIDs, ","))
+        -- 1. Issue the one objects ENGAGEABLE batch for 98, 99.
+        mark = #fix.uiTriggeredEvents
+        tick42()
+        batches = batchesSince42(mark)
+        assert(#batches == 1 and #batches[1].targets == 2
+            and batches[1].targets[1] == "98" and batches[1].targets[2] == "99",
+            "the objects ENGAGEABLE batch must query exactly 98, 99; targets="
+            .. table.concat(batches[1] and batches[1].targets or {}, ","))
+        -- 2. After the batch is issued, 98 dies; its reading will never settle.
+        operational42["98"] = false
+        -- 3. 99 proves positive, 98 is left unresolved; complete the batch the
+        -- standard fixture way (per-target results, then batch complete).
+        deliver42(batches[1], { ["99"] = "1:1:1" })
+        softtargetCalls42 = {}
+        local restartMark = #fix.uiTriggeredEvents
+        tick42()
+        -- 4. The consume tick must detect the dead 98 BEFORE planner
+        -- evaluation: the list rebuilds to exactly the surviving 99, the
+        -- stage holds on objects page 1, nothing is chosen, no browser
+        -- fallback, and no new ENGAGEABLE batch rides this tick.
+        assert(sess.targetFallback ~= nil
+            and sess.targetFallback.stage == "objects"
+            and sess.targetFallback.page == 1,
+            "the stale-object restart must keep the resolution active on "
+            .. "objects page 1; stage="
+            .. tostring(sess.targetFallback and sess.targetFallback.stage)
+            .. " page=" .. tostring(sess.targetFallback and sess.targetFallback.page))
+        objectIDs = {}
+        for _, v in ipairs(sess.targetFallback.orderedIDs) do
+            objectIDs[#objectIDs + 1] = X4GunneryState.normID(v)
+        end
+        assert(table.concat(objectIDs, ",") == "99",
+            "the dead 98 must be dropped from the objects list before planner "
+            .. "evaluation; ids=" .. table.concat(objectIDs, ","))
+        assert(#softtargetCalls42 == 0,
+            "the stale-object restart must make no target choice; soft-target "
+            .. "calls=" .. tostring(#softtargetCalls42))
+        assert(sess.phase == "engaged" and tostring(sess.aimTargetID) == "701"
+            and tostring(sess.targetObjectID) == "600",
+            "the stale-object restart must choose nothing and stay engaged; "
+            .. "phase=" .. tostring(sess.phase) .. " aim="
+            .. tostring(sess.aimTargetID) .. " root="
+            .. tostring(sess.targetObjectID))
+        assert(#batchesSince42(restartMark) == 0,
+            "the restart tick must return before querying; batches="
+            .. tostring(#batchesSince42(restartMark)))
+        local restarts = 0
+        for i = pLogStart + 1, #fix.getCapturedLog() do
+            if string.find(fix.getCapturedLog()[i],
+                "event=auto_next_fallback action=stale_object_list_restart", 1, true)
+            then restarts = restarts + 1 end
+        end
+        assert(restarts == 1,
+            "the stale-object-list restart must be logged exactly once; saw "
+            .. restarts)
+        -- 5. On the following tick the cached positive reading for 99 is
+        -- reused without a new transport batch, and 99 is engaged.
+        mark = #fix.uiTriggeredEvents
+        softtargetCalls42 = {}
+        tick42()
+        assert(#batchesSince42(mark) == 0,
+            "the cached positive reading for 99 must be reused; no new "
+            .. "ENGAGEABLE batch may be issued")
+        assert(tostring(sess.aimTargetID) == "99"
+            and tostring(sess.targetObjectID) == "99",
+            "the surviving 99 must be engaged from its cached positive "
+            .. "reading; aim=" .. tostring(sess.aimTargetID)
+            .. " root=" .. tostring(sess.targetObjectID))
+        assert(sess.phase == "engaged" and sess.targetFallback == nil,
+            "the cached engage must stay engaged and clear the fallback")
+        assert(softtargetCalls42[#softtargetCalls42] == 99,
+            "the engaged object 99 must become the soft target")
+        C.GetDistanceBetween = savedDistP
+    end
+
     -- Restore the pre-block stubs (nil hands C back to its fallbacks).
     C.IsComponentClass = savedClass42
     C.GetNumUpgradeSlots = savedNumSlots42

@@ -1834,6 +1834,35 @@ local function updateTargetFallback()
         handleObjectLoss()
         return
     end
+    -- A dead objects-stage candidate whose ENGAGEABLE evidence is still
+    -- pending (or was never queried this epoch) can never settle, and the
+    -- planner would keep yielding "wait" for the whole page even while a
+    -- surviving sibling proved positive (5B2c). Dead candidates with SETTLED
+    -- evidence stay on the ordinary path: a fresh positive is re-verified by
+    -- the engage-time recheck (5B2b) and a proven zero is just a zero.
+    -- Rebuild the ranked list exactly as the stage entry does (the dead
+    -- object drops out) and let ordinary evaluation resume from page 1 on
+    -- the next tick.
+    if fb.stage == "objects" then
+        local deadParts = {}
+        for _, componentID in ipairs(fb.orderedIDs) do
+            if not C.IsComponentOperational(id(componentID)) then
+                local cached = engageabilityCache[
+                    tostring(sessionEpoch) .. ":" .. State.normID(componentID)]
+                if cached == nil or cached.pending then
+                    deadParts[#deadParts + 1] = tostring(componentID)
+                end
+            end
+        end
+        if #deadParts > 0 then
+            fb.orderedIDs = rankFallbackObjects(fb.root)
+            fb.page = 1
+            log("event=auto_next_fallback action=stale_object_list_restart root="
+                .. tostring(fb.root) .. " dead=" .. table.concat(deadParts, ",")
+                .. " ranked=" .. tostring(#fb.orderedIDs))
+            return
+        end
+    end
     local orderedIDs = fb.orderedIDs
     local decision
     if fb.stage == "hull" then
