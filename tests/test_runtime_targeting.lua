@@ -1228,11 +1228,21 @@ do
         assert(table.concat(oldAllSurfaces, ",") == "701,702,703",
             "setup: the pre-existing snapshot must hold all three operational "
             .. "surfaces; got " .. table.concat(oldAllSurfaces, ","))
+        -- The user's engine filter narrows the browser's FILTERED list to
+        -- nothing (all three surfaces are turrets) while its unfiltered
+        -- allSurfaces keeps the turret surfaces: the fallback below must rank
+        -- the allSurfaces that the filter hides from the browser.
+        assert(#sess.surfaceBrowser.orderedIDs == 0,
+            "setup: under the engine filter the browser's filtered orderedIDs "
+            .. "must be empty while allSurfaces holds the turret surfaces; got "
+            .. tostring(#sess.surfaceBrowser.orderedIDs))
         -- ENGAGEABLE traffic from that setup render (the pinned row's batch)
         -- must not satisfy the loss-tick assertions: mark only now.
         local mark = #fix.uiTriggeredEvents
         local sweepsAtMark = objectSweepCalls42
         softtargetCalls42 = {}
+        -- The browser object the loss tick must refresh in place.
+        local browserBefore = sess.surfaceBrowser
         -- 2. 701 dies while the browser still lists it: the pre-existing
         -- snapshot is now stale.
         operational42["701"] = false
@@ -1252,6 +1262,9 @@ do
             .. (objectSweepCalls42 - sweepsAtMark) .. " extra call(s)")
         -- The surface snapshot for the root is the SAME browser object,
         -- advanced by exactly one generation on the loss tick...
+        assert(sess.surfaceBrowser == browserBefore,
+            "the loss tick must refresh the pre-existing browser object "
+            .. "itself, not replace it")
         assert(sess.surfaceBrowser.generation == genBefore + 1,
             "the loss tick must advance the pre-existing snapshot by exactly "
             .. "one generation; before=" .. tostring(genBefore)
@@ -1768,51 +1781,63 @@ do
     -- M. A surface that dies after its positive ENGAGEABLE result was
     -- accepted must never be engaged: the consume tick must skip engageTarget
     -- entirely (no hull/browser fallthrough) and restart the same-root
-    -- surface stage from a fresh snapshot, whose immediate page-1 evaluation
-    -- then targets only the survivor.
+    -- surface stage from a fresh snapshot. 703 starts NON-OPERATIONAL, so
+    -- the loss snapshot holds 702 as the only surviving alternative, the
+    -- loss-tick batch targets only 702, and 703 has no cached ENGAGEABLE
+    -- reading when it is made operational just before the consume tick. The
+    -- consume tick's stale restart must therefore issue the new page-1 batch
+    -- for 703 itself, immediately (startTargetFallback's immediate page-1
+    -- query): the UI-event mark recorded right before the consume tick fails
+    -- if that query were deferred to a later tick.
     do
         resetCounts42()
-        slotCount42 = 3                       -- 701 (dead), 702/703 (alive)
-        operational42 = { ["600"] = true, ["702"] = true, ["703"] = true,
-            ["98"] = true }
+        local mLogStart = #fix.getCapturedLog()
+        slotCount42 = 3                       -- 701 (dead), 702 alive, 703 not yet operational
+        operational42 = { ["600"] = true, ["702"] = true, ["98"] = true }
         sectorShips42 = { 98 }
         local sess = freshDirectSession42({ grp42 })
         sess.targetObjectID, sess.aimTargetID = 600, 701
         clock = 500
         local mark = #fix.uiTriggeredEvents
         API.updateAimTarget()
-        -- 1. Surfaces 702 and 703 survive the loss snapshot.
-        assert(#sess.surfaceBrowser.allSurfaces == 2
-            and sess.surfaceBrowser.allSurfaces[1].componentID == 702
-            and sess.surfaceBrowser.allSurfaces[2].componentID == 703,
-            "surfaces 702 and 703 must survive the loss snapshot; got "
-            .. tostring(#sess.surfaceBrowser.allSurfaces))
+        -- 1. The loss snapshot holds 702 as the only surviving alternative;
+        -- 703 is not operational yet and cannot leak in.
+        assert(#sess.surfaceBrowser.allSurfaces == 1
+            and sess.surfaceBrowser.allSurfaces[1].componentID == 702,
+            "the loss snapshot must hold 702 as the only surviving "
+            .. "alternative; got " .. tostring(#sess.surfaceBrowser.allSurfaces))
         local batches = batchesSince42(mark)
-        assert(#batches == 1 and #batches[1].targets == 2
-            and batches[1].targets[1] == "702" and batches[1].targets[2] == "703",
-            "the loss tick must query both surviving surfaces; targets="
+        assert(#batches == 1 and #batches[1].targets == 1
+            and batches[1].targets[1] == "702",
+            "the loss tick must query only 702; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        -- Record this snapshot's generation before 702 dies: the stale
-        -- restart must advance exactly this snapshot by one generation.
+        -- Record this snapshot's generation before the consume tick: the
+        -- stale restart must advance exactly this snapshot by one generation.
         local genBeforeRestart = sess.surfaceBrowser.generation
-        -- 2. The page result proves 702 positive (and settles 703 so the
-        -- planner can decide).
-        deliver42(batches[1], { ["702"] = "1:1:1", ["703"] = "1:1:1" })
-        -- 3. Before the consume tick, 702 dies; the root and 703 stay alive.
+        -- 2. The page result proves 702 positive.
+        deliver42(batches[1], { ["702"] = "1:1:1" })
+        -- 3. Before the consume tick, 702 dies and 703 comes back
+        -- operational; the root stays alive.
         operational42["702"] = false
+        operational42["703"] = true
         softtargetCalls42 = {}
+        -- 4. Mark immediately before the consume tick: the restarted page-1
+        -- batch for 703 must appear between this mark and the end of the
+        -- consume tick itself.
+        local restartMark = #fix.uiTriggeredEvents
         tick42()
-        -- 4. The consume tick must NOT engage the dead surface.
+        -- 5. The consume tick must NOT engage the dead surface.
         local engaged702 = false
         for _, target in ipairs(softtargetCalls42) do
             if tostring(target) == "702" then engaged702 = true end
         end
         assert(not engaged702,
             "a surface that died after its positive result must not be engaged")
-        -- 5. The fallback stays active on the surfaces stage, restarted from
+        -- 6. The fallback stays active on the surfaces stage, restarted from
         -- the fresh snapshot: the snapshot advanced by exactly one
-        -- generation, the refreshed allSurfaces exclude 702 and keep the
-        -- surviving 703, and the immediate page-1 evaluation targets 703.
+        -- generation, the refreshed allSurfaces and the fallback's
+        -- orderedIDs hold exactly the newly operational 703, and the
+        -- immediate page-1 query asked for it on this same tick.
         assert(sess.surfaceBrowser.generation == genBeforeRestart + 1,
             "the stale restart must advance the snapshot by exactly one "
             .. "generation; before=" .. tostring(genBeforeRestart)
@@ -1822,8 +1847,8 @@ do
             restartedAllSurfaces[#restartedAllSurfaces + 1] = X4GunneryState.normID(surface.componentID)
         end
         assert(table.concat(restartedAllSurfaces, ",") == "703",
-            "the restarted snapshot must exclude the dead 702 and keep the "
-            .. "surviving 703; got " .. table.concat(restartedAllSurfaces, ","))
+            "the restarted snapshot must hold exactly the newly operational "
+            .. "703; got " .. table.concat(restartedAllSurfaces, ","))
         assert(sess.targetFallback ~= nil
             and sess.targetFallback.stage == "surfaces"
             and sess.targetFallback.page == 1,
@@ -1832,9 +1857,17 @@ do
             .. tostring(sess.targetFallback and sess.targetFallback.stage))
         assert(#sess.targetFallback.orderedIDs == 1
             and X4GunneryState.normID(sess.targetFallback.orderedIDs[1]) == "703",
-            "the refreshed candidates must exclude the dead 702 and the "
-            .. "page-1 evaluation must target 703; ids="
+            "the restarted candidates must hold exactly 703; ids="
             .. table.concat(sess.targetFallback.orderedIDs, ","))
+        local restartBatches = batchesSince42(restartMark)
+        assert(#restartBatches == 1 and #restartBatches[1].targets == 1
+            and restartBatches[1].targets[1] == "703",
+            "the consume tick itself must issue the fresh page-1 batch for "
+            .. "703, which has no cached reading; batches="
+            .. tostring(#restartBatches))
+        assert(#softtargetCalls42 == 0,
+            "the stale restart must make no target choice; soft-target calls="
+            .. tostring(#softtargetCalls42))
         assert(sess.phase == "engaged" and tostring(sess.aimTargetID) == "701"
             and tostring(sess.targetObjectID) == "600",
             "the stale restart must choose nothing; aim="
@@ -1843,15 +1876,16 @@ do
             "a dead surface must not escalate to the object sweep or browser; "
             .. objectSweepCalls42 .. " sweep call(s)")
         local restarts = 0
-        for _, line in ipairs(fix.getCapturedLog()) do
-            if string.find(line,
+        for i = mLogStart + 1, #fix.getCapturedLog() do
+            if string.find(fix.getCapturedLog()[i],
                 "event=auto_next_fallback action=stale_surface_restart", 1, true)
             then restarts = restarts + 1 end
         end
         assert(restarts == 1,
             "the stale/dead surface restart must be logged exactly once")
-        -- 6. With the positive result for 703 on file, the next consume tick
-        -- engages 703.
+        -- 7. The new batch's positive result makes 703 engageable.
+        deliver42(restartBatches[1], { ["703"] = "1:1:1" })
+        -- 8. The next consume tick engages 703.
         softtargetCalls42 = {}
         tick42()
         assert(tostring(sess.aimTargetID) == "703"
