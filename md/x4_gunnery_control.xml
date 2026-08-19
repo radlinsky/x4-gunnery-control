@@ -209,6 +209,32 @@
                       <!-- Start at the live muzzle and include the firing ship
                            so its own hull can mask an otherwise clear ray. -->
                       <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="false" useaimtarget="true"/>
+                      <!-- A large ship/station root's aim point is its bounding-
+                           box centre (see check_line_of_sight useaimtarget in the
+                           9.00 XSD), which sits inside the hull, so the root ray
+                           self-blocks even while turrets fire at surface modules.
+                           Mirror vanilla move.attack.object.capital (9.00): on a
+                           modular target whose root has no line of fire, fall back
+                           to per-module line of fire. First visible module counts
+                           this weapon as engageable, matching engine behaviour. -->
+                      <do_if value="not $lineoffireclear
+                                    and $target.defensible.ismodular
+                                    and $target.defensible.modules.operational.count gt 1">
+                        <set_value name="$modules" exact="$target.defensible.modules.operational.list"/>
+                        <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
+                        <do_for_each name="$module" in="$modules" counter="$moduleindex">
+                          <do_if value="$moduleindex gt 10">
+                            <break/>
+                          </do_if>
+                          <do_if value="$weapon.bboxdistanceto.{$module} le $weapon.maxfirerange">
+                            <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$module" excludeself="false" useaimtarget="true"/>
+                            <do_if value="$lineoffireclear">
+                              <break/>
+                            </do_if>
+                          </do_if>
+                        </do_for_each>
+                        <remove_value name="$modules"/>
+                      </do_if>
                       <do_if value="$lineoffireclear">
                         <set_value name="$engageable" operation="add"/>
                       </do_if>
