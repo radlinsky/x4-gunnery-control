@@ -66,7 +66,12 @@ grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_member"' "$main
 grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_target"' "$main"
 grep -Fq 'State.checkedGroups(session)' "$main"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityService'])" "engageability service cue count"
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'])" "engageability service own-hull-aware muzzle-origin line-of-fire check count"
+# The own-hull-aware muzzle-origin probe fires twice: once at the target root,
+# then (issue #60) as the per-module fallback when a large ship/station root's
+# bbox-centre aim point self-blocks the ray. Both keep the barrel offset and
+# excludeself='false' so the firing ship's own hull can mask the shot.
+assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'][@target='\$target'])" "engageability service root muzzle-origin line-of-fire check count"
+assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'][@target='\$module'])" "engageability service module-fallback muzzle-origin line-of-fire check count"
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityResult'\"])" "engageability result event count"
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityBatchComplete'\"])" "engageability batch-complete event count"
 grep -Fq "EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
