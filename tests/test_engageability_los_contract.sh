@@ -31,10 +31,13 @@ has() { printf '%s\n' "$block" | grep -Fq "$1"; }
 has "check_line_of_sight" || note "no check_line_of_sight in EngageabilityCommit"
 has "target=\"\$target\"" || note "root check_line_of_sight against \$target is missing"
 
-# 2. Module fallback is gated like vanilla: root ray failed, target is modular
+# 2. Module fallback is gated like vanilla: root ray failed, target is the whole
+#    defensible root (not a player-selected surface element, #62), and modular
 #    with more than one operational module.
 has "not \$lineoffireclear" \
   || note "module fallback must be gated on 'not \$lineoffireclear' (root failed)"
+has "\$target == \$target.defensible" \
+  || note "module fallback must be gated on \$target == \$target.defensible (whole-root only, #62)"
 has "\$target.defensible.ismodular" \
   || note "module fallback must be gated on \$target.defensible.ismodular"
 has "\$target.defensible.modules.operational.count" \
