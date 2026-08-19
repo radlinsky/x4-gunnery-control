@@ -8,13 +8,10 @@ local C      = fix.C
 
 -- A reusable group that has one camera-capable member (componentID 27).
 -- Several tests mutate session around this group.
-local grp27 = {
-    key = "grp27", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, displayName = "G27", totalCount = 1, operationalCount = 1,
-    mode = "attack", armed = false, members = {
-        { componentID = 27, displayName = "T1", operational = true,
-          cameraSupported = true, componentKey = "27" }
-    }
+local grp27 = fix.makeGroup{
+    key = "grp27", displayName = "G27",
+    members = { { componentID = 27, displayName = "T1", operational = true,
+                  cameraSupported = true, componentKey = "27" } },
 }
 
 -- ── 34. Esc out of a cinematic returns to the manual panel ──────────────────
@@ -146,13 +143,10 @@ do
     local savedFocus53           = C.GetExternalTargetViewComponent
     local savedOperational53     = C.IsComponentOperational
 
-    local grp53 = {
-        key = "grp53", kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 60, displayName = "Katana Front", totalCount = 1, operationalCount = 1,
-        mode = "attack", armed = false, members = {
-            { componentID = 60, displayName = "T1", operational = true,
-              cameraSupported = true, componentKey = "60" }
-        }
+    local grp53 = fix.makeGroup{
+        key = "grp53", componentID = 60, displayName = "Katana Front",
+        members = { { componentID = 60, displayName = "T1", operational = true,
+                      cameraSupported = true, componentKey = "60" } },
     }
     local function startSelection53()
         gcMenu.onShowMenu()

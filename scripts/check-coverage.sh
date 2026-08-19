@@ -23,10 +23,21 @@ trap 'rm -rf "$coverage_dir"' EXIT
 coverage_hits=$coverage_dir/hits
 : >"$coverage_hits"
 targets=(ui/gunnery_state.lua ui/gunnery_persistence.lua ui/gunnery_control.lua)
-tests=(tests/test_gunnery_state.lua tests/test_gunnery_persistence.lua tests/test_runtime_*.lua)
+# Globs so a split file (test_gunnery_state_surface.lua, test_runtime_targeting_pov.lua)
+# is picked up automatically and keeps contributing its covered lines.
+tests=(tests/test_gunnery_state*.lua tests/test_gunnery_persistence.lua tests/test_runtime_*.lua)
+# The coverage runner uses an instruction-level debug hook, so this is the slowest
+# part of validation. The tests are independent processes, so run them concurrently;
+# each writes its own hits file so parallel appends cannot corrupt a shared one.
+pids=()
 for test_file in "${tests[@]}"; do
-  lua5.1 tests/support/coverage_runner.lua "$coverage_hits" "${targets[@]}" -- "$test_file" >/dev/null
+  lua5.1 tests/support/coverage_runner.lua "$coverage_dir/hits.$(basename "$test_file")" "${targets[@]}" -- "$test_file" >/dev/null &
+  pids+=("$!")
 done
+coverage_failed=0
+for pid in "${pids[@]}"; do wait "$pid" || coverage_failed=1; done
+if [[ "$coverage_failed" -ne 0 ]]; then echo "a coverage test process failed" >&2; exit 1; fi
+cat "$coverage_dir"/hits.* >"$coverage_hits"
 sort -u "$coverage_hits" -o "$coverage_hits"
 
 executable_lines() {

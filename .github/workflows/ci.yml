@@ -1,10 +1,16 @@
 name: CI
-on: [push, pull_request]
+# push is filtered to the long-lived branches so a feature-branch push that also
+# has an open PR does not run every job twice (once for push, once for pull_request).
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
 permissions:
   contents: read
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,6 +27,7 @@ jobs:
           path: dist/*.zip
   windows-contract:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       # Git materialises unsupported symlinks as ordinary files on Windows.
       # The release prompt must still be complete and usable in that checkout.

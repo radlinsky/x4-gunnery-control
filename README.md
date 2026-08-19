@@ -92,6 +92,8 @@ Launch X4, enable Gunnery Control and both required extensions in the Extensions
 
 Thanks to [Kuertee](https://github.com/kuertee) for pointers on how to make the cinematic mode work.
 
+Thanks to Chem O'Dun for suggestions and feedback on the mod.
+
 ## Development
 
 The full developer guide is [DEVELOPMENT.md](DEVELOPMENT.md). Test procedure and coverage live in [TESTING.md](TESTING.md). Contributions are MIT licensed; see [CONTRIBUTING.md](CONTRIBUTING.md).

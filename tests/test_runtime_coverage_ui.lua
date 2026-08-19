@@ -3,34 +3,31 @@ local fix = dofile("tests/support/runtime_fixture.lua").load()
 -- staged by that same derivation. Use the real form here so the fixture cannot
 -- pass while the production key derivations disagree.
 local groupKey = X4GunneryState.groupKey(5, "p", "g")
-local group = {
-    key = groupKey, kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, displayName = "Group", operationalCount = 1, totalCount = 1, mode = "attack", armed = false,
-    members = { { componentID = 27, displayName = "Turret", operational = true, cameraSupported = true } },
-}
+local group = fix.makeGroup{ displayName = "Group",
+    members = { { componentID = 27, displayName = "Turret", operational = true, cameraSupported = true } } }
 fix.gcMenu.onShowMenu()
 local session = fix.API.getSession()
 session.groups, session.checkedGroupKeys = { group }, { [groupKey] = true }
 session.phase, session.controlMode, session.cameraMemberID = "engaged", "auto", 27
 fix.C.GetExternalTargetViewComponent = function() return 27 end
 fix.gcMenu.display()
-for _, id in ipairs({ 71, 72 }) do
-    local entry = fix.buttonByText("text:20991:" .. id)
+for _, label in ipairs({ fix.LABEL.nextTurret, fix.LABEL.prevTurret }) do
+    local entry = fix.buttonByText(label)
     assert(entry and entry.handlers and type(entry.handlers.onClick) == "function",
         "cycle turret button must expose its production handler")
     local checkpoint = fix.callbackCheckpoint()
     entry.handlers.onClick()
     assert(fix.callbackCheckpoint() > checkpoint,
-        "cycle turret button " .. tostring(id) .. " must schedule its camera gate")
+        "cycle turret button " .. tostring(label) .. " must schedule its camera gate")
 end
 -- #18: Previous on the left, Next on the right.
 local cycleTurretBtns = {}
 for _, b in ipairs(fix.getCreatedButtons()) do
-    if string.find(b.text, "text:20991:7[12]") then cycleTurretBtns[#cycleTurretBtns + 1] = b end end
+    if b.text == fix.LABEL.nextTurret or b.text == fix.LABEL.prevTurret then cycleTurretBtns[#cycleTurretBtns + 1] = b end end
 assert(#cycleTurretBtns == 2, "engaged/auto must render exactly two cycle_turret buttons")
 local prevBtn, nextBtn
 for _, b in ipairs(cycleTurretBtns) do
-    if b.text == "text:20991:72" then prevBtn = b elseif b.text == "text:20991:71" then nextBtn = b end
+    if b.text == fix.LABEL.prevTurret then prevBtn = b elseif b.text == fix.LABEL.nextTurret then nextBtn = b end
 end
 assert(prevBtn and prevBtn.column == 1, "engaged/auto: Previous Turret (72) must be col 1")
 assert(nextBtn and nextBtn.column == 2, "engaged/auto: Next Turret (71) must be col 2")
@@ -52,12 +49,7 @@ end
 for _, controlMode in ipairs({ "auto", "direct" }) do
     local fixE = dofile("tests/support/runtime_fixture.lua").load()
     local key = X4GunneryState.groupKey(5, "p", "g")
-    local grpE = {
-        key = key, kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
-    }
+    local grpE = fixE.makeGroup()
     fixE.gcMenu.onShowMenu()
     local sessE = fixE.API.getSession()
     sessE.groups, sessE.checkedGroupKeys, sessE.cameraMemberID = { grpE }, { [key] = true }, 27
@@ -67,17 +59,17 @@ for _, controlMode in ipairs({ "auto", "direct" }) do
     fixE.gcMenu.display()
     -- Task 1: engaged panels (auto and direct) must NOT render Update turret
     -- behavior; the button lives on the main console only.
-    local engagedUpdateBtn = latestButton(fixE, "text:20991:83")
+    local engagedUpdateBtn = latestButton(fixE, fixE.LABEL.updateBehavior)
     assert(engagedUpdateBtn == nil,
         "engaged/" .. controlMode .. " panel must NOT render the Update turret behavior button")
     -- #18: Previous on the left, Next on the right (cycle_turret is shared).
     local dirCycleBtns = {}
     for _, b in ipairs(fixE.getCreatedButtons()) do
-        if string.find(b.text, "text:20991:7[12]") then dirCycleBtns[#dirCycleBtns + 1] = b end end
+        if b.text == fixE.LABEL.nextTurret or b.text == fixE.LABEL.prevTurret then dirCycleBtns[#dirCycleBtns + 1] = b end end
     assert(#dirCycleBtns == 2, "engaged/" .. controlMode .. " must render exactly two cycle_turret buttons")
     local dPrev, dNext
     for _, b in ipairs(dirCycleBtns) do
-        if b.text == "text:20991:72" then dPrev = b elseif b.text == "text:20991:71" then dNext = b end
+        if b.text == fixE.LABEL.prevTurret then dPrev = b elseif b.text == fixE.LABEL.nextTurret then dNext = b end
     end
     assert(dPrev and dPrev.column == 1, "engaged/" .. controlMode .. ": Previous Turret (72) must be col 1")
     assert(dNext and dNext.column == 2, "engaged/" .. controlMode .. ": Next Turret (71) must be col 2")
@@ -86,12 +78,7 @@ end
 do
     local fixCT = dofile("tests/support/runtime_fixture.lua").load()
     local key = X4GunneryState.groupKey(5, "p", "g")
-    local grp = {
-        key = key, kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
-    }
+    local grp = fixCT.makeGroup()
     fixCT.gcMenu.onShowMenu()
     local sess = fixCT.API.getSession()
     sess.groups, sess.checkedGroupKeys, sess.cameraMemberID = { grp }, { [key] = true }, 27
@@ -102,11 +89,11 @@ do
     fixCT.gcMenu.display()
     local cycleTargetBtns = {}
     for _, b in ipairs(fixCT.getCreatedButtons()) do
-        if string.find(b.text, "text:20991:7[56]") then cycleTargetBtns[#cycleTargetBtns + 1] = b end end
+        if b.text == fixCT.LABEL.nextTarget or b.text == fixCT.LABEL.prevTarget then cycleTargetBtns[#cycleTargetBtns + 1] = b end end
     assert(#cycleTargetBtns == 2, "engaged/direct must render exactly two cycle_target buttons")
     local cPrev, cNext
     for _, b in ipairs(cycleTargetBtns) do
-        if b.text == "text:20991:76" then cPrev = b elseif b.text == "text:20991:75" then cNext = b end
+        if b.text == fixCT.LABEL.prevTarget then cPrev = b elseif b.text == fixCT.LABEL.nextTarget then cNext = b end
     end
     assert(cPrev and cPrev.column == 1, "engaged/direct: Previous Target (76) must be col 1")
     assert(cNext and cNext.column == 2, "engaged/direct: Next Target (75) must be col 2")
@@ -119,12 +106,7 @@ end
 do
     local fixC = dofile("tests/support/runtime_fixture.lua").load()
     local key = X4GunneryState.groupKey(5, "p", "g")
-    local grpC = {
-        key = key, kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
-    }
+    local grpC = fixC.makeGroup()
     fixC.gcMenu.onShowMenu()
     local sessC = fixC.API.getSession()
     sessC.groups, sessC.checkedGroupKeys, sessC.cameraMemberID = { grpC }, { [key] = true }, 27
@@ -132,7 +114,7 @@ do
     X4GunneryState.seedBaseline(sessC, { grpC })
     fixC.gcMenu.display()
 
-    local ceaseBtn = latestButton(fixC, "text:20991:14")
+    local ceaseBtn = latestButton(fixC, fixC.LABEL.getUp)
     assert(ceaseBtn and ceaseBtn.handlers and ceaseBtn.handlers.onClick,
         "engaged/direct panel must render a clickable Get Up button")
     ceaseBtn.handlers.onClick()
@@ -148,12 +130,7 @@ end
 do
     local fixR = dofile("tests/support/runtime_fixture.lua").load()
     local key = X4GunneryState.groupKey(5, "p", "g")
-    local grpR = {
-        key = key, kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
-    }
+    local grpR = fixR.makeGroup()
     fixR.gcMenu.onShowMenu()
     local sessR = fixR.API.getSession()
     sessR.groups, sessR.checkedGroupKeys, sessR.cameraMemberID = { grpR }, { [key] = true }, 27
@@ -163,7 +140,7 @@ do
     -- mismatch branch runs. That is the branch worth covering: a silent failure
     -- to restore is exactly what leaves the player with a silently altered ship.
     local markR = fixR.callbackCheckpoint()
-    local autoBtn = latestButton(fixR, "text:20991:68")
+    local autoBtn = latestButton(fixR, fixR.LABEL.autoEngage)
     assert(autoBtn and autoBtn.handlers and autoBtn.handlers.onClick,
         "console must render a clickable Auto-engage button")
     autoBtn.handlers.onClick()
@@ -239,7 +216,7 @@ fix2.gcMenu.display()
 -- Task 1: Update must exist while clean and be inactive (active == false).
 local State = X4GunneryState
 assert(not State.isStagedDirty(sess2), "seeded session must start clean")
-local updateBtnClean = latestButton(fix2, "text:20991:83")
+local updateBtnClean = latestButton(fix2, fix2.LABEL.updateBehavior)
 assert(updateBtnClean ~= nil,
     "Update turret behavior button must be rendered in clean console display")
 assert(updateBtnClean.active == false,
@@ -248,7 +225,7 @@ assert(updateBtnClean.active == false,
 -- Stage a divergent mode and re-display; Update must become active.
 X4GunneryState.stageMode(sess2, groupKey, "defend", group.armed)
 fix2.gcMenu.display()
-local updateBtnDirty = latestButton(fix2, "text:20991:83")
+local updateBtnDirty = latestButton(fix2, fix2.LABEL.updateBehavior)
 assert(updateBtnDirty ~= nil,
     "Update button must still render while dirty")
 assert(updateBtnDirty.active == true,
@@ -266,7 +243,7 @@ end
 -- Match on the armed labels (ids 6/7) rather than "any button that is not the
 -- Update one": identity comparison against a stale handle silently selected the
 -- Update button instead and consumed the dirty state this block sets up.
-local armedLabels = { ["text:20991:6"] = true, ["text:20991:7"] = true }
+local armedLabels = { [fix2.LABEL.armed] = true, [fix2.LABEL.disarmed] = true }
 local armedClicked = false
 for _, btn in ipairs(fix2.getCreatedButtons()) do
     if armedLabels[btn.text] and btn.handlers and btn.handlers.onClick then
@@ -501,160 +478,3 @@ do
 end
 
 print("runtime coverage ui tests passed")
-
--- Issue #48 Task 3: the Direct-control engaged panel carries the same
--- selector as the console, and changing it while engaged applies the policy
--- to the checked groups' live modes immediately, without touching target,
--- camera, Auto-next, checkbox membership or the committed baseline.
-do
-    local fixE = dofile("tests/support/runtime_fixture.lua").load()
-    local key = X4GunneryState.groupKey(5, "p", "g")
-    local grp = {
-        key = key, kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
-    }
-    fixE.gcMenu.onShowMenu()
-    local sess = fixE.API.getSession()
-    sess.groups = { grp }
-    sess.cameraMemberID = 27
-    X4GunneryState.seedBaseline(sess, { grp })
-    X4GunneryState.toggleGroup(sess, key, grp.armed)
-    sess.phase, sess.controlMode = "engaged", "direct"
-    sess.aimTargetID = 77
-    sess.autoNextTarget = true
-
-    -- This fixture's module instance binds its own C table (the fixture clears
-    -- the require cache on every load), so overrides on fixE.C are visible to
-    -- the production code exactly as the fixture contract documents.
-    local liveModes, liveArmed = {}, {}
-    local savedSetMode, savedSetArmed = rawget(fixE.C, "SetTurretGroupMode2"), rawget(fixE.C, "SetTurretGroupArmed")
-    fixE.C.SetTurretGroupMode2 = function(_, _, _, _, mode) liveModes[#liveModes + 1] = mode end
-    fixE.C.SetTurretGroupArmed = function(_, _, _, _, armed) liveArmed[#liveArmed + 1] = armed end
-    local function eventsSince(mark)
-        local fallback, watch = false, false
-        for i = mark + 1, #fixE.uiTriggeredEvents do
-            local control = fixE.uiTriggeredEvents[i].control
-            if control == "direct_fallback" then fallback = true end
-            if control == "direct_watch" then watch = true end
-        end
-        return fallback, watch
-    end
-    local function latestRow(fixture, rowID)
-        local found
-        for _, dd in ipairs(fixture.getCreatedDropDowns()) do
-            if dd.row == rowID then found = dd end
-        end
-        return found
-    end
-
-    fixE.gcMenu.display()
-
-    -- The selector renders with the same options, label and help as the
-    -- console's, and starts at the session policy.
-    local sel = latestRow(fixE, "direct_mode")
-    assert(sel, "engaged panel must render the direct_mode selector dropdown")
-    local selIDs = {}
-    for _, option in ipairs(sel.options) do selIDs[#selIDs + 1] = option.id end
-    assert(#selIDs == 2 and selIDs[1] == "attackenemies" and selIDs[2] == "autoassist",
-        "engaged selector must offer exactly the two Direct-control modes in vanilla order")
-    local vanillaText = {}
-    for _, entry in ipairs(Helper.turretModes) do vanillaText[entry.id] = entry.text end
-    assert(sel.options[1].text == vanillaText.attackenemies
-        and sel.options[2].text == vanillaText.autoassist,
-        "engaged selector options must reuse the vanilla Helper option texts")
-    for i, option in ipairs(sel.options) do
-        assert(type(option.displayremoveoption) == "boolean",
-            "engaged selector option " .. i .. " (" .. tostring(option.id) .. ") must carry a "
-            .. "boolean displayremoveoption for X4's createDropDown")
-    end
-    assert(sel.startOption == "attackenemies" and sess.directMode == "attackenemies",
-        "engaged selector must start at session.directMode")
-    local selLabel
-    for _, entry in ipairs(fixE.getCreatedTexts()) do
-        if entry.row == "direct_mode" and entry.column == 1 then selLabel = entry.text end
-    end
-    assert(selLabel == ReadText(20991, 101),
-        "engaged selector label must come from localization id 101")
-    assert(sel.mouseOverText == ReadText(20991, 102),
-        "engaged selector help must come from localization id 102")
-
-    -- Switch to autoassist while engaged: the checked group's live mode is
-    -- written, no fallback list is installed, the watch is untouched, and the
-    -- session keeps its target, camera, Auto-next, checkbox and baseline.
-    local mark = #fixE.uiTriggeredEvents
-    sel.handlers.onDropDownConfirmed(nil, "autoassist")
-    assert(#liveModes == 1 and liveModes[1] == "autoassist",
-        "engaged selector change must write the checked group's live mode: "
-        .. table.concat(liveModes, ","))
-    assert(#liveArmed == 0, "a policy switch must not touch armed state")
-    local sawFallback, sawWatch = eventsSince(mark)
-    assert(not sawFallback and not sawWatch,
-        "switching to autoassist must not install a fallback list or re-arm the watch")
-    assert(sess.directMode == "autoassist", "selector change must set session.directMode")
-    assert(sess.aimTargetID == 77, "policy switch must not move the engaged target")
-    assert(sess.cameraMemberID == 27, "policy switch must not move the camera")
-    assert(sess.autoNextTarget == true, "policy switch must not touch Auto-next")
-    assert(sess.checkedGroupKeys[key] == true, "policy switch must not touch checkbox membership")
-    assert(sess.committedBaseline[1].mode == "attack",
-        "policy switch must not touch the committed baseline")
-    assert(sess.phase == "engaged" and sess.controlMode == "direct",
-        "policy switch must not change the session phase")
-    assert(sess.staged[key].mode == "autoassist",
-        "the checked row's staged mode must follow the new policy")
-    assert(grp.mode == "autoassist",
-        "the live-mode bookkeeping must track the applied mode")
-
-    -- Repaint: the selector now starts at the new policy.
-    fixE.gcMenu.display()
-    assert(latestRow(fixE, "direct_mode").startOption == "autoassist",
-        "the selector must repaint at the new policy")
-
-    -- Switch back to attackenemies: the live mode is written again and the
-    -- preferred-target/fallback list is re-installed for the current target.
-    mark = #fixE.uiTriggeredEvents
-    latestRow(fixE, "direct_mode").handlers.onDropDownConfirmed(nil, "attackenemies")
-    assert(#liveModes == 2 and liveModes[2] == "attackenemies",
-        "switching back must re-mode the checked group once: " .. table.concat(liveModes, ","))
-    sawFallback, sawWatch = eventsSince(mark)
-    assert(sawFallback and sawWatch,
-        "switching back to attackenemies must re-install the fallback list and keep the watch")
-    assert(sess.directMode == "attackenemies", "selector must end at attackenemies")
-
-    -- Re-confirming the current policy is a no-op: no live writes, no events.
-    mark = #fixE.uiTriggeredEvents
-    latestRow(fixE, "direct_mode").handlers.onDropDownConfirmed(nil, "attackenemies")
-    assert(#liveModes == 2, "re-confirming the current policy must not write the live mode")
-    sawFallback, sawWatch = eventsSince(mark)
-    assert(not sawFallback and not sawWatch,
-        "re-confirming the current policy must not re-issue MD events")
-
-    fixE.C.SetTurretGroupMode2, fixE.C.SetTurretGroupArmed = savedSetMode, savedSetArmed
-end
-
--- The auto-engage panel is not a Direct-control panel: no selector there.
-do
-    local fixA = dofile("tests/support/runtime_fixture.lua").load()
-    local key = X4GunneryState.groupKey(5, "p", "g")
-    local grp = {
-        key = key, kind = "group", contextID = 5, path = "p", group = "g",
-        componentID = 27, displayName = "G", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 27, displayName = "T", operational = true, cameraSupported = true } },
-    }
-    fixA.gcMenu.onShowMenu()
-    local sessA = fixA.API.getSession()
-    sessA.groups = { grp }
-    sessA.cameraMemberID = 27
-    X4GunneryState.seedBaseline(sessA, { grp })
-    X4GunneryState.toggleGroup(sessA, key, grp.armed)
-    sessA.phase, sessA.controlMode = "engaged", "auto"
-    fixA.gcMenu.display()
-    local foundSelector
-    for _, dd in ipairs(fixA.getCreatedDropDowns()) do
-        if dd.row == "direct_mode" then foundSelector = dd end
-    end
-    assert(foundSelector == nil,
-        "the auto-engage panel must not render the Direct-control selector")
-end

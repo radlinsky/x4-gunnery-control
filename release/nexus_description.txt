@@ -95,3 +95,5 @@ MIT licensed, developed in the open at [url=https://github.com/radlinsky/x4-gunn
 [size=4][b]Shout outs[/b][/size]
 
 Thanks to @kuertee for advice on how to implement this.
+
+Thanks to Chem O'Dun for suggestions and feedback.

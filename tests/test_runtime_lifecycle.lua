@@ -7,13 +7,10 @@ local API    = fix.API
 local C      = fix.C
 
 -- A reusable group used across several lifecycle tests.
-local grp27 = {
-    key = "grp27", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 27, displayName = "G27", totalCount = 1, operationalCount = 1,
-    mode = "attack", armed = false, members = {
-        { componentID = 27, displayName = "T1", operational = true,
-          cameraSupported = true, componentKey = "27" }
-    }
+local grp27 = fix.makeGroup{
+    key = "grp27", displayName = "G27",
+    members = { { componentID = 27, displayName = "T1", operational = true,
+                  cameraSupported = true, componentKey = "27" } },
 }
 
 -- ── 36. get-up discards the session now but closes the frames a tick later ───
@@ -277,13 +274,10 @@ local sess50 = API.getSession()
 assert(sess50 ~= nil, "expected session for startAutoEngage failure test (50)")
 -- Build a group with NO operational members so cameraMember() returns nil and
 -- startAutoEngage hits its first failure exit.
-local grp50 = {
-    key = "grp50", kind = "group", contextID = 5, path = "p", group = "g",
-    componentID = 30, displayName = "Empty Group", totalCount = 1, operationalCount = 0,
-    mode = "attack", armed = false, members = {
-        { componentID = 30, displayName = "T1", operational = false,
-          cameraSupported = false, componentKey = "30" }
-    }
+local grp50 = fix.makeGroup{
+    key = "grp50", componentID = 30, displayName = "Empty Group", operationalCount = 0,
+    members = { { componentID = 30, displayName = "T1", operational = false,
+                  cameraSupported = false, componentKey = "30" } },
 }
 sess50.groups = { grp50 }
 sess50.checkedGroupKeys = { ["grp50"] = true }
