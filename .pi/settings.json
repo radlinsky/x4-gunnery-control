@@ -1,0 +1,11 @@
+{
+  "packages": [
+    {
+      "source": "npm:pi-lens",
+      "autoload": false,
+      "extensions": [
+        "-dist/index.js"
+      ]
+    }
+  ]
+}

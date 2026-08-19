@@ -33,6 +33,50 @@ discriminator for `Esc` (it is not). Reading the shipped Helper property
 documentation resolved the actual mechanism in one search. Source order matters:
 read the shipped source before designing a probe, not after.
 
+## Negative result 2026-08-11: a passive capture cannot attribute fire to a turret
+
+X4 9.00, Test Lab observability logger
+`testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml`.
+One ~10 minute free-play session on the player ship "Ray" (14 turrets, ids
+`0x6c2bc`-`0x6c2cf`): 622 STATE samples and 7252 per-turret SOLUTION samples to
+`debug.log`. n=1 ship, n=1 session.
+
+The capture did not answer the behavioural question it was built for, and the
+design cannot answer it, for two structural reasons rather than sampling ones:
+
+- The "was it hit, by whom" signal it polled, `lastattacker`, is SHIP-scoped —
+  no turret id ever appeared (see the attacker-attribution record in
+  `ui-lua-menu-camera.md`).
+- The aim-direction signal it polled, `$turret.rotation`, is STATIC — the
+  mounted base orientation, one constant value per turret for the whole session
+  (see the `$turret.rotation` record in `md-ai.md`).
+
+With no per-turret hit signal and no per-turret pointing signal, nothing in a
+mixed free-play capture separates the contribution of one turret, or one turret
+MODE, from the rest. A third confound compounded it: the sweep enumerated only
+`turrets.operational.list`, which excludes missile turrets, leaving an
+unmeasured emitter that could account for hits.
+
+Design rule that follows: any experiment intended to establish per-turret-mode
+behaviour must be CONTROLLED — isolate by construction so only one class of
+turret can possibly be firing (zero turrets in the competing mode, pilot idle so
+the main guns are silent, missile turrets accounted for) rather than capturing a
+mixed engagement and trying to disambiguate afterwards. Do not rebuild passive
+observability expecting attribution to fall out of it.
+
+Amended 2026-08-11 — this narrows the lesson, and the narrowing matters: the
+failure is specific to POLLING, not to attribution. A shipped-source spike found
+that MD does expose per-turret attribution, as event payloads rather than
+property reads. `event_object_attacked_object` carries the firing weapon in
+`param3.{2}`, and `event_weapon_fired` paired with `bullet.launcher` gives
+per-shot bore direction (records in `md-ai.md`). There is no per-turret
+current-target property anywhere in the 9.00 surface and there was never going to
+be one — selection runs in an engine-side "shoot controller" that scripts write
+to and never read back. So the corrected instrumentation rule is to LISTEN, not
+to sample. Isolation by construction is still required on top of that: a hit
+event names the turret that fired, but not the MODE that chose the target, so
+mode-level questions still need a scenario where only one mode can be acting.
+
 ## Live run 2026-08-04
 
 X4 9.00 Steam, Windows 11 with WSL2, extension `x4_gunnery_control` build marker
@@ -49,3 +93,70 @@ X4 9.00 Steam, Windows 11 with WSL2, extension `x4_gunnery_control` build marker
 - The native "External Target View activated" notice reappears because the session is
   recreated on every Map close, which re-activates the turret camera. Suspect redundant
   camera activation before suspecting the notice itself.
+
+## Negative masking fixture 2026-08-11: port-side target did not mask port-side turrets
+
+X4 9.00, player-owned Boron Ray, Test Lab scenario
+`issue-1-on-solution-masked-clear-r1`, one session on 2026-08-11. The exact
+selected group was raw `group_front_up_left`, members `0x204df21` and
+`0x204df32`. Target A spawned 3 km forward, 1.2 km port and at hull level;
+target B used the same range/bearing at 1.2 km elevation; C was the elevated
+15 km range control.
+
+This did NOT stage LINE OF FIRE BLOCKED. Against A, the MD predicate reported `los_ex=1` and
+`inrange=1` for both selected turrets. `0x204df21` hit A three times during the
+initial 11-second hold. `0x204df32` did not fire in that interval, but later hit
+the unchanged A when selected C was OUT OF RANGE. The late hit proves A was a
+valid shot for that turret too; the initial asymmetry was consistent with slew
+time, not masking. The owner independently reported that A was visibly not
+masked.
+
+Controls worked: both selected turrets eventually hit elevated B; both reported
+`inrange=0` against C at about 15 km and fell back to A. Do not use this run as
+evidence for or against whether `check_line_of_sight excludeself="true"`
+detects own-hull masking.
+
+Design corrections: put a candidate across the hull from the selected mounts,
+and capture a second automatic snapshot only after the same target has remained
+selected for at least 20 seconds. A short no-hit window is not a valid masking
+signal on a traversing turret.
+
+**Follow-up negative: cross-hull placement also did not mask.**
+
+The immediate follow-up in the same X4 9.00 session used scenario
+`issue-1-on-solution-cross-hull-r2`: A was moved from 1.2 km port to 1.2 km
+starboard, still 3 km forward and at hull level. This also did NOT stage
+LINE OF FIRE BLOCKED. Immediate and settled (20-second) snapshots both reported `los_ex=1`
+and `inrange=1` for exact selected members `0x204df21` and `0x204df32`, and
+both turrets struck A roughly 15--19 seconds after designation. The owner also
+reported that A was visibly not masked.
+
+Do not infer own-hull masking from a ship-local point that merely lies across
+the hull in one projection. The next general obstruction test should use a
+separate, named capital ship centred between the firing ship and target. That
+can establish the externally blocked-line-of-fire case, but it still cannot
+answer whether `check_line_of_sight excludeself="true"` detects the firing
+ship's own hull.
+
+## Live masking fixture 2026-08-11: independent obstruction and range controls
+
+X4 9.00, player-owned Boron Ray, Test Lab scenario
+`issue-1-on-solution-blocker-r3`, one session on 2026-08-11. Exact selected
+group `group_front_up_left` contained members `0x204df21` and `0x204df32`.
+The fixture placed a player-owned Argon XL carrier 2 km forward as an
+intervening obstruction; hostile A was centred behind it at 4 km, clear-sky B
+was 4 km forward and 1.2 km up, and C was 15 km forward and 1.2 km up.
+
+Immediate and settled snapshots agreed for both selected turrets:
+
+- A: `los_ex=0`, `inrange=1` -- LINE OF FIRE BLOCKED only.
+- B: `los_ex=1`, `inrange=1` -- clear and within weapon range. Both selected
+  turrets produced attributed hits on B.
+- C: `los_ex=1`, `inrange=0` -- OUT OF RANGE only. Although C appeared nearly
+  aligned with the carrier to the owner, the per-turret checks establish that
+  neither selected member was masked.
+
+This is live evidence that `check_line_of_sight excludeself="true"` can
+distinguish an intervening ship obstruction for each exact selected turret,
+independently of the shipped range predicate. It remains no evidence about
+masking by the firing ship's own hull.

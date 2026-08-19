@@ -67,4 +67,16 @@ grep -Fq 'if errorlevel 1 goto installfailed' "$launcher"
 # WSL UNC path substring guard must be present
 grep -Fq '"\\wsl.localhost\"' "$launcher"
 
+# Tail-window spawn block assertions
+grep -Fq 'if not defined X4GC_TAIL_LOG goto notail' "$launcher"
+grep -Fq 'if not defined X4GC_DISTRO' "$launcher"
+grep -Fq 'start "X4 Gunnery Log" wsl.exe -d %X4GC_DISTRO% -- "%X4GC_TAILER%"' "$launcher"
+# Tail script path must be built the same way as the installer path.
+grep -Fq 'tail-gunnery-log.sh' "$launcher"
+# X4GC_TAIL_LOG must NOT be in WSLENV (it is a Windows-side gate only).
+if grep -v '^ *rem ' "$launcher" | grep -i 'WSLENV' | grep -i 'X4GC_TAIL_LOG'; then
+  echo "FAIL: X4GC_TAIL_LOG appears in WSLENV inside launch-x4-dev.bat" >&2
+  exit 1
+fi
+
 echo "Windows development launcher checks passed"

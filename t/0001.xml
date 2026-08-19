@@ -4,7 +4,7 @@
     <t id="1">Gunnery Control</t><t id="2">Current Target</t><t id="3">No Target</t>
     <t id="4">Turret Group</t><t id="5">Mode</t><t id="6">Armed</t><t id="7">Disarmed</t>
     <t id="8">Operational</t><t id="9">Damaged</t><t id="10">Destroyed</t>
-    <t id="11">Watch</t><t id="12">Engage</t><t id="13">Cease Engagement</t>
+    <t id="11">Watch</t><t id="12">Engage</t>
     <t id="14">Get Up</t><t id="15">Refresh</t><t id="16">Camera unavailable</t>
     <t id="17">Ship is not player-owned</t><t id="18">No turrets installed</t>
     <t id="19">Engage arms the linked turret group and tells X4's auto-assist AI to fire at the selected target.</t>
@@ -35,12 +35,20 @@
     <t id="68">Auto-engage</t><t id="69">Direct-control</t>
     <t id="70">Select at least one turret group.</t>
     <t id="71">Next Turret</t><t id="72">Previous Turret</t><t id="73">Engaged Target</t>
-    <t id="74">Check turret groups, then choose Auto-engage (camera only) or Direct-control (pick a target for all checked groups).</t>
+    <t id="74">1. Tick the turret groups you want to work with. 2. Auto-engage watches them without giving orders; Direct-control lets you pick their target. 3. Ticking a group applies the selected Direct-control turret mode to it. That and any other change here is undone when you get up, unless you press Update turret behavior.</t>
     <t id="75">Next Target</t><t id="76">Previous Target</t><t id="77">Select all</t>
     <t id="78">Auto-next Target when destroyed</t>
     <t id="79">Turret groups restored to their previous settings.</t>
     <t id="80">Gunnery Control disengaged.</t>
-    <t id="81">All Turrets: Prefer My Target</t>
-    <t id="82">Release Other Turrets</t>
+    <t id="83">Update turret behavior</t>
+    <t id="84">Class</t><t id="85">Macro</t>
+    <t id="86">Any</t><t id="87">Surface type</t><t id="88">Surface equipment</t>
+    <t id="89">ENGAGEABLE</t><t id="90">Selected turrets</t>
+    <t id="91">Current aim point</t><t id="92">Hull</t><t id="93">Size</t>
+    <t id="94">Previous Page</t><t id="95">Next Page</t><t id="96">Page</t>
+    <t id="97">Refresh every 10 seconds</t><t id="98">Shield</t><t id="99">Hull</t>
+    <t id="100">UNKNOWN</t>
+    <t id="101">Direct-control turret mode</t>
+    <t id="102">The engine mode Direct-control arms checked turret groups with. Selecting an ordinary mode on a checked group takes that group out of Direct-control.</t>
   </page>
 </language>

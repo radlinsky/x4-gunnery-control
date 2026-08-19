@@ -1,102 +1,87 @@
-[i]Paste this into the Workshop item's description field on the website.
-WorkshopTool ignores name and description on update unless -namedesc up is
-passed, so what you paste there survives every release. Keep it in step with
-release/RELEASE_NOTES.md by hand; the two audiences read the same text.[/i]
+[h2]Description[/h2]
 
-I never liked the vanilla gunnery control chair - you sit down and get the same
-boring menu. This mod replaces it with a real turret console.
+Makes the Access Gunnery Control chair worth sitting in. Instead of the vanilla secondary-control menu, you get a turret console, direct fire orders, and four camera views of your turrets at work.
 
-[h2]New in this release[/h2]
-
-[list]
-[*][b]New (Direct-control) engagement panel buttons[/b]:
-[*][b]All Turrets: Prefer My Target[/b] Normally, only the turret group(s) you
-selected to control will try and fire at your target. If your target goes out
-of range from any of your selected turrets, those turrets will sit idle. This
-button tells [b]every[/b] turret that can hit your chosen target to do so
-(including the turrets outside your selected group). Turrets that cannot find a
-firing solution for your target instead find the next best enemy target
-in-range.
-[*][b]Release Other Turrets[/b] Turns off the ship-wide "Prefer my target"
-mode.
-[*][b]Bug fix[/b]
-[*]Direct-control now works on M ships lacking a turret camera.
-[*]If the camera cannot attach for a target-view request, target selection
-stays open so you can continue playing instead of being kicked out.
-[*]Turret groups with duplicate names are now still controllable.
-[*]The group [b]Mode[/b] column now refreshes correctly after [b]Cease
-Engagement[/b].
-[/list]
+https://www.youtube.com/watch?v=pn1kFxXdgzU
 
 [h2]What you can do[/h2]
 
-[b]Pick your turret groups.[/b] Every physical turret group gets a row with a
-checkbox. Check the ones you want, or use [b]Select all[/b]. Names read like
-[i]Front Upper Left[/i], with the turret type when the game exposes it. You can
-set each group's [b]Mode[/b] and [b]Armed[/b] state right there, same as on the
-ship's behaviour tab.
+Sitting down opens the console. Every turret group gets a checkbox, or you can use Select all. You can also change each group's Mode and Armed state from the same screen.
 
-Then two buttons light up:
+Once you select at least one group, two controls become available.
 
-[b]Auto-engage[/b] - changes nothing. Your turrets keep doing what they were
-already doing. This is just for sitting back and watching them work.
+[b]Auto-engage[/b] issues no fire orders. Your turrets still choose their own targets. The camera cycles only through turrets in the selected groups.
 
-[b]Direct-control[/b] - you tell the checked groups what to shoot.
-[b]Select Engagement Target[/b] lists ships and stations in radar range; click
-one and its hull is engaged immediately. You can also point every checked group
-at a specific surface element instead - a turret, a shield generator, an engine.
+[b]Direct-control[/b] lets you tell the selected groups what to shoot. Select Engagement Target lists ships and stations in radar range, along with class/type, distance, and an N / total ENGAGEABLE count. Fully ENGAGEABLE candidates are listed first. Select a ship or station to engage its hull, or switch to one of its surface elements.
+
+While engaged, the surface element browser keeps the current aim point pinned and lets you switch between the parent hull and operational turret, shield, and engine surface elements. You can filter by Turret / Shield / Engine. Surface elements are ordered largest-first (XL → L → M → S → XS), then by type and distance, and are paged 20 at a time. Each surface element shows distance and its own ENGAGEABLE count. The pinned aim point also shows shield and hull status. You can refresh manually or enable an optional 10-second automatic refresh.
+
+The ENGAGEABLE count is a geometry check, not a guarantee that a turret will fire. A turret counts as ENGAGEABLE when its known traverse arc covers the aim direction, the target is within weapon range, and the line of fire from the muzzle is clear past your own ship. Turrets with unknown arc data stay in the denominator and are reported as UNKNOWN. Readiness, fire authorization, intercept, and actual firing are separate.
+
+For example, 3 / 4 ENGAGEABLE means 3 of the 4 selected/evaluated turrets currently pass that geometry check.
 
 [list]
-[*][b]Auto-next Target when destroyed[/b] is on by default: when the target
-dies, everything moves to the next one automatically. Turn it off and the mod
-stops and asks you to pick the next target yourself, which feels a lot more like
-actually manning the gun.
-[*][b]Next Target[/b] / [b]Previous Target[/b] step through the same list
-without reopening the browser.
+[*]Auto-next Target when destroyed is on by default. When the current target dies, the turrets and camera automatically select the next target (or surface element). Turn it off if you prefer to choose the next one yourself.
+[*]Next Target / Previous Target step through the same candidate list without reopening the browser.
+[*]Choose the Direct-control turret mode, on the main console or the Direct-control panel: [b]Attack all enemies[/b] keeps your target as the preferred target with the other enemies in range as fallback, or [b]Attack my current enemy[/b] sticks strictly to your selected target (turrets that cannot engage it may sit idle).
 [/list]
 
-[h2]Four ways to watch[/h2]
+Your previous turret settings are restored when you stand up, unless you click [b]Update turret behavior[/b] on the main console first. That makes the current Mode/Armed settings stick after you leave the chair.
+
+Saving and loading keeps your seat. Save while engaged and loading that save puts you back at the same turret, watching the same target, with the same groups selected.
+
+[h2]Four viewing modes[/h2]
 
 [list]
-[*][b]Turret POV manual[/b] / [b]Target POV manual[/b] - camera on the turret,
-or on what it is shooting at, with the normal UI still up. Hold Shift + middle
-mouse button to look around.
-[*][b]Turret POV cinematic[/b] / [b]Target POV cinematic[/b] - the same two
-viewpoints through the game's cutscene camera, which hides all UI and aims for
-you. Esc returns you to the manual panel.
-[*][b]Next Turret[/b] / [b]Previous Turret[/b] cycle the camera through every
-operational turret in the checked groups. This only moves the camera; it never
-changes what is being shot at.
+[*]Turret POV manual / Target POV manual: camera on the turret, or on what it is shooting at, with the normal UI still visible. Hold Shift + middle mouse button to look around freely.
+[*]Turret POV cinematic / Target POV cinematic: the same two viewpoints through the game's cutscene camera. It hides the UI and aims the camera for you. Press Esc to return to the manual panel.
+[*]Next Turret / Previous Turret cycle through every operational turret in the selected groups. This only moves the camera.
 [/list]
 
-[h2]Leaving the seat[/h2]
-
-[b]Cease Engagement[/b], [b]Get Up[/b], closing the console, undocking, or
-changing ships puts every group back exactly as you found it, and a short popup
-confirms it.
-
-[h2]Things to know[/h2]
+[h2]Limitations[/h2]
 
 [list]
-[*][b]This is not manual aiming.[/b] X4 still decides barrel traverse, lead,
-when to fire, and whether a target is legal to attack. You say [i]what[/i], not
-[i]how[/i].
-[*][b]Turret POV cinematic often clips into your own hull[/b] and looks rough.
-Target POV cinematic is the prettier of the two.
-[*]On some S/M ships, a turret-target camera request can resolve to a wider
-ship-level view instead of a tight turret component view.
-[*]If two turret groups share the same name, member rows can appear under the
-wrong name and Direct-control can open the camera on a sibling group's
-representative turret. Commands still apply to the correct group.
-[*]Cinematic views hide the entire UI, including this mod's panel.
+[*]This is not manual aiming. Direct-control tells the turrets what to hit, not how to aim.
+[*]Some S/M ships use a ship camera instead of a turret camera. When a turret camera is not available, Gunnery Control uses a ship camera instead. This is often the case for S/M ships. Direct-control, target selection, and Auto-engage still work normally.
+[*]Turret POV cinematic can clip the camera into your own hull. Target POV cinematic usually looks better.
+[*]The confirmation popup that appears when you stand up also works around an X4 bug that can leave Esc unresponsive after a camera session. If help texts are disabled in the game options, that workaround is also disabled. Opening and closing another menu, such as the map, restores Esc.
+[*]ENGAGEABLE is a targeting aid, not a firing guarantee. A turret can pass the geometry check and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. UNKNOWN turrets may still fire when their arc data are unavailable to the mod.
+[*]Duplicate-named groups can mislabel members in the UI. Commands still reach the correct group.
 [/list]
+
+[h2]Reporting problems[/h2]
+
+If Gunnery Control is not working correctly, please send me a debug log with the report.
+
+In Steam, right-click X4 Foundations in your Library, choose Properties, and add this under General > Launch Options:
+
+[code]-debug all -logfile debug.log[/code]
+
+For GOG or another launcher, add the same arguments to X4's launch command.
+
+Start X4, reproduce the problem, then quit the game. On Windows, the log is usually here:
+
+[code]C:\Users\<your-name>\Documents\Egosoft\X4\<number>\debug.log[/code]
+
+Attach debug.log to a [url=https://github.com/radlinsky/x4-gunnery-control/issues]GitHub issue[/url] and briefly describe what you were doing when the problem occurred. If GitHub will not accept the .log file, zip it first.
+
+X4 replaces debug.log every time it launches, so save or send the log before starting the game again.
 
 [h2]Requirements[/h2]
 
 [list]
 [*]X4 Foundations 9.00 or newer.
-[*][url=https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743]kuertee
-UI Extensions and HUD[/url] 9.00 or newer. This is a hard requirement - X4 will
-not load Gunnery Control without it. Steam lists it as a required item and
-subscribes you to it along with this mod.
+[*][url=https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743]kuertee UI Extensions and HUD[/url].
+[*][url=https://steamcommunity.com/sharedfiles/filedetails/?id=3770927339]Print Extension List[/url].
 [/list]
+
+[h2]Source[/h2]
+
+MIT licensed, developed in the open at [url=https://github.com/radlinsky/x4-gunnery-control]github.com/radlinsky/x4-gunnery-control[/url]. Bug reports and pull requests welcome.
+[list]
+[*][url=https://github.com/radlinsky/x4-gunnery-control/issues]Known issues and bug tracker on GitHub[/url]
+[/list]
+
+[h2]Shout outs[/h2]
+
+Thanks to @kuertee for advice on how to implement this.

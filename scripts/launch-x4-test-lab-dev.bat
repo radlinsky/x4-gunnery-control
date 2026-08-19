@@ -13,5 +13,10 @@ rem that line the variable never reaches the installer running inside WSL.
 set "X4GC_INSTALL_TESTLAB=1"
 set "WSLENV=X4GC_INSTALL_TESTLAB:%WSLENV%"
 
+rem X4GC_TAIL_LOG tells launch-x4-dev.bat to open a second console window running
+rem tail-gunnery-log.sh alongside X4. This variable is consumed by the .bat on the
+rem Windows side before any wsl.exe call, so it does NOT need to be in WSLENV.
+set "X4GC_TAIL_LOG=1"
+
 call "%~dp0launch-x4-dev.bat" %*
 exit /b %errorlevel%

@@ -1,0 +1,491 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Gunnery Control Test Lab - Fire-Control Observability Logger
+  Developer-only.  Belongs in testlab, NOT in the shipped mod.
+
+  PURPOSE
+  docs/FIRE_CONTROL_BEHAVIOR.md carries rows marked UNTESTED and UNKNOWN.
+  This script answers those during ordinary free play so a capture can be read
+  back and a row promoted to LIVE.
+
+  WHY THIS IS EVENT DRIVEN AND NOT A POLLING SWEEP
+  The first version of this file polled every turret once a second and logged
+  mode, two raycasts, range and rotation.  It ran for ten minutes on a live
+  ship, produced 7252 per-turret samples, and could not answer the question at
+  all.  Three findings from that capture killed the design, all now recorded in
+  the research KB, and all three are why the code below looks nothing like it:
+
+    1. $target.lastattacker resolves to the SHIP, never to a turret.  Across the
+       whole capture not one of the 14 turret component ids ever appeared.  So
+       "the target got hit" could not be attributed to the turret that hit it,
+       which is precisely what every open row needs.
+    2. $turret.rotation is the MOUNTED BASE, not the live barrel.  Each turret
+       reported exactly one distinct yaw for ten minutes, through hard
+       maneuvering.  Aim direction carried zero information.
+    3. check_line_of_sight with excludeself="false" reported blocked 7252 times
+       out of 7252.  Only excludeself="true" carries signal, and by itself it
+       cannot separate a turret that held fire from one that had no shot.
+
+  event_object_attacked_object replaces all of it.  common.xsd:13058 documents
+  param3 as [attacked component, weapon], so event.param3.{2} IS the turret
+  that landed the hit - the attribution lastattacker could not give.  Shipped
+  proof that param3.{2} really is the weapon and not something else:
+  md/notifications.xml:1515 reads that exact slot and passes it straight into
+  change_relation_on_attack weapon=, whose weapon attribute is common.xsd:21620.
+  object= is the ATTACKER, not the victim: common.xsd:13058 says so and
+  md/cover.xml:271-273 pairs it with event_object_attacked under the comment
+  "if we either attack something or are attacked by something".
+
+  So one HIT line now carries what the entire sweep could not: which turret
+  fired, what mode it was in, and what it hit.  A Defend turret hitting the
+  preferred target is a single greppable line.
+
+  WHAT IS DELIBERATELY NOT HERE
+  event_weapon_fired (common.xsd:16836) would also catch shots that MISS, and
+  diffing it against the hits would give a per-turret hit rate.  It is left out:
+  it fires on every trigger pull, so fourteen turrets in a sustained engagement
+  would swamp the log, and the only row it would help with (NO FIRING SOLUTION) is not
+  one of the open ones.  Add it if that row ever matters.
+
+  THE CENSUS, AND WHY IT SURVIVED THE REWRITE
+  Hits are positive evidence only.  The Hold fire row needs the opposite: proof
+  that a turret which WAS in holdfire never appeared as an attacker.  That needs
+  a denominator, so a mode census still runs, but stripped to modes alone - no
+  raycasts, no rotation, no range, one line per sample rather than one per
+  turret, every 10s rather than every 1s.
+
+  It sweeps weapons.operational.list and missileturrets.operational.list.  The
+  old sweep used only turrets.operational.list and thereby skipped missile
+  turrets entirely, which are a separate property list
+  (scriptproperties.xml:542-545) - an unmeasured emitter that could have
+  accounted for hits nobody could explain.  turret derives from weapon
+  (scriptproperties.xml:1461-1463), so the two explicit lists cover regular
+  weapons/turrets, missile turrets and main guns without claiming that one
+  property list contains all emitters.
+
+  TRANSPORT
+  Same flat-scalar contract as the scenario script: the engine prepends '$' to
+  every Lua string key (research KB, "Lua->MD AddUITriggeredEvent transport
+  contract", live-tested 2026-08-04).  Component ids arrive as components
+  because Lua converts them with ConvertStringToLuaID.
+
+    observe_toggle {enabled = true|false}
+    observe_mark   {}
+    observe_state  {softtgt =, aimtgt =}
+
+  observe_state is only sent while a Direct-control session exists.  In plain
+  free play it never arrives and the log simply carries player.target, which is
+  correct rather than degraded.
+
+  THE SNAPSHOT
+  The old per-second sweep is not gone, it is demand-driven: "Mark moment" now
+  fires one burst of per-weapon geometry lines. Besides the established
+  root-origin external LOS check, it captures the target in each mount's local
+  frame, the reported muzzle position, and two experimental muzzle-origin
+  raycasts. This is the minimum single-restart probe for static mechanical arc
+  prediction and own-hull masking; none of the experimental fields is promoted
+  to a verdict in the logger.
+
+  VOCABULARY
+  The snapshot logs los_ex, muzzle LOS, local geometry, inrange and ready as raw
+  values and stops there.
+  Mapping them to ENGAGEABLE / OUT OF RANGE / CANNOT BEAR / LINE OF FIRE BLOCKED is the
+  analyst's job: the engine exposes no arc test at all, so CANNOT BEAR can only
+  ever be read off as "aimable and in range yet never firing", which is an
+  interpretation and must not be baked into a log line.
+
+  RELOAD NOTE: any change to THIS file requires a full game restart, because
+  testlab/ md is only reloadable together with the rest of the extension.
+  See docs/RELOADING.md.
+-->
+<mdscript name="X4GunneryTestLabObserve" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../../#modding/xsd/md.xsd">
+  <cues>
+    <cue name="ObserveRoot">
+      <actions>
+        <!-- Off by default.  A long play session must not flood debug.log
+             because the extension happens to be installed; nothing is written
+             until the owner arms it from the Test Lab menu. -->
+        <set_value name="$Enabled" exact="false"/>
+        <set_value name="$MarkCount" exact="0"/>
+        <!-- Seeded so the census time guard has something to compare against on
+             its very first check.  Derived from player.age rather than written
+             as a bare -1 so it carries the time datatype: player.age is a time
+             (suffix s, scriptproperties.xml:2396) and comparing a time against
+             a plain number is a type error, not a false. -->
+        <set_value name="$LastSample" exact="player.age - 1s"/>
+      </actions>
+      <cues>
+
+        <!-- ObserveToggle
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_toggle",
+               {enabled = true|false})
+             The master switch.  Resetting ObserveArm is what actually starts
+             and stops logging: arming re-evaluates ObserveArm's condition,
+             which activates or deactivates both listener cues beneath it. -->
+        <cue name="ObserveToggle" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_toggle'"/>
+          </conditions>
+          <actions>
+            <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
+            <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
+            <reset_cue cue="ObserveArm"/>
+          </actions>
+        </cue>
+
+        <!-- ObserveMark
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
+             Stamps the interesting instant so the window is greppable
+             afterwards.  The label is generated here as an incrementing
+             counter rather than typed by the owner: mid-combat the whole point
+             is one click, and "which mark was that" is answered by reading the
+             surrounding lines.  Marks are accepted even while logging is off,
+             so a mark is never silently swallowed. -->
+        <cue name="ObserveMark" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_mark'"/>
+          </conditions>
+          <actions>
+            <set_value name="ObserveRoot.$MarkCount" exact="ObserveRoot.$MarkCount + 1"/>
+            <set_value name="$Label" exact="'mark_' + ObserveRoot.$MarkCount"/>
+            <debug_text text="'[X4GC TEST MARK] label=' + $Label + ' enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
+
+            <!-- The one-shot engageability snapshot.  This is the sweep that used to
+                 run once a second, kept only as a burst fired by hand at the
+                 instant the owner is looking at something wrong.
+
+                 It exists because HIT lines answer "what did the turret shoot"
+                 but never "why is this one not shooting".  LINE OF FIRE BLOCKED and
+                 CANNOT BEAR are indistinguishable from the cockpit - both look like a
+                 turret pointed at the target holding its fire - yet the doc
+                 says they behave oppositely, CANNOT BEAR switching away and
+                 LINE OF FIRE BLOCKED staying put.  los_ex plus inrange is what separates
+                 them.
+
+                 Root-origin excludeself="false" was measured returning blocked
+                 7252 times out of 7252 and stays removed. The two new muzzle
+                 raycasts deliberately use $Weapon.barrelposition as an origin
+                 offset: whether that escapes the parent hull is the experiment.
+                 Mount rotation is static, which is exactly what the asset-based
+                 trainable-arc calculation needs as its reference frame.
+
+                 The whole cost is fourteen raycasts on a button press, so
+                 there is no gate on $Enabled: a snapshot must never be lost
+                 because logging happened to be switched off. -->
+            <do_if value="player.ship">
+              <set_value name="$Target" exact="null"/>
+              <!-- A live Gunnery Control session supplies the target it
+                   actually ordered. It outranks the engine soft target, which
+                   can briefly lag during restore or surface-component changes.
+                   Free play has no AimTarget, so retain soft target then the
+                   hard player target as its fallback chain. -->
+              <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
+              </do_if>
+              <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+              </do_elseif>
+              <do_elseif value="player.target?">
+                <set_value name="$Target" exact="player.target"/>
+              </do_elseif>
+
+              <do_if value="$Target">
+                <do_for_each name="$Weapon" in="player.ship.weapons.operational.list">
+                  <check_line_of_sight name="$LosEx" object="$Weapon" target="$Target" excludeself="true" useaimtarget="true"/>
+                  <check_line_of_sight name="$MuzzleLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="true" useaimtarget="true"/>
+                  <check_line_of_sight name="$MuzzleLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="false" useaimtarget="true"/>
+                  <!-- The engine's own definition of in-range, verbatim from
+                       shipped combat AI: bounding-box distance under max fire
+                       range, no size term.  There is no arc term anywhere in
+                       vanilla's firing-solution test, which is why CANNOT BEAR
+                       has to be read off as "aimable but never firing" rather
+                       than measured directly.  $Dist keeps the raw
+                       component-distance reading for comparison. -->
+                  <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>
+                  <set_value name="$Relative" exact="$Target.relativeposition.{$Weapon}"/>
+                  <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                  <!-- Compare the raw component-origin bearing with the XSD's
+                       weapon-consistent aim-target bearing. The local-space
+                       form is the candidate production pitch predicate; this
+                       remains diagnostic until a live capture agrees. -->
+                  <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
+                    <position object="$Weapon" space="$Weapon"/>
+                  </create_orientation>
+                  <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
+                    + ' t=' + player.age
+                    + ' weapon=' + $Weapon
+                    + ' macro=' + $Weapon.macro
+                    + ' mode=' + $Weapon.mode
+                    + ' isturret=' + $Weapon.isclass.turret
+                    + ' ready=' + $Weapon.isreadytofire
+                    + ' los_ex=' + $LosEx
+                    + ' muzzle_los_ex=' + $MuzzleLosEx
+                    + ' muzzle_los_self=' + $MuzzleLosSelf
+                    + ' rel_x=' + $Relative.x
+                    + ' rel_y=' + $Relative.y
+                    + ' rel_z=' + $Relative.z
+                    + ' rel_yaw=' + $Relative.rotation.yaw
+                    + ' rel_pitch=' + $Relative.rotation.pitch
+                    + ' aim_yaw=' + $AimLocal.yaw
+                    + ' aim_pitch=' + $AimLocal.pitch
+                    + ' mount_yaw=' + $Weapon.rotation.yaw
+                    + ' mount_pitch=' + $Weapon.rotation.pitch
+                    + ' mount_roll=' + $Weapon.rotation.roll
+                    + ' barrel_x=' + $Barrel.x
+                    + ' barrel_y=' + $Barrel.y
+                    + ' barrel_z=' + $Barrel.z
+                    + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
+                    + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
+                    + ' dist=' + $Dist
+                    + ' maxrange=' + $Weapon.maxfirerange"/>
+                </do_for_each>
+                <do_for_each name="$Weapon" in="player.ship.missileturrets.operational.list">
+                  <check_line_of_sight name="$LosEx" object="$Weapon" target="$Target" excludeself="true" useaimtarget="true"/>
+                  <check_line_of_sight name="$MuzzleLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="true" useaimtarget="true"/>
+                  <check_line_of_sight name="$MuzzleLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="false" useaimtarget="true"/>
+                  <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>
+                  <set_value name="$Relative" exact="$Target.relativeposition.{$Weapon}"/>
+                  <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                  <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
+                    <position object="$Weapon" space="$Weapon"/>
+                  </create_orientation>
+                  <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
+                    + ' t=' + player.age
+                    + ' weapon=' + $Weapon
+                    + ' macro=' + $Weapon.macro
+                    + ' mode=' + $Weapon.mode
+                    + ' isturret=' + $Weapon.isclass.turret
+                    + ' ready=' + $Weapon.isreadytofire
+                    + ' los_ex=' + $LosEx
+                    + ' muzzle_los_ex=' + $MuzzleLosEx
+                    + ' muzzle_los_self=' + $MuzzleLosSelf
+                    + ' rel_x=' + $Relative.x
+                    + ' rel_y=' + $Relative.y
+                    + ' rel_z=' + $Relative.z
+                    + ' rel_yaw=' + $Relative.rotation.yaw
+                    + ' rel_pitch=' + $Relative.rotation.pitch
+                    + ' aim_yaw=' + $AimLocal.yaw
+                    + ' aim_pitch=' + $AimLocal.pitch
+                    + ' mount_yaw=' + $Weapon.rotation.yaw
+                    + ' mount_pitch=' + $Weapon.rotation.pitch
+                    + ' mount_roll=' + $Weapon.rotation.roll
+                    + ' barrel_x=' + $Barrel.x
+                    + ' barrel_y=' + $Barrel.y
+                    + ' barrel_z=' + $Barrel.z
+                    + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
+                    + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
+                    + ' dist=' + $Dist
+                    + ' maxrange=' + $Weapon.maxfirerange"/>
+                </do_for_each>
+                <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
+                  + ' t=' + player.age
+                  + ' end tgt=' + $Target
+                  + ' tgtname=' + $Target.knownname
+                  + ' tgtsize=' + $Target.size
+                  + ' pilot=' + (if player.ship.pilot then player.ship.pilot.command.value else 'none')"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label + ' t=' + player.age + ' end tgt=none'"/>
+              </do_else>
+            </do_if>
+          </actions>
+        </cue>
+
+        <!-- ObserveState
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_state",
+               {softtgt =, aimtgt =})
+             The only two facts MD cannot see for itself: the engine SOFT target
+             (MD has player.target and no soft equivalent - scriptproperties.xml
+             has no player.softtarget at all) and the mod session's
+             aimTargetID.  Pushed from Lua only while a
+             Direct-control session exists.  These are what make a HIT line
+             answer "did it shoot MY target" rather than merely "it shot". -->
+        <cue name="ObserveState" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_state'"/>
+          </conditions>
+          <actions>
+            <set_value name="ObserveRoot.$SoftTarget" exact="@event.param3.$softtgt"/>
+            <set_value name="ObserveRoot.$AimTarget" exact="@event.param3.$aimtgt"/>
+          </actions>
+        </cue>
+
+        <!-- ObserveArm
+             The gate.  Its children only exist while it has fired, so switching
+             logging off genuinely detaches both listeners rather than leaving
+             them running behind an if.
+
+             It also binds $Ship once, here, because event_object_attacked_object
+             resolves object= when the listening cue activates.  Re-arming on
+             every toggle is therefore what keeps the listener pointed at the
+             ship the owner is actually flying after a ship change.  Flip the
+             switch off and on again after changing ships.
+
+             checkinterval is mandatory here, not a pacing choice.  MD refuses
+             to load a cue whose conditions are all non-event:
+               "Found non-event condition 'check_value', event condition
+                required!"
+             which is exactly how the first run of this file failed - the toggle
+             logged enabled=1 and then nothing else ever appeared, because both
+             listeners hang off a cue the engine had rejected.  One boolean test
+             a second is free, and the listeners underneath are events, so they
+             still cost nothing between hits. -->
+        <cue name="ObserveArm" checkinterval="1s">
+          <conditions>
+            <check_value value="ObserveRoot.$Enabled"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="player.ship"/>
+            <create_group groupname="$FiringWeapons"/>
+            <add_to_group groupname="$FiringWeapons" list="$Ship.weapons.operational.list"/>
+            <add_to_group groupname="$FiringWeapons" list="$Ship.missileturrets.operational.list"/>
+            <debug_text text="'[X4GC TEST OBSERVE] armed ship=' + $Ship + ' name=' + $Ship.knownname + ' t=' + player.age"/>
+          </actions>
+          <cues>
+
+            <!-- A trigger-pull is the prospective arc predicate's ground
+                 truth. event.object names the exact emitter; event.param is
+                 the projectile, whose rotation is the only shipped route to a
+                 real bore direction at the instant of fire. -->
+            <cue name="ObserveFired" instantiate="true">
+              <conditions>
+                <event_weapon_fired group="$FiringWeapons"/>
+              </conditions>
+              <actions>
+                <set_value name="$Aimed" exact="null"/>
+                <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                  <set_value name="$Aimed" exact="ObserveRoot.$AimTarget"/>
+                </do_if>
+                <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                  <set_value name="$Aimed" exact="ObserveRoot.$SoftTarget"/>
+                </do_elseif>
+                <do_elseif value="player.target?">
+                  <set_value name="$Aimed" exact="player.target"/>
+                </do_elseif>
+                <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
+                <debug_text text="'[X4GC TEST FIRED] t=' + player.age
+                  + ' weapon=' + event.object
+                  + ' macro=' + event.object.macro
+                  + ' mode=' + event.object.mode
+                  + ' bullet=' + event.param
+                  + ' bullet_yaw=' + @event.param.rotation.yaw
+                  + ' bullet_pitch=' + @event.param.rotation.pitch
+                  + ' bullet_roll=' + @event.param.rotation.roll
+                  + ' aimed=' + (if $Aimed then $Aimed else 'none')
+                  + ' aim_error_yaw=' + (if $TargetBearing then $TargetBearing.rotation.yaw else 'none')
+                  + ' aim_error_pitch=' + (if $TargetBearing then $TargetBearing.rotation.pitch else 'none')
+                  + ' aim_distance=' + (if $TargetBearing then $TargetBearing.length else 'none')"/>
+              </actions>
+            </cue>
+
+            <!-- ObserveHit
+                 The whole point of the rewrite.  One line per hit landed BY the
+                 player ship, naming the weapon that landed it.
+
+                 event.param3.{2} is the weapon, event.param3.{1} the component
+                 of the victim that was struck, event.param the victim itself,
+                 event.param2 the kill method (common.xsd:13058).  param3.{2} is
+                 read through @ because a hit with no weapon attribution is
+                 survivable - a missing turret id is worth one line saying so,
+                 not a dead cue.
+
+                 istgt is the field the open rows turn on: it is true when the
+                 thing this weapon hit is the target Direct-control was aiming
+                 at.  A line with mode=weaponmode.defend and istgt=true closes
+                 the Defend row on its own. -->
+            <cue name="ObserveHit" instantiate="true">
+              <conditions>
+                <event_object_attacked_object object="$Ship"/>
+              </conditions>
+              <actions>
+                <set_value name="$Weapon" exact="@event.param3.{2}"/>
+                <!-- Every read off $Weapon and event.param is @-guarded.  A
+                     failed property lookup does not merely blank one field: MD
+                     abandons the expression and writes the debug_text SOURCE to
+                     the log instead, so a single bad read turns the line into
+                     unparseable garbage.  Seen live on missile hits, where the
+                     emitter is not in weapons.operational.list and $Weapon.mode
+                     does not resolve. -->
+                <!-- Same target precedence as Direct-control itself: AimTarget
+                     is authoritative while a session is active; soft target
+                     and player.target are the free-play fallbacks. -->
+                <set_value name="$Aimed" exact="null"/>
+                <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                  <set_value name="$Aimed" exact="ObserveRoot.$AimTarget"/>
+                </do_if>
+                <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                  <set_value name="$Aimed" exact="ObserveRoot.$SoftTarget"/>
+                </do_elseif>
+                <do_elseif value="player.target?">
+                  <set_value name="$Aimed" exact="player.target"/>
+                </do_elseif>
+                <debug_text text="'[X4GC TEST HIT] t=' + player.age
+                  + ' weapon=' + (if $Weapon then $Weapon else 'none')
+                  + ' mode=' + (if $Weapon then @$Weapon.mode else 'none')
+                  + ' isturret=' + (if $Weapon then $Weapon.isclass.turret else false)
+                  + ' hit=' + event.param
+                  + ' hitname=' + @event.param.knownname
+                  + ' hitcomp=' + (if @event.param3.{1} then event.param3.{1} else 'none')
+                  + ' method=' + event.param2
+                  + ' aimed=' + (if $Aimed then $Aimed else 'none')
+                  + ' istgt=' + ($Aimed? and (event.param == $Aimed or @event.param3.{1} == $Aimed))"/>
+              </actions>
+            </cue>
+
+            <!-- ObserveCensus
+                 The denominator.  Hits alone are positive evidence; proving a
+                 holdfire turret never fired needs proof it was in holdfire at
+                 the time, which only a periodic read gives.
+
+                 instantiate plus checkinterval, NOT reset_cue cue="this".  An
+                 earlier version combined checkinterval with a trailing
+                 self-reset, which froze the game hard and wrote a 4.3 GB
+                 debug.log in seconds: the reset re-satisfied the condition
+                 immediately, so the cue re-fired without any game time passing
+                 (every line carried the identical timestamp 247034.45).
+                 instantiate lets the engine own the pacing, which is the
+                 shipped idiom - see StationPeaceful_Zoom_VisibilityCheck,
+                 .x4-research-cache/extracted/scripts-9.00/md/cinematiccamera.xml:2004.
+
+                 $LastSample is belt and braces on top of that: no sample is ever
+                 emitted twice for the same value of player.age, so even if a
+                 future edit reintroduces a re-entrant path it cannot run away
+                 again.  A freeze that needs the process killed is worth two
+                 lines of paranoia.
+
+                 10s, not 1s.  Turret modes change when the owner changes them,
+                 not continuously, so this only has to be fine-grained enough to
+                 bracket a mode change - and at one line per sample the whole
+                 census costs less than the old sweep did in a single second. -->
+            <cue name="ObserveCensus" instantiate="true" checkinterval="10s">
+              <conditions>
+                <check_value value="player.age gt ObserveRoot.$LastSample"/>
+              </conditions>
+              <actions>
+                <set_value name="ObserveRoot.$LastSample" exact="player.age"/>
+                <!-- The two lists are deliberate. weapons.operational.list
+                     covers regular weapons/turrets; missile turrets are a
+                     separate property list (scriptproperties.xml:542-545).
+                     Keep both in the denominator. -->
+                <set_value name="$Census" exact="''"/>
+                <do_for_each name="$Weapon" in="$Ship.weapons.operational.list">
+                  <set_value name="$Census" exact="$Census + $Weapon + '=' + $Weapon.mode + ','"/>
+                </do_for_each>
+                <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
+                  <set_value name="$Census" exact="$Census + $Weapon + '=' + $Weapon.mode + ','"/>
+                </do_for_each>
+                <debug_text text="'[X4GC TEST CENSUS] t=' + player.age
+                  + ' pilot=' + (if $Ship.pilot then $Ship.pilot.command.value else 'none')
+                  + ' hardtgt=' + (if player.target then player.target else 'none')
+                  + ' softtgt=' + (if ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget then ObserveRoot.$SoftTarget else 'none')
+                  + ' modes=' + $Census"/>
+              </actions>
+            </cue>
+
+          </cues>
+        </cue>
+
+      </cues>
+    </cue>
+  </cues>
+</mdscript>

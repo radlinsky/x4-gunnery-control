@@ -26,6 +26,16 @@ done
 if [[ -z "$source_dir" || ! -f "$source_dir/md/md.xsd" ]]; then echo 'source must contain md/md.xsd' >&2; exit 2; fi
 source_dir=$(realpath -e -- "$source_dir")
 if [[ -z "$cache_root" || "$cache_root" == / || "$cache_root" == . ]]; then echo 'provide a specific non-root --cache-root' >&2; exit 2; fi
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_dir=$(realpath -e -- "$script_dir/../../../..")
+repo_cache="$repo_dir/.x4-research-cache"
+cache_abs=$(realpath -m -- "$cache_root")
+if [[ "$cache_abs" == "$repo_dir" || "$cache_abs" == "$repo_dir"/* ]]; then
+  if [[ "$cache_abs" != "$repo_cache" && "$cache_abs" != "$repo_cache"/* ]]; then
+    echo "refusing tracked repository cache outside .x4-research-cache: $cache_root" >&2
+    exit 2
+  fi
+fi
 dest="$cache_root/schema"
 if [[ -e "$dest" ]]; then echo "refusing existing destination: $dest" >&2; exit 2; fi
 

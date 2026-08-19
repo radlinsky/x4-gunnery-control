@@ -65,7 +65,8 @@
 ### External Target View notice appears on every camera entry, not on repeated activation
 
 - X4: 9.00
-- Status: live-tested (observation); inference (cause)
+- Status: live-tested
+- Scope: the notice is live-tested; its cause remains inference
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, Windows 11, X4 9.00 Steam;
   `ui/core/lua/infobar2.lua` (notice generation)
@@ -99,6 +100,28 @@
 - Live test: no — untested as of 2026-08-03
 - Finding: soft-target state contains a component ID and connection name;
   preserve both when restoring a target.
+
+### GetPlayerTarget returns the hard target as the string "ID: n"
+- X4: 9.00
+- Status: live-tested
+- Corroboration: the two ids were confirmed to be the same component by an
+  independent path, which is how the mismatch was caught
+- Source: live probe 2026-08-10, X4 9.00, logged alongside a component id
+  obtained from `C.GetContextByClass`
+- Live test: yes — 2026-08-10
+- Finding: `GetPlayerTarget` is a bare engine global, not a `C.` call, so it
+  needs no `cdef`. It returns the player's HARD target as a string in the form
+  `"ID: 1637331"` — with the literal `ID: ` prefix. It is NOT a bare number and
+  NOT the LuaJIT `"1637331ULL"` cdata form that the usual id-normalising helpers
+  are written to strip. Comparing it to an id from any other source without
+  stripping that prefix silently reports "different component" for two values
+  that are the same component.
+- Consequence for mods: normalise with something like
+  `tostring(v):gsub("^ID:%s*", "")` before comparing. Note the trap for test
+  doubles: a fixture stub that returns a bare number makes the comparison pass
+  offline while it fails in game, so stub the real `"ID: n"` form.
+- Limitations: read-only. No hard-target setter exists in either surface — the
+  UI FFI exposes only `SetSofttarget`, and MD has no `set_player_target` action.
 
 ### Direct surface-element IDs are an installed-mod technique
 - X4: 9.00
@@ -156,7 +179,8 @@
 
 ### Restoring cockpit camera after GetUp locks player input
 - X4: 9.00
-- Status: live-tested (symptom); inference (precise mechanism)
+- Status: live-tested
+- Scope: the symptom is live-tested; the precise input-lock mechanism remains inference
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, Windows 11, X4 9.00 Steam
 - Live test: yes — symptom reproduced on 2026-08-04; ordering defect is unambiguous in
@@ -196,7 +220,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 #### Mechanism A: `useMiniWidgetSystem = true` disables default Esc/Del handling
 
 - X4: 9.00
-- Status: shipped-source (property meaning); live-tested (observed effect)
+- Status: live-tested
+- Corroboration: shipped-source establishes the property meaning
 - Source: `ui/addons/ego_detailmonitorhelper/helper.lua`
 - Live test: yes — fix observed 2026-08-04; Watch and compact Engage frames
   set `useMiniWidgetSystem = true` and did not receive `Esc`; removing that
@@ -230,7 +255,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 #### Mechanism C: a Helper frame must contain a table to receive Esc (decisive fix for Watch)
 
 - X4: 9.00
-- Status: shipped-source (mechanism); live-tested (outcome)
+- Status: live-tested
+- Corroboration: shipped-source establishes the frame/table mechanism
 - Source: `ui/addons/ego_detailmonitorhelper/helper.lua` (`frame:display()`);
   game session on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, Windows 11, X4 9.00 Steam
@@ -371,7 +397,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Follow camera cannot be parked on a turret: no ship-local component offset
 - X4: 9.00
-- Status: inference (scoped negative over the full ui-9.00 FFI index)
+- Status: inference
+- Scope: negative search over the full ui-9.00 FFI index
 - Source: `ui/addons/ego_detailmonitor/menu_followcamera.lua`;
   `ui/core/lua/targetsystem.lua`; full FFI index of ui-9.00 (1914 unique names)
 - Live test: no — negative result, untested as of 2026-08-04
@@ -429,7 +456,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### The engine exports far more than vanilla Lua declares
 - X4: 9.00
-- Status: shipped-source (binary export table)
+- Status: shipped-source
+- Scope: X4.exe binary export table
 - Source: PE export table of `X4.exe` via `objdump -p`, diffed against every
   `C.<name>` call site in `ui-9.00`
 - Live test: no — untested as of 2026-08-04
@@ -472,7 +500,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Free look is suppressed in Engage by the enemy soft target, not the camera
 - X4: 9.00
-- Status: inference (from shipped-source paths plus live observation)
+- Status: inference
+- Corroboration: shipped-source paths and a partial live observation
 - Source: `ui/gunnery_control.lua` `startWatch` vs `engageTarget`;
   `ui/core/lua/crosshair handling.lua` (`IsExternalTargetMode`)
 - Live test: partial — Watch (no enemy soft target) has working mouse look;
@@ -511,7 +540,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Custom MD play_cutscene is a playable main-view camera
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`,
   `md/x4_gunnery_control.xml` `CutsceneAim` cue, Windows 11, X4 9.00 Steam
 - Live test: yes — confirmed in both POVs (camera at turret and camera at
@@ -532,7 +561,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### A turret surface element is a valid cutscene anchor object
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`,
   `md/x4_gunnery_control.xml` `CutsceneAim` cue, Windows 11, X4 9.00 Steam
 - Live test: yes — camera observed positioned at the turret on 2026-08-04
@@ -543,7 +572,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### Lua→MD AddUITriggeredEvent transport contract
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: three live rounds on 2026-08-04, extension `x4_gunnery_control`
   (`ui/gunnery_control.lua` `sendCutsceneAimStart` →
   `md/x4_gunnery_control.xml` `CutsceneAim.Start`), Windows 11, X4 9.00 Steam;
@@ -562,7 +591,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 
 ### anchordist=0 clips the camera inside the anchor; use the vanilla negative-distance idiom
 - X4: 9.00
-- Status: live-tested (2026-08-04)
+- Status: live-tested
 - Source: game session on 2026-08-04, extension `x4_gunnery_control`;
   vanilla idiom in `md/cinematiccamera.xml:2504`
 - Live test: yes — anchordist=0 observed clipping through anchor geometry with
@@ -581,8 +610,9 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### No turret-target getter exists in the public FFI surface or in the undeclared engine exports examined so far
 
 - X4: 9.00
-- Status: shipped-source (negative result, public declarations); shipped-source
-  (negative result, binary export table); inference (MD script properties)
+- Status: inference
+- Corroboration: negative searches of shipped public declarations, the binary
+  export table, and MD script properties
 - Source: full LuaJIT ffi.cdef index of `ui-9.00` (3123 unique declarations
   across 80 Lua files) via `scripts/index-lua-ffi.sh`; PE export table of
   `X4.exe` via `objdump -p` (2493 named symbols; 609 not called by any shipped
@@ -618,9 +648,9 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### A turret slot cannot be attributed to a group, and on a ship it never needs to be
 
 - X4: 9.00
-- Status: live-tested (probe on a Boron L destroyer, 2026-08-07);
-  shipped-source (FFI declarations, vanilla callers, ship macros);
-  inference (the uniqueness argument)
+- Status: inference
+- Corroboration: a 2026-08-07 Boron L destroyer live probe plus shipped FFI
+  declarations, vanilla callers, and ship macros
 - Source: live probe logged as `[X4GC PROBE]` on
   `ship_bor_l_destroyer_01_a_macro` (14 turret slots, 9 groups);
   1924 unique FFI declarations across `ui-9.00`;
@@ -671,8 +701,9 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### 15 shipped ships have two turret groups that humanize to the same label
 
 - X4: 9.00
-- Status: shipped-source (the group identifiers); inference (the labels, derived
-  by replaying this project's `State.turretGroupLabel()` over them)
+- Status: inference
+- Corroboration: shipped-source group identifiers replayed through this
+  project's `State.turretGroupLabel()`
 - Source: `assets/units/size_l/ship_*.xml` and `assets/units/size_xl/ship_*.xml`
   across base game and all seven DLC catalogs, extracted to
   `.x4-research-cache/extracted/ships-comp-base-9.00`,
@@ -708,7 +739,8 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### Group identifiers in ship component XML carry surrounding whitespace
 
 - X4: 9.00
-- Status: shipped-source (the padding); inference (that the runtime strips it)
+- Status: inference
+- Corroboration: shipped-source proves padding; runtime trimming is inferred
 - Source: `.x4-research-cache/extracted/ships-comp-dlc-9.00/assets/units/size_l/
   ship_bor_l_destroyer_01.xml`, which contains `group="group_front_up_left "`,
   `group=" group_front_up_mid "`, `group="  group_front_down_mid "` and even
@@ -751,7 +783,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
 ### Trigger and symptom
 
 - X4: 9.00
-- Status: live-tested (three in-game trials, 2026-08-06)
+- Status: live-tested
 - Source: game sessions on 2026-08-06, extension `x4_gunnery_control`
   build markers `2026-08-06-viewcycle-20` / `2026-08-06-notify-21`,
   Windows 11, X4 9.00 Steam; debug log archived at `debug with trial 2.log`
@@ -865,8 +897,14 @@ confirmed Esc is restored after the popup appears on every exit route tested
 same commit that moved the emission to `discardSession`; those routes were
 not individually live-tested but share the same discardSession code path.
 
-Known ceiling: if the player has hints/help texts disabled in game options the
-popup may not display and the Esc bug would return.
+The earlier claim that a player could disable hints/help texts in Game Options
+was retracted on 2026-08-08. Current X4 9.00 shipped `gameoptions.lua` exposes
+no global Help Text toggle, and `ego_helptext/helptext.lua` queues custom
+`helptext` events without consulting such an option. The absence of a
+player-accessible global setting is an `inference` from the complete scoped
+Game Options and HelpText source search; the handler behavior itself is
+`shipped-source`. Acceptance tests should directly check that the custom popup
+appears and that `Esc` works. They require no Help Text preflight setting.
 
 Fallback that was removed: commit `2f8691d` implemented an invisible 1×1
 offscreen throwaway frame on a dedicated layer (`viewCycleLayer = 2`) as an
@@ -880,3 +918,406 @@ among the 609 undeclared engine exports (see "The engine exports far more than
 vanilla Lua declares" above), it could replace this workaround entirely and
 would not depend on hint settings. Any candidate must be tested in a disposable
 save using `pcall`.
+
+## Reloading UI Lua without restarting X4 (live-tested 2026-08-08)
+
+### ScheduleReloadUI exists in the menus environment and re-reads loose files from disk
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extensions `x4_gunnery_control` and
+  `x4_gunnery_control_testlab`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — four reloads triggered from a Test Lab button during one session on
+  2026-08-08, each confirmed against the log
+- Finding: `ScheduleReloadUI` was present as a global in the menus environment
+  (logged `fn_present=true`) and calling it with no arguments reloaded the extension's
+  UI Lua without restarting the game.
+
+  Timing observed: the reload log line and the extension's own init line were 0.01 in-game
+  seconds apart.
+
+  It re-reads loose files from disk. A build-marker string was edited in the repository and
+  copied into the game's `extensions/` directory while X4 was running; the next reload
+  logged the new marker. No restart, no save reload.
+
+  The player was seated in a gunnery chair for every reload. Behaviour when not seated, and
+  the effect on `md/`, `t/`, `ui.xml`, or `content.xml`, were not tested.
+
+### A UI reload does not preserve Lua globals
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — a counter global incremented at init and logged across two consecutive
+  reloads on 2026-08-08
+- Finding: a global set to `(X or 0) + 1` at init logged `1` on every reload, never `2` or
+  `3`. The global did not carry across.
+
+  Measured alongside it: `#Menus` was 35 after each reload, not growing. The vanilla menu
+  table is rebuilt rather than appended to, and the extension's own entry did not accumulate
+  a duplicate.
+
+  Also observed across four inits in the session: each init logged exactly one of each of
+  the extension's two hook registrations, four in total, with no doubling.
+
+  Consequence measured in this extension: its session table is a file-local, and after each
+  reload it logged `session created from chair ingress` — a new session, not a resumed one.
+  Any in-memory UI state is therefore lost on reload.
+
+  Not established by this test: whether any category of global is exempt. Vanilla stores
+  cross-menu UI state in globals named `__CORE_*` (for example
+  `__CORE_DETAILMONITOR_MAPFILTER_SAVE`), and no engine registration or persistence hook for
+  that prefix was found in `ui/core`. Whether those survive a reload was not measured.
+
+### Vanilla carries a delimited string through raise_lua_event and parses it in Lua
+- X4: 9.00
+- Status: shipped-source
+- Source: `scripts-9.00/md/scenario_advanced.xml:414` raises
+  `<raise_lua_event name="'mapfilter'" param="'layer_trade;false'"/>`;
+  `ui-9.00/ui/addons/ego_detailmonitor/menu_map.lua:1942` registers the handler and
+  `:4031-4032` parses it with `string.match(params, "(.+);(.+)")`
+- Live test: no — read from shipped source on 2026-08-08, not exercised
+- Finding: the MD-to-Lua direction carries a string, and vanilla packs two values into one
+  by delimiting them and splitting the result in Lua.
+
+  This bounds the repository's earlier note that a table sent through
+  `raise_lua_event` arrives as `nil`. That note lived at `ui/gunnery_control.lua:1927-1938`
+  until the string transport replaced it; the surviving summary is now the comment on
+  `persistSession()`. That live-tested result is about tables. It does not
+  establish that the channel is unusable, and the shipped delimited-string pattern above is
+  the vanilla way to move more than one value through it.
+
+  The string leg was live-tested the same day; see the next record. The separate defect noted
+  at that code location — component IDs are reassigned on save/load — is unaffected by
+  transport and would still apply.
+
+### A string survives a UI reload by way of an MD cue variable
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — a marker string stored from Lua, then fetched back after a reload, on
+  2026-08-08
+- Finding: Lua sent a unique marker to MD, which stored it in a cue variable. After a
+  `ScheduleReloadUI` wiped every Lua global, the reloaded file asked MD for the value before
+  storing a new one, and the marker written by the PREVIOUS life of the file came back as
+  `type=string`.
+
+  Measured sequence: `probe_store sending: probe-14`, then after the next reload
+  `probe_fetch: raising State.$probe=probe-14` and
+  `probe_restore: type=string; value=probe-14`.
+
+  The store leg used the Lua-to-MD table transport recorded above, carrying one string key,
+  so the only untested step was the return. The return used `raise_lua_event` with the cue
+  variable as `param`.
+
+  An MD cue variable is therefore the only storage measured in this session that outlives a
+  UI reload. Lua globals do not.
+
+  Also measured: MD logged its receipt roughly 0.6 to 0.7 in-game seconds after the Lua send,
+  so delivery crosses a tick and is not synchronous.
+
+  Not established by this test: any length limit on the payload, and whether the same value
+  survives save/load rather than only a reload.
+
+### A whole UI session round-trips through MD as one delimited string
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-session-persist-2`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — an engaged turret session reloaded and resumed, on 2026-08-08
+- Finding: the single-string transport scales past a marker to a real payload. A session of
+  11 scalar fields plus 4 turret-group snapshots plus 4 checked-group entries was encoded as
+  one delimited string, stored in an MD cue variable, raised back after `ScheduleReloadUI`,
+  and decoded into a working session. Lua logged `payload type=string` and
+  `restored=true phase=engaged groups=8 snapshots=4`, and the player kept the turret camera,
+  the checked groups and the engaged target across the reload.
+
+  The same run reproduced the table failure it replaces. On the immediately preceding build
+  MD logged a fully populated `State.$active` while Lua logged `payload type=nil` on the same
+  tick, which is the third such reproduction after 2026-08-06 and earlier on 2026-08-08.
+
+  MD needed no knowledge of the format. The cue stores `event.param3` and raises it back
+  verbatim, so encoding stayed entirely on the Lua side.
+
+  Per-group values survived intact, including a non-default `mining` mode on one group, so
+  the round trip is not flattening values to a default.
+
+  Not established by this test: any length limit. This payload was roughly 700 characters and
+  no truncation was observed, but no boundary was probed. Also not established: whether the
+  string survives an actual save/load as opposed to the UI reload measured here. The
+  separately recorded defect that component IDs are reassigned on load was not exercised.
+
+### The engine soft target reads 0 after a UI reload
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-testlab-anyphase-probe-2`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — a probe logging `GetSofttarget2()` at menu-file init, on 2026-08-08
+- Finding: with a target engaged, the mod having called `SetSofttarget` on it and the turrets
+  firing at it, a `ScheduleReloadUI` was taken. The reloaded file logged
+  `PROBE softtarget id=0ULL connection= name=<none>` at init. The soft target was not
+  readable after the reload, so a UI that needs its target back must carry it in its own
+  payload rather than re-reading it from the engine.
+
+  Not established by this test: which action cleared it. Reaching the reload button required
+  opening another menu, and the player was in that menu for several seconds before clicking,
+  so the reload, the intervening menu, and the closing of the mod's own menu are not
+  separated. Only the end state was measured.
+
+  Measured alongside: the external target view camera was NOT cleared. The engine still
+  reported the turret component from `GetExternalTargetViewComponent()` after the reload
+  while Lua state was gone, so the camera and the soft target did not behave the same way.
+
+  A save/load does the same, measured separately on 2026-08-08 (build `2026-08-08-audit-2`):
+  with a surface element engaged and the turrets firing at it, the game saved and loaded, the
+  restore read `GetSofttarget2().softtargetID` as `0ULL` before writing anything, while the
+  target itself came back alive through an MD component reference. So neither route hands the
+  soft target back and a restoring UI must re-issue `SetSofttarget` itself.
+
+### A Lua error during a menu file's init removes the mod from the UI until restart
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-testlab-anyphase-probe-1`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — an accidental FFI field-name typo, on 2026-08-08
+- Finding: a menu file's top-level `init()` read a struct field that did not exist on the
+  cdef'd type, `connectionname` instead of `softtargetConnectionName` on
+  `SofttargetDetails2`. The error aborted `init()` after its first log line. Everything after
+  that point never ran: the `Menus` insertion, `Helper.registerMenu`, the DockedMenu redirect
+  hook, and the event registrations.
+
+  The observable result was total. The mod's menu did not appear, and interacting with the
+  chair opened the vanilla menu instead. Because this extension's reload button lives inside
+  its now-unreachable menu, there was no in-game route back and the game had to be restarted.
+
+  The failure was silent in the way that mattered: the log showed `initializing UI` and then
+  stopped, with no Lua traceback among the extension-tagged lines. Diagnosis came from
+  noticing which init log lines were missing, not from an error message.
+
+  Not established by this test: whether a traceback appeared elsewhere in the log under a
+  different tag, and whether the engine retries a failed menu init. `initializing UI` was
+  logged twice in succession, which was not explained.
+
+### An MD cue variable holding a component survives a save/load and returns to Lua remapped
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control` build
+  `2026-08-08-target-probe-1`, X4 9.00 Steam, Windows 11; game debug.log
+- Live test: yes — a target engaged, the game saved, then loaded twice, on 2026-08-08
+- Finding: a UI menu that must name a specific object again after a save/load cannot do it
+  with an id. Component ids are reassigned on load, so an id written into a string payload
+  addresses a different object afterwards. Parking the same object in an MD cue variable as
+  a component does work.
+
+  Lua sent the target's id to MD with `AddUITriggeredEvent`, MD stored `event.param3` into a
+  cue variable and logged `typeof=component idcode=SFL-948`. The game was saved, then loaded
+  twice. On both loads MD logged the same `idcode=SFL-948` and raised the variable back with
+  `raise_lua_event`; Lua received `type=number` and `IsComponentOperational` returned true.
+
+  The numeric id differed on each load — `2089492` on the first, `34178848` on the second,
+  against a pre-save id of `444138`. That difference is the result, not noise: the same
+  object arrived under a new id each time, so the engine is remapping the reference rather
+  than storing a number. The player's own ship was reassigned across the same loads
+  (`443747` → `2089092` → `34180899`), reproducing the recorded reassignment behaviour.
+
+  The string payload written on the same tick carried the pre-save target id and was
+  correctly refused by the restoring code, so both routes were observed side by side in one
+  run: `fromPayload=nil fromMD=2089492`.
+
+  A second run on 2026-08-08 (build `2026-08-08-target-restore-1`) repeated this with a
+  **surface element** rather than a whole object: a `XEN L Shield Generator Mk1` on a Xenon
+  defence platform. MD logged `typeof=component idcode=null` when storing it and
+  `typeof=component idcode=null name=XEN L Shield Generator Mk1` after the load, and Lua
+  received a usable id. So surface elements ride this route too. Note the weaker evidence
+  there: surface elements report `idcode=null`, so the same-object claim rests on the name
+  and on the reference being raised at all, not on a unique id as in the SFL-948 case above.
+
+  Measured in that second run and NOT part of this finding: `SetSofttarget` returned false
+  for the recovered surface element immediately after the load, while the identical call on
+  the identical element had succeeded at engagement moments before. Distance does not explain
+  the difference — the player reports the element was already out of range when they engaged
+  it, and the engagement path refuses to continue unless `SetSofttarget` returns true, which
+  it did. Both calls therefore ran at the same distance with opposite results.
+
+  A third run on 2026-08-08 (build `2026-08-08-audit-2`) recovered a `XEN M Shield Generator
+  Mk1` the same way and `SetSofttarget` returned **true**, with `GetSofttarget2()` reading
+  the same id straight back and `GetDistanceBetween` reporting `7851`. The one difference
+  from the failing call is when it ran: this one was issued from a periodic
+  `setInterval` watchdog roughly 0.4s after the restore, the failing one from inside the
+  `RestoreSession` event handler itself. That the delay is what changed the result is an
+  inference and was not isolated — only one call site was tried per run.
+
+  Not established by this test: what happens when the referenced component is destroyed
+  while the game is closed. The MD side guards with `@` and does not raise in that case, but
+  that branch was never reached. No limit on how many such references can be held was
+  probed; one was used.
+
+### refreshmd re-reads MD from disk, keeps cue variables, and does not re-fire completed cues
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11; game debug.log
+- Live test: yes — an on-demand cue's text edited mid-session, with a UI-only reload as the
+  control, on 2026-08-08
+- Finding: `ExecuteDebugCommand` was present in the menus environment (logged
+  `fn_present=true`), and `ExecuteDebugCommand("refreshmd", 0)` picked up an edit made to
+  `md/` while the game was running.
+
+  A `debug_text` string inside an on-demand cue was edited and copied into the game's
+  `extensions/` directory mid-session. A UI reload alone fired that cue and logged the OLD
+  text. After `refreshmd`, the same cue logged the NEW text. The control rules out the UI
+  reload having re-read MD.
+
+  Two behaviours measured alongside it. A cue variable set before `refreshmd` was still
+  readable after it. A conditionless root cue that had already fired did not fire again, so a
+  marker placed in such a cue cannot detect that a refresh happened — an earlier attempt in
+  this session failed for exactly that reason.
+
+  Not established by this test: the effect on cues mid-execution, on `instantiate="true"`
+  instances in flight, or on newly ADDED cues rather than edited ones.
+
+## Attacker attribution and obstruction queries
+
+### GetLastAttackInfo gives attacker attribution from the victim
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/addons/ego_interactmenu/menu_interactmenu.lua:200` (declaration and LastAttackerInfo struct); call sites at `menu_interactmenu.lua:5560,5566` and `ui-9.00/ui/addons/ego_detailmonitor/menu_map.lua:21101,30732`; `props-9.00/libraries/scriptproperties.xml:187-188` (`lastattacker`/`lastattacktime` on the `destructible` datatype)
+- Live test: no — untested as of 2026-08-09
+- Finding: `LastAttackerInfo GetLastAttackInfo(UniverseID destructibleid)` returns a struct of `UniverseID attacker`, `double time`, and `const char* method`. It is queried on the VICTIM, not the shooter. The MD property docs describe `lastattacker` as "the component (not exclusive to objects) that was last registered as the attacker", which suggests it may resolve to a turret rather than a ship. However no shipped script inspects the returned component's class, so which component it actually returns (turret vs. ship) is UNRESOLVED. One live probe settles it.
+- Status of the question, 2026-08-10: still unresolved, and deliberately not probed. It was only ever of interest as a way to infer which turret is engaging what, in order to detect the LINE OF FIRE BLOCKED condition. That line of work is closed: LINE OF FIRE BLOCKED was confirmed live on 2026-08-09 to be unrecoverable (the engine's preferred-target fallback tests whether a turret can aim, not whether it can hit — see the fire-control record in md-ai.md), so no consumer for the answer remains.
+- **RESOLVED 2026-08-11 for the MD `lastattacker` property: it returns the SHIP, not the turret.** The probe was run after all, as a side effect of a Test Lab fire-control capture. Over a ~10 minute free-play session the distinct `lastattacker` values observed on targets were `0x5aaf6`, `0x6ba5f`, `0x6bac1`, `0x6c289`, `0x6c599`, plus null/none. `0x6c289` is the player's own ship. NONE of the 14 known turret component ids on that ship (`0x6c2bc`-`0x6c2cf`) ever appeared, despite those turrets firing throughout. Consequence: a hit CANNOT be attributed to an individual turret via `lastattacker`, and the MD property docs' "the component (not exclusive to objects)" wording does not mean a turret-level component in this case.
+  - Evidence class: first-party live capture, not shipped source. n=1 ship ("Ray"), n=1 session. Logger `testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml` (`:230` reads `$Target.lastattacker`), captured to `debug.log`, X4 9.00.
+  - Scope: what was probed is the **MD** property `lastattacker` (`props-9.00/libraries/scriptproperties.xml:187`). The Lua `GetLastAttackInfo` was NOT itself called. It is the same underlying engine concept and almost certainly returns the same component, but that is inferred, not verified — if the Lua return value matters, probe it directly.
+- **Ship granularity is by design, and per-turret attribution IS available elsewhere — go there.** Added 2026-08-11, shipped-source. `lastattacker` is a property of the `destructible` datatype (`props-9.00/libraries/scriptproperties.xml:187`, inside `destructible` declared at `:162`), so it answers "what attacked this object" at object granularity. For per-turret attribution use the MD event `event_object_attacked_object`, whose `param3` is documented `[attacked component, weapon]` — `event.param3.{2}` is the firing weapon/turret (`schemas-9.00/libraries/common.xsd:13055`; vanilla forwards that exact expression into `change_relation_on_attack weapon=` at `md/notifications.xml:1515`). See "Per-turret attribution from MD events" in `md-ai.md`. Attribution is an EVENT payload, never a property read. Do not leave this page believing per-turret attribution is impossible — the negative result above is about this property only.
+
+### IsObstructed cannot be used for arbitrary component pairs
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:3943-3950`
+- Live test: no — untested as of 2026-08-09
+- Finding: `IsObstructed` takes a HUD render posID owned by the target-system bracket machinery, not a component pair, and is engine-injected rather than declared in any `ffi.cdef`. A mod cannot construct a posID for a component of its choosing. Use `check_line_of_sight` from MD instead (see the MD firing-solution record in md-ai.md).
+
+## Reading a pilot's current command from UI Lua
+
+### GetComponentData(pilot, "aicommandraw") mirrors MD's $pilot.command.value
+- X4: 9.00
+- Status: live-tested
+- Corroboration: MD `debug_text` of `$ship.pilot.command.value` emitted from the same engage, one frame apart
+- Source: live probe logged as `[X4GC] DIAG pilotprobe` / `[X4GC DIAG] mdpilot` on 2026-08-10, X4 9.00, player-piloted M10; sibling key `aicommandactionraw` read by `ui-9.00/ui/addons/ego_detailmonitor/menu_map.lua:8808`
+- Live test: yes — 2026-08-10, three engages
+- Finding: `GetComponentData(assignedpilot, "aicommandraw")` returns the pilot's
+  outer command as a bare lowercase string matching the MD `command.*` lookup
+  with the prefix stripped. Three engages agreed exactly with MD's
+  `$ship.pilot.command.value` read in the same frame: `wait`/`wait` twice, then
+  `attackobject`/`attackobject` once the pilot was given an attack order. The
+  key is undocumented — no shipped Lua file reads it — but the symmetric
+  `aicommandactionraw` (which vanilla does read, comparing it to the bare string
+  `"orderfailed"`) served as the control and returned a value on every call.
+  `aicommand` and `aicommandaction` are the localised display text, not this.
+- Consequence: "does this ship's pilot have an attack order" is answerable
+  entirely in UI Lua, with no MD round trip. The order queue is not a substitute:
+  `interrupt.attacked.xml` puts a ship into `command.attackobject` without
+  touching the order queue, so `C.GetOrders`/`orderdef` misses a ship that is
+  merely being shot at while idle. Vanilla's own idiom for the same question is
+  the MD-side pair at `aiscripts/order.fight.protect.ship.xml:340`.
+- Limitations: only `wait` and `attackobject` were observed. That the mapping is
+  "command id minus the `command.` prefix" for every other command is inference
+  from two data points; confirm the specific value before branching on a third.
+
+## targetsystem.lua utility functions
+
+### GetShipOrLaserTowerSize returns a size class string
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:135`
+- Live test: no — untested as of 2026-08-09
+- Finding: `C.GetShipOrLaserTowerSize(UniverseID)` returns a size class string: one of `"xs"`, `"s"`, `"m"`, `"l"`, or `"xl"`.
+
+### IsSurfaceElement tests whether a component is a surface element
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:178`
+- Live test: no — untested as of 2026-08-09
+- Finding: `C.IsSurfaceElement(UniverseID)` returns a boolean indicating whether the component is a surface element.
+
+### targetsystem.lua uses a nil-sentinel lazy cache for expensive per-target checks
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui-9.00/ui/core/lua/targetsystem.lua:1568,3936-3950,4078,5384`
+- Live test: no — untested as of 2026-08-09
+- Finding: the target system stores expensive per-target check results (including the `IsObstructed` bracket results) using a nil-sentinel lazy-init pattern: a result is only computed on first access and cached in a table, then the whole cache is invalidated per frame so checks remain current without running every tick. This is the idiom to follow when adding per-target logic that is costly to evaluate each frame.
+
+### Helper.addDelayedOneTimeCallbackOnUpdate fails silently when its deadline is never reached
+- X4: 9.00
+- Status: shipped-source
+- Source: `ui/addons/ego_detailmonitorhelper/helper.lua`, `Helper.addDelayedOneTimeCallbackOnUpdate`
+  and `onUpdate` (9.00 extracted UI catalog)
+- Live test: partial — mechanism read from shipped source 2026-08-08; the clock behaviour
+  across a UI reload and a savegame load was measured live 2026-08-08. The original
+  never-firing failure was observed live and its cause is still not isolated
+- Finding: the helper does not hold a timer. It pushes a closure onto a file-local
+  one-time-callback list that `onUpdate` drains once per frame, and the closure compares
+  `getElapsedTime()` against the `delaytime` argument. If the deadline has not arrived, the
+  closure re-queues itself and returns. There is no attempt counter, no ceiling and no
+  diagnostic, so a `delaytime` that the clock never reaches produces a callback that spins
+  every frame forever and reports nothing at all.
+
+  The practical consequence for a caller: `delaytime` is an absolute value on the
+  `getElapsedTime()` scale, not a duration, and it is captured at scheduling time. Any caller
+  that computes it from a reading taken in a context where that clock differs from the one
+  `onUpdate` later compares against will never fire, and will look exactly like a callback
+  that was never registered.
+
+  `onUpdate` swaps the list to a local and replaces the shared one with a fresh table before
+  iterating, so a callback that schedules another during the drain lands in the next frame's
+  list rather than the one being walked. That part is safe.
+
+  Observed live and NOT explained by the source alone: two builds of `x4_gunnery_control`
+  scheduled a callback with `getElapsedTime() + 0.3` from inside a `RegisterEvent` handler
+  for an MD-raised event at game load. Neither ever fired, with no error. A repeating
+  watchdog using the identical API kept ticking throughout, which rules out the drain having
+  stopped — it re-arms with a fresh reading every tick, so it would self-heal from a bad
+  deadline. The cause of those two failures remains unexplained.
+
+  Measured 2026-08-08 (live-tested, X4 9.00), disproving the clock hypothesis that stood
+  here: a canary armed with `getElapsedTime() + 0.3` from inside that same `RegisterEvent`
+  handler FIRED, both after a UI reload (due 0.867, fired at 0.873) and after loading a
+  savegame (due 44.051, fired at 44.082) — one frame late, not stalled. Across the load
+  `getElapsedTime()` rose monotonically through the restore, the next watchdog tick and the
+  callback (43.751 → 43.956 → 44.082). It does not reset or rewind at load, so a deadline
+  captured in that handler is reachable and scheduling from an MD-event handler works.
+
+  Incidental from the same runs: `getElapsedTime()` DOES restart near zero after a **UI
+  reload** (0.567 against a UI init in the same frame). It is UI-lifetime, not game-lifetime.
+  Harmless to this API, since `delaytime` is computed from a current reading either way.
+
+  Not established by this test: why the two original builds failed. The scheduling mechanism
+  is now excluded; the cause is elsewhere and was not isolated.
+
+  `getElapsedTime` is engine-provided: it appears in the extracted 9.00 UI Lua only as a
+  caller, never as a definition, so the readings above are the only evidence of its
+  behaviour across a load.
+
+### `SetTurretGroupMode2` with the group's CURRENT mode is not a no-op: it drops the script-supplied preferred target
+- X4: 9.00
+- Status: live-tested
+- Source: live sessions 2026-08-15, extension `x4_gunnery_control`; game debug.log
+- Live test: yes — reproduced twice on 2026-08-15
+- Finding: calling `C.SetTurretGroupMode2(ship, contextID, path, group, mode)` with
+  the mode the group is ALREADY in still reinitialises the turret group's targeting
+  and discards any preferred target an MD `set_turret_targets ... preferredtarget=`
+  had installed. The group falls back to autonomous selection over the hostiles in
+  range and takes a different target. Observed twice, each flipping fire off the
+  player's selected target onto another hostile: once on apply (a per-click mode
+  rewrite of already-directed groups) and once on release (a re-arm loop that re-set
+  the directed groups to `attackenemies`, the mode they were already in). The census
+  `prefer` flag dropped `1 → 0` at the release with the selected target unchanged,
+  and fire moved to the other hostile.
+- Fix: guard the write with a live-mode compare — skip `SetTurretGroupMode2` when the
+  group's read-back `.mode` already equals the target mode. A group genuinely knocked
+  out of mode still gets re-set; one already in mode is left undisturbed and keeps its
+  preferred target. Verified: with the guard, directed groups held the selected target
+  through both apply and release.
+- Cross-reference: the MD side of the same preferred-target semantics is under
+  "Vanilla's fight loop does NOT overwrite mod-supplied attackenemies targets" in
+  [md-ai.md](md-ai.md).

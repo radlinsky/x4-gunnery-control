@@ -3,7 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/lib-release.sh
 source scripts/lib-release.sh
-version=${1:?usage: scripts/package.sh VERSION}
+# No argument: package whatever version content.xml is at.  An explicit argument
+# is still checked against content.xml below — that is the guard the release tag
+# relies on.
+version=${1:-$(content_xml_version_dotted)}
 if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.[0-9][0-9]$ ]]; then
   echo "version must be MAJOR.MINOR with a two-digit minor (for example 0.20)" >&2
   exit 2

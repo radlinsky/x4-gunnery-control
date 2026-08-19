@@ -4,9 +4,9 @@
 
 ### X4 debug log invocation is silent-failing and strict
 - X4: 9.00
-- Status: live-tested; corroborated by documented-public sources (Egosoft community wiki
-  "h2odragon's HOWTO-hackx4f" and Nexus article "Providing log files when submitting bug
-  report", both showing the form `-debug all -logfile debuglog.txt`)
+- Status: live-tested
+- Corroboration: documented-public Egosoft community wiki and a Nexus guide
+  both show the form `-debug all -logfile debuglog.txt`
 - Source: game debug.log; live run on 2026-08-04, extension `x4_gunnery_control`
   build marker `2026-08-04-lifecycle-1`, X4 9.00 Steam, Windows 11 with WSL2
 - Live test: yes — all four argument forms tested on the same machine and build on 2026-08-04
@@ -48,3 +48,23 @@
   while a process holds the handle open, so a growing log can look stale from outside.
   Compare the first `Logfile started, time ...` line and grep for a known build marker
   to confirm the log belongs to the current run.
+
+### The log is readable from WSL while X4 is still running
+- X4: 9.00
+- Status: live-tested
+- Source: live session on 2026-08-08, extension `x4_gunnery_control`, X4 9.00 Steam,
+  Windows 11 with WSL2; log at
+  `/mnt/c/Users/PC/Documents/Egosoft/X4/51053644/debug.log`
+- Live test: yes — lines emitted by in-game actions were read from WSL during the same
+  session on 2026-08-08, before X4 exited
+- Finding: X4 does not withhold log output until it exits. Lines written during play were
+  read from WSL while the game was still running, matched to the action that produced them
+  by their in-game timestamp.
+
+  Reading bytes past a tracked offset returned that new content. Nothing derived from the
+  file's metadata was consulted to find it. This is the same metadata staleness recorded
+  above, so `tail -f`, which polls `stat`, is not the tool for this; `scripts/tail-gunnery-log.sh`
+  in this repository tracks a byte offset instead.
+
+  Not established by this test: whether X4 flushes on a timer, per line, or per buffer.
+  Only that content written during play is readable during play.

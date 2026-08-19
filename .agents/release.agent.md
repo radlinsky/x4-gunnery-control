@@ -1,10 +1,11 @@
 ---
 name: release
 description: >
-  Guides a full release of X4 Gunnery Control: reviews unreleased changes,
-  proposes a version number, bumps CHANGELOG.md and content.xml, runs
-  validation, commits, tags, and provides the exact terminal commands to
-  publish on Nexus (via GitHub CI) and Steam Workshop.
+  Guides a full release of X4 Gunnery Control: reviews unreleased changes in
+  NEWS.md and CHANGELOG.md, proposes a version number, bumps both history files
+  and content.xml, synchronizes release/RELEASE_NOTES.md, runs validation,
+  commits, tags, and provides the exact terminal commands to publish via GitHub
+  Releases, upload on Nexus manually, and publish to Steam Workshop.
 ---
 
 # Release Agent
@@ -18,34 +19,20 @@ after a tag is pushed.
 
 ## Step 1 — Read the current state
 
-Read these two files and display the relevant sections to the user:
+Read these three files and display the relevant sections to the user:
 
-1. `CHANGELOG.md` — show the full `## [Unreleased]` section verbatim.
-2. `content.xml` — show the current `version` attribute value and `date`.
+1. `NEWS.md` — show the full `## Unreleased` section verbatim.
+2. `CHANGELOG.md` — show the full `## [Unreleased]` section verbatim.
+3. `content.xml` — show the current `version` attribute value and `date`.
 
 Derive the current display version: divide the integer in `content.xml` by 100.
 For example `version="20"` → `0.20`.
 
 ---
 
-## Step 2 — Confirm pre-flight
+## Step 2 — Propose the version number
 
-Before touching any file, ask the user to confirm all of the following:
-
-- `./scripts/validate.sh` passes clean on the current branch.
-- The in-game **camera release gate** from `TESTING.md` has passed for the
-  supported bridge matrix on this build.
-- The branch to be released is merged to `main` (or the release commit is
-  already on `main`).
-
-Do not proceed until the user confirms. If they haven't run the gate, remind
-them that a tag pushed without it cannot be undone cleanly.
-
----
-
-## Step 3 — Propose the version number
-
-Based on the `[Unreleased]` changes, suggest a version:
+Based on the `[Unreleased]` sections, suggest a version:
 
 - **MINOR bump** (e.g. `0.20` → `0.21`) — the default for feature releases and
   bug-fix releases where the save format and API surface are compatible.
@@ -58,7 +45,72 @@ Version format rules: `MAJOR.MINOR` where MINOR is always two digits (`0.21`,
 just a counter.
 
 Show your reasoning and ask the user to confirm or override the version before
-editing anything.
+continuing. The confirmed version is required for the remote tag check below;
+never check a placeholder tag.
+
+---
+
+## Step 3 — Confirm pre-flight
+
+Before touching any file, run the following checks in order and stop if any
+fail. Do not ask the user to confirm these — verify them yourself.
+
+**1. Clean working tree.**
+
+```bash
+git status --porcelain
+```
+
+The output must be empty. If it is not, tell the user what is uncommitted and
+stop. Do not stash silently.
+
+**2. Fetch latest refs and tags.**
+
+```bash
+git fetch --tags origin
+```
+
+**3. Check out `main` and fast-forward.**
+
+```bash
+git checkout main
+git merge --ff-only origin/main
+```
+
+If the fast-forward fails, the local `main` has diverged from the remote; tell
+the user and stop.
+
+**4. Verify HEAD matches `origin/main`.**
+
+```bash
+git rev-parse HEAD
+git rev-parse origin/main
+```
+
+Both must be identical. If they differ, stop and report.
+
+**5. Verify the confirmed tag does not already exist.**
+
+Use the version confirmed in Step 2, then run:
+
+```bash
+git tag --list "v<VERSION>"
+git ls-remote --tags origin "refs/tags/v<VERSION>"
+```
+
+Both must return nothing. If either returns output, the tag already exists —
+stop and tell the user.
+
+---
+
+Ask the user to confirm the following before proceeding:
+
+- `./scripts/validate.sh` passes clean on `main`.
+- The in-game **camera release gate** from `TESTING.md` has passed for the
+  supported bridge matrix on this build.
+
+Do not proceed until the user confirms. If they haven't run the gate, remind
+them that a tag pushed without it cannot be undone cleanly.
 
 ---
 
@@ -67,33 +119,55 @@ editing anything.
 Once the version (e.g. `0.21`) and today's date are confirmed, make these edits
 **in a single operation**:
 
-1. **`CHANGELOG.md`** — rename the top heading from  
-   `## [Unreleased]`  
-   to  
-   `## [0.21] - 2026-08-07`  
+1. **`NEWS.md`** — rename the top heading from
+   `## Unreleased`
+   to
+   `## 0.21 — 2026-08-07`
    (substitute the confirmed version and today's ISO date).
 
-2. **`content.xml`** — update the `version` integer and `date` attribute:
+2. **`CHANGELOG.md`** — rename the top heading from
+   `## [Unreleased]`
+   to
+   `## [0.21] - 2026-08-07`
+   (substitute the confirmed version and today's ISO date).
+
+3. **`content.xml`** — update the `version` integer and `date` attribute:
    - `version` = `MAJOR * 100 + MINOR` (e.g. `21` for `0.21`)
    - `date` = today's ISO date (e.g. `2026-08-07`)
 
-After editing, read both files back and show the changed lines to the user.
+After editing, read all three files back and show the changed lines to the user.
+
+The release version is recorded in three files for different audiences:
+`content.xml` is the machine-readable source that CI, packaging, and the X4
+launcher read; `NEWS.md` is the player-facing history whose top heading is
+intentionally versioned so users can see what shipped in each release.
+`CHANGELOG.md` carries the parallel technical record. If you ever find a version
+number hardcoded anywhere else outside these three files, delete it rather than
+bump it — a second copy is what silently breaks CI one commit later.
 
 ---
 
 ## Step 5 — Review release notes
 
-Read `release/RELEASE_NOTES.md` and ask the user:
+Read `release/RELEASE_NOTES.md` and compare it to the current release entry in
+`NEWS.md` (the heading you just versioned in Step 4). Then read
+`release/nexus_description.txt` and `release/workshop-description.bbcode`
+solely to audit whether any **evergreen** content — current behaviour
+description, requirements, limitations, installation steps, or links — has
+become inaccurate since the last release.
 
-> Does this release add features or change user-visible behaviour that aren't
-> reflected here?
+If `release/RELEASE_NOTES.md` does not match the current release entry in
+`NEWS.md`, update it so the two are aligned. Show the diff and ask the user to
+confirm before saving.
 
-If yes, open the file so the user can edit it, then remind them to keep
-`release/workshop-description.bbcode` in step (the Workshop description is
-the same text in BBCode format; it's edited on the Workshop website, with the
-in-repo file as the paste-ready copy).
+Do **not** ask whether features changed or whether release notes should be
+copied into store descriptions. Nexus and Workshop descriptions are evergreen
+current-product docs; they stay current by correcting inaccuracies, not by
+mirroring every new release.
 
-If no changes are needed, move on.
+If you find stale evergreen content in either store-description file,
+update the file so it accurately reflects current behaviour/requirements and
+show the diff to the user for confirmation. If no staleness is found, move on.
 
 ---
 
@@ -118,15 +192,18 @@ Show the user the exact git diff and ask them to confirm before committing:
 git diff
 ```
 
-Then stage and commit only the version-bump files (and `release/RELEASE_NOTES.md`
-if it was updated):
+Then stage and commit:
 
 ```bash
-git add CHANGELOG.md content.xml
-# add release/RELEASE_NOTES.md and release/workshop-description.bbcode if changed
+git add NEWS.md CHANGELOG.md content.xml
 git diff --cached
 git commit -m "Release v0.21"
 ```
+
+Also stage `release/RELEASE_NOTES.md` if it was synchronized in Step 5, and
+stage `release/nexus_description.txt` or `release/workshop-description.bbcode`
+only when an evergreen accuracy correction was actually made. Do not stage
+store-description files merely because a new release introduced new features.
 
 Substitute the confirmed version. Do not amend or force-push existing commits.
 
@@ -157,7 +234,50 @@ Provide the direct link pattern:
 
 ---
 
-## Step 9 — Steam Workshop release
+## Step 9 — Nexus release (manual)
+
+The Nexus upload remains manual. Do this after the GitHub tag build completes.
+Download the GitHub release ZIP (`x4_gunnery_control-v0.21.zip`, substituting
+the confirmed version) first; that exact built artifact is what is staged for
+the Nexus upload.
+
+Use this flow on the Nexus website:
+
+1. Open your mod page and go to **Manage** (or **My Mods** -> your mod), then
+   open **Files**.
+2. Find the current main file entry (for example `0.20`) and click its
+   **Update** button.
+3. Upload the new GitHub release zip (`x4_gunnery_control-v0.21.zip`,
+   substitute your release version).
+4. Provide the one-line change summary Nexus asks for.
+5. Confirm the updated file now shows the new version as latest.
+
+Audit only (no automatic update):
+
+6. Re-read the Nexus mod-page description carefully. Update it **only** when
+   its evergreen content — behaviour description, requirements, limitations,
+   installation steps, or links — is inaccurate for the current release.
+   Do not update it simply because features or behaviour changed; that belongs
+   in `RELEASE_NOTES.md`, not in an evergreen store description.
+
+Verification before moving on:
+
+- The new file appears in the Files tab with the expected version.
+- The page's primary download points at the new file.
+- Description/requirements still match `README.md` and current product state.
+
+Notes from Nexus docs and current site rollout:
+
+- Nexus confirms submitted files can be edited/archived/removed from the
+  author's management area.
+- Nexus recommends clear versioning and marking the current file clearly for
+  users.
+- Nexus's new Upload Form is in open beta, so labels/placement can differ from
+  legacy screens.
+
+---
+
+## Step 10 — Steam Workshop release
 
 The Workshop release requires:
 - Running on Windows with Steam open and logged in.
@@ -167,22 +287,28 @@ The Workshop release requires:
 
 Provide the single command that stages and publishes in one step:
 
-```bat
-REM Run this from a Windows terminal (CMD or PowerShell) — Steam must be running
-.\scripts\release-workshop.sh 0.21 "Describe what changed in this release"
+```bash
+# Run from WSL with Steam open on Windows — release-workshop.sh is a bash script
+# and requires wslpath; it cannot be run directly from CMD or PowerShell.
+# Use wsl.exe if invoking from a Windows terminal:
+#   wsl.exe bash scripts/release-workshop.sh 0.21 "Describe what changed in this release"
+scripts/release-workshop.sh 0.21 "Describe what changed in this release"
 ```
 
 Remind the user:
 - Replace the changenote with a short plain-English summary of this release.
 - The script aborts if WorkshopTool is not found; set `X4GC_WORKSHOPTOOL` to
   override the path, or `X4GC_DRY_RUN=1` to print the command without publishing.
-- `WorkshopTool` does **not** update the title or long description; edit those
-  on the Workshop website if needed. Keep `release/workshop-description.bbcode`
+- `WorkshopTool` does **not** update the title or long description. After
+  publishing, audit the Workshop page description for stale evergreen content
+  (behaviour, requirements, limitations, installation steps, or links). Update
+  it only when something is inaccurate; do not rewrite it merely because a new
+  release introduced new features. Keep `release/workshop-description.bbcode`
   in step as the paste-ready copy.
 
 ---
 
-## Step 10 — Post-release checklist
+## Step 11 — Post-release checklist
 
 After both platforms are live:
 
@@ -190,12 +316,12 @@ After both platforms are live:
 - [ ] Nexus file uploaded and set as the main download.
 - [ ] Steam Workshop item updated (check the page to confirm the new version
   appears in the mod's file info).
-- [ ] `release/workshop-description.bbcode` reflects the current feature set if
-  the description was updated on the website.
+- [ ] `release/workshop-description.bbcode` reflects any evergreen content that was corrected on the website.
+- [ ] Open a new `## Unreleased` section at the top of `NEWS.md` on `main` so the next feature branch has somewhere to record changes for players.
 - [ ] Open a new `## [Unreleased]` section at the top of `CHANGELOG.md` on
-  `main` so the next feature branch has somewhere to record changes.
+  `main` so the next feature branch has somewhere to record changes for maintainers.
 
 ```bash
-# Add the empty unreleased heading after confirming the release is live
-# Edit CHANGELOG.md manually or ask the agent to prepend the heading
+# Add the empty unreleased headings after confirming the release is live
+# Edit NEWS.md and CHANGELOG.md manually or ask the agent to prepend both headings
 ```

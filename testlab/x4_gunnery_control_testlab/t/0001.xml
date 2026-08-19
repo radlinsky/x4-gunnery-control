@@ -8,5 +8,10 @@
     <t id="15">Progress</t><t id="16">Group verification</t><t id="17">Not seated in a gunnery chair</t>
     <t id="18">Cease Engagement before starting Test Lab</t><t id="19">Camera unstable or unavailable</t>
     <t id="20">Camera technically stable; visual confirmation required</t><t id="21">Skip reason</t>
+    <t id="22">Reload UI</t><t id="23">Reload MD</t><t id="24">Reload AI</t>
+    <t id="25">Create test scenario</t><t id="26">Despawn test scenario</t>
+    <t id="27">Scenario spec</t>
+    <t id="28">Arm capture of next engaged target (10s after engage)</t>
+    <t id="29">Fire-control logging</t><t id="30">Mark moment</t>
   </page>
 </language>

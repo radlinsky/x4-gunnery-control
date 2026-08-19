@@ -37,6 +37,9 @@ for it.
    third-party techniques, not proof of public support.
 6. Consult official Egosoft documentation next. Use community discussion only
    for leads, then verify it against one of the earlier sources.
+   Follow [references/source-registry.md](references/source-registry.md) so the
+   official wiki, Egosoft forums, upstream mod sources, Nexus/Workshop, and
+   unavailable community channels are covered and disclosed consistently.
 7. Classify every conclusion as exactly one of:
    `documented-public`, `shipped-source`, `third-party-technique`, `inference`,
    or `live-tested`.
@@ -61,6 +64,8 @@ not give it a higher classification.
 
 - Read [references/source-policy.md](references/source-policy.md) for source
   order, classification, and KB update criteria.
+- Read [references/source-registry.md](references/source-registry.md) for every
+  external-source investigation or source-coverage audit.
 - Read [references/ui-lua-menu-camera.md](references/ui-lua-menu-camera.md)
   for UI FFI, menus, camera, input-frame, target, and surface findings.
 - Read [references/md-ai.md](references/md-ai.md) for MD/XSD lookup and AI
@@ -84,8 +89,9 @@ the current working directory is the skill directory. Invoke every helper as
   use a home-directory variable as a target.
 - Run `"$SKILL_DIR/scripts/search-x4.sh" --help`. Search with
   `"$SKILL_DIR/scripts/search-x4.sh" --dry-run -- PATTERN`; the `--` before the
-  pattern is mandatory. It searches the KB/project and selected extracted or
-  extension roots with `rg`; `--dry-run` prints scope only.
+  pattern is mandatory. It searches the KB/project and discovered or selected
+  extracted/extension roots with `rg`; `--dry-run` prints scope only. Pass
+  `--x4-root` when the install is outside the discovered locations.
 - Run `"$SKILL_DIR/scripts/index-lua-ffi.sh" --source PATH` to emit FFI
   declarations to stdout. Use `--output FILE` only for an explicit new file;
   it refuses to overwrite it.
@@ -96,7 +102,9 @@ the current working directory is the skill directory. Invoke every helper as
 - Run `"$SKILL_DIR/scripts/extract-selected-xrcat.sh" --help` before
   extraction. Supply an explicit executable or the verified v1.11 ZIP plus
   explicit tool cache, existing `.cat` inputs, a new non-X4 output directory,
-  and include regexes.
+  and include regexes. The helper verifies the recorded v1.11 ZIP SHA-256 and
+  the extracted cache on every reuse; use `--expected-sha256` only with an
+  independently verified mirror or a controlled test fixture.
   Inside this repository, output and tool caches must stay under the ignored
   `.x4-research-cache/`; external temporary directories are also allowed.
   Use `--dry-run` first; it prints the escaped command. Never add `-append` or
