@@ -2,6 +2,8 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
 ## [0.31] - 2026-08-20
 
 - Add a selectable Direct-control turret policy with two manual modes,

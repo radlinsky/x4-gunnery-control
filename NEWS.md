@@ -1,5 +1,7 @@
 # News
 
+## Unreleased
+
 ## 0.31 - 2026-08-20
 
 - Target selection now shows each ship/station candidate's class/type and an N / total ENGAGEABLE count for the selected turrets. Fully ENGAGEABLE candidates are listed first, ahead of the normal relationship/distance ordering.
