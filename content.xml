@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<content id="x4_gunnery_control" name="X4 Gunnery Control" author="X4 Gunnery Control contributors" version="30" date="2026-08-07" save="false" enabled="1" description="Turns gunnery chairs into a real turret console. Pick which turret groups to engage, choose a target, and watch from the turret or target camera. You say what, not how.">
+<content id="x4_gunnery_control" name="X4 Gunnery Control" author="X4 Gunnery Control contributors" version="31" date="2026-08-20" save="false" enabled="1" description="Turns gunnery chairs into a real turret console. Pick which turret groups to engage, choose a target, and watch from the turret or target camera. You say what, not how.">
   <dependency version="900"/>
   <!-- optional="true" on purpose: UI Extensions ships from Nexus and from the Workshop under
        two different extension ids, so no single id matches every install that actually has it.

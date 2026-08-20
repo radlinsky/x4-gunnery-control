@@ -1,6 +1,6 @@
 # News
 
-## Unreleased
+## 0.31 - 2026-08-20
 
 - Target selection now shows each ship/station candidate's class/type and an N / total ENGAGEABLE count for the selected turrets. Fully ENGAGEABLE candidates are listed first, ahead of the normal relationship/distance ordering.
 - Surface element targeting has been rebuilt for large ships and stations. Filter operational surface elements by Turret / Shield / Engine, with alternatives ordered largest-first (XL → L → M → S → XS), then paged 20 at a time. Every listed surface element has its own ENGAGEABLE count; the current aim point stays pinned with distance, shield and hull status. Manual refresh and an optional 10-second automatic refresh keep the browser current.
