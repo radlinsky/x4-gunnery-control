@@ -31,4 +31,10 @@ cd "$(dirname "$tool")"
 set -- update -path "$stage" -buildcat -changenote "$changenote" "$@"
 printf 'WorkshopTool'; printf ' %q' "$@"; printf '\n'
 [[ -n "${X4GC_DRY_RUN:-}" ]] && exit 0
-exec "$tool" "$@"
+# WorkshopTool prompts "Start upload to the Steam cloud (y/n)?" on stdin. Run
+# non-interactively it reads EOF, reprints the prompt in a tight loop forever,
+# and never uploads (a silent hang + multi-GB log). Feed it y. yes gets SIGPIPE
+# when the tool exits, so take the tool's own status, not the pipeline's.
+set +o pipefail
+yes | "$tool" "$@"
+exit "${PIPESTATUS[1]}"
