@@ -66,12 +66,13 @@ grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_member"' "$main
 grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_target"' "$main"
 grep -Fq 'State.checkedGroups(session)' "$main"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityService'])" "engageability service cue count"
-# The own-hull-aware muzzle-origin probe fires twice: once at the target root,
-# then (issue #60) as the per-module fallback when a large ship/station root's
-# bbox-centre aim point self-blocks the ray. Both keep the barrel offset and
-# excludeself='false' so the firing ship's own hull can mask the shot.
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'][@target='\$target'])" "engageability service root muzzle-origin line-of-fire check count"
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'][@target='\$module'])" "engageability service module-fallback muzzle-origin line-of-fire check count"
+# Guided missile turrets bypass the direct ray after bearing/range. Unguided
+# missile turrets cast it with own-hull exclusion; conventional turrets cast the
+# same expression as false and retain the existing own-hull-aware behaviour.
+assert_md_xpath "1" "count(//set_value[@name='\$guidedmissileturret'][contains(@exact, '\$weapon.class == class.missileturret')][contains(@exact, '\$weapon.ammo.macro.isguided')])" "guided missile-turret discriminator count"
+assert_md_xpath "1" "count(//do_if[@value='\$guidedmissileturret']/set_value[@name='\$lineoffireclear'][@exact='true'])" "guided missile-turret line-of-fire bypass count"
+assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='\$weapon.class == class.missileturret'][@useaimtarget='true'][@target='\$target'])" "engageability service root muzzle-origin line-of-fire check count"
+assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='\$weapon.class == class.missileturret'][@useaimtarget='true'][@target='\$module'])" "engageability service module-fallback muzzle-origin line-of-fire check count"
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityResult'\"])" "engageability result event count"
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityBatchComplete'\"])" "engageability batch-complete event count"
 grep -Fq "EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
@@ -90,7 +91,7 @@ if grep -Eq "\\\$weapon\.distanceto\.\{\\\$target\}[[:space:]]*\+[[:space:]]*\(?
   echo "production MD reintroduced the point-distance (distanceto + target.size/2) firing-range predicate" >&2
   exit 1
 fi
-assert_md_xpath "1" "count(//check_line_of_sight[parent::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
+assert_md_xpath "1" "count(//check_line_of_sight[@target='\$target'][ancestor::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityMember']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'weapons.count lt')][contains(@value, 'not EngageabilityService.\$weapons.indexof')])" "member nonce/count/duplicate guards"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityTarget']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'targets.count lt')][contains(@value, 'not EngageabilityService.\$targets.indexof')])" "target nonce/count/duplicate guards"
 grep -Fq "[@event.param3.\$targets, 20].min" "$md"

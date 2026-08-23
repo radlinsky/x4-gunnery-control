@@ -3,7 +3,7 @@
 local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
 local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
-local scenarioActionStatus, scenarioRequestSerial, pendingScenario = nil, 0, nil
+local scenarioActionStatus, scenarioRequestSerial, pendingScenario, remoteScenarioReady = nil, 0, nil, false
 local finishGroups, emitSummary, returnToGunnery
 
 local function text(id) return ReadText(20992, id) end
@@ -129,6 +129,30 @@ local function validateSpec(raw)
         if behaviour ~= "wait" and behaviour ~= "attack" and behaviour ~= "none" then
             return nil, where .. ".behaviour must be wait, attack or none"
         end
+        local role = tostring(group.role or "")
+        if role ~= "" and role ~= "shooter" then
+            return nil, where .. ".role must be empty or shooter"
+        end
+        local expectedMissileTurrets = tonumber(group.expectedMissileTurrets) or 0
+        local expectedGuided = tonumber(group.expectedGuided) or 0
+        local expectedDumbfire = tonumber(group.expectedDumbfire) or 0
+        local expectedAmmo = tonumber(group.expectedAmmo) or 0
+        for field, value in pairs({ expectedMissileTurrets = expectedMissileTurrets,
+                expectedGuided = expectedGuided, expectedDumbfire = expectedDumbfire,
+                expectedAmmo = expectedAmmo }) do
+            if value < 0 or value ~= math.floor(value) then
+                return nil, where .. "." .. field .. " must be a non-negative integer"
+            end
+        end
+        if role == "shooter" then
+            if group.loadout ~= "issue65_odysseus_mixed_missiles" then
+                return nil, where .. ".loadout is not a supported shooter loadout"
+            end
+            if expectedMissileTurrets < 1 or expectedGuided + expectedDumbfire ~= expectedMissileTurrets
+                    or expectedAmmo < 1 then
+                return nil, where .. " has an inconsistent shooter census"
+            end
+        end
         groups[#groups + 1] = {
             label = tostring(group.label or ("group" .. index)),
             macro = group.macro,
@@ -143,6 +167,13 @@ local function validateSpec(raw)
             holdFire = group.holdFire == true,
             stripDefenceUnits = group.stripDefenceUnits == true,
             repairGuard = group.repairGuard == true,
+            yaw = tonumber(group.yaw) or 0,
+            role = role,
+            loadout = tostring(group.loadout or ""),
+            expectedMissileTurrets = expectedMissileTurrets,
+            expectedGuided = expectedGuided,
+            expectedDumbfire = expectedDumbfire,
+            expectedAmmo = expectedAmmo,
         }
     end
     local stations = {}
@@ -196,6 +227,7 @@ local function validateSpec(raw)
             return nil, "spec.setup.expectedTurrets must be a positive number"
         end
         setup = {
+            remote = raw.setup.remote == true,
             shipMacro = raw.setup.shipMacro,
             shipLabel = raw.setup.shipLabel,
             turretGroup = raw.setup.turretGroup,
@@ -204,7 +236,29 @@ local function validateSpec(raw)
             selectAll = raw.setup.selectAll == true,
         }
     end
-    return { id = raw.id, enabled = raw.enabled, groups = groups, stations = stations, setup = setup }
+    local location
+    if raw.location ~= nil then
+        if type(raw.location) ~= "table" then return nil, "spec.location must be a table" end
+        if type(raw.location.sectorMacro) ~= "string" or raw.location.sectorMacro == "" then
+            return nil, "spec.location.sectorMacro must be a non-empty string"
+        end
+        for _, field in ipairs({ "x", "y", "z" }) do
+            if type(raw.location[field]) ~= "number" then
+                return nil, "spec.location." .. field .. " must be a number"
+            end
+        end
+        location = {
+            sectorMacro = raw.location.sectorMacro,
+            x = raw.location.x, y = raw.location.y, z = raw.location.z,
+        }
+    end
+    if setup and setup.remote and not location then
+        return nil, "remote setup requires spec.location"
+    end
+    return {
+        id = raw.id, enabled = raw.enabled, groups = groups, stations = stations,
+        setup = setup, location = location,
+    }
 end
 
 -- The spec file is a plain data literal, but it is hand-edited by an agent, so
@@ -242,8 +296,12 @@ local function sendScenarioSpec(force, requestId)
         log("scenario_spec", { action = "inert", spec_id = scenarioSpec.id })
         return false
     end
-    AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin",
-        { specId = scenarioSpec.id, force = force == true, requestId = requestId or "" })
+    local location = scenarioSpec.location or {}
+    AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin", {
+        specId = scenarioSpec.id, force = force == true, requestId = requestId or "",
+        sectorMacro = location.sectorMacro or "",
+        anchorX = location.x or 0, anchorY = location.y or 0, anchorZ = location.z or 0,
+    })
     for _, group in ipairs(scenarioSpec.groups) do
         AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group", {
             label = group.label, macro = group.macro, faction = group.faction,
@@ -252,6 +310,11 @@ local function sendScenarioSpec(force, requestId)
             behaviour = group.behaviour, hostile = group.hostile,
             holdFire = group.holdFire, stripDefenceUnits = group.stripDefenceUnits,
             repairGuard = group.repairGuard,
+            yaw = group.yaw, role = group.role, loadout = group.loadout,
+            expectedMissileTurrets = group.expectedMissileTurrets,
+            expectedGuided = group.expectedGuided,
+            expectedDumbfire = group.expectedDumbfire,
+            expectedAmmo = group.expectedAmmo,
         })
     end
     for _, station in ipairs(scenarioSpec.stations) do
@@ -354,18 +417,43 @@ local function createTestScenario()
         menu.display()
         return
     end
-    local selection, reason = resolveExactGroup()
-    if not selection then
-        scenarioActionStatus = "FAILED: " .. reason
-        log("scenario_create", { action = "rejected", reason = reason })
-        menu.display()
-        return
+    local remote = scenarioSpec.setup and scenarioSpec.setup.remote == true
+    local selection, reason
+    if remote then
+        selection = resolveExactGroup()
+        if remoteScenarioReady or selection then
+            scenarioActionStatus = "BLOCKED: remote fixture already exists; do not Create again. "
+                .. (remoteScenarioReady and ("teleport to " .. scenarioSpec.setup.shipLabel
+                    .. " and open Test Lab once to arm it")
+                    or "this is the spawned shooter; continue from Gunnery Control")
+            log("scenario_create", { action = "rejected", reason = "remote_fixture_already_active",
+                ship_id = selection and selection.shipID or "pending_teleport" })
+            menu.display()
+            return
+        end
+        selection = nil
+    end
+    if not remote then
+        selection, reason = resolveExactGroup()
+        if not selection then
+            scenarioActionStatus = "FAILED: " .. reason
+            log("scenario_create", { action = "rejected", reason = reason })
+            menu.display()
+            return
+        end
     end
     local expectedShips, expectedHostiles, expectedRepairFixtures = 0, 0, 0
+    local expectedShooters, expectedMissileTurrets, expectedGuided = 0, 0, 0
+    local expectedDumbfire, expectedAmmo = 0, 0
     for _, group in ipairs(scenarioSpec.groups) do
         expectedShips = expectedShips + group.count
         if group.hostile then expectedHostiles = expectedHostiles + group.count end
         if group.repairGuard then expectedRepairFixtures = expectedRepairFixtures + group.count end
+        if group.role == "shooter" then expectedShooters = expectedShooters + group.count end
+        expectedMissileTurrets = expectedMissileTurrets + group.expectedMissileTurrets * group.count
+        expectedGuided = expectedGuided + group.expectedGuided * group.count
+        expectedDumbfire = expectedDumbfire + group.expectedDumbfire * group.count
+        expectedAmmo = expectedAmmo + group.expectedAmmo * group.count
     end
     local expectedStations, expectedModules, minSurfaces, expectedSafeFixtures = #scenarioSpec.stations, 0, 0, 0
     for _, group in ipairs(scenarioSpec.groups) do
@@ -389,8 +477,16 @@ local function createTestScenario()
         expectedRepairFixtures = expectedRepairFixtures,
         expectedDefenceUnits = 0,
         expectedHostiles = expectedHostiles,
+        expectedShooters = expectedShooters,
+        expectedMissileTurrets = expectedMissileTurrets,
+        expectedGuided = expectedGuided,
+        expectedDumbfire = expectedDumbfire,
+        expectedAmmo = expectedAmmo,
+        expectedLocationFailures = 0,
+        expectedLoadoutFailures = 0,
         deadline = getElapsedTime() + (expectedStations > 0 and 20 or 10),
         selection = selection,
+        remote = remote,
     }
     scenarioActionStatus = "CREATING: replacing the previous fixture and verifying "
         .. expectedShips .. " ships, " .. expectedStations .. " stations, and live surfaces..."
@@ -400,7 +496,8 @@ local function createTestScenario()
         expected_stations = expectedStations, expected_modules = expectedModules,
         min_surfaces = minSurfaces,
         request_id = requestId, load_time = scenarioLoadTime,
-        group = selection.rawGroup, member_ids = selection.memberIDs,
+        group = selection and selection.rawGroup or "deferred_remote",
+        member_ids = selection and selection.memberIDs or "deferred_remote",
     })
     menu.display()
 end
@@ -408,8 +505,16 @@ end
 local function onScenarioReady(_, param)
     local value = tostring(param or "")
     local requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures =
-        value:match("^x4gct6:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures,
+        shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
+        value:match("^x4gct7:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+    if not requestId then
+        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
+            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures =
+            value:match("^x4gct6:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
+            "0", "0", "0", "0", "0", "0", "0"
+    end
     if not requestId then
         requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
             safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles =
@@ -449,6 +554,9 @@ local function onScenarioReady(_, param)
     defenceUnits = tonumber(defenceUnits)
     hostiles = tonumber(hostiles)
     repairFixtures = tonumber(repairFixtures)
+    shooters, shooterMissileTurrets = tonumber(shooters), tonumber(shooterMissileTurrets)
+    guided, dumbfire, ammo = tonumber(guided), tonumber(dumbfire), tonumber(ammo)
+    loadoutFailures, locationFailures = tonumber(loadoutFailures), tonumber(locationFailures)
     local surfaces = modules + turrets + missileTurrets + shields + engines
     local request = pendingScenario
     pendingScenario = nil
@@ -503,6 +611,46 @@ local function onScenarioReady(_, param)
             expected_repair_fixtures = request.expectedRepairFixtures,
             repair_fixtures = repairFixtures })
         menu.display()
+        return
+    end
+    if shooters ~= request.expectedShooters
+            or shooterMissileTurrets ~= request.expectedMissileTurrets
+            or guided ~= request.expectedGuided or dumbfire ~= request.expectedDumbfire
+            or ammo ~= request.expectedAmmo or loadoutFailures ~= request.expectedLoadoutFailures then
+        scenarioActionStatus = "FAILED: shooter census was " .. shooters .. " ships, "
+            .. shooterMissileTurrets .. " missile turrets (" .. guided .. " guided/"
+            .. dumbfire .. " dumbfire), " .. ammo .. " missiles, and "
+            .. loadoutFailures .. " loadout failures; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_shooters = request.expectedShooters, shooters = shooters,
+            expected_missile_turrets = request.expectedMissileTurrets,
+            shooter_missile_turrets = shooterMissileTurrets,
+            expected_guided = request.expectedGuided, guided = guided,
+            expected_dumbfire = request.expectedDumbfire, dumbfire = dumbfire,
+            expected_ammo = request.expectedAmmo, ammo = ammo,
+            loadout_failures = loadoutFailures })
+        menu.display()
+        return
+    end
+    if locationFailures ~= request.expectedLocationFailures then
+        scenarioActionStatus = "FAILED: " .. locationFailures
+            .. " objects missed the exact remote placement; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_location_failures = request.expectedLocationFailures,
+            location_failures = locationFailures })
+        menu.display()
+        return
+    end
+    if request.remote then
+        remoteScenarioReady = true
+        scenarioActionStatus = "READY: remote fixture verified; teleport to "
+            .. scenarioSpec.setup.shipLabel .. " and open Test Lab once to arm "
+            .. scenarioSpec.setup.turretLabel
+        log("scenario_create", { action = "remote_ready", request_id = request.requestId,
+            spawned_ships = spawned, shooters = shooters,
+            missile_turrets = shooterMissileTurrets, guided = guided,
+            dumbfire = dumbfire, ammo = ammo, location_failures = locationFailures })
+        returnToGunnery("remote_scenario_ready")
         return
     end
     local selection, reason = resolveExactGroup()
@@ -634,6 +782,22 @@ end
 
 function menu.onShowMenu()
     closing, suppressReopen = false, false
+    if remoteScenarioReady then
+        local selection, reason = resolveExactGroup()
+        if selection then
+            applyExactGroup(selection)
+            remoteScenarioReady = false
+            scenarioActionStatus = "ARMED: " .. selection.label
+                .. " verified and selected; returning to Gunnery Control"
+            log("scenario_activate", { action = "ready", ship_id = selection.shipID,
+                group = selection.rawGroup, member_ids = selection.memberIDs })
+            setObserving(true)
+            returnToGunnery("remote_scenario_armed")
+            return
+        end
+        scenarioActionStatus = "READY: teleport to " .. scenarioSpec.setup.shipLabel
+            .. ", then open Test Lab again (" .. tostring(reason) .. ")"
+    end
     menu.display()
 end
 
@@ -671,12 +835,18 @@ function menu.display()
     if scenarioSpec and scenarioSpec.setup then
         local setup = scenarioSpec.setup
         local setupRow = tableView:addRow(false, {})
-        setupRow[1]:setColSpan(4):createText("One-click setup: " .. setup.shipLabel
-            .. " | only " .. setup.turretLabel .. " | " .. setup.expectedTurrets .. " operational turrets")
+        setupRow[1]:setColSpan(4):createText((setup.remote and "Remote setup: " or "One-click setup: ")
+            .. setup.shipLabel .. " | only " .. setup.turretLabel .. " | "
+            .. setup.expectedTurrets .. " operational turrets")
     end
     local scenarioRow = tableView:addRow("scenario", {})
+    local remoteCreateBlocked = false
+    if scenarioSpec and scenarioSpec.setup and scenarioSpec.setup.remote then
+        remoteCreateBlocked = remoteScenarioReady or resolveExactGroup() ~= nil
+    end
     scenarioRow[1]:setColSpan(2):createButton({
-        active = scenarioSpec ~= nil and scenarioSpec.setup ~= nil and pendingScenario == nil,
+        active = scenarioSpec ~= nil and scenarioSpec.setup ~= nil and pendingScenario == nil
+            and not remoteCreateBlocked,
     }):setText(text(25))
     scenarioRow[1].handlers.onClick = createTestScenario
     scenarioRow[3]:setColSpan(2):createButton({ active = pendingScenario == nil }):setText(text(26)); scenarioRow[3].handlers.onClick = function()

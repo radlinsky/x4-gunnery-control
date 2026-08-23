@@ -18,7 +18,7 @@ Once you select at least one group, two controls become available.
 
 While engaged, the surface element browser keeps the current aim point pinned and lets you switch between the parent hull and operational turret, shield, and engine surface elements. You can filter by Turret / Shield / Engine. Surface elements are ordered largest-first (XL → L → M → S → XS), then by type and distance, and are paged 20 at a time. Each surface element shows distance and its own ENGAGEABLE count. The pinned aim point also shows shield and hull status. You can refresh manually or enable an optional 10-second automatic refresh.
 
-The ENGAGEABLE count is a geometry check, not a guarantee that a turret will fire. A turret counts as ENGAGEABLE when its known traverse arc covers the aim direction, the target is within weapon range, and the line of fire from the muzzle is clear past your own ship. Turrets with unknown arc data stay in the denominator and are reported as UNKNOWN. Readiness, fire authorization, intercept, and actual firing are separate.
+The ENGAGEABLE count is a geometry check, not a guarantee that a turret will fire. Every turret needs known traverse coverage and weapon range. Conventional turrets also need a clear muzzle-to-target line of fire including their own hull; unguided missile turrets keep that direct-line check but ignore their own hull, while guided missile turrets do not require a direct line. Turrets with unknown arc data stay in the denominator and are reported as UNKNOWN. Readiness, fire authorization, intercept, and actual firing are separate.
 
 For example, 3 / 4 ENGAGEABLE means 3 of the 4 selected/evaluated turrets currently pass that geometry check.
 

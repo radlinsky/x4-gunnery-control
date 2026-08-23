@@ -26,26 +26,30 @@
        out of 7252.  Only excludeself="true" carries signal, and by itself it
        cannot separate a turret that held fire from one that had no shot.
 
-  event_object_attacked_object replaces all of it.  common.xsd:13058 documents
-  param3 as [attacked component, weapon], so event.param3.{2} IS the turret
-  that landed the hit - the attribution lastattacker could not give.  Shipped
-  proof that param3.{2} really is the weapon and not something else:
+  event_object_attacked_object replaces the polling path for ordinary turret
+  hits. common.xsd:13058 documents param3 as [attacked component, weapon], and
+  ordinary projectile captures return the turret in event.param3.{2}. Shipped
+  proof that param3.{2} has the weapon role:
   md/notifications.xml:1515 reads that exact slot and passes it straight into
   change_relation_on_attack weapon=, whose weapon attribute is common.xsd:21620.
   object= is the ATTACKER, not the victim: common.xsd:13058 says so and
   md/cover.xml:271-273 pairs it with event_object_attacked under the comment
   "if we either attack something or are attacked by something".
 
-  So one HIT line now carries what the entire sweep could not: which turret
-  fired, what mode it was in, and what it hit.  A Defend turret hitting the
-  preferred target is a single greppable line.
+  This is kill-method-dependent. In the 2026-08-23 issue #65 capture,
+  hitbymissile returned the LAUNCHER SHIP in param3.{2}, not the missile turret.
+  FIRED still names the exact turret and missile object. One ordinary HIT line
+  can therefore carry what the sweep could not, but a missile HIT line cannot
+  be used for per-turret attribution.
 
-  WHAT IS DELIBERATELY NOT HERE
-  event_weapon_fired (common.xsd:16836) would also catch shots that MISS, and
-  diffing it against the hits would give a per-turret hit rate.  It is left out:
-  it fires on every trigger pull, so fourteen turrets in a sustained engagement
-  would swamp the log, and the only row it would help with (NO FIRING SOLUTION) is not
-  one of the open ones.  Add it if that row ever matters.
+  MISSILE FLIGHT CHECK
+  event_weapon_fired (common.xsd:16836) names the exact emitter in event.object
+  and the fired missile in event.param. For missile turrets a second listener
+  records that missile after 500 ms: survival plus increasing distance from the
+  firing ship is the own-hull-clearance check. missile.target records the
+  intended target; it does not prove impact. The general hit event omits the
+  missile object, so launch and arbitrary-target missile impact remain separate
+  signals.
 
   THE CENSUS, AND WHY IT SURVIVED THE REWRITE
   Hits are positive evidence only.  The Hold fire row needs the opposite: proof
@@ -378,16 +382,46 @@
               </actions>
             </cue>
 
+            <!-- A dumbfire launch alone does not prove that ignoring the
+                 firing ship in a diagnostic ray is safe: the missile could
+                 immediately collide with its own hull. Preserve the exact
+                 turret/missile pair from event_weapon_fired, wait long enough
+                 to clear the mount but far less than the fixture flight time,
+                 then report survival and displacement. missile.target is a
+                 direct launch-to-intended-target link, not an impact link. -->
+            <cue name="ObserveMissileFlight" instantiate="true">
+              <conditions>
+                <event_weapon_fired group="$FiringWeapons"/>
+              </conditions>
+              <delay exact="500ms"/>
+              <actions>
+                <do_if value="event.object.class == class.missileturret">
+                  <set_value name="$Weapon" exact="event.object"/>
+                  <set_value name="$Missile" exact="event.param"/>
+                  <set_value name="$Guided" exact="@$Missile.isguided"/>
+                  <set_value name="$Target" exact="@$Missile.target"/>
+                  <debug_text text="'[X4GC TEST MISSILE FLIGHT] t=' + player.age
+                    + ' weapon=' + $Weapon
+                    + ' macro=' + $Weapon.macro
+                    + ' missile=' + $Missile
+                    + ' guided=' + $Guided
+                    + ' target=' + (if $Target then $Target else 'none')
+                    + ' exists=' + @$Missile.exists
+                    + ' shipdist_500ms=' + (if @$Missile.exists then $Missile.distanceto.{$Ship} else 'none')"/>
+                </do_if>
+              </actions>
+            </cue>
+
             <!-- ObserveHit
-                 The whole point of the rewrite.  One line per hit landed BY the
-                 player ship, naming the weapon that landed it.
+                 One line per hit landed BY the player ship. For ordinary
+                 projectiles this names the turret; hitbymissile names the
+                 launcher ship and must be read with FIRED/FLIGHT lines.
 
                  event.param3.{2} is the weapon, event.param3.{1} the component
                  of the victim that was struck, event.param the victim itself,
-                 event.param2 the kill method (common.xsd:13058).  param3.{2} is
-                 read through @ because a hit with no weapon attribution is
-                 survivable - a missing turret id is worth one line saying so,
-                 not a dead cue.
+                 event.param2 the kill method (common.xsd:13058). param3.{2} is
+                 read through @ because missing or ship-level attribution is
+                 survivable and worth logging, not a dead cue.
 
                  istgt is the field the open rows turn on: it is true when the
                  thing this weapon hit is the target Direct-control was aiming
