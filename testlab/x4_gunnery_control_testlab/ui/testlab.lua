@@ -280,6 +280,23 @@ local function scenarioSpecLabel()
     return scenarioSpec.id .. (scenarioSpec.enabled and " (enabled)" or " (disabled)")
 end
 
+-- A remote fixture's player ship is disposable only while the owner is not
+-- aboard it.  Keep this identity check deliberately narrower than
+-- resolveExactGroup(): damaged/missing turrets must not make an occupied
+-- spawned ship suddenly safe to destroy.
+local function occupiedRemoteShooter()
+    local setup, bridge = scenarioSpec and scenarioSpec.setup, api()
+    if not setup or not setup.remote or not bridge or not bridge.getCurrentShipSweepReadOnly then
+        return nil
+    end
+    local ship = bridge.getCurrentShipSweepReadOnly()
+    if not ship or ship.macro ~= setup.shipMacro
+            or trim(ship.name) ~= trim(setup.shipLabel) then
+        return nil
+    end
+    return tostring(ship.id)
+end
+
 -- MD cannot be handed a nested table: the only live-tested Lua->MD payload is a
 -- flat table of scalars. The spec is therefore streamed as begin / one event per
 -- group / commit. See the transport note in the MD script.
@@ -421,13 +438,14 @@ local function createTestScenario()
     local selection, reason
     if remote then
         selection = resolveExactGroup()
-        if remoteScenarioReady or selection then
+        local occupiedShooterID = occupiedRemoteShooter()
+        if remoteScenarioReady or occupiedShooterID then
             scenarioActionStatus = "BLOCKED: remote fixture already exists; do not Create again. "
                 .. (remoteScenarioReady and ("teleport to " .. scenarioSpec.setup.shipLabel
                     .. " and open Test Lab once to arm it")
                     or "this is the spawned shooter; continue from Gunnery Control")
             log("scenario_create", { action = "rejected", reason = "remote_fixture_already_active",
-                ship_id = selection and selection.shipID or "pending_teleport" })
+                ship_id = occupiedShooterID or "pending_teleport" })
             menu.display()
             return
         end
@@ -499,6 +517,27 @@ local function createTestScenario()
         group = selection and selection.rawGroup or "deferred_remote",
         member_ids = selection and selection.memberIDs or "deferred_remote",
     })
+    menu.display()
+end
+
+local function despawnTestScenario()
+    if pendingScenario then
+        scenarioActionStatus = "BLOCKED: scenario creation is still pending"
+        log("scenario", { action = "despawn_rejected", reason = "creation_pending" })
+        menu.display()
+        return
+    end
+    local occupiedShooterID = occupiedRemoteShooter()
+    if occupiedShooterID then
+        scenarioActionStatus = "BLOCKED: leave the spawned shooter before despawning the test scenario"
+        log("scenario", { action = "despawn_rejected", reason = "occupied_remote_shooter",
+            ship_id = occupiedShooterID })
+        menu.display()
+        return
+    end
+    remoteScenarioReady = false
+    AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
+    log("scenario", { action = "despawn" })
     menu.display()
 end
 
@@ -840,24 +879,21 @@ function menu.display()
             .. setup.expectedTurrets .. " operational turrets")
     end
     local scenarioRow = tableView:addRow("scenario", {})
-    local remoteCreateBlocked = false
+    local remoteCreateBlocked, remoteDespawnBlocked = false, false
     if scenarioSpec and scenarioSpec.setup and scenarioSpec.setup.remote then
-        remoteCreateBlocked = remoteScenarioReady or resolveExactGroup() ~= nil
+        local occupiedShooterID = occupiedRemoteShooter()
+        remoteCreateBlocked = remoteScenarioReady or occupiedShooterID ~= nil
+        remoteDespawnBlocked = occupiedShooterID ~= nil
     end
     scenarioRow[1]:setColSpan(2):createButton({
         active = scenarioSpec ~= nil and scenarioSpec.setup ~= nil and pendingScenario == nil
             and not remoteCreateBlocked,
     }):setText(text(25))
     scenarioRow[1].handlers.onClick = createTestScenario
-    scenarioRow[3]:setColSpan(2):createButton({ active = pendingScenario == nil }):setText(text(26)); scenarioRow[3].handlers.onClick = function()
-        if pendingScenario then
-            pendingScenario = nil
-            scenarioActionStatus = "CANCELLED: pending creation was invalidated"
-        end
-        AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
-        log("scenario", { action = "despawn" })
-        menu.display()
-    end
+    scenarioRow[3]:setColSpan(2):createButton({
+        active = pendingScenario == nil and not remoteDespawnBlocked,
+    }):setText(text(26))
+    scenarioRow[3].handlers.onClick = despawnTestScenario
     if scenarioActionStatus then
         local statusRow = tableView:addRow(false, {})
         statusRow[1]:setColSpan(4):createText(scenarioActionStatus)

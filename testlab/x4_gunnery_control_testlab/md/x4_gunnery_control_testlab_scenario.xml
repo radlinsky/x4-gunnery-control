@@ -203,6 +203,7 @@
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_commit'"/>
             <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+            <check_value value="not (ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship})"/>
           </conditions>
           <actions>
             <set_value name="ScenarioRoot.$Accepting" exact="false"/>
@@ -241,6 +242,13 @@
                  Absolute sector positions keep this fixture independent of the
                  save's current sector and exactly 500 km from the origin. -->
             <set_value name="$Remote" exact="ScenarioRoot.$PendingSectorMacro != ''"/>
+            <!-- A local fixture is fired on by the ship at whose console Test
+                 Lab was opened.  Remote fixtures add their spawned role=shooter
+                 ship below.  One group therefore drives repair attribution in
+                 both setup modes. -->
+            <do_if value="not $Remote">
+              <add_to_group groupname="ScenarioRoot.$PlayerShooters" object="player.ship"/>
+            </do_if>
             <do_if value="$Remote">
               <set_value name="$SectorMacroName" exact="ScenarioRoot.$PendingSectorMacro"/>
               <do_if value="not @macro.{$SectorMacroName}">
@@ -607,6 +615,25 @@
           </actions>
         </cue>
 
+        <!-- A stale or direct scenario_commit must never replace a fixture
+             while the player occupies one of its spawned ships.  The normal
+             commit cue has the inverse guard, so exactly one consumes the
+             event. -->
+        <cue name="ScenarioCommitOccupiedReject" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_commit'"/>
+            <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+            <check_value value="ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship}"/>
+          </conditions>
+          <actions>
+            <set_value name="ScenarioRoot.$Accepting" exact="false"/>
+            <remove_value name="ScenarioRoot.$Pending"/>
+            <remove_value name="ScenarioRoot.$PendingStations"/>
+            <remove_value name="ScenarioRoot.$PendingRequestId"/>
+            <debug_text text="'[X4GC TEST SCENARIO] replacement rejected; player occupies spawned ship=' + player.ship"/>
+          </actions>
+        </cue>
+
         <!-- Repair only after a real player-ship hit. Unlike minimum-hull or
              invulnerability flags, this leaves the fixture attackable and its
              surface elements eligible for the vanilla shoot controller. -->
@@ -665,12 +692,23 @@
         <cue name="DespawnScenario" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'despawn_scenario'"/>
+            <check_value value="not (ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship})"/>
           </conditions>
           <actions>
             <signal_cue_instantly cue="DespawnScenarioImpl"/>
             <do_if value="ScenarioRoot.$SpawnedSpecId?">
               <remove_value name="ScenarioRoot.$SpawnedSpecId"/>
             </do_if>
+          </actions>
+        </cue>
+
+        <cue name="DespawnScenarioOccupiedReject" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'despawn_scenario'"/>
+            <check_value value="ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship}"/>
+          </conditions>
+          <actions>
+            <debug_text text="'[X4GC TEST SCENARIO] despawn rejected; player occupies spawned ship=' + player.ship"/>
           </actions>
         </cue>
 

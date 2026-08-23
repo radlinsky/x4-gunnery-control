@@ -309,8 +309,12 @@ do
     -- fixture is waiting.
     harness.testMenu.onShowMenu()
     local createWhileWaiting = harness.fix.buttonByText(ReadText(20992, 25))
+    local despawnWhileSafe = harness.fix.buttonByText(ReadText(20992, 26))
     assert(createWhileWaiting and createWhileWaiting.active == false,
         "Create must be disabled while a remote fixture waits for teleport")
+    assert(despawnWhileSafe and despawnWhileSafe.active == true,
+        "Despawn must remain available from the safe launcher")
+    local staleSafeDespawnHandler = despawnWhileSafe.handlers.onClick
     local eventCountBeforeRejectedCreate = #scenarioEvents(harness)
     createWhileWaiting.handlers.onClick()
     assert(#scenarioEvents(harness) == eventCountBeforeRejectedCreate
@@ -339,13 +343,43 @@ do
     -- crashed X4 in the 2026-08-23 live run.
     harness.testMenu.onShowMenu()
     local createAboardShooter = harness.fix.buttonByText(ReadText(20992, 25))
+    local despawnAboardShooter = harness.fix.buttonByText(ReadText(20992, 26))
     assert(createAboardShooter and createAboardShooter.active == false,
         "Create must be disabled aboard the exact remote shooter")
+    assert(despawnAboardShooter and despawnAboardShooter.active == false,
+        "Despawn must be disabled aboard the exact remote shooter")
     eventCountBeforeRejectedCreate = #scenarioEvents(harness)
     createAboardShooter.handlers.onClick()
     assert(#scenarioEvents(harness) == eventCountBeforeRejectedCreate
             and harness.fix.logContains("ship_id="),
         "a stale handler must reject second Create aboard the remote shooter")
+    despawnAboardShooter.handlers.onClick()
+    staleSafeDespawnHandler()
+    assert(#scenarioEvents(harness) == eventCountBeforeRejectedCreate
+            and harness.fix.logContains("reason=occupied_remote_shooter"),
+        "current and previously active Despawn handlers must re-check occupancy and send no event")
+end
+
+-- Outside an occupied remote shooter, Despawn remains active and emits the
+-- one cleanup event that MD owns.
+do
+    local harness = loadHarness({
+        id = "safe-despawn", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    harness.openFromGunnery({ label = "safe local launcher", phase = "console" })
+    local despawn = harness.fix.buttonByText(ReadText(20992, 26))
+    assert(despawn and despawn.active == true,
+        "Despawn must be active when the player does not occupy a spawned fixture")
+    local before = #scenarioEvents(harness)
+    despawn.handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == before + 1 and events[#events].control == "despawn_scenario",
+        "active Despawn must emit exactly one cleanup event")
 end
 
 -- A disabled spec is inert on load. The one-click action preflights the exact
@@ -577,8 +611,8 @@ do
         "changed loadout must preserve checked and staged state")
 end
 
--- Despawn is disabled while pending. Defensive invocation cancels correlation,
--- so a queued ready event cannot return the owner to an empty field.
+-- Despawn is disabled while pending, and even a directly invoked stale handler
+-- must leave both the fixture request and its acknowledgement correlation intact.
 do
     local harness = loadHarness({
         id = "pending-despawn", enabled = false,
@@ -593,11 +627,15 @@ do
     local events = scenarioEvents(harness)
     local despawn = harness.fix.buttonByText(ReadText(20992, 26))
     assert(despawn.active == false, "Despawn must be disabled while creation is pending")
+    local eventCountBeforeRejectedDespawn = #scenarioEvents(harness)
     despawn.handlers.onClick()
+    assert(#scenarioEvents(harness) == eventCountBeforeRejectedDespawn
+            and harness.fix.logContains("reason=creation_pending"),
+        "a stale pending Despawn handler must send no cleanup event")
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
         "x4gct1:" .. events[1].params.requestId .. ":pending-despawn:1")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
-        "ready after defensive Despawn cancellation must be ignored")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "rejected pending Despawn must preserve the matching READY handoff")
 end
 
 -- Malformed specs are caught, logged, and never raise. Test Lab must still open

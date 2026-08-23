@@ -35,6 +35,12 @@ and reject Create while teleport is pending and whenever the current gunnery
 ship exactly matches the remote shooter; operator wording is not a sufficient
 safety guard.
 
+Despawn is equally destructive. It must be disabled aboard the remote shooter,
+and its click handler must re-check occupancy so a handler captured while the
+owner was still on the safe launcher cannot later destroy the occupied ship.
+Mission Director cleanup must independently reject cleanup or replacement while
+`player.ship` belongs to the spawned fixture.
+
 That button must:
 
 - refuse a visible ship-name or macro mismatch, missing raw group, or wrong

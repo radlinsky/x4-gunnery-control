@@ -114,8 +114,18 @@ grep -Fq "':' + \$Hostiles + ':' + \$RepairObjectCount" "$scenario" \
   || fail "scenario acknowledgement omits the repair-guard census"
 grep -Fq "groupname=\"ScenarioRoot.\$RepairObjects\" object=\"\$Ship\"" "$scenario" \
   || fail "repair-guard fixtures are not registered during spawn"
+grep -Fq "groupname=\"ScenarioRoot.\$PlayerShooters\" object=\"player.ship\"" "$scenario" \
+  || fail "local scenarios do not attribute repair hits to the current player ship"
+grep -Fq "groupname=\"ScenarioRoot.\$PlayerShooters\" object=\"\$Ship\"" "$scenario" \
+  || fail "remote scenarios do not attribute repair hits to their spawned shooter"
 grep -Fq "<event_object_attacked_object group=\"ScenarioRoot.\$PlayerShooters\"/>" "$scenario" \
-  || fail "repair guard is not driven by attributed spawned-shooter hits"
+  || fail "repair guard is not driven by the unified local/remote shooter group"
+grep -Fq "not (ScenarioRoot.\$Spawned? and ScenarioRoot.\$Spawned.indexof.{player.ship})" "$scenario" \
+  || fail "scenario replacement and cleanup do not guard the occupied spawned ship"
+grep -Fq '<cue name="ScenarioCommitOccupiedReject" instantiate="true">' "$scenario" \
+  || fail "MD has no defensive rejection path for occupied-fixture replacement"
+grep -Fq '<cue name="DespawnScenarioOccupiedReject" instantiate="true">' "$scenario" \
+  || fail "MD has no defensive rejection path for occupied-fixture cleanup"
 grep -Fq "':' + \$ShooterCount + ':' + \$ShooterMissileTurrets" "$scenario" \
   || fail "scenario acknowledgement omits the spawned-shooter turret census"
 grep -Fq "':' + \$ShooterGuided + ':' + \$ShooterDumbfire + ':' + \$ShooterAmmo" "$scenario" \
