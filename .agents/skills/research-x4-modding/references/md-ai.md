@@ -92,6 +92,79 @@
   The attribute name invites the opposite reading and this project acted on it;
   it selects a destination, never an origin or a bore direction.
 
+### Missile guidance is a shipped fire-control discriminator, but missile-turret launch LOS is engine-side
+- X4: 9.00
+- Status: shipped-source
+- Source: `props-9.00/libraries/scriptproperties.xml:1443,1455,1463,2150`
+  (`weapon.ammo.macro`, `weapon.isguided`, the `missileturret` datatype, and
+  `macro.isguided`) and
+  `aiscripts/fight.attack.object.bigtarget.xml:398-425,993-1117` (fixed-launcher
+  guidance branches). A full `check_line_of_sight` census over shipped
+  `aiscripts/` finds the action in exactly five scripts: lockbox collection,
+  mass-traffic police/watchdog, capital mining, and capital movement/attack;
+  none is the missile firing path.
+- Live test: no — this record is the shipped-source boundary; see the following
+  live record for guided missile turrets.
+- Finding: loaded ammunition exposes its missile macro and `isguided` flag.
+  Vanilla uses that flag as a real fire-control discriminator for fixed missile
+  launchers: an unguided launcher tightens ship aim tolerance to 4 degrees
+  against capitals or 8 degrees otherwise, while guided missile handling takes
+  separate branches. Turret weapons are explicitly skipped by that ship-aim
+  calculation, so shipped scripts do not reveal the engine's missile-turret
+  launch test. There is no shipped AI-script LOS gate that can be copied as a
+  missile-turret rule.
+- Design consequence (inference, now partly corroborated by the live record
+  below): do not apply the conventional direct muzzle-to-target ray uniformly
+  to missile turrets. Guidance is the available discriminator. Missing ammo or
+  modded ammo without affirmative `isguided` data must not be promoted to the
+  guided branch.
+
+### Guided missiles launch through an own-hull-masked direct ray and reach the designated surface
+- X4: 9.00
+- Status: live-tested
+- Source: controlled Test Lab run 2026-08-23, scenario
+  `issue-65-remote-odysseus-e-r1`, game `debug.log`; detailed run record in
+  `testing-experiments.md`.
+- Live test: yes — one X4 9.00 session, one player-owned Odysseus E, one Xenon K
+  turret surface selected under `autoassist`.
+- Finding: the initial simultaneous diagnostic against selected surface
+  `0x18c351` returned `los=0` for all 16 missile turrets; 15 returned
+  `los_noself=1`. Eight guided turrets whose direct rays were self-masked then
+  emitted 16 attributed missile launches. Missile impact events landed on the
+  designated surface (four `hitcomp=0x18c351`, including three while the
+  designation was still active) and on adjacent components through splash.
+  This establishes that a guided missile turret can have a valid launch and
+  engagement path even when `check_line_of_sight excludeself="false"` rejects
+  the direct muzzle ray. For an ENGAGEABLE predicate, a guided missile turret
+  should retain bearing and range gates but must not require that direct ray.
+- Boundary: R1 did NOT answer the unguided case. All seven dumbfire turrets were
+  outside their elevation limits against the chosen surface. That question was
+  subsequently resolved by the R2/R6 record below.
+
+### Unguided missile turrets ignore own hull but retain an external direct-line check
+- X4: 9.00
+- Status: live-tested
+- Source: controlled Test Lab runs 2026-08-23, scenarios
+  `issue-65-remote-odysseus-e-r2` and `r6`, game `debug.log`; detailed run and
+  rejected-control history in `testing-experiments.md`.
+- Live test: yes — one exact player-owned Odysseus E loadout, clear Xenon K
+  hull control and fully Asgard-masked Xenon P control.
+- Finding: in the clear lane, three dumbfire components whose muzzle rays were
+  blocked only by the Odysseus's own hull launched 92 missiles; all 92 exact
+  missiles still existed after 500 ms while retaining the intended K target.
+  In the final blocked lane, the P was wholly hidden by a solid Asgard, all
+  seven dumbfire turrets were within range, and every exact muzzle ray returned
+  `muzzle_los_ex=0`. ENGAGEABLE fell to 8/16: eight guided turrets that could
+  bear remained eligible despite their equally blocked direct rays, while all
+  seven dumbfire turrets were rejected and one guided turret was in CANNOT
+  BEAR.
+- Design consequence: for a missile turret, affirmative loaded-ammunition
+  `macro.isguided` bypasses direct LOS while bearing/range remain mandatory.
+  Unguided or missing-guidance ammunition retains direct LOS with
+  `excludeself="true"`: ignore the firing ship's own hull, not external
+  obstructions. This is verified for the tested vanilla Odysseus/loadout; do
+  not upgrade it to a universal result for arbitrary hulls or modded missiles.
+
 ### Modular targets, attackable defence modules, and the per-module LOS fallback
 - X4: 9.00
 - Status: shipped-source
@@ -106,7 +179,7 @@
 
 ## Per-turret attribution from MD events
 
-### `event_object_attacked_object` param3 carries the firing WEAPON — this is the per-turret attribution route
+### `event_object_attacked_object` documents a firing WEAPON, but the runtime value is kill-method-dependent
 - X4: 9.00
 - Status: shipped-source
 - Source: `schemas-9.00/libraries/common.xsd:13055` (the event element; its
@@ -115,24 +188,41 @@
   Shipped proof the second element really is the weapon: `md/notifications.xml:1515`
   passes `event.param3.{2}` straight into `change_relation_on_attack weapon=`,
   whose `weapon` attribute is declared at `common.xsd:21620` (element at `:21611`)
-- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Live test: yes — ordinary turret hits have produced a turret component in
+  controlled captures; missile-hit behaviour is split into the correction below.
 - Finding: the event's `param3` is a two-element list, `[attacked component,
-  weapon]`. `event.param3.{2}` is therefore the weapon component that landed the
-  hit — on a turreted ship, the individual turret. Vanilla's own use is the
-  corroboration: `notifications.xml` does not inspect or reinterpret the value, it
-  forwards it as the `weapon` argument of a relation-change action that is typed
-  to take a weapon. This is a HIT signal, delivered to a listener, rather than a
-  property that can be polled.
+  weapon]`. Vanilla's own use corroborates the documented role:
+  `notifications.xml` does not inspect or reinterpret `event.param3.{2}`, but
+  forwards it as the `weapon` argument of a relation-change action. This is a
+  HIT signal, delivered to a listener, rather than a property that can be
+  polled. The schema does NOT guarantee that the runtime component is always an
+  individual turret; the missile correction below is a demonstrated exception.
 - **This supersedes the `lastattacker` dead end.** `lastattacker` is ship-scoped
   by design and cannot attribute a hit to a turret (live capture 2026-08-11, see
   the attacker-attribution record in `ui-lua-menu-camera.md`). Per-turret
-  attribution is available — just from an event payload, not from a property read.
-  Anyone landing on the negative result should come here.
+  attribution can be available from event payloads rather than a property read,
+  but the exact event must be validated for the kill method. Anyone landing on
+  the negative result should come here and the missile exception below.
 - Related but distinct, do not conflate: `md/x4ep1_mentor_subscription.xml:7138`
   tests `event.param3.isclass.bullet and event.param3.launcher`, but that is a
   condition on `event_player_ship_hit`, a different event whose `param3` is the
   BULLET itself rather than a two-element list. It is evidence for the
   `bullet.launcher` route below, not for this event's payload shape.
+
+### `hitbymissile` reports the launcher ship, not the individual missile turret
+- X4: 9.00
+- Status: live-tested
+- Source: controlled Test Lab run 2026-08-23, scenario
+  `issue-65-remote-odysseus-e-r1`, game `debug.log`.
+- Live test: yes — 16 launches from eight guided missile turrets and their
+  subsequent impacts in one X4 9.00 session.
+- Finding: for every observed `event_object_attacked_object` record with
+  `method=hitbymissile`, `event.param3.{2}` resolved to Odysseus launcher ship
+  `0x18c2de`, with `isturret=0`, rather than any of the missile-turret components
+  named by the corresponding FIRED events. Therefore missile impacts cannot be
+  attributed per turret through this payload. Use `event_weapon_fired` for the
+  exact missile turret that launched; correlate later impact only at ship or
+  missile-object level unless another live-verified identifier is available.
 
 ### `event_weapon_fired` fires per trigger pull and accepts a single weapon or a group
 - X4: 9.00
@@ -144,7 +234,8 @@
   `group`. Vanilla call sites, all group form:
   `aiscripts/move.attack.object.capital.xml:905`, `md/cinematiccamera.xml:3212`,
   `md/scenario_combat.xml:113` and `:300`
-- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Live test: yes for missile turrets — the 2026-08-23 run emitted 16 FIRED
+  events naming eight exact guided missile-turret components.
 - Finding: a mod can listen for the moment any specific weapon fires, scoped to
   one weapon or to a group it assembles. Turrets ARE weapons for this purpose and
   they DO appear in `<ship>.weapons.operational.list` — the proof is negative and
@@ -155,11 +246,22 @@
   `find_object_component class="class.weapon"` with a `<match class="class.turret"
   negate="true"/>` child. Both vanilla users of this event deliberately strip
   turrets out; a mod that wants turrets simply does not strip them.
-- Consequence worth recording: `event_object_attacked_object` fires on a HIT and
-  `event_weapon_fired` on every TRIGGER PULL. Listening to both and diffing per
-  weapon yields a per-turret hit rate — rounds sent versus rounds connecting —
-  which is a measurement neither signal gives alone. Untested; this is the design
-  consequence of the two schema records above, not an observed result.
+- Bounded consequence: for ordinary turret projectiles where the hit payload
+  has been verified to name the turret, listening to both events can yield a
+  per-turret hit rate. Do NOT apply that design to missiles: the launch event is
+  per turret, but `hitbymissile` reports the launcher ship (correction above).
+- Missile correlation boundary (shipped-source): the FIRED payload gives a
+  direct exact pair, `event.object` = missile turret and `event.param` = fired
+  missile. That missile exposes `.target`
+  (`props-9.00/libraries/scriptproperties.xml:894-897`), and
+  `event_object_incoming_missile` also exposes the same missile in `param2` plus
+  its target component in `param` (`common.xsd:14431-14444`). This directly
+  links turret -> missile -> intended target at launch. It still does NOT link
+  to an arbitrary-target impact: `event_object_attacked_object` omits the
+  missile object for `hitbymissile`. `event_player_ship_hit` does include the
+  projectile in `param3` (`common.xsd:15427-15440`), but only when the victim is
+  the player-controlled ship or ship context. No general-target equivalent has
+  been verified.
 - Note on list choice: `weapons.operational.list` (used here) and
   `turrets.operational.list` are different enumerations, and neither includes
   missile turrets (see the `missileturrets` record below). Pick deliberately.
@@ -457,6 +559,13 @@
   `hitcomp=` plus `istgt=1`), not a line-of-sight or firing-solution
   measurement. That is why this stands as a live-tested targeting result even
   though no firing-solution field was consulted.
+- Corroboration added 2026-08-23: on an Odysseus E, 16 guided missile launches
+  carried `aimed=0x18c351` for the directly selected Xenon K turret surface, and
+  missile-hit events registered that same component four times (three while the
+  designation remained active). Adjacent-component events at the same impact
+  times are splash and do not negate the direct surface hits. The missile HIT
+  payload named the launcher ship rather than the individual turret, so this is
+  surface-designation evidence, not per-turret impact attribution.
 - **This supersedes the earlier inference that station surface elements are
   inherently unusable as fire targets.** That inference grew out of a
   2026-08-17 research-branch run on a station under `attackenemies` (n=1): the

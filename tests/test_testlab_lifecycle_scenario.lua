@@ -248,6 +248,140 @@ do
         "omitted x/y must default to 0 in the group payload")
 end
 
+-- A remote setup is bootstrapped from an arbitrary safe gunnery ship. Creation
+-- is acknowledged only after MD reports the exact spawned shooter, mixed
+-- missile-turret loadout, ammunition, and absolute-placement census.
+do
+    local harness = loadHarness({
+        id = "remote-odysseus", enabled = false,
+        location = {
+            sectorMacro = "Cluster_14_Sector001_macro",
+            x = 500000, y = 0, z = 0,
+        },
+        setup = {
+            remote = true,
+            shipMacro = "ship_par_l_destroyer_02_a_macro",
+            shipLabel = "Remote Odysseus 1",
+            turretGroup = "all_missile_turrets", turretLabel = "All Missile Turrets",
+            -- The harness models one operational turret; the MD census below
+            -- still proves the fixture contract's full 16-turret payload.
+            expectedTurrets = 1, selectAll = true,
+        },
+        groups = {
+            { label = "Remote Odysseus", macro = "ship_par_l_destroyer_02_a_macro",
+              faction = "player", count = 1, distance = 0, x = 0, y = 0, yaw = 0,
+              behaviour = "wait", role = "shooter",
+              loadout = "issue65_odysseus_mixed_missiles",
+              expectedMissileTurrets = 16, expectedGuided = 9,
+              expectedDumbfire = 7, expectedAmmo = 160 },
+        },
+        stations = {},
+    })
+    harness.openFromGunnery({ label = "arbitrary safe launcher", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == 3, "remote Create must stream begin + shooter + commit")
+    assert(events[1].params.sectorMacro == "Cluster_14_Sector001_macro"
+            and events[1].params.anchorX == 500000
+            and events[1].params.anchorY == 0 and events[1].params.anchorZ == 0,
+        "remote begin must carry the exact flat sector anchor")
+    assert(events[2].params.role == "shooter"
+            and events[2].params.loadout == "issue65_odysseus_mixed_missiles"
+            and events[2].params.expectedMissileTurrets == 16
+            and events[2].params.expectedGuided == 9
+            and events[2].params.expectedDumbfire == 7
+            and events[2].params.expectedAmmo == 160,
+        "remote shooter event must carry the exact flat readiness census")
+    local requestId = events[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct7:" .. requestId .. ":remote-odysseus:1:0:0:0:0:0:0:0:0:0:0:0:0:1:16:9:7:160:0:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "an exact remote census must return to the safe launcher for teleport")
+    assert(harness.fix.logContains("action=remote_ready")
+            and harness.fix.logContains("missile_turrets=16")
+            and harness.fix.logContains("guided=9")
+            and harness.fix.logContains("dumbfire=7")
+            and harness.fix.logContains("ammo=160"),
+        "remote READY must log the verified shooter loadout")
+
+    -- READY returned to the safe launcher for teleport. Reopening Test Lab
+    -- there must not expose a destructive second Create while the remote
+    -- fixture is waiting.
+    harness.testMenu.onShowMenu()
+    local createWhileWaiting = harness.fix.buttonByText(ReadText(20992, 25))
+    local despawnWhileSafe = harness.fix.buttonByText(ReadText(20992, 26))
+    assert(createWhileWaiting and createWhileWaiting.active == false,
+        "Create must be disabled while a remote fixture waits for teleport")
+    assert(despawnWhileSafe and despawnWhileSafe.active == true,
+        "Despawn must remain available from the safe launcher")
+    local staleSafeDespawnHandler = despawnWhileSafe.handlers.onClick
+    local eventCountBeforeRejectedCreate = #scenarioEvents(harness)
+    createWhileWaiting.handlers.onClick()
+    assert(#scenarioEvents(harness) == eventCountBeforeRejectedCreate
+            and harness.fix.logContains("reason=remote_fixture_already_active"),
+        "a stale handler must reject second Create while teleport is pending")
+
+    GetComponentData = function(_, field)
+        if field == "macro" then return "ship_par_l_destroyer_02_a_macro" end
+        if field == "isplayerowned" then return true end
+        return nil
+    end
+    harness.fix.C.GetComponentName = function() return "Remote Odysseus 1" end
+    harness.fix.gcMenu.onShowMenu()
+    harness.fix.gcMenu.display()
+    harness.fix.buttonByText(ReadText(20991, 32)).handlers.onClick()
+    harness.testMenu.onShowMenu()
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
+        "opening Test Lab on the teleported shooter must auto-arm and return")
+    assert(harness.fix.logContains("event=scenario_activate")
+            and harness.fix.logContains("action=ready"),
+        "post-teleport activation must log the exact group setup")
+
+    -- Opening Test Lab after activation is legal for diagnostics, but Create
+    -- must remain disabled and its handler must refuse to replace the occupied
+    -- shooter. This exact operator mistake despawned the player context and
+    -- crashed X4 in the 2026-08-23 live run.
+    harness.testMenu.onShowMenu()
+    local createAboardShooter = harness.fix.buttonByText(ReadText(20992, 25))
+    local despawnAboardShooter = harness.fix.buttonByText(ReadText(20992, 26))
+    assert(createAboardShooter and createAboardShooter.active == false,
+        "Create must be disabled aboard the exact remote shooter")
+    assert(despawnAboardShooter and despawnAboardShooter.active == false,
+        "Despawn must be disabled aboard the exact remote shooter")
+    eventCountBeforeRejectedCreate = #scenarioEvents(harness)
+    createAboardShooter.handlers.onClick()
+    assert(#scenarioEvents(harness) == eventCountBeforeRejectedCreate
+            and harness.fix.logContains("ship_id="),
+        "a stale handler must reject second Create aboard the remote shooter")
+    despawnAboardShooter.handlers.onClick()
+    staleSafeDespawnHandler()
+    assert(#scenarioEvents(harness) == eventCountBeforeRejectedCreate
+            and harness.fix.logContains("reason=occupied_remote_shooter"),
+        "current and previously active Despawn handlers must re-check occupancy and send no event")
+end
+
+-- Outside an occupied remote shooter, Despawn remains active and emits the
+-- one cleanup event that MD owns.
+do
+    local harness = loadHarness({
+        id = "safe-despawn", enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro", shipLabel = "Test Ship",
+            turretGroup = "g", turretLabel = "Test Group", expectedTurrets = 1,
+        },
+        groups = { { macro = "m", faction = "xenon", count = 1, distance = 1000 } },
+    })
+    harness.openFromGunnery({ label = "safe local launcher", phase = "console" })
+    local despawn = harness.fix.buttonByText(ReadText(20992, 26))
+    assert(despawn and despawn.active == true,
+        "Despawn must be active when the player does not occupy a spawned fixture")
+    local before = #scenarioEvents(harness)
+    despawn.handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == before + 1 and events[#events].control == "despawn_scenario",
+        "active Despawn must emit exactly one cleanup event")
+end
+
 -- A disabled spec is inert on load. The one-click action preflights the exact
 -- ship/group, replaces the fixture, selects only that group, and returns to
 -- Gunnery only after MD acknowledges the expected ship count.
@@ -477,8 +611,8 @@ do
         "changed loadout must preserve checked and staged state")
 end
 
--- Despawn is disabled while pending. Defensive invocation cancels correlation,
--- so a queued ready event cannot return the owner to an empty field.
+-- Despawn is disabled while pending, and even a directly invoked stale handler
+-- must leave both the fixture request and its acknowledgement correlation intact.
 do
     local harness = loadHarness({
         id = "pending-despawn", enabled = false,
@@ -493,11 +627,15 @@ do
     local events = scenarioEvents(harness)
     local despawn = harness.fix.buttonByText(ReadText(20992, 26))
     assert(despawn.active == false, "Despawn must be disabled while creation is pending")
+    local eventCountBeforeRejectedDespawn = #scenarioEvents(harness)
     despawn.handlers.onClick()
+    assert(#scenarioEvents(harness) == eventCountBeforeRejectedDespawn
+            and harness.fix.logContains("reason=creation_pending"),
+        "a stale pending Despawn handler must send no cleanup event")
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
         "x4gct1:" .. events[1].params.requestId .. ":pending-despawn:1")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
-        "ready after defensive Despawn cancellation must be ignored")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "rejected pending Despawn must preserve the matching READY handoff")
 end
 
 -- Malformed specs are caught, logged, and never raise. Test Lab must still open

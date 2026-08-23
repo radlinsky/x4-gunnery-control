@@ -18,6 +18,29 @@ The normal owner workflow is:
 3. Confirm the displayed scenario id.
 4. Click **Create test scenario** once.
 
+For a `setup.remote = true` fixture, use this distinct workflow:
+
+1. Sit at any safe launcher's gunnery console and click **Create test scenario**
+   exactly once.
+2. Wait for `READY: remote fixture verified`; teleport to the exact named
+   spawned player ship.
+3. Open that ship's gunnery console and open **Test Lab exactly once**. Test Lab
+   auto-arms the exact group and immediately returns to Gunnery Control.
+4. Continue the gameplay checklist. Never press Create after teleport.
+
+Create is destructive replacement. In a live 2026-08-23 failure, a second
+Create while aboard the spawned shooter despawned the occupied ship, orphaned
+the player/camera context, and crashed X4. A remote-capable Test Lab must disable
+and reject Create while teleport is pending and whenever the current gunnery
+ship exactly matches the remote shooter; operator wording is not a sufficient
+safety guard.
+
+Despawn is equally destructive. It must be disabled aboard the remote shooter,
+and its click handler must re-check occupancy so a handler captured while the
+owner was still on the safe launcher cannot later destroy the occupied ship.
+Mission Director cleanup must independently reject cleanup or replacement while
+`player.ship` belongs to the spawned fixture.
+
 That button must:
 
 - refuse a visible ship-name or macro mismatch, missing raw group, or wrong
@@ -146,6 +169,22 @@ Position uses ship-local axes: positive `distance` is forward, negative is
 astern, positive `x` is right, and positive `y` is up. Random spread cannot
 stage repeatable bearing, elevation, range, or masking controls.
 
+For a remote absolute-anchor fixture, do not give any group `distance = 0`.
+The current Lua-to-MD receiver treats scalar zero as a missing optional value
+and substitutes its 5 km default. Use a shared nonzero base offset (for
+example, shooter `1`, blocker `2101`, target `4201`) so all intended relative
+separations remain exact. Confirm masking visually before permitting fire and
+compare the observer's target distance with the designed geometry.
+
+For a solid-obstruction control, a blocker's outer silhouette is insufficient:
+capital-ship meshes can contain hangar or structural openings that admit exact
+muzzle rays. Require the owner to confirm that no part of the target is visible
+through or around the blocker, then require `muzzle_los_ex=0` for every weapon
+the control claims to block before permitting fire. The catalog-verified Asgard
+macro is `ship_atf_xl_battleship_01_a_macro`; resolve unfamiliar ship macros
+from selected catalog assets before authoring the spec rather than inferring a
+faction prefix from the display name.
+
 `behaviour`:
 
 - `wait`: hold position; default for controlled targets.
@@ -198,7 +237,9 @@ The final instruction before the live run must contain all of these, in order:
 2. Required save, ship, seat, and console state.
 3. Exact menu path.
 4. Exact displayed scenario id.
-5. Exactly one setup action: **Create test scenario**.
+5. Exactly one setup action: **Create test scenario**. For a remote fixture,
+   explicitly add the teleport and the single post-teleport Test Lab opening;
+   state that this opening auto-arms and that Create must not be pressed again.
 6. What success does automatically, including the selected turret group.
 7. Exact spawned names and expected distances/roles.
 8. Every test action in click order.

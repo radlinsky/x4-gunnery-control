@@ -16,11 +16,14 @@
   live-tested 2026-08-04).  A multi-group spec is therefore streamed as a
   sequence of flat events rather than one nested payload:
 
-    scenario_begin  {specId = "...", force = true|false, requestId = "..."}
+    scenario_begin  {specId=, force=, requestId=, sectorMacro=,
+                     anchorX=, anchorY=, anchorZ=}
     scenario_group  {macro=, faction=, count=, distance=, spread=,
                      behaviour="wait"|"attack"|"none", hostile=true|false,
                      label=, holdFire=, stripDefenceUnits=,
-                     repairGuard=}                            (repeated)
+                     repairGuard=, yaw=, role=, loadout=,
+                     expectedMissileTurrets=, expectedGuided=,
+                     expectedDumbfire=, expectedAmmo=}        (repeated)
     scenario_station {recipe="xen_defence", faction=, distance=, spread=,
                       x=, y=, hostile=, label=, expectedModules=,
                       minSurfaces=, holdFire=}                (repeated)
@@ -116,6 +119,10 @@
               <set_value name="ScenarioRoot.$Accepting" exact="true"/>
               <set_value name="ScenarioRoot.$PendingSpecId" exact="$SpecId"/>
               <set_value name="ScenarioRoot.$PendingRequestId" exact="$RequestId"/>
+              <set_value name="ScenarioRoot.$PendingSectorMacro" exact="if @event.param3.$sectorMacro then event.param3.$sectorMacro else ''"/>
+              <set_value name="ScenarioRoot.$PendingAnchorX" exact="if @event.param3.$anchorX then event.param3.$anchorX else 0"/>
+              <set_value name="ScenarioRoot.$PendingAnchorY" exact="if @event.param3.$anchorY then event.param3.$anchorY else 0"/>
+              <set_value name="ScenarioRoot.$PendingAnchorZ" exact="if @event.param3.$anchorZ then event.param3.$anchorZ else 0"/>
               <set_value name="ScenarioRoot.$Pending" exact="[]"/>
               <set_value name="ScenarioRoot.$PendingStations" exact="[]"/>
               <debug_text text="'[X4GC TEST SCENARIO] accepting spec id=' + $SpecId + ' force=' + $Force"/>
@@ -177,7 +184,14 @@
               $hostile   = @event.param3.$hostile == true,
               $holdfire  = @event.param3.$holdFire == true,
               $stripdefenceunits = @event.param3.$stripDefenceUnits == true,
-              $repairguard = @event.param3.$repairGuard == true
+              $repairguard = @event.param3.$repairGuard == true,
+              $yaw       = if @event.param3.$yaw       then event.param3.$yaw       else 0,
+              $role      = if @event.param3.$role      then event.param3.$role      else '',
+              $loadout   = if @event.param3.$loadout   then event.param3.$loadout   else '',
+              $expectedmissileturrets = if @event.param3.$expectedMissileTurrets then event.param3.$expectedMissileTurrets else 0,
+              $expectedguided = if @event.param3.$expectedGuided then event.param3.$expectedGuided else 0,
+              $expecteddumbfire = if @event.param3.$expectedDumbfire then event.param3.$expectedDumbfire else 0,
+              $expectedammo = if @event.param3.$expectedAmmo then event.param3.$expectedAmmo else 0
             ]"/>
           </actions>
         </cue>
@@ -189,6 +203,7 @@
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_commit'"/>
             <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+            <check_value value="not (ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship})"/>
           </conditions>
           <actions>
             <set_value name="ScenarioRoot.$Accepting" exact="false"/>
@@ -200,6 +215,7 @@
             <create_group groupname="ScenarioRoot.$SpawnedStations"/>
             <create_group groupname="ScenarioRoot.$SafeObjects"/>
             <create_group groupname="ScenarioRoot.$RepairObjects"/>
+            <create_group groupname="ScenarioRoot.$PlayerShooters"/>
             <set_value name="$StationModules" exact="0"/>
             <set_value name="$StationTurrets" exact="0"/>
             <set_value name="$StationMissileTurrets" exact="0"/>
@@ -212,6 +228,95 @@
             <set_value name="$DefenceUnits" exact="0"/>
             <set_value name="$Hostiles" exact="0"/>
             <set_value name="$RepairObjectCount" exact="0"/>
+            <set_value name="$ShooterCount" exact="0"/>
+            <set_value name="$ShooterMissileTurrets" exact="0"/>
+            <set_value name="$ShooterGuided" exact="0"/>
+            <set_value name="$ShooterDumbfire" exact="0"/>
+            <set_value name="$ShooterAmmo" exact="0"/>
+            <set_value name="$LoadoutFailures" exact="0"/>
+            <set_value name="$LocationFailures" exact="0"/>
+            <set_value name="$DormantShooterWeapons" exact="0"/>
+            <set_value name="$UnsafeDormantShooterWeapons" exact="0"/>
+
+            <!-- Argon Prime's shipped macro is Cluster_14_Sector001_macro.
+                 Absolute sector positions keep this fixture independent of the
+                 save's current sector and exactly 500 km from the origin. -->
+            <set_value name="$Remote" exact="ScenarioRoot.$PendingSectorMacro != ''"/>
+            <!-- A local fixture is fired on by the ship at whose console Test
+                 Lab was opened.  Remote fixtures add their spawned role=shooter
+                 ship below.  One group therefore drives repair attribution in
+                 both setup modes. -->
+            <do_if value="not $Remote">
+              <add_to_group groupname="ScenarioRoot.$PlayerShooters" object="player.ship"/>
+            </do_if>
+            <do_if value="$Remote">
+              <set_value name="$SectorMacroName" exact="ScenarioRoot.$PendingSectorMacro"/>
+              <do_if value="not @macro.{$SectorMacroName}">
+                <set_value name="$LocationFailures" operation="add"/>
+                <debug_text text="'[X4GC TEST SCENARIO] unknown remote sector macro=' + $SectorMacroName"/>
+              </do_if>
+              <do_else>
+                <find_sector name="$ScenarioSector" macro="macro.{$SectorMacroName}" checkoperational="false"/>
+                <do_if value="not $ScenarioSector">
+                  <set_value name="$LocationFailures" operation="add"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] remote sector not found macro=' + $SectorMacroName"/>
+                </do_if>
+              </do_else>
+            </do_if>
+
+            <!-- Exact issue #65 shooter loadout, derived from the shipped
+                 story_paranid_stranded_odysseus_E loadout. Every one of the 16
+                 turret slots is a missile turret: 9 guided and 7 dumbfire.
+                 Four ammunition types split the ship's exact 160 capacity. -->
+            <create_loadout result="$Issue65OdysseusLoadout">
+              <macros>
+                <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_03"/>
+                <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_02"/>
+                <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_01"/>
+                <weapon macro="weapon_par_l_destroyer_01_mk1_macro" path="../con_weapon_01"/>
+                <weapon macro="weapon_par_l_destroyer_01_mk1_macro" path="../con_weapon_02"/>
+                <shield macro="shield_par_l_standard_01_mk2_macro" path="../con_shieldgen_large_01"/>
+                <shield macro="shield_par_l_standard_01_mk2_macro" path="../con_shieldgen_large_02"/>
+              </macros>
+              <groups>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_up_mid"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_up_mid"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_down_down" exact="4"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_up_mid2" exact="2"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_up_left"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_up_right"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_down_mid"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_down_right"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_down_left"/>
+                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_down_mid" exact="2"/>
+                <turrets macro="turret_par_m_guided_02_mk1_macro" group="group_front_up_mid" exact="2" ammunition="missile_gen_m_guided_01_mk1_macro"/>
+                <turrets macro="turret_par_m_guided_02_mk1_macro" group="group_rear_up_left" exact="2" ammunition="missile_gen_m_guided_01_mk1_macro"/>
+                <turrets macro="turret_par_m_guided_02_mk1_macro" group="group_rear_up_right" exact="2" ammunition="missile_gen_m_guided_01_mk1_macro"/>
+                <turrets macro="turret_par_m_dumbfire_02_mk1_macro" group="group_front_down_mid" exact="2" ammunition="missile_gen_m_dumbfire_01_mk1_macro"/>
+                <turrets macro="turret_par_m_dumbfire_02_mk1_macro" group="group_rear_down_right" exact="2" ammunition="missile_gen_m_dumbfire_01_mk1_macro"/>
+                <turrets macro="turret_par_m_dumbfire_02_mk1_macro" group="group_rear_down_left" exact="2" ammunition="missile_gen_m_dumbfire_01_mk1_macro"/>
+                <turrets macro="turret_par_l_guided_01_mk1_macro" group="group_front_down_down" exact="2" ammunition="missile_gen_l_guided_01_mk1_macro"/>
+                <turrets macro="turret_par_l_guided_01_mk1_macro" group="group_front_up_mid2" ammunition="missile_gen_l_guided_01_mk1_macro"/>
+                <turrets macro="turret_par_l_dumbfire_01_mk1_macro" group="group_rear_down_mid" ammunition="missile_gen_l_dumbfire_01_mk1_macro"/>
+              </groups>
+              <ammunition>
+                <ammunition macro="missile_gen_m_guided_01_mk1_macro" exact="40"/>
+                <ammunition macro="missile_gen_m_dumbfire_01_mk1_macro" exact="40"/>
+                <ammunition macro="missile_gen_l_guided_01_mk1_macro" exact="40"/>
+                <ammunition macro="missile_gen_l_dumbfire_01_mk1_macro" exact="40"/>
+              </ammunition>
+              <software>
+                <software ware="software_dockmk2"/>
+                <software ware="software_flightassistmk1"/>
+                <software ware="software_scannerlongrangemk2"/>
+                <software ware="software_scannerobjectmk2"/>
+                <software ware="software_targetmk1"/>
+                <software ware="software_trademk1"/>
+              </software>
+              <virtualmacros>
+                <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
+              </virtualmacros>
+            </create_loadout>
             <do_for_each name="$Def" in="ScenarioRoot.$Pending">
               <do_if value="$Def.$macro == '' or not @macro.{$Def.$macro}">
                 <debug_text text="'[X4GC TEST SCENARIO] skipping group ' + $Def.$label + '; unknown macro=' + $Def.$macro"/>
@@ -232,19 +337,104 @@
               <set_value name="$Index" exact="0"/>
               <do_all exact="$Count">
                 <set_value name="$Index" operation="add"/>
-                <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                             zone="player.zone" macro="macro.{$Def.$macro}">
-                  <owner exact="$Owner"/>
-                  <loadout>
-                    <level exact="1.0"/>
-                  </loadout>
-                  <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
-                </create_ship>
+                <do_if value="$Remote">
+                  <do_if value="not $ScenarioSector">
+                    <continue/>
+                  </do_if>
+                  <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                               sector="$ScenarioSector" macro="macro.{$Def.$macro}">
+                    <owner exact="$Owner"/>
+                    <loadout><level exact="1.0"/></loadout>
+                    <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
+                              y="ScenarioRoot.$PendingAnchorY + $Def.$y"
+                              z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+                    <rotation yaw="($Def.$yaw)deg"/>
+                  </create_ship>
+                </do_if>
+                <do_else>
+                  <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                               zone="player.zone" macro="macro.{$Def.$macro}">
+                    <owner exact="$Owner"/>
+                    <loadout><level exact="1.0"/></loadout>
+                    <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
+                    <rotation yaw="($Def.$yaw)deg"/>
+                  </create_ship>
+                </do_else>
+
+                <do_if value="$Def.$loadout == 'issue65_odysseus_mixed_missiles'">
+                  <apply_loadout object="$Ship" loadout="$Issue65OdysseusLoadout"/>
+                </do_if>
+                <do_elseif value="$Def.$loadout != ''">
+                  <set_value name="$LoadoutFailures" operation="add"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] unknown deterministic loadout=' + $Def.$loadout + ' ship=' + $Ship"/>
+                </do_elseif>
 
                 <!-- Live tests kept failing on "which of these three identical Xenon fighters
                      am I supposed to designate" - an explicit name makes the instruction
                      unambiguous in the target list. -->
                 <set_object_name object="$Ship" name="$Def.$label + ' ' + $Index"/>
+
+                <!-- A remotely created ship receives a dynamic zone at the
+                     requested sector position.  component.position is local
+                     to that zone, so convert it back to sector coordinates
+                     before validating the absolute anchor. -->
+                <do_if value="$Remote">
+                  <create_position name="$ShipSectorPosition" object="$Ship" space="$ScenarioSector"/>
+                </do_if>
+                <do_if value="$Remote and ($Ship.sector != $ScenarioSector
+                              or $ShipSectorPosition.x lt ScenarioRoot.$PendingAnchorX + $Def.$x - 10m
+                              or $ShipSectorPosition.x gt ScenarioRoot.$PendingAnchorX + $Def.$x + 10m
+                              or $ShipSectorPosition.y lt ScenarioRoot.$PendingAnchorY + $Def.$y - 10m
+                              or $ShipSectorPosition.y gt ScenarioRoot.$PendingAnchorY + $Def.$y + 10m
+                              or $ShipSectorPosition.z lt ScenarioRoot.$PendingAnchorZ + $Def.$distance - 10m
+                              or $ShipSectorPosition.z gt ScenarioRoot.$PendingAnchorZ + $Def.$distance + 10m)">
+                  <set_value name="$LocationFailures" operation="add"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] placement mismatch ship=' + $Ship + ' sector_x=' + $ShipSectorPosition.x + ' sector_y=' + $ShipSectorPosition.y + ' sector_z=' + $ShipSectorPosition.z"/>
+                </do_if>
+
+                <do_if value="$Def.$role == 'shooter'">
+                  <set_value name="$ShooterCount" operation="add"/>
+                  <add_to_group groupname="ScenarioRoot.$PlayerShooters" object="$Ship"/>
+                  <set_value name="$ShooterMissileTurrets" operation="add" exact="$Ship.missileturrets.operational.count"/>
+                  <set_value name="$LocalGuided" exact="0"/>
+                  <set_value name="$LocalDumbfire" exact="0"/>
+                  <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
+                    <do_if value="$Weapon.ammo.macro and $Weapon.ammo.macro.isguided">
+                      <set_value name="$LocalGuided" operation="add"/>
+                    </do_if>
+                    <do_elseif value="$Weapon.ammo.macro">
+                      <set_value name="$LocalDumbfire" operation="add"/>
+                    </do_elseif>
+                  </do_for_each>
+                  <set_value name="$ShooterGuided" operation="add" exact="$LocalGuided"/>
+                  <set_value name="$ShooterDumbfire" operation="add" exact="$LocalDumbfire"/>
+                  <set_value name="$LocalAmmo" exact="$Ship.ammostorage.{macro.missile_gen_m_guided_01_mk1_macro}.count
+                    + $Ship.ammostorage.{macro.missile_gen_m_dumbfire_01_mk1_macro}.count
+                    + $Ship.ammostorage.{macro.missile_gen_l_guided_01_mk1_macro}.count
+                    + $Ship.ammostorage.{macro.missile_gen_l_dumbfire_01_mk1_macro}.count"/>
+                  <set_value name="$ShooterAmmo" operation="add" exact="$LocalAmmo"/>
+                  <do_if value="$Ship.missileturrets.operational.count != $Def.$expectedmissileturrets
+                                or $LocalGuided != $Def.$expectedguided
+                                or $LocalDumbfire != $Def.$expecteddumbfire
+                                or $LocalAmmo != $Def.$expectedammo">
+                    <set_value name="$LoadoutFailures" operation="add"/>
+                    <debug_text text="'[X4GC TEST SCENARIO] shooter loadout mismatch ship=' + $Ship + ' missile_turrets=' + $Ship.missileturrets.operational.count + ' guided=' + $LocalGuided + ' dumbfire=' + $LocalDumbfire + ' ammo=' + $LocalAmmo"/>
+                  </do_if>
+                  <!-- Keep the remote shooter dormant while the owner
+                       teleports. Direct-control engagement owns the selected
+                       groups and temporarily overrides this HOLD FIRE baseline;
+                       no safety guard reasserts it during the actual trial. -->
+                  <cease_fire object="$Ship"/>
+                  <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
+                    <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                    <do_if value="$Weapon.mode == weaponmode.holdfire">
+                      <set_value name="$DormantShooterWeapons" operation="add"/>
+                    </do_if>
+                    <do_else>
+                      <set_value name="$UnsafeDormantShooterWeapons" operation="add"/>
+                    </do_else>
+                  </do_for_each>
+                </do_if>
 
                 <!-- Remove combat drones before hostility is applied. A
                      launched drone is another hostile target and invalidates
@@ -288,10 +478,11 @@
                 <debug_text text="'[X4GC TEST SCENARIO] created ' + $Ship + ' exists=' + $Ship.exists + ' sector=' + $Ship.sector.knownname + ' dist=' + $Ship.distanceto.{player.ship} + ' playersector=' + player.sector.knownname + ' name=' + $Ship.knownname"/>
 
                 <do_if value="$Def.$hostile">
-                  <add_relation_boost object="$Ship" otherobject="player.ship"
+                  <set_value name="$HostileReference" exact="if ScenarioRoot.$PlayerShooters.count then ScenarioRoot.$PlayerShooters.{1} else player.ship"/>
+                  <add_relation_boost object="$Ship" otherobject="$HostileReference"
                                       value="$Ship.owner.relation.kill.max"
                                       decay="1" delay="60min" silent="true"/>
-                  <do_if value="player.ship.mayattack.{$Ship}">
+                  <do_if value="$HostileReference.mayattack.{$Ship}">
                     <set_value name="$Hostiles" operation="add"/>
                   </do_if>
                 </do_if>
@@ -415,12 +606,31 @@
             <set_value name="ScenarioRoot.$SpawnedSpecId" exact="ScenarioRoot.$PendingSpecId"/>
             <remove_value name="ScenarioRoot.$Pending"/>
             <remove_value name="ScenarioRoot.$PendingStations"/>
-            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count + ' stations=' + ScenarioRoot.$SpawnedStations.count + ' modules=' + $StationModules + ' turrets=' + $StationTurrets + ' missile_turrets=' + $StationMissileTurrets + ' shields=' + $StationShields + ' engines=' + $StationEngines + ' safe_fixtures=' + $SafeObjectCount + ' safe_weapons=' + $SafeWeapons + ' unsafe_weapons=' + $UnsafeWeapons + ' defence_units=' + $DefenceUnits + ' hostiles=' + $Hostiles + ' repair_fixtures=' + $RepairObjectCount + ' loadout_failures=' + $StationLoadoutFailures"/>
+            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count + ' stations=' + ScenarioRoot.$SpawnedStations.count + ' modules=' + $StationModules + ' turrets=' + $StationTurrets + ' missile_turrets=' + $StationMissileTurrets + ' shields=' + $StationShields + ' engines=' + $StationEngines + ' safe_fixtures=' + $SafeObjectCount + ' safe_weapons=' + $SafeWeapons + ' unsafe_weapons=' + $UnsafeWeapons + ' defence_units=' + $DefenceUnits + ' hostiles=' + $Hostiles + ' repair_fixtures=' + $RepairObjectCount + ' shooters=' + $ShooterCount + ' shooter_missile_turrets=' + $ShooterMissileTurrets + ' guided=' + $ShooterGuided + ' dumbfire=' + $ShooterDumbfire + ' ammo=' + $ShooterAmmo + ' dormant_shooter_weapons=' + $DormantShooterWeapons + ' unsafe_dormant_shooter_weapons=' + $UnsafeDormantShooterWeapons + ' loadout_failures=' + ($StationLoadoutFailures + $LoadoutFailures + $UnsafeDormantShooterWeapons) + ' location_failures=' + $LocationFailures"/>
             <do_if value="ScenarioRoot.$PendingRequestId != ''">
               <raise_lua_event name="'X4GunneryTestLab.ScenarioReady'"
-                               param="'x4gct6:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count + ':' + ScenarioRoot.$SpawnedStations.count + ':' + $StationModules + ':' + $StationTurrets + ':' + $StationMissileTurrets + ':' + $StationShields + ':' + $StationEngines + ':' + $SafeObjectCount + ':' + $SafeWeapons + ':' + $UnsafeWeapons + ':' + $DefenceUnits + ':' + $Hostiles + ':' + $RepairObjectCount"/>
+                               param="'x4gct7:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count + ':' + ScenarioRoot.$SpawnedStations.count + ':' + $StationModules + ':' + $StationTurrets + ':' + $StationMissileTurrets + ':' + $StationShields + ':' + $StationEngines + ':' + $SafeObjectCount + ':' + $SafeWeapons + ':' + $UnsafeWeapons + ':' + $DefenceUnits + ':' + $Hostiles + ':' + $RepairObjectCount + ':' + $ShooterCount + ':' + $ShooterMissileTurrets + ':' + $ShooterGuided + ':' + $ShooterDumbfire + ':' + $ShooterAmmo + ':' + ($StationLoadoutFailures + $LoadoutFailures + $UnsafeDormantShooterWeapons) + ':' + $LocationFailures"/>
             </do_if>
             <remove_value name="ScenarioRoot.$PendingRequestId"/>
+          </actions>
+        </cue>
+
+        <!-- A stale or direct scenario_commit must never replace a fixture
+             while the player occupies one of its spawned ships.  The normal
+             commit cue has the inverse guard, so exactly one consumes the
+             event. -->
+        <cue name="ScenarioCommitOccupiedReject" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_commit'"/>
+            <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
+            <check_value value="ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship}"/>
+          </conditions>
+          <actions>
+            <set_value name="ScenarioRoot.$Accepting" exact="false"/>
+            <remove_value name="ScenarioRoot.$Pending"/>
+            <remove_value name="ScenarioRoot.$PendingStations"/>
+            <remove_value name="ScenarioRoot.$PendingRequestId"/>
+            <debug_text text="'[X4GC TEST SCENARIO] replacement rejected; player occupies spawned ship=' + player.ship"/>
           </actions>
         </cue>
 
@@ -430,15 +640,15 @@
         <cue name="ScenarioRepairArm" checkinterval="0.1s">
           <conditions>
             <check_value value="ScenarioRoot.$RepairObjects? and ScenarioRoot.$RepairObjects.count"/>
+            <check_value value="ScenarioRoot.$PlayerShooters? and ScenarioRoot.$PlayerShooters.count"/>
           </conditions>
           <actions>
-            <set_value name="$Ship" exact="player.ship"/>
-            <debug_text text="'[X4GC TEST SCENARIO] repair guard armed ship=' + $Ship + ' fixtures=' + ScenarioRoot.$RepairObjects.count"/>
+            <debug_text text="'[X4GC TEST SCENARIO] repair guard armed shooters=' + ScenarioRoot.$PlayerShooters.count + ' fixtures=' + ScenarioRoot.$RepairObjects.count"/>
           </actions>
           <cues>
             <cue name="ScenarioRepairHit" instantiate="true">
               <conditions>
-                <event_object_attacked_object object="$Ship"/>
+                <event_object_attacked_object group="ScenarioRoot.$PlayerShooters"/>
                 <check_value value="ScenarioRoot.$RepairObjects? and ScenarioRoot.$RepairObjects.indexof.{event.param}"/>
               </conditions>
               <actions>
@@ -482,12 +692,23 @@
         <cue name="DespawnScenario" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'despawn_scenario'"/>
+            <check_value value="not (ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship})"/>
           </conditions>
           <actions>
             <signal_cue_instantly cue="DespawnScenarioImpl"/>
             <do_if value="ScenarioRoot.$SpawnedSpecId?">
               <remove_value name="ScenarioRoot.$SpawnedSpecId"/>
             </do_if>
+          </actions>
+        </cue>
+
+        <cue name="DespawnScenarioOccupiedReject" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'despawn_scenario'"/>
+            <check_value value="ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.indexof.{player.ship}"/>
+          </conditions>
+          <actions>
+            <debug_text text="'[X4GC TEST SCENARIO] despawn rejected; player occupies spawned ship=' + player.ship"/>
           </actions>
         </cue>
 
@@ -518,6 +739,9 @@
             </do_if>
             <do_if value="ScenarioRoot.$SafeObjects?">
               <remove_value name="ScenarioRoot.$SafeObjects"/>
+            </do_if>
+            <do_if value="ScenarioRoot.$PlayerShooters?">
+              <remove_value name="ScenarioRoot.$PlayerShooters"/>
             </do_if>
             <do_if value="ScenarioRoot.$RepairObjects?">
               <remove_value name="ScenarioRoot.$RepairObjects"/>

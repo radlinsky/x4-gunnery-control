@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Correct missile-turret ENGAGEABLE geometry (#65). A missile turret with
+  affirmatively guided loaded ammunition now retains the bearing and range
+  gates without requiring a direct muzzle-to-target line. Unguided missile
+  turrets, including ammunition without affirmative guidance data, retain the
+  direct-line gate but exclude their own ship, so external obstructions still
+  mask the shot. Conventional turrets remain own-hull-aware, and the same policy
+  applies to whole-target and per-module fallback checks.
+
 ## [0.31] - 2026-08-20
 
 - Add a selectable Direct-control turret policy with two manual modes,

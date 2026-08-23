@@ -36,18 +36,25 @@ The situations that matter for this mod. Each is checked against **your target**
 | **ENGAGEABLE** | Generic fire-control condition: adequate track, the turret can aim at the target, the target is in range, nothing blocks the shot, and a valid firing/intercept solution exists. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
-| **LINE OF FIRE BLOCKED** | The turret is aimed right at the target, but part of your own ship is between the turret and the target, blocking the shot. |
+| **LINE OF FIRE BLOCKED** | The turret can bear on the target, but an obstruction masks a required projectile path. The obstruction may be the firing ship, terrain, or another object; guided missile turrets do not use a direct muzzle-to-target path for the console's geometry check. |
 | **NO FIRING SOLUTION** | The turret can aim and the target is in range, but the target is moving in a way that leaves no shot that would connect. |
 | **WEAPON NOT READY** | Aiming is fine, but the turret itself cannot fire right now: reloading, overheated, out of ammunition, or destroyed. |
 | **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
 *Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
 
-**What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when all three conditions are true for the selected target:
+**What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when its bearing and range gates pass and its weapon-specific direct-line policy passes:
 
 - the turret has known arc data and its traverse arc contains the aim direction;
 - the target is within weapon range, measured as bounding-box distance (`bboxdistanceto`) against the weapon's max fire range rather than center-to-center distance, so reachable hull or modules on a large ship or station count as in range even when the center is far; and
-- a line of fire from the muzzle to the target is clear. When the selected target is a whole ship or station root and that ray is self-blocked — a large root's aim point is its bounding-box centre, which sits inside the hull — and the root is a targetable modular object with more than one operational module (a station, or a capital ship with an embedded targetable defence module), the check falls back to that root's operational and construction modules and counts the turret if any one is reachable. An individually selected surface element keeps its own direct line-of-fire test and does not use this fallback.
+- the applicable direct-line policy passes:
+  - a conventional turret requires a clear muzzle-to-target line of fire that includes its own ship, so its own hull or an external object can mask the shot;
+  - an unguided missile turret requires a clear direct line that excludes its own ship, so its own hull does not mask a viable launch but terrain or another object still does; ammunition with missing or unrecognized guidance data takes this conservative unguided path; and
+  - a missile turret with affirmatively guided loaded ammunition does not require a direct muzzle-to-target line, because the missile can steer after launch. Bearing and range remain mandatory.
+
+When a required direct ray against a whole ship or station root is blocked — a large root's aim point may be its bounding-box centre, which sits inside the target hull — and the root is a targetable modular object with more than one operational module (a station, or a capital ship with an embedded targetable defence module), the check falls back to that root's operational and construction modules and counts the turret if any one is reachable under the same weapon-specific policy. An individually selected surface element keeps its own direct-line policy and does not use this fallback.
+
+The source-backed rationale and live-test boundaries are recorded in the knowledge base under [missile guidance](../.agents/skills/research-x4-modding/references/md-ai.md#missile-guidance-is-a-shipped-fire-control-discriminator-but-missile-turret-launch-los-is-engine-side), [guided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#guided-missiles-launch-through-an-own-hull-masked-direct-ray-and-reach-the-designated-surface), and [unguided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#unguided-missile-turrets-ignore-own-hull-but-retain-an-external-direct-line-check).
 
 The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio does **not** prove adequate fire-control track, a valid ballistic/intercept solution, weapon readiness, fire authorization, or actual firing — the bounding-box range gate and the per-module line-of-fire fallback are geometry evidence only. The generic fire-control concept `ENGAGEABLE` additionally assumes adequate track and a valid firing/intercept solution; weapon readiness and fire authorization remain separate states.
 
@@ -143,7 +150,7 @@ What the game itself checks, per situation, for a ticked turret on **Attack all 
 | **AIM / RANGE / LINE CLEAR** | Can aim, in range, shot clear | Shoots your target | LIVE |
 | **OUT OF RANGE** | Distance vs the turret's reach | Switches to a fallback target in range | LIVE |
 | **CANNOT BEAR** | Can the turret aim that far | Switches to a fallback target it can aim at | LIVE |
-| **LINE OF FIRE BLOCKED** | Is the shot path clear of your own ship | Stays aimed, holds fire, does not switch | LIVE |
+| **LINE OF FIRE BLOCKED** | Is the weapon's required projectile path obstructed | Stays aimed, holds fire, does not switch | LIVE |
 | **NO FIRING SOLUTION** | (the game runs no such check) | Fires and misses | INFERRED |
 | **WEAPON NOT READY** | Turret ready to fire | Waits until ready | X4 CODE |
 

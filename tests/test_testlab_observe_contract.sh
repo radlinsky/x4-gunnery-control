@@ -43,6 +43,20 @@ grep -Fq "name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposit
 grep -Fq "' aim_error_yaw='" "$md" || fail "FIRED observer does not log target yaw error"
 grep -Fq "' aim_error_pitch='" "$md" || fail "FIRED observer does not log target pitch error"
 
+# Missile hit payloads name the launcher ship, so own-hull clearance must be
+# checked from the exact fired missile object before it disappears. A surviving
+# missile farther from the ship after 500 ms is the direct dumbfire control.
+grep -Fq '<cue name="ObserveMissileFlight" instantiate="true">' "$md" \
+  || fail "missile-flight observer cue is missing"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveMissileFlight']/delay[@exact='500ms'])" "$md") == "1" ]] \
+  || fail "missile-flight observer must have one cue-level 500 ms delay"
+[[ $(xmllint --xpath "count(//actions/delay)" "$md") == "0" ]] \
+  || fail "MD delay must be a cue modifier between conditions and actions, not an action node"
+grep -Fq "name=\"\$Target\" exact=\"@\$Missile.target\"" "$md" \
+  || fail "missile-flight observer does not retain the missile intended target"
+grep -Fq "' shipdist_500ms='" "$md" \
+  || fail "missile-flight observer does not log delayed distance from the firing ship"
+
 # The candidate mechanical-arc bearing uses the target's weapon-consistent aim
 # point in the turret mount's local frame; keep it diagnostic until live proof.
 aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")
@@ -94,15 +108,64 @@ grep -Fq "':' + \$UnsafeWeapons + ':' + \$DefenceUnits" "$scenario" \
   || fail "scenario acknowledgement omits the remaining defence-unit census"
 grep -Fq "':' + \$DefenceUnits + ':' + \$Hostiles" "$scenario" \
   || fail "scenario acknowledgement omits the attackable-hostile census"
-grep -Fq "'x4gct6:'" "$scenario" \
-  || fail "scenario acknowledgement does not use repair-aware protocol x4gct6"
+grep -Fq "'x4gct7:'" "$scenario" \
+  || fail "scenario acknowledgement does not use remote-shooter census protocol x4gct7"
 grep -Fq "':' + \$Hostiles + ':' + \$RepairObjectCount" "$scenario" \
   || fail "scenario acknowledgement omits the repair-guard census"
 grep -Fq "groupname=\"ScenarioRoot.\$RepairObjects\" object=\"\$Ship\"" "$scenario" \
   || fail "repair-guard fixtures are not registered during spawn"
-grep -Fq "<event_object_attacked_object object=\"\$Ship\"/>" "$scenario" \
-  || fail "repair guard is not driven by attributed player-ship hits"
+grep -Fq "groupname=\"ScenarioRoot.\$PlayerShooters\" object=\"player.ship\"" "$scenario" \
+  || fail "local scenarios do not attribute repair hits to the current player ship"
+grep -Fq "groupname=\"ScenarioRoot.\$PlayerShooters\" object=\"\$Ship\"" "$scenario" \
+  || fail "remote scenarios do not attribute repair hits to their spawned shooter"
+grep -Fq "<event_object_attacked_object group=\"ScenarioRoot.\$PlayerShooters\"/>" "$scenario" \
+  || fail "repair guard is not driven by the unified local/remote shooter group"
+grep -Fq "not (ScenarioRoot.\$Spawned? and ScenarioRoot.\$Spawned.indexof.{player.ship})" "$scenario" \
+  || fail "scenario replacement and cleanup do not guard the occupied spawned ship"
+grep -Fq '<cue name="ScenarioCommitOccupiedReject" instantiate="true">' "$scenario" \
+  || fail "MD has no defensive rejection path for occupied-fixture replacement"
+grep -Fq '<cue name="DespawnScenarioOccupiedReject" instantiate="true">' "$scenario" \
+  || fail "MD has no defensive rejection path for occupied-fixture cleanup"
+grep -Fq "':' + \$ShooterCount + ':' + \$ShooterMissileTurrets" "$scenario" \
+  || fail "scenario acknowledgement omits the spawned-shooter turret census"
+grep -Fq "':' + \$ShooterGuided + ':' + \$ShooterDumbfire + ':' + \$ShooterAmmo" "$scenario" \
+  || fail "scenario acknowledgement omits guided/dumbfire/ammunition census"
+grep -Fq "':' + (\$StationLoadoutFailures + \$LoadoutFailures + \$UnsafeDormantShooterWeapons) + ':' + \$LocationFailures" "$scenario" \
+  || fail "scenario acknowledgement omits loadout and exact-placement failures"
 grep -Fq '<set_object_hull object="event.param3.{1}" exact="100"/>' "$scenario" \
   || fail "repair guard does not restore the exact struck component"
+
+# Issue #65 remote fixture: the deterministic loadout must fill all 16
+# Odysseus E turret slots with the intended 9/7 guided/dumbfire split and stock
+# all four missile types to the ship's shipped 160-round capacity.
+[[ $(grep -Fc '<turrets macro="turret_par_m_guided_02_mk1_macro"' "$scenario") -eq 3 ]] \
+  || fail "issue #65 loadout does not define three two-slot M guided groups"
+[[ $(grep -Fc '<turrets macro="turret_par_m_dumbfire_02_mk1_macro"' "$scenario") -eq 3 ]] \
+  || fail "issue #65 loadout does not define three two-slot M dumbfire groups"
+[[ $(grep -Fc '<turrets macro="turret_par_l_guided_01_mk1_macro"' "$scenario") -eq 2 ]] \
+  || fail "issue #65 loadout does not define the 2+1 L guided groups"
+[[ $(grep -Fc '<turrets macro="turret_par_l_dumbfire_01_mk1_macro"' "$scenario") -eq 1 ]] \
+  || fail "issue #65 loadout does not define one L dumbfire group"
+[[ $(grep -Fc '<ammunition macro="missile_gen_' "$scenario") -eq 4 ]] \
+  || fail "issue #65 loadout must stock exactly four missile types"
+[[ $(grep -Fc 'exact="40"/>' "$scenario") -eq 4 ]] \
+  || fail "issue #65 loadout must split 160 missiles evenly across four types"
+grep -Fq "<apply_loadout object=\"\$Ship\" loadout=\"\$Issue65OdysseusLoadout\"/>" "$scenario" \
+  || fail "issue #65 fixed loadout is not applied to the spawned shooter"
+grep -Fq "<set_value name=\"\$DormantShooterWeapons\" operation=\"add\"/>" "$scenario" \
+  || fail "remote shooter is not held dormant while the owner teleports"
+grep -Fq "<set_value name=\"\$UnsafeDormantShooterWeapons\" operation=\"add\"/>" "$scenario" \
+  || fail "remote shooter HOLD FIRE failure is not part of readiness"
+grep -Fq "<find_sector name=\"\$ScenarioSector\" macro=\"macro.{\$SectorMacroName}\"" "$scenario" \
+  || fail "remote fixture does not resolve the exact requested sector macro"
+grep -Fq "x=\"ScenarioRoot.\$PendingAnchorX + \$Def.\$x\"" "$scenario" \
+  || fail "remote fixture does not use absolute sector-anchor placement"
+grep -Fq "<create_position name=\"\$ShipSectorPosition\" object=\"\$Ship\" space=\"\$ScenarioSector\"/>" "$scenario" \
+  || fail "remote placement validation does not convert the ship position to sector coordinates"
+grep -Fq "\$ShipSectorPosition.x lt ScenarioRoot.\$PendingAnchorX + \$Def.\$x - 10m" "$scenario" \
+  || fail "remote placement validation does not compare sector-coordinate x against the anchor"
+if grep -Fq "\$Ship.position.x lt ScenarioRoot.\$PendingAnchorX" "$scenario"; then
+  fail "remote placement validation compares a zone-local ship position against the sector anchor"
+fi
 
 echo "testlab observability contract tests passed"

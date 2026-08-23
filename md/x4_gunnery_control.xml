@@ -206,9 +206,21 @@
                     <do_if value="$aimpitch ge (EngageabilityService.$arcmins.{$weaponindex} * 1deg)
                                   and $aimpitch le (EngageabilityService.$arcmaxs.{$weaponindex} * 1deg)
                                   and $weapon.bboxdistanceto.{$target} le $weapon.maxfirerange">
-                      <!-- Start at the live muzzle and include the firing ship
-                           so its own hull can mask an otherwise clear ray. -->
-                      <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="false" useaimtarget="true"/>
+                      <!-- Guided missile turrets need only be able to bear and
+                           reach: the missile can steer clear after launch, and
+                           the engine does not require a direct muzzle-to-target
+                           ray. Unguided missile turrets retain a direct line-of-
+                           fire gate but exclude the firing ship so its own hull
+                           does not mask a viable launch. Missing or modded ammo
+                           guidance data takes this conservative unguided path.
+                           Conventional turrets keep the own-hull-aware probe. -->
+                      <set_value name="$guidedmissileturret" exact="$weapon.class == class.missileturret and $weapon.ammo.macro and $weapon.ammo.macro.isguided"/>
+                      <do_if value="$guidedmissileturret">
+                        <set_value name="$lineoffireclear" exact="true"/>
+                      </do_if>
+                      <do_else>
+                        <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="$weapon.class == class.missileturret" useaimtarget="true"/>
+                      </do_else>
                       <!-- A large ship/station root's aim point is its bounding-
                            box centre (see check_line_of_sight useaimtarget in the
                            9.00 XSD), which sits inside the hull, so the root ray
@@ -240,7 +252,7 @@
                         <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
                         <do_for_each name="$module" in="$modules">
                           <do_if value="$weapon.bboxdistanceto.{$module} le $weapon.maxfirerange">
-                            <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$module" excludeself="false" useaimtarget="true"/>
+                            <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$module" excludeself="$weapon.class == class.missileturret" useaimtarget="true"/>
                             <do_if value="$lineoffireclear">
                               <break/>
                             </do_if>
