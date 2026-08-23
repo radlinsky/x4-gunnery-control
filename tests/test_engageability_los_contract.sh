@@ -23,9 +23,10 @@ block=$(awk '
 
 [ -n "$block" ] || { note "EngageabilityCommit cue not found in $md"; exit 1; }
 
-# Substring present anywhere in the cue. Patterns are double-quoted with escaped
-# '$' so they stay literal MD text (no shell expansion, no SC2016).
-has() { printf '%s\n' "$block" | grep -Fq "$1"; }
+# Substring present anywhere in the cue. A here-string avoids the SIGPIPE that
+# grep -q can give a printf producer under pipefail after an early match.
+# Patterns are double-quoted with escaped '$' so they stay literal MD text.
+has() { grep -Fq -- "$1" <<< "$block"; }
 
 # 1. Guided missile turrets bypass direct line of fire after the shared bearing
 #    and range gates. The guidance discriminator must require both the missile-
