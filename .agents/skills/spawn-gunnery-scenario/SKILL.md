@@ -29,15 +29,17 @@ For a `setup.remote = true` fixture, use this distinct workflow:
      discriminator must still run in system (a fixture whose classification
      split only resolves once the player shares the fixture's system).
 3. Open that ship's gunnery console and open **Test Lab exactly once**:
-   - a READY fixture auto-arms the exact group and immediately returns to
+   - a READY fixture auto-selects the exact group and immediately returns to
      Gunnery Control;
    - a PENDING fixture runs its in-system qualification on that single open. It
      may automatically move the same preserved object through a bounded logged
      position search, with a nonzero delay before measuring each position. It
-     auto-arms and returns to Gunnery Control ONLY on `QUALIFIED`. On `FAILED`
-     (or a timeout) it stops closed: leave X4 open, preserve the evidence, and
-     report the displayed text. Do not press Create, Reload UI, or Despawn, and
-     do not retry coordinates manually.
+     selects the exact group and returns to Gunnery Control ONLY on `QUALIFIED`.
+     For a Direct-control interaction test it also visibly marks the qualified
+     target and surface, but the owner performs the Direct-control, target, and
+     surface clicks. On `FAILED` (or a timeout) it stops closed: leave X4 open,
+     preserve the evidence, and report the displayed text. Do not press Create,
+     Reload UI, or Despawn, and do not retry coordinates manually.
 4. Continue the gameplay checklist. Never press Create after teleport.
 
 Create is destructive replacement. In a live 2026-08-23 failure, a second
@@ -196,6 +198,22 @@ fields.
 
 Never ask the owner to retry guessed coordinates in either case.
 
+A coordinate that qualified one generated station instance is not yet a
+deterministic fixture coordinate. Preserve the bounded automatic search until
+the same coordinate and exact component predicates reproduce on a fresh
+instance; if a later instance fails, record that bounded negative and restore
+the search instead of weakening the gates or asking the owner to retry the
+coordinate manually.
+
+If moving one preserved modular station makes every component's previously
+distinguishable external ray uniformly blocked, stop repositioning it once an
+already-settled no-warp control and a deliberately delayed post-warp control
+agree. Record that result as experimental for the tested instance; do not infer
+a universal station-warp rule or keep increasing the delay. Replace the next
+fixture with independently pre-positioned candidates, preferably stationary
+capital ships whose operational surface elements can be enumerated and whose
+defence units are removed before hostility.
+
 A geometry qualifier must qualify the exact component that the timed test will
 designate. For an origin-vs-hittable-aim arc discriminator, require that SAME
 component's origin be outside the generated arc and its hittable aim point be
@@ -204,6 +222,18 @@ are independently satisfied. Never qualify a station-root test because the root
 is outside while some different module has both origin and aim inside. If the
 question is whether a root designation becomes a module engagement, make that a
 separate test: designate the root and instrument exact firing/hit components.
+
+For a test of the Direct-control interaction, Test Lab must never call the
+Gunnery `SetSofttarget`/engagement bridge at all. Geometry automation may
+transport the exact component ID, select the exact weapon group, set the test's
+required Direct-control policy, and visibly mark the matching root and surface
+rows. The owner must still click **Direct control**, the marked target ship, and
+the marked surface. Arm timed observation only after Gunnery accepts that exact
+manual surface click, and log geometry qualification separately from operator
+designation. X4 9.00 refused the r11 Xenon K surface write both while Test Lab
+owned the external menu and after two post-return attempts; those failures do
+not establish that the surface is ineligible, because the automated path did
+not reproduce the normal root-then-surface interaction.
 
 Likewise, a self-excluding-clear/self-inclusive-blocked ray pair proves only
 that the firing ship masks the mod's direct ray. It does not establish what
@@ -353,11 +383,13 @@ The final instruction before the live run must contain all of these, in order:
 4. Exact displayed scenario id.
 5. Exactly one setup action: **Create test scenario**. For a remote fixture,
    explicitly add the teleport and the single post-teleport Test Lab opening.
-   State whether that opening auto-arms directly (a READY fixture) or first runs
-   an in-system qualification that auto-arms only on `QUALIFIED` and stops closed
-   on `FAILED` (a geometry-PENDING fixture), and that Create must not be pressed
-   again either way.
-6. What success does automatically, including the selected turret group.
+   State whether that opening selects the exact group directly (a READY fixture)
+   or first runs an in-system qualification that marks the manual targets only
+   on `QUALIFIED` and stops closed on `FAILED` (a geometry-PENDING fixture), and
+   that Create must not be pressed again either way.
+6. What success does automatically, including the selected turret group and any
+   marked manual target/surface rows. Explicitly distinguish those aids from the
+   owner clicks the test is intended to exercise.
 7. Exact spawned names and expected distances/roles.
 8. Every test action in click order.
 9. Exact expected visible result for each action.
@@ -381,10 +413,12 @@ The one-click path logs `[X4GC TEST] event=scenario_create`:
 For a geometry-PENDING remote fixture, Create instead logs
 `action=remote_geometry_pending`, and the single post-teleport Test Lab open
 logs `event=geometry_qualify action=requested` followed by exactly one of
-`action=qualified` (a measured fixture-specific geometry candidate passed, group
-armed, observation on) or
+`action=qualified` (a measured fixture-specific geometry candidate passed and
+the exact group/target aids are ready; for an interaction test, observation is
+still off until the owner's exact surface click) or
 `action=failed|timeout` (stop closed). Treat those as the qualification's
-distinct evidence records; the fixture is not armed until `action=qualified`.
+distinct evidence records. Require a separate operator-designation record before
+starting any timed firing observation whose action is the subject of the test.
 When a qualifier compares root and module geometry, inspect and preserve its
 independent root-origin/root-aim, module-origin/module-aim, range, and external
 line-of-fire fields. Do not collapse `qualified` into a claim about which target

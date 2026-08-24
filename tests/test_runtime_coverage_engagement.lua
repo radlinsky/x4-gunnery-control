@@ -24,6 +24,40 @@ assert(fix.API.engageTarget(99), "Direct entry must accept an external target")
 assert(session.phase == "engaged" and session.controlMode == "direct",
     "Direct entry must build the engaged session")
 
+-- Test Lab may identify the exact qualified component, but it must not write
+-- any target or enter Direct control. The callback runs only after the owner
+-- manually selects the marked root and then the marked exact surface.
+do
+    session.phase, session.controlMode = "console", nil
+    session.checkedGroupKeys = { g = true }
+    session.staged = { g = { mode = "autoassist", armed = true } }
+    session.groups[1].mode, session.groups[1].armed = "attack", false
+    local targetWrites, writtenTargets, callbackResult = 0, {}, nil
+    local originalSetSofttarget = fix.C.SetSofttarget
+    fix.C.SetSofttarget = function(component)
+        targetWrites = targetWrites + 1
+        writtenTargets[#writtenTargets + 1] = tonumber(component)
+        return true
+    end
+    assert(fix.API.suggestTestEngagement(99, function(ok, reason)
+        callbackResult = { ok = ok, reason = reason }
+    end), "Test Lab must be able to mark an eligible exact component")
+    assert(targetWrites == 0 and callbackResult == nil
+            and session.phase == "console" and session.controlMode == nil,
+        "marking a Test Lab component must not designate or enter Direct control")
+    assert(fix.API.engageTarget(98), "the owner's marked-root click must work normally")
+    assert(targetWrites == 1 and writtenTargets[1] == 98 and callbackResult == nil,
+        "the root click must not complete an exact-surface recommendation")
+    assert(fix.API.engageTarget(99), "the owner's marked-surface click must work normally")
+    assert(targetWrites == 2 and writtenTargets[2] == 99
+            and callbackResult and callbackResult.ok == true,
+        "only the exact manual surface click may complete the Test Lab recommendation")
+    assert(session.phase == "engaged" and session.controlMode == "direct"
+            and tostring(session.aimTargetID) == "99",
+        "the manual surface click must leave Direct control aimed at the exact component")
+    fix.C.SetSofttarget = originalSetSofttarget
+end
+
 -- The refusal branch: a player-owned root is rejected, so entering Direct
 -- against one leaves the existing engagement untouched.
 GetComponentData = function(_, key)

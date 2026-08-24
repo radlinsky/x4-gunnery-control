@@ -4,9 +4,9 @@ local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
 local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
 local scenarioActionStatus, scenarioRequestSerial, pendingScenario, remoteScenarioReady = nil, 0, nil, false
--- Two-phase #67 station B geometry discriminator: after the OOS census the
--- fixture is only geometry-PENDING; the split is measured in system once the
--- owner teleports aboard the preserved Colossus. onGeometryQualified.
+-- Two-phase #67 surface geometry discriminator: after the OOS census the
+-- fixture is geometry-PENDING; settled ship surfaces are measured in system
+-- once the owner teleports aboard the preserved Colossus.
 local pendingQualify, remoteGeometryPending = nil, false
 local finishGroups, emitSummary, returnToGunnery
 
@@ -138,8 +138,9 @@ local function validateSpec(raw)
             return nil, where .. ".role must be empty or shooter"
         end
         local geometryRole = tostring(group.geometryRole or "")
-        if geometryRole ~= "" and geometryRole ~= "clear_arc" and geometryRole ~= "below_arc" then
-            return nil, where .. ".geometryRole must be empty, clear_arc, or below_arc"
+        if geometryRole ~= "" and geometryRole ~= "clear_arc" and geometryRole ~= "below_arc"
+                and geometryRole ~= "surface_mask" then
+            return nil, where .. ".geometryRole must be empty, clear_arc, below_arc, or surface_mask"
         end
         local expectedMissileTurrets = tonumber(group.expectedMissileTurrets) or 0
         local expectedGuided = tonumber(group.expectedGuided) or 0
@@ -341,10 +342,13 @@ local function scenarioSpecLabel()
     return scenarioSpec.id .. (scenarioSpec.enabled and " (enabled)" or " (disabled)")
 end
 
--- A spec with an aim_split station cannot be qualified from the out-of-system
--- census: its root-vs-aim split only resolves in system, so the remote READY is
--- a PENDING state that a post-teleport in-system re-measurement must clear.
-local function specHasAimSplit()
+-- Geometry that depends on live collision/aim data is deliberately qualified
+-- only after teleport. A remote census therefore reports PENDING until one
+-- in-system measurement identifies the exact component the timed run will use.
+local function specHasPendingGeometry()
+    for _, group in ipairs(scenarioSpec and scenarioSpec.groups or {}) do
+        if group.geometryRole == "surface_mask" then return true end
+    end
     for _, station in ipairs(scenarioSpec and scenarioSpec.stations or {}) do
         if station.geometryRole == "aim_split" then return true end
     end
@@ -821,14 +825,11 @@ local function onScenarioReady(_, param)
     end
     if request.remote then
         remoteScenarioReady = true
-        remoteGeometryPending = specHasAimSplit()
+        remoteGeometryPending = specHasPendingGeometry()
         if remoteGeometryPending then
-            -- The remote shell/module census is verified, but both station
-            -- equipment and geometry remain experimental until the in-system
-            -- qualifier reports them. Do not call the fixture READY here.
-            scenarioActionStatus = "PENDING: remote station shell verified; equipment and geometry are NOT qualified; teleport to "
-                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it re-measures station B "
-                .. "in system and qualifies only with the exact standard loadout plus a measured root or clear module aim-point candidate"
+            scenarioActionStatus = "PENDING: remote ship census verified; surface geometry is NOT qualified; teleport to "
+                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it scans the settled Xenon K candidates "
+                .. "and qualifies only when both selected plasma turrets pass against the same operational surface element"
             log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
                 spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
                 operational_surfaces = surfaces, turrets = turrets,
@@ -895,44 +896,50 @@ local function onGeometryQualifiedTarget(_, component)
     pendingQualify.designatedComponent = component
 end
 
--- Phase-two acknowledgement for the #67 direct-component masking
--- discriminator. Qualify only when the exact station loadout is present and
--- both selected plasma turrets reproduce, against the SAME module: origin and
--- hittable aim in arc, in range, externally clear, and self-inclusive blocked.
--- Test Lab then directly engages that transported module in strict autoassist;
--- the below-arc station root is never the timed target.
+-- Phase-two acknowledgement for the #67 direct ship-surface masking
+-- discriminator. Qualify only when both selected plasma turrets reproduce,
+-- against the SAME operational surface: origin and hittable aim in arc, in
+-- range, externally clear, self-inclusive blocked, and legally attackable.
+-- Test Lab marks that transported surface in Gunnery, but the owner performs
+-- the Direct-control, target-ship, and exact-surface clicks being tested.
 local function onGeometryQualified(_, param)
-    local token, qualified, equipped, attempt, searchCount, rootSplits, moduleOriginCandidates,
-        moduleAimCandidates, moduleClearCandidates, maskingMembers, measured, modulePairs,
-        modules, turrets, standardLasers, missileTurrets, shields, engines =
-        tostring(param or ""):match("^x4gcq6:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+    local token, qualified, targetCount, surfaceCount, measured, surfacePairs,
+        originCandidates, aimCandidates, clearCandidates, maskingMembers =
+        tostring(param or ""):match("^x4gcq7:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
-    qualified, equipped = tonumber(qualified), tonumber(equipped)
-    attempt, searchCount = tonumber(attempt), tonumber(searchCount)
-    rootSplits = tonumber(rootSplits)
-    moduleOriginCandidates = tonumber(moduleOriginCandidates)
-    moduleAimCandidates = tonumber(moduleAimCandidates)
-    moduleClearCandidates = tonumber(moduleClearCandidates)
+    qualified, targetCount, surfaceCount = tonumber(qualified), tonumber(targetCount), tonumber(surfaceCount)
+    measured, surfacePairs = tonumber(measured), tonumber(surfacePairs)
+    originCandidates, aimCandidates = tonumber(originCandidates), tonumber(aimCandidates)
+    clearCandidates = tonumber(clearCandidates)
     maskingMembers = tonumber(maskingMembers)
-    measured, modulePairs = tonumber(measured), tonumber(modulePairs)
-    modules, turrets, standardLasers = tonumber(modules), tonumber(turrets), tonumber(standardLasers)
-    missileTurrets, shields, engines = tonumber(missileTurrets), tonumber(shields), tonumber(engines)
-    if qualified == 1 and equipped == 1
-            and maskingMembers == 2 and request.designatedComponent ~= nil
-            and modules == 5 and turrets == 2 and standardLasers == 2
-            and missileTurrets == 0 and shields == 4 and engines == 0 then
+    if qualified == 1 and targetCount == 4 and surfaceCount > 0
+            and measured == 2 and maskingMembers == 2
+            and request.designatedComponent ~= nil then
         applyExactGroup(request.selection)
         X4GunneryState.setDirectMode(request.selection.session, "autoassist")
         local bridge = api()
-        local engaged = bridge and bridge.engageTarget
-            and bridge.engageTarget(request.designatedComponent)
-        if not engaged then
-            scenarioActionStatus = "FAILED: exact station module qualified but could not be directly designated; diagnostic not started"
+        local marked = bridge and bridge.suggestTestEngagement
+            and bridge.suggestTestEngagement(request.designatedComponent, function(selected)
+                if not selected then return end
+                scenarioActionStatus = "RUNNING: owner manually designated exact qualified Xenon K surface "
+                    .. tostring(request.designatedComponent) .. "; observation armed"
+                log("geometry_qualify", { action = "operator_designated",
+                    request_id = request.requestId,
+                    designated_target = "ship_surface",
+                    designated_component = request.designatedComponent,
+                    direct_mode = "autoassist", ship_id = request.selection.shipID,
+                    group = request.selection.rawGroup,
+                    member_ids = request.selection.memberIDs,
+                    member_macros = request.selection.memberMacros })
+                setObserving(true)
+            end)
+        if not marked then
+            scenarioActionStatus = "FAILED: exact Xenon K surface qualified but could not be marked for manual selection; diagnostic not started"
             log("geometry_qualify", { action = "failed", request_id = request.requestId,
-                reason = "direct_component_designation_failed",
-                designated_target = "station_module",
+                reason = "manual_component_mark_failed",
+                designated_target = "ship_surface",
                 designated_component = request.designatedComponent,
                 masking_members = maskingMembers })
             menu.display()
@@ -940,60 +947,37 @@ local function onGeometryQualified(_, param)
         end
         remoteScenarioReady = false
         remoteGeometryPending = false
-        scenarioActionStatus = "QUALIFIED: exact station module "
-            .. tostring(request.designatedComponent) .. " directly designated in strict mode after attempt "
-            .. attempt .. "/" .. searchCount .. " (masking plasma members="
-            .. maskingMembers .. ", " .. modulePairs .. " module pairs); "
-            .. request.selection.label .. " armed; returning to Gunnery Control"
+        scenarioActionStatus = "QUALIFIED GEOMETRY: use Direct control and manually click the [TEST TARGET] ship, then its [TEST TARGET] surface"
         log("geometry_qualify", { action = "qualified", request_id = request.requestId,
-            search_attempt = attempt, search_count = searchCount,
-            root_splits = rootSplits, module_origin_candidates = moduleOriginCandidates,
-            module_aim_candidates = moduleAimCandidates,
-            module_clear_candidates = moduleClearCandidates,
+            targets = targetCount, surfaces = surfaceCount,
+            surface_origin_candidates = originCandidates,
+            surface_aim_candidates = aimCandidates,
+            surface_clear_candidates = clearCandidates,
             masking_members = maskingMembers,
-            measured = measured, module_pairs = modulePairs,
-            designated_target = "station_module",
+            measured = measured, surface_pairs = surfacePairs,
+            designated_target = "ship_surface",
             designated_component = request.designatedComponent,
+            designation = "manual_pending",
             direct_mode = "autoassist", ship_id = request.selection.shipID,
-            station_modules = modules, station_turrets = turrets,
-            station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
-            station_shields = shields, station_engines = engines,
             group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
             member_macros = request.selection.memberMacros })
-        setObserving(true)
         returnToGunnery("geometry_qualified")
     else
-        -- Fail closed on equipment, exact same-component masking, or missing
-        -- component transport. Root splits are diagnostic and cannot qualify.
-        if equipped ~= 1 then
-            scenarioActionStatus = "FAILED: in-system station B loadout census was "
-                .. modules .. " modules, " .. turrets .. " turrets (" .. standardLasers
-                .. " standard lasers), " .. missileTurrets .. " missile turrets, "
-                .. shields .. " shields, and " .. engines
-                .. " engines; expected 5/2/2/0/4/0; diagnostic not started"
-        else
-            scenarioActionStatus = "FAILED: station B masking discriminator exhausted "
-                .. attempt .. "/" .. searchCount
-                .. " attempts without both plasma turrets qualifying on the same module (root splits="
-                .. rootSplits .. ", module origin/aim/clear candidates="
-                .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
-                .. moduleClearCandidates .. ", masking members=" .. maskingMembers
-                .. ", " .. modulePairs
-                .. " module pairs); diagnostic not started"
-        end
+        scenarioActionStatus = "FAILED: settled Xenon K surface scan found "
+            .. maskingMembers .. "/2 masking plasma members on one component across "
+            .. targetCount .. " targets and " .. surfaceCount .. " operational surfaces"
+            .. " (origin/aim/clear candidates=" .. originCandidates .. "/"
+            .. aimCandidates .. "/" .. clearCandidates .. ", " .. surfacePairs
+            .. " surface pairs); diagnostic not started"
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
-            equipped = equipped, search_attempt = attempt, search_count = searchCount,
-            root_splits = rootSplits,
-            module_origin_candidates = moduleOriginCandidates,
-            module_aim_candidates = moduleAimCandidates,
-            module_clear_candidates = moduleClearCandidates,
+            targets = targetCount, surfaces = surfaceCount,
+            surface_origin_candidates = originCandidates,
+            surface_aim_candidates = aimCandidates,
+            surface_clear_candidates = clearCandidates,
             masking_members = maskingMembers,
-            measured = measured, module_pairs = modulePairs,
-            designated_target = "station_module",
-            designated_component = request.designatedComponent or "none",
-            station_modules = modules, station_turrets = turrets,
-            station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
-            station_shields = shields, station_engines = engines })
+            measured = measured, surface_pairs = surfacePairs,
+            designated_target = "ship_surface",
+            designated_component = request.designatedComponent or "none" })
         menu.display()
     end
 end
@@ -1093,8 +1077,19 @@ end
 
 function menu.onShowMenu()
     closing, suppressReopen = false, false
+    -- Reload UI intentionally wipes this file's remoteScenarioReady latch but
+    -- leaves both the spawned objects and MD's exact candidate groups alive.
+    -- Recover only while seated in the uniquely named/macro-matched shooter;
+    -- GeometryQualify still fail-closes on the MD-side exact target census.
+    if not remoteScenarioReady and scenarioSpec and scenarioSpec.setup
+            and scenarioSpec.setup.remote and specHasPendingGeometry()
+            and occupiedRemoteShooter() then
+        remoteScenarioReady, remoteGeometryPending = true, true
+        log("scenario_create", { action = "recovered_geometry_pending_after_ui_reload",
+            spec_id = scenarioSpec.id })
+    end
     if pendingQualify then
-        -- The in-system station B discriminator is still running; keep the menu
+        -- The in-system surface discriminator is still running; keep the menu
         -- up and wait for GeometryQualify rather than re-issuing it.
         menu.display()
         return
@@ -1103,16 +1098,16 @@ function menu.onShowMenu()
         local selection, reason = resolveExactGroup()
         if selection then
             if remoteGeometryPending then
-                -- Phase two: the exact plasma group is verified, so fire the
-                -- single in-system re-measurement of preserved station B. Do NOT
-                -- arm or return until one exact module qualifies for both guns.
+                -- Phase two: the exact plasma group is verified, so scan the
+                -- settled Xenon K surfaces in system. Do NOT arm or return until
+                -- one exact surface qualifies for both guns.
                 scenarioRequestSerial = scenarioRequestSerial + 1
                 local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
                 pendingQualify = { requestId = token, selection = selection,
                     deadline = getElapsedTime() + 30 }
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })
-                scenarioActionStatus = "QUALIFYING: measuring the direct-module masking position with preserved station B and "
+                scenarioActionStatus = "QUALIFYING: scanning settled Xenon K surfaces for direct own-hull masking with "
                     .. selection.label .. " (" .. selection.memberIDs .. ")"
                 log("geometry_qualify", { action = "requested", request_id = token,
                     ship_id = selection.shipID, group = selection.rawGroup,

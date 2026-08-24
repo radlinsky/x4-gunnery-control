@@ -764,6 +764,40 @@
   is the assignment that is exclusive, not merely the firing. This is the
   idle-turret cost of Direct-control.
 
+### Conventional autoassist turrets hold fire on a manually selected own-hull-masked ship surface
+- X4: 9.00 (611726)
+- Status: live-tested
+- Source: controlled Test Lab run 2026-08-24, scenario
+  `issue-67-direct-surface-mask-r11`, production build marker
+  `2026-08-24-testlab-manual-designation-1`, game `debug.log`; detailed run
+  record in `testing-experiments.md`
+- Live test: yes — one player-owned Colossus E, one stationary repaired/held-fire
+  Xenon K, two exact `turret_arg_m_plasma_02_mk1_macro` members, and one exact
+  manually selected `turret_xen_l_laser_01_mk1_macro` surface
+- Finding: the owner used the normal Direct-control flow to select the marked
+  Xenon K root and then the exact surface `0x1796eb`; Gunnery accepted that
+  component and only then armed observation. At both the initial and 20.874 s
+  settled snapshots, plasma turrets `0x179672` and `0x179673` were
+  `isreadytofire=1`, in range, and inside their generated -10/+90 degree arcs.
+  Each exact muzzle ray was clear with the firing ship excluded
+  (`muzzle_los_ex=1`) and blocked with it included (`muzzle_los_self=0`). The
+  observer recorded zero FIRED and zero HIT events throughout the interval.
+  Gunnery's independently recomputed pinned-surface result remained 0/2
+  ENGAGEABLE for the same selected component. For this controlled conventional
+  weapon case, X4's autoassist shoot controller therefore held fire on the
+  own-hull-masked surface, and the production self-inclusive line-of-fire gate
+  agreed with the observed firing result.
+- Consequence for #67: do not remove or self-exclude the conventional
+  projectile line-of-fire gate based on the earlier zero-barrel hypothesis.
+  The exact `_02` beam/plasma barrels were non-degenerate, and the existing
+  predicate correctly rejected this clean masking case.
+- Boundaries: one generated Colossus/K instance and two plasma turrets. This
+  does not establish every hull's collision behavior, station-root-to-module
+  retargeting, or the separate origin-versus-hittable-aim arc question. The
+  two earlier automated surface-designation failures are fixture failures, not
+  evidence that surface elements are invalid targets: the normal manual
+  root-then-surface path succeeded immediately.
+
 ### RETRACTED 2026-08-10: "A preferred target without a target list frees turrets from their mode"
 - X4: 9.00
 - Status: inference

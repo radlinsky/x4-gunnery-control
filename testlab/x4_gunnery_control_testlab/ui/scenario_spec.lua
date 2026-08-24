@@ -60,7 +60,8 @@
 --     yaw       number   Optional absolute yaw in degrees. Default 0.
 --     role      string   Optional "shooter" role for strict loadout census.
 --     loadout   string   Optional supported deterministic Test Lab loadout.
---     geometryRole string Optional "clear_arc" or "below_arc" preflight role.
+--     geometryRole string Optional "clear_arc", "below_arc", or
+--                         "surface_mask" post-teleport qualifier role.
 --     expectedWeapons / expectedTurrets / expectedBeam / expectedPlasma
 --                        Exact ordinary-emitter census required before READY.
 --     expectedMissileTurrets / expectedGuided / expectedDumbfire / expectedAmmo
@@ -80,22 +81,27 @@
 --                            READY unless the live mode census proves it.
 --     geometryRole   string  Optional "aim_split" transport role. The current
 --                            #67 phase uses its post-teleport qualifier to find
---                            one exact directly designated masking module.
+--                            one exact masking component for manual designation.
 --     searchAttempts/searchStepY
 --                        Bounded deterministic vertical position search.
 --
--- Issue #67's arc and conventional-ray questions are now separate. r10 answers
--- only the direct-component masking question. The OOS create preserves one
--- station and reports geometry PENDING; a single post-teleport in-system open
--- re-measures r9's known position on a later MD update, directly designates the
--- exact qualifying station module, and starts strict Direct-control. The owner
--- never retries guessed coordinates or selects the root manually.
+-- Issue #67's arc and conventional-ray questions are separate. r11 answers only
+-- the direct ship-surface masking question. Four Xenon K candidates are created
+-- once at authored positions and left settled; the post-teleport qualifier does
+-- not warp anything. It enumerates every operational surface element, then
+-- marks one exact surface only when BOTH selected plasma turrets
+-- can bear, are in range, have externally clear muzzle rays, have self-inclusive
+-- blocked muzzle rays, and may legally attack that same component. The owner
+-- then performs Direct-control, target-ship, and marked-surface clicks; Test Lab
+-- does not set the soft target. Xenon K is the ship surface route already
+-- exercised successfully by issue 65. Candidate coordinates remain
+-- experimental fixture inputs until a fresh run qualifies.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-direct-module-mask-r10",
+    id      = "issue-67-direct-surface-mask-r11",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -132,58 +138,34 @@ X4GunneryTestLabScenarioSpec = {
           expectedBeam = 2, expectedPlasma = 2,
           expectedMissileTurrets = 0, expectedGuided = 0,
           expectedDumbfire = 0, expectedAmmo = 0 },
-        { label = "A CLEAR IN-ARC BARREL CONTROL P",
-          macro = "ship_xen_m_fighter_01_a_macro", faction = "xenon",
-          count = 1, distance = 2201, x = -1200, y = 400, spread = 0, yaw = 180,
+        -- The shipped macro is explicitly called Xenon K by vanilla MD despite
+        -- its xl_destroyer name. Separate one-count groups preserve four exact
+        -- authored positions and make each candidate unmistakable in logs.
+        { label = "MASK CANDIDATE K 1",
+          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
+          count = 1, distance = 4201, x = 0, y = -550, spread = 0, yaw = 180,
           behaviour = "wait", hostile = true, holdFire = true,
           stripDefenceUnits = true, repairGuard = true,
-          geometryRole = "clear_arc" },
-        { label = "C TRUE CANNOT BEAR CONTROL P",
-          macro = "ship_xen_m_fighter_01_a_macro", faction = "xenon",
-          count = 1, distance = 1801, x = 1600, y = -1200, spread = 0, yaw = 180,
+          geometryRole = "surface_mask" },
+        { label = "MASK CANDIDATE K 2",
+          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
+          count = 1, distance = 4601, x = 700, y = -650, spread = 0, yaw = 180,
           behaviour = "wait", hostile = true, holdFire = true,
           stripDefenceUnits = true, repairGuard = true,
-          geometryRole = "below_arc" },
+          geometryRole = "surface_mask" },
+        { label = "MASK CANDIDATE K 3",
+          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
+          count = 1, distance = 5001, x = 1400, y = -750, spread = 0, yaw = 180,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true,
+          geometryRole = "surface_mask" },
+        { label = "MASK CANDIDATE K 4",
+          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
+          count = 1, distance = 5401, x = 2100, y = -850, spread = 0, yaw = 180,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true,
+          geometryRole = "surface_mask" },
     },
-    stations = {
-        -- B: a Xenon xen_defence station used to expose one exact directly
-        -- designated construction module. The station root remains below the
-        -- front-upper turrets and is NOT the timed target in r10.
-        -- Equipment discriminator: apply one deterministic SAFE loadout to one
-        -- actual xenon_small_station_01_base module, never to the station root:
-        -- two standard medium lasers in group01, four medium shields in groups01-04,
-        -- and no large/graviton equipment. The MD records the station census
-        -- immediately, after a 1 ms delayed cue, and in system. Only the in-system
-        -- census is a qualification gate; the earlier two are observations that
-        -- will tell us whether remote equipment is synchronous. Two-phase: OOS the
-        -- aim target does not resolve to a real hull surface, so root and
-        -- hittable-aim pitch are near-identical and no split can be measured at
-        -- spawn. Test Lab PRESERVES exactly one station at this attempt-0 position
-        -- (searchAttempts = 1; no OOS repositioning), verifies its census, and
-        -- reports geometry PENDING. After the owner teleports to the Colossus,
-        -- opening Test Lab once repositions this same station to r9's first
-        -- measured position (5750 m forward, -900 m vertical, 180-degree roll),
-        -- then waits 1 ms before re-measuring every exact pair. Qualification
-        -- requires BOTH front-right plasma turrets against the SAME module to
-        -- have origin and hittable aim inside -10/+90, be in range, have clear
-        -- self-excluding muzzle LOS, have blocked self-inclusive muzzle LOS, and
-        -- be legally attackable. Test Lab transports that exact module as a
-        -- component, ticks only the plasma group, selects strict autoassist, and
-        -- directly engages it. Root splits remain diagnostic and cannot qualify.
-        -- The search coordinates are experimental fixture inputs, not verified
-        -- X4 behavior or a knowledge-base conclusion.
-        -- At Create,
-        -- minSurfaces intentionally requires only the five-module shell so a
-        -- deferred loadout can reach the in-system discriminator. The exact
-        -- turret-and-shield census is enforced only by that in-system check.
-        -- searchStepY is retained only as a historical downward-search marker.
-        { label = "B DIRECT MODULE MASK STATION",
-          recipe = "xen_defence", faction = "xenon",
-          distance = 6000, x = 0, y = -800, spread = 0,
-          hostile = true, holdFire = true,
-          geometryRole = "aim_split",
-          expectedModules = 5, minSurfaces = 5,
-          searchAttempts = 1, searchStepY = -400 },
-    },
+    stations = {},
 }
 return X4GunneryTestLabScenarioSpec

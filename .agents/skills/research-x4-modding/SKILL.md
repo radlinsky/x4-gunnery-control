@@ -18,6 +18,11 @@ for it.
   proposed findings with classification, source, version, and live-test need.
 - Keep user observations experimental until reproduced. Never upgrade them to
   a durable claim from a report alone.
+- For an active live-test workstream, keep hypotheses, planned discriminators,
+  failed-fixture diagnoses, and provisional conclusions in the issue/log until
+  the decisive run has completed. Do not pre-write a durable KB conclusion and
+  then try to make the run fit it. After the run, inspect the correlated engine
+  log yourself and record only what its accepted controls actually establish.
 - Never copy unpacked game files, third-party extension files, catalogs, or
   data files into tracked repository paths. Use the ignored
   `.x4-research-cache/` or an explicit external temporary directory.

@@ -295,7 +295,8 @@ The A/B/C observations must remain separated:
   limit; its self-inclusive rays were also blocked. It did not fire and remains
   a valid CANNOT BEAR control, not a line-of-fire discriminator.
 
-Questions still open for Issue #67:
+Questions still open at the r9 checkpoint (question 2 is answered by the r11
+follow-up below):
 
 1. Can a deterministic station surface be placed so the SAME exact component's
    origin pitch is outside the generated arc while its hittable aim-point pitch
@@ -318,3 +319,95 @@ Fixture rule: a qualifying component must be the component the timed action
 actually designates. Keep the arc split and own-hull masking as independent
 branches; a target with both CANNOT BEAR and a blocked line of fire cannot
 decide which condition controls firing.
+
+## Issue #67 r10/r11 follow-up 2026-08-24: conventional own-hull masking resolved
+
+X4 9.00 (611726), UI Extensions 9.00, X4 Gunnery Control 0.31, Test Lab
+0.10, branch `feature/issue-67-arc-barrel-fixture`. Evidence is the correlated
+game `debug.log` from the disposable save. The accepted manual-designation run
+used scenario `issue-67-direct-surface-mask-r11` and runtime build marker
+`2026-08-24-testlab-manual-designation-1`.
+
+### Why r10 was abandoned
+
+The r10 direct-station-module fixture re-used the r9 station candidate, but its
+post-teleport movement destroyed the useful external-ray distinction: an
+unchanged settled control and a deliberately delayed post-warp measurement both
+left all candidate station-module rays externally blocked. That is an
+experimental result for the tested generated station instance, not a universal
+station-warp/collision rule. Waiting longer did not have an evidence-backed
+purpose. The next fixture therefore removed station movement entirely and used
+four independently pre-positioned, stationary Xenon K candidates whose
+operational surfaces could be enumerated after teleport.
+
+### r11 qualification and manual interaction
+
+The r11 Create census passed exactly: one player-owned Colossus E shooter plus
+four repaired, held-fire Xenon Ks; four conventional shooter turrets (two
+`turret_arg_m_beam_02_mk1_macro`, two
+`turret_arg_m_plasma_02_mk1_macro`); no missile turrets, unrelated weapons, or
+remaining defence units; all four K targets legally attackable. The in-system
+qualifier scanned 140 operational target surfaces and 280 exact plasma/surface
+pairs. It found 17 externally clear candidates and selected surface `0x1796eb`
+(`XEN L Graviton Turret Mk1`) on `MASK CANDIDATE K 2 1` (`0x1796ce`) because
+both exact plasma turrets satisfied all intended gates against that SAME
+component:
+
+- `0x179672`: origin/aim pitch `-0.168770/-0.168039` rad, range 3683 m of
+  5500 m, `muzzle_los_ex=1`, `muzzle_los_self=0`, `mayattack=1`;
+- `0x179673`: origin/aim pitch `-0.172767/-0.172005` rad, range 3598.5 m of
+  5500 m, `muzzle_los_ex=1`, `muzzle_los_self=0`, `mayattack=1`.
+
+Two attempts to automate designation were invalid fixture designs. Calling the
+engagement bridge while Test Lab owned the external menu failed, and deferring
+the same exact surface write until Gunnery regained ownership still produced
+two `SetSofttarget` refusals. Those failures do NOT establish an X4 surface
+targeting limitation: they bypassed the normal player interaction. The final
+fixture only marked the exact root and surface. The owner then clicked Direct
+control, the marked K root, and the marked surface; Gunnery accepted the exact
+surface immediately and logged a distinct `action=operator_designated` before
+observation began.
+
+### Clean firing result
+
+At both initial and settled (20.874 s) snapshots, the two selected plasma
+turrets were in `autoassist`, `isreadytofire=1`, in range, inside their generated
+arcs, externally clear, and self-inclusive blocked against the manually selected
+surface. From designation through the settled snapshot the observer recorded
+zero FIRED and zero HIT events. The independently refreshed Gunnery surface row
+reported 0/2 ENGAGEABLE on every pinned update during the same interval.
+
+This is the clean answer to r9 question 2 for the tested conventional turrets:
+X4 held fire when the exact in-arc/in-range selected surface had an external
+clear ray but an own-Colossus-hull-masked projectile path. The production
+self-inclusive conventional line-of-fire gate agreed with engine behavior; no
+#67 production line-of-fire change is warranted for this branch.
+
+### Arc evidence and what remains open
+
+The same 280-pair scan found exactly one origin-versus-hittable-aim boundary
+crossing: plasma `0x179673` against Xenon K shield surface `0x17970f` on
+candidate `0x179707`, with origin pitch `-0.174791` rad just outside the -10
+degree limit and hittable aim pitch `-0.174418` rad just inside. It was in range
+but externally blocked (`muzzle_los_ex=0`), so it cannot decide whether the
+production origin-based arc gate under-counts a shot X4 would take. It does
+prove the two points can straddle the generated limit on one exact component.
+
+Still open for #67:
+
+1. Reproduce a same-component origin-outside/aim-inside split with range and
+   external line of fire clear, then manually designate that exact surface and
+   observe the exact turret's fire/hit behavior. Use fresh independently
+   pre-positioned candidates and a bounded search; one generated r11 coordinate
+   is not yet deterministic.
+2. Separately determine whether station-root `set_turret_targets` ever becomes
+   an engine-side module engagement, or whether vanilla module attacks depend
+   on explicit AI-script retargeting.
+3. Separately reproduce the r9 A-page case where a hull refreshed to 4/4 while
+   its surface rows retained 0/4. Recompute/reopen and directly select one exact
+   surface before classifying it as a stale-snapshot UI defect.
+
+Do not revisit remote/local station timing: r6 and r9 already reproduced the
+exact remote module loadout synchronously. Do not revisit zero/degenerate
+barrels for the tested `_02` macros or weaken the conventional line-of-fire
+gate: those branches are resolved within their stated bounds.

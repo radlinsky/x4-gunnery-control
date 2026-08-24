@@ -42,7 +42,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-18-auto-next-async-1"
+local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -64,6 +64,7 @@ local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
 local activeExternalMenuName
+local suggestedTestEngagement
 local cameraMismatchLogged = false
 local mapReopenFailureLogged = false
 local containedShipsFailureLogged, containedStationsFailureLogged = false, false
@@ -950,7 +951,44 @@ local function engageTarget(targetID)
             menu.display()
         end
     end, false, getElapsedTime() + 0.01)
+    -- A controlled interaction test must exercise the same operator click as
+    -- normal Direct control. Test Lab may mark the exact qualified component,
+    -- but it must never designate it on the owner's behalf. Notify Test Lab
+    -- only after engageTarget has accepted that exact manual click and updated
+    -- the live Direct-control session.
+    local suggestion = suggestedTestEngagement
+    if suggestion and currentSession(suggestion.session, suggestion.epoch)
+            and sameID(target, suggestion.target) then
+        suggestedTestEngagement = nil
+        log("operator selected suggested Test Lab engagement target=" .. tostring(target))
+        if suggestion.callback then
+            local ok, err = pcall(suggestion.callback, true, "")
+            if not ok then log("suggested Test Lab engagement callback failed: " .. tostring(err)) end
+        end
+    end
     return true
+end
+
+-- Test-only recommendation: retain the exact qualified component and its root
+-- so Gunnery can label both manual choices. This deliberately performs no
+-- SetSofttarget call and does not enter Direct control.
+local function suggestTestEngagement(targetID, callback)
+    if targetID == nil or not session then return false end
+    local target = id(targetID)
+    if target == 0 or not isEligibleEngagementTarget(target) then return false end
+    suggestedTestEngagement = {
+        target = target, root = targetRoot(target), callback = callback,
+        session = session, epoch = sessionEpoch,
+    }
+    log("marked Test Lab engagement for manual selection target=" .. tostring(target)
+        .. " root=" .. tostring(suggestedTestEngagement.root))
+    return true
+end
+
+local function currentTestEngagementSuggestion()
+    local suggestion = suggestedTestEngagement
+    if suggestion and currentSession(suggestion.session, suggestion.epoch) then return suggestion end
+    return nil
 end
 
 -- Forward-declared above restoreDirect; see the contract comment there.
@@ -1512,6 +1550,9 @@ end
 -- the requested session POV is applied.
 function TestAPI.enterCamera(member, options) return enterCamera(member, options) end
 function TestAPI.engageTarget(targetID) return engageTarget(targetID) end
+function TestAPI.suggestTestEngagement(targetID, callback)
+    return suggestTestEngagement(targetID, callback)
+end
 
 function TestAPI.getCameraFocus()
     return tostring(C.GetExternalTargetViewComponent())
@@ -2523,7 +2564,12 @@ function menu.display()
                             tostring(engageabilityTotal), engageabilityText(result)))
                     end
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
-                    surfRow[1]:setColSpan(2):createText(surface.name)
+                    local suggestion = currentTestEngagementSuggestion()
+                    local surfaceName = surface.name
+                    if suggestion and sameID(surface.componentID, suggestion.target) then
+                        surfaceName = "[TEST TARGET] " .. surfaceName
+                    end
+                    surfRow[1]:setColSpan(2):createText(surfaceName)
                     surfRow[3]:createText(surfaceDistanceText(pageCache.distances[position]))
                     surfRow[4]:createText(engageabilityText(result))
                     surfRow[5]:createButton({}):setText(text(60))
@@ -2624,7 +2670,12 @@ function menu.display()
                 candidate.macro, position, engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
                 tostring(engageabilityTotal), engageabilityText(candidate.engageability)))
             local row = tableView:addRow(tostring(candidate.componentID), {})
-            row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
+            local candidateName = candidate.name ~= "" and candidate.name or text(51)
+            local suggestion = currentTestEngagementSuggestion()
+            if suggestion and sameID(candidate.componentID, suggestion.root) then
+                candidateName = "[TEST TARGET] " .. candidateName
+            end
+            row[1]:setColSpan(2):createText(candidateName)
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
             row[6]:createText(candidate.relation)
             row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
