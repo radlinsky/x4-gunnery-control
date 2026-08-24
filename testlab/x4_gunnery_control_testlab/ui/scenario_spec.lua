@@ -94,7 +94,7 @@
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
     id      = "issue-67-arc-barrel-diagnostic-r1",
-    enabled = true,
+    enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
         x = 500000, y = 0, z = 0,
