@@ -93,7 +93,7 @@
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-arc-barrel-diagnostic-r1",
+    id      = "issue-67-arc-barrel-diagnostic-r2",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -101,10 +101,10 @@ X4GunneryTestLabScenarioSpec = {
     },
     setup   = {
         remote          = true,
-        shipMacro       = "ship_arg_l_destroyer_02_a_macro",
-        shipLabel       = "ISSUE ARC-BARREL BEHEMOTH E 1",
-        turretGroup     = "group_front_up_mid",
-        turretLabel     = "Front Upper Mid",
+        shipMacro       = "ship_arg_xl_carrier_02_a_macro",
+        shipLabel       = "ISSUE ARC-BARREL COLOSSUS E 1",
+        turretGroup     = "group_front_left_up",
+        turretLabel     = "Front Upper Left",
         selectAll       = true,
         expectedTurrets = 4,
         expectedMacros  = {
@@ -115,15 +115,16 @@ X4GunneryTestLabScenarioSpec = {
         },
     },
     groups = {
-        { label = "ISSUE ARC-BARREL BEHEMOTH E",
-          macro = "ship_arg_l_destroyer_02_a_macro", faction = "player",
+        { label = "ISSUE ARC-BARREL COLOSSUS E",
+          macro = "ship_arg_xl_carrier_02_a_macro", faction = "player",
           count = 1, distance = 1, x = 0, y = 0, spread = 0, yaw = 0,
           behaviour = "wait", role = "shooter",
-          loadout = "issue67_behemoth_arc_barrel",
+          loadout = "issue67_colossus_arc_barrel",
           stripDefenceUnits = true,
           -- Live-proven (issue-67 run, X4 9.00): `.weapons.operational.count`
           -- reports 4 here, matching `.turrets` — turret-mounted weapons are
-          -- counted in both. 4 turrets => weapons=4.
+          -- counted in both. Colossus E arms group_front_left_up (beam) and
+          -- group_front_right_up (plasma), 2 turrets each. 4 turrets => weapons=4.
           expectedWeapons = 4, expectedTurrets = 4,
           expectedBeam = 2, expectedPlasma = 2,
           expectedMissileTurrets = 0, expectedGuided = 0,

@@ -57,7 +57,7 @@
     .x4-research-cache/extracted/scripts-9.00/md/tutorial_captureship.xml:180-183
     .x4-research-cache/extracted/scripts-9.00/md/lib_generic.xml:741-742
 
-  static named loadout supplied while creating the shipped Behemoth E:
+  static named loadout supplied while creating the shipped Colossus E:
     .x4-research-cache/extracted/issue67-vanilla-md-9.00/md/scenario_combat.xml:738-748
     .x4-research-cache/extracted/issue67-vanilla-md-9.00/libraries/loadouts.xml:405-451
 
@@ -379,9 +379,11 @@
               <do_all exact="$Count">
                 <set_value name="$Index" operation="add"/>
 
-                <!-- Issue #67 pre-spawn diagnostic (one controlled run, 2026-08-23:
-                     static ref reached create_ship, Behemoth ended with 0
-                     weapons/turrets). Shipped source proves the get_loadout
+                <!-- Issue #67 pre-spawn diagnostic. The static-ref route was later
+                     live-proven (SHA d7e3870) to apply its full per-group census
+                     (weapons=4/turrets=4/beam=2/plasma=2); an earlier 2026-08-23
+                     run had ended with 0 weapons/turrets, unexplained and
+                     superseded. Shipped source proves the get_loadout
                      syntax and one successful use, but NOT what a missing ID
                      leaves in result - or that execution even continues after
                      it - so each lookup is bracketed by its own stage/result
@@ -394,12 +396,12 @@
                      can never hide its own result. Read-only: nothing here
                      branches on the results, so creation proceeds exactly as
                      before. -->
-                <do_if value="$Def.$loadout == 'issue67_behemoth_arc_barrel'">
-                  <get_loadout result="$Issue67ProbeControl" loadout="'scenario_combat_arg_destroyer'" macro="macro.{$Def.$macro}"/>
+                <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
+                  <get_loadout result="$Issue67ProbeControl" loadout="'scenario_combat_arg_carrier_02'" macro="macro.{$Def.$macro}"/>
                   <set_value name="$Issue67ProbeControlOk" exact="$Issue67ProbeControl? and $Issue67ProbeControl != null"/>
                   <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=control_result control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved') + ' macro=' + $Def.$macro"/>
                   <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=custom_start macro=' + $Def.$macro"/>
-                  <get_loadout result="$Issue67ProbeCustom" loadout="'x4gc_testlab_issue67_behemoth_arc_barrel'" macro="macro.{$Def.$macro}"/>
+                  <get_loadout result="$Issue67ProbeCustom" loadout="'x4gc_testlab_issue67_colossus_arc_barrel'" macro="macro.{$Def.$macro}"/>
                   <set_value name="$Issue67ProbeCustomOk" exact="$Issue67ProbeCustom? and $Issue67ProbeCustom != null"/>
                   <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=custom_result custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' macro=' + $Def.$macro"/>
                   <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=summary macro=' + $Def.$macro + ' custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved')"/>
@@ -408,14 +410,14 @@
                   <do_if value="not $ScenarioSector">
                     <continue/>
                   </do_if>
-                  <do_if value="$Def.$loadout == 'issue67_behemoth_arc_barrel'">
+                  <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>
+                      <loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>
                       <!-- A captain is required for the player to man a secondary
                            bridge post (the gunner console); without one the console
-                           is inert. Mirrors vanilla scenario_combat's crewed Behemoth. -->
+                           is inert. Mirrors vanilla scenario_combat's crewed Colossus. -->
                       <pilot><select faction="$Owner" tags="tag.pilot"/></pilot>
                       <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
                                 y="ScenarioRoot.$PendingAnchorY + $Def.$y"
@@ -436,11 +438,11 @@
                   </do_else>
                 </do_if>
                 <do_else>
-                  <do_if value="$Def.$loadout == 'issue67_behemoth_arc_barrel'">
+                  <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  zone="player.zone" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>
+                      <loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>
                       <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
                       <rotation yaw="($Def.$yaw)deg"/>
                     </create_ship>
@@ -459,12 +461,12 @@
                 <do_if value="$Def.$loadout == 'issue65_odysseus_mixed_missiles'">
                   <apply_loadout object="$Ship" loadout="$Issue65OdysseusLoadout"/>
                 </do_if>
-                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_behemoth_arc_barrel'">
+                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel'">
                   <set_value name="$LoadoutFailures" operation="add"/>
                   <debug_text text="'[X4GC TEST SCENARIO] unknown deterministic loadout=' + $Def.$loadout + ' ship=' + $Ship"/>
                 </do_elseif>
-                <do_if value="$Def.$loadout == 'issue67_behemoth_arc_barrel'">
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 loadout_transport=static_ref slot_paths=con_turret_m_03,con_turret_m_04 ship=' + $Ship"/>
+                <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
+                  <debug_text text="'[X4GC TEST SCENARIO] issue67 loadout_transport=static_ref slot_paths=con_turret_m_06,con_turret_m_14,con_turret_m_08,con_turret_m_16 ship=' + $Ship"/>
                 </do_if>
 
                 <!-- Live tests kept failing on "which of these three identical Xenon fighters

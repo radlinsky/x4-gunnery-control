@@ -183,46 +183,54 @@
   pair has no self-dependency, so the inspected source does not establish any
   additional intra-extension ordering declaration.
 
-### Issue #67 custom static named loadout reached MD but did not yield its expected turret census
+### Issue #67 custom static named loadout resolves and applies its per-group turret census on the Test Lab route
 - X4: 9.00
 - Status: live-tested
-- Source: full-restart Issue #67 run reported 2026-08-23; installed
-  `extensions/x4_gunnery_control_testlab/libraries/loadouts.xml` SHA-256
-  `2bcd09c954153942ac6f76da724cbede82ddd0de172ec145cdb992ca38d8a645`, matching
-  the repository file; Test Lab MD
+- Source: full-restart Issue #67 run on SHA d7e3870 (superseding an earlier
+  2026-08-23 run); installed
+  `extensions/x4_gunnery_control_testlab/libraries/loadouts.xml` matching the
+  repository file; Test Lab MD
   `x4_gunnery_control_testlab_scenario.xml:376-432`
-- Live test: yes — one full-X4-restart run reached the `static_ref` branch and
-  created a Behemoth using `<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>`; the resulting Behemoth
-  reported 0 weapons and 0 turrets, with no identified log error, on 2026-08-23
-- Finding: the former "untested" status is stale. This is a bounded negative
-  result: it does NOT distinguish a missing/unresolved library ID from a
-  resolved definition whose entries did not apply. It also does not establish
-  a general failure of custom loadouts or of MD `<loadout ref>`.
+- Live test: yes — a full-X4-restart run reached the `static_ref` branch and
+  created a Behemoth E (macro `ship_arg_l_destroyer_02_a_macro`) using
+  `<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>`; the resulting
+  ship reported the exact expected census — weapons=4, turrets=4, beam=2,
+  plasma=2, loadout_failures=0. An EARLIER 2026-08-23 run had reported 0
+  weapons and 0 turrets with no identified log error; that zero result is
+  unexplained and is SUPERSEDED by this later full-restart run.
+- Finding: a static `<loadout ref>` to a full-root, extension-defined loadout
+  DOES resolve and apply its per-group turret census on this Test Lab route.
+  The earlier zero-turret run is treated as an unexplained EARLIER run, not a
+  route failure. Established for the Behemoth E macro; no other hull has been
+  live-mounted on this route.
+- Bound: proves the route resolves and applies for this loadout/macro pair;
+  does not establish the cause of the earlier zero run, nor generalize the
+  per-group census result to any other hull (e.g. Colossus compatibility
+  remains inference).
 
-### Issue #67 static-ref structure matches the shipped registration shape, but its failure cause is not source-proven
+### Issue #67 static-ref structure matches the shipped registration shape and the route is now shown to work
 - X4: 9.00
 - Status: inference
-- Bound: source comparison plus the single live-tested failure above; no source
+- Bound: source comparison plus the live-tested result above; no source
   inspected exposes the engine's loadout-registration diagnostic or the
-  per-entry apply decision
+  per-entry apply decision, so the cause of the earlier zero run stays unknown
 - Source: Test Lab `libraries/loadouts.xml:5-31`; vanilla
   `libraries/loadouts.xml:405-451`; official extension census in the preceding
   record
-- Live test: no — this is an inference from the current source and existing
-  run, not a new reproduction
+- Live test: no — this is an inference from the current source and the
+  live-tested run above, not a new reproduction
 - Finding: the Test Lab file uses the same full `<loadouts>` root and direct
   ID form as official extensions, and its ID is referenced inside the
-  corresponding `create_ship`, as in shipped scenarios. Its Behemoth macro,
-  engine/shield paths, and `groups` form also have shipped counterparts;
-  deliberately absent fixed `<weapon>` entries do not explain the expected
-  four turret-mounted weapons being absent. Source therefore does not prove a
-  registration or application cause. The single smallest distinguishing next
-  instrumentation is one pre-spawn MD `get_loadout` for
-  `x4gc_testlab_issue67_behemoth_arc_barrel` with macro
-  `ship_arg_l_destroyer_02_a_macro`, logging whether its result is present;
-  that separates ID lookup/registration failure from a later create/apply
-  failure without redesigning the current Behemoth fixture. Do not infer a corrective
-  XML change from the current evidence.
+  corresponding `create_ship`, as in shipped scenarios. Its macro,
+  engine/shield paths, and `groups` form also have shipped counterparts. The
+  live-tested run above shows the route resolves and applies the per-group
+  census, so the earlier zero result is not attributable to a structural
+  registration or application defect on the current evidence; its cause is not
+  source-proven and no root cause is claimed. The pre-spawn MD `get_loadout`
+  probe (custom ID plus a shipped control ID, logging whether each result is
+  present) remains staged to separate ID lookup/registration from a later
+  create/apply outcome should the earlier zero ever recur. Do not infer a
+  corrective XML change from the current evidence.
 
 ### Transient singular-turret loadouts are unreliable on the Behemoth E
 - X4: 9.00

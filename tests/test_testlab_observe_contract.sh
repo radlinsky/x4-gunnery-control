@@ -172,21 +172,21 @@ fi
 # Issue #67 reusable prerequisites: per-group conventional loadout, and
 # fail-closed control census.  Station-B (aim_split) was removed in the r2
 # refactor; the fixture now spawns in Hatikvah's Choice I for the Q1 arc test.
-[[ $(grep -Fc '<turrets macro="turret_arg_m_beam_02_mk1_macro" group="group_front_up_mid" exact="2"/>' "$loadouts") -eq 1 ]] \
-  || fail "issue #67 loadout does not install 2 beam turrets in group_front_up_mid"
-[[ $(grep -Fc '<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_mid_up_mid" exact="2"/>' "$loadouts") -eq 1 ]] \
-  || fail "issue #67 loadout does not install 2 plasma turrets in group_mid_up_mid"
-grep -Fq '<loadout id="x4gc_testlab_issue67_behemoth_arc_barrel" macro="ship_arg_l_destroyer_02_a_macro">' "$loadouts" \
-  || fail "issue #67 static loadout does not bind itself to the exact Behemoth E macro"
-[[ $(grep -Fc '<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>' "$scenario") -eq 2 ]] \
+[[ $(grep -Fc '<turrets macro="turret_arg_m_beam_02_mk1_macro" group="group_front_left_up" exact="2"/>' "$loadouts") -eq 1 ]] \
+  || fail "issue #67 loadout does not install 2 beam turrets in group_front_left_up"
+[[ $(grep -Fc '<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_front_right_up" exact="2"/>' "$loadouts") -eq 1 ]] \
+  || fail "issue #67 loadout does not install 2 plasma turrets in group_front_right_up"
+grep -Fq '<loadout id="x4gc_testlab_issue67_colossus_arc_barrel" macro="ship_arg_xl_carrier_02_a_macro">' "$loadouts" \
+  || fail "issue #67 static loadout does not bind itself to the exact Colossus E macro"
+[[ $(grep -Fc '<loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>' "$scenario") -eq 2 ]] \
   || fail "issue #67 static loadout ref is not used in both remote and local creation paths"
-if grep -Fq 'Issue67BehemothLoadout' "$scenario"; then
+if grep -Fq 'Issue67ColossusLoadout' "$scenario"; then
   fail "issue #67 fixture regressed to a live-proven-unreliable transient loadout"
 fi
 grep -Fq 'issue67 loadout_transport=static_ref' "$scenario" \
   || fail "issue #67 fixture does not log its source-backed loadout transport"
-grep -Fq 'slot_paths=con_turret_m_03,con_turret_m_04' "$scenario" \
-  || fail "issue #67 fixture does not log the shipped Behemoth slot paths"
+grep -Fq 'slot_paths=con_turret_m_06,con_turret_m_14,con_turret_m_08,con_turret_m_16' "$scenario" \
+  || fail "issue #67 fixture does not log the shipped Colossus slot paths"
 grep -Fq "\$Control.\$role == 'clear_arc'" "$scenario" \
   || fail "clear in-arc control has no fail-closed geometry preflight"
 grep -Fq "\$Control.\$role == 'below_arc'" "$scenario" \
@@ -209,10 +209,10 @@ grep -Fq "':' + \$ShooterWeapons + ':' + \$ShooterTurrets + ':' + \$ShooterBeam 
 # The probe never branches on its results, and the -eq 2 check above keeps
 # pinning both <loadout ref> creation sites, which must stay unchanged.
 scenario_probe_line() { { grep -Fn "$1" "$scenario" || true; } | head -n 1 | cut -d: -f1; }
-[[ $(grep -Fc "<get_loadout result=\"\$Issue67ProbeControl\" loadout=\"'scenario_combat_arg_destroyer'\" macro=\"macro.{\$Def.\$macro}\"/>" "$scenario") -eq 1 ]] \
-  || fail "issue #67 probe does not query the shipped control loadout ID with the Behemoth macro"
-[[ $(grep -Fc "<get_loadout result=\"\$Issue67ProbeCustom\" loadout=\"'x4gc_testlab_issue67_behemoth_arc_barrel'\" macro=\"macro.{\$Def.\$macro}\"/>" "$scenario") -eq 1 ]] \
-  || fail "issue #67 probe does not query the custom loadout ID with the Behemoth macro"
+[[ $(grep -Fc "<get_loadout result=\"\$Issue67ProbeControl\" loadout=\"'scenario_combat_arg_carrier_02'\" macro=\"macro.{\$Def.\$macro}\"/>" "$scenario") -eq 1 ]] \
+  || fail "issue #67 probe does not query the shipped control loadout ID with the Colossus macro"
+[[ $(grep -Fc "<get_loadout result=\"\$Issue67ProbeCustom\" loadout=\"'x4gc_testlab_issue67_colossus_arc_barrel'\" macro=\"macro.{\$Def.\$macro}\"/>" "$scenario") -eq 1 ]] \
+  || fail "issue #67 probe does not query the custom loadout ID with the Colossus macro"
 grep -Fq "stage=control_result control=' + (if \$Issue67ProbeControlOk then 'resolved' else 'not_resolved')" "$scenario" \
   || fail "issue #67 probe does not log the control lookup result"
 grep -Fq "stage=custom_start" "$scenario" \
@@ -224,7 +224,7 @@ ctl_result_line=$(scenario_probe_line "stage=control_result")
 cust_start_line=$(scenario_probe_line "stage=custom_start")
 cust_lookup_line=$(scenario_probe_line "<get_loadout result=\"\$Issue67ProbeCustom\"")
 cust_result_line=$(scenario_probe_line "stage=custom_result")
-first_ref_line=$(scenario_probe_line '<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>')
+first_ref_line=$(scenario_probe_line '<loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>')
 [[ -n "$ctl_lookup_line" && -n "$ctl_result_line" && -n "$cust_start_line" && -n "$cust_lookup_line" && -n "$cust_result_line" && -n "$first_ref_line" ]] \
   || fail "issue #67 probe is missing one of its stage markers"
 [[ "$ctl_lookup_line" -lt "$ctl_result_line" && "$ctl_result_line" -lt "$cust_start_line" && "$cust_start_line" -lt "$cust_lookup_line" && "$cust_lookup_line" -lt "$cust_result_line" && "$cust_result_line" -lt "$first_ref_line" ]] \
@@ -233,7 +233,7 @@ summary_count=$(grep -Fc "stage=summary" "$scenario" || true)
 if [[ "$summary_count" -gt 0 ]]; then
   summary_line=$(scenario_probe_line "stage=summary")
   grep -Fq "stage=summary macro=" "$scenario" \
-    || fail "issue #67 summary must name the probed Behemoth macro"
+    || fail "issue #67 summary must name the probed Colossus macro"
   grep -Fq "' custom=' + (if \$Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' control='" "$scenario" \
     || fail "issue #67 summary must report both lookup results"
   [[ "$cust_result_line" -lt "$summary_line" && "$summary_line" -lt "$first_ref_line" ]] \

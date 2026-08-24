@@ -3,19 +3,17 @@
      entries from extensions, so the MD spawner can use the same static
      <loadout ref="..."/> route as shipped scenarios. -->
 <loadouts>
-  <loadout id="x4gc_testlab_issue67_behemoth_arc_barrel" macro="ship_arg_l_destroyer_02_a_macro">
+  <loadout id="x4gc_testlab_issue67_colossus_arc_barrel" macro="ship_arg_xl_carrier_02_a_macro">
     <macros>
-      <engine macro="engine_arg_l_allround_01_mk1_macro" path="../con_engine_03"/>
-      <engine macro="engine_arg_l_allround_01_mk1_macro" path="../con_engine_02"/>
-      <engine macro="engine_arg_l_allround_01_mk1_macro" path="../con_engine_01"/>
-      <shield macro="shield_arg_l_standard_01_mk2_macro" path="../con_shield_l_03"/>
-      <shield macro="shield_arg_l_standard_01_mk1_macro" path="../con_shield_l_02"/>
-      <shield macro="shield_arg_l_standard_01_mk2_macro" path="../con_shield_l_01"/>
+      <engine macro="engine_arg_xl_allround_01_mk1_macro" path="../con_engine_02"/>
+      <engine macro="engine_arg_xl_allround_01_mk1_macro" path="../con_engine_01"/>
+      <shield macro="shield_arg_xl_standard_01_mk1_macro" path="../con_shield_xl_03"/>
+      <shield macro="shield_arg_xl_standard_01_mk1_macro" path="../con_shield_xl_02"/>
+      <shield macro="shield_arg_xl_standard_01_mk1_macro" path="../con_shield_xl_01"/>
     </macros>
     <groups>
-      <shields macro="shield_arg_m_standard_02_mk1_macro" group="group_front_up_mid" exact="2"/>
-      <turrets macro="turret_arg_m_beam_02_mk1_macro" group="group_front_up_mid" exact="2"/>
-      <turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_mid_up_mid" exact="2"/>
+      <turrets macro="turret_arg_m_beam_02_mk1_macro" group="group_front_left_up" exact="2"/>
+      <turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_front_right_up" exact="2"/>
     </groups>
     <software>
       <software ware="software_dockmk2"/>
@@ -25,7 +23,7 @@
       <software ware="software_targetmk1"/>
     </software>
     <virtualmacros>
-      <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
+      <thruster macro="thruster_gen_xl_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
 </loadouts>

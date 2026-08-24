@@ -372,16 +372,16 @@ do
         id = "issue-67-contract", enabled = false,
         location = { sectorMacro = "Cluster_29_Sector001_macro", x = 500000, y = 0, z = 0 },
         setup = {
-            remote = true, shipMacro = "ship_arg_l_destroyer_02_a_macro",
-            shipLabel = "ISSUE ARC-BARREL BEHEMOTH E 1",
-            turretGroup = "group_front_up_mid", turretLabel = "Front Upper Mid",
+            remote = true, shipMacro = "ship_arg_xl_carrier_02_a_macro",
+            shipLabel = "ISSUE ARC-BARREL COLOSSUS E 1",
+            turretGroup = "group_front_left_up", turretLabel = "Front Upper Left",
             selectAll = true, expectedTurrets = 4,
             expectedMacros = { beam, beam, plasma, plasma },
         },
         groups = {
-            { label = "ISSUE ARC-BARREL BEHEMOTH E", macro = "ship_arg_l_destroyer_02_a_macro",
+            { label = "ISSUE ARC-BARREL COLOSSUS E", macro = "ship_arg_xl_carrier_02_a_macro",
               faction = "player", count = 1, distance = 1, behaviour = "wait",
-              role = "shooter", loadout = "issue67_behemoth_arc_barrel",
+              role = "shooter", loadout = "issue67_colossus_arc_barrel",
               expectedWeapons = 4, expectedTurrets = 4, expectedBeam = 2,
               expectedPlasma = 2 },
             { label = "A CLEAR IN-ARC BARREL CONTROL P", macro = "ship_xen_m_fighter_01_a_macro",
@@ -398,7 +398,7 @@ do
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
     assert(#events == 5, "issue #67 Create must stream begin + 3 groups + commit")
-    assert(events[2].params.loadout == "issue67_behemoth_arc_barrel"
+    assert(events[2].params.loadout == "issue67_colossus_arc_barrel"
             and events[2].params.expectedWeapons == 4
             and events[2].params.expectedTurrets == 4
             and events[2].params.expectedBeam == 2
@@ -426,19 +426,19 @@ do
             and harness.fix.logContains("beam=2") and harness.fix.logContains("plasma=2"),
         "v8 READY must verify the exact four-turret shooter with no station")
 
-    -- selectAll arms BOTH equipped medium groups: group_front_up_mid holds two
-    -- beams (components 27,28) and group_mid_up_mid holds two plasmas (29,30),
+    -- selectAll arms BOTH equipped medium groups: group_front_left_up holds two
+    -- beams (components 27,28) and group_front_right_up holds two plasmas (29,30),
     -- four turrets total. The flattened, sorted member multiset must equal
     -- {beam,beam,plasma,plasma}; a fourth beam breaks it.
     local groupBuffer = {
-        [0] = { path = "p", group = "group_front_up_mid", contextid = 5 },
-        [1] = { path = "p", group = "group_mid_up_mid", contextid = 5 },
+        [0] = { path = "p", group = "group_front_left_up", contextid = 5 },
+        [1] = { path = "p", group = "group_front_right_up", contextid = 5 },
     }
     harness.fix.ffiStub.new = function() return groupBuffer end
     harness.fix.C.GetNumUpgradeGroups = function() return 2 end
     harness.fix.C.GetUpgradeGroups2 = function() return 2 end
     harness.fix.C.GetUpgradeGroupInfo2 = function(_, _, _, _, group)
-        if group == "group_mid_up_mid" then
+        if group == "group_front_right_up" then
             return { count = 2, currentcomponent = 29, currentmacro = plasma,
                 slotsize = "medium", total = 2, operational = 2 }
         end
@@ -450,8 +450,8 @@ do
         return 26 + slot
     end
     harness.fix.C.GetUpgradeSlotGroup = function(_, _, _, slot)
-        if slot <= 2 then return { path = "p", group = "group_front_up_mid" } end
-        return { path = "p", group = "group_mid_up_mid" }
+        if slot <= 2 then return { path = "p", group = "group_front_left_up" } end
+        return { path = "p", group = "group_front_right_up" }
     end
     local wrongComposition = true
     GetComponentData = function(component, field)
@@ -460,7 +460,7 @@ do
             if value == 27 or value == 28 then return beam end
             if value == 29 then return plasma end
             if value == 30 then return wrongComposition and beam or plasma end
-            return "ship_arg_l_destroyer_02_a_macro"
+            return "ship_arg_xl_carrier_02_a_macro"
         end
         if field == "isplayerowned" then return true end
         return nil
@@ -469,7 +469,7 @@ do
         local value = tonumber(component)
         if value == 27 or value == 28 then return "Beam" end
         if value == 29 or value == 30 then return "Plasma" end
-        return "ISSUE ARC-BARREL BEHEMOTH E 1"
+        return "ISSUE ARC-BARREL COLOSSUS E 1"
     end
 
     harness.fix.gcMenu.onShowMenu()
@@ -817,12 +817,12 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-diagnostic-r1"
-            and shipped.setup.shipMacro == "ship_arg_l_destroyer_02_a_macro"
-            and shipped.setup.turretGroup == "group_front_up_mid"
+    assert(shipped.id == "issue-67-arc-barrel-diagnostic-r2"
+            and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
+            and shipped.setup.turretGroup == "group_front_left_up"
             and shipped.setup.selectAll == true
             and shipped.setup.expectedTurrets == 4,
-        "the shipped issue #67 fixture must retain its exact Behemoth E setup")
+        "the shipped issue #67 fixture must retain its exact Colossus E setup")
     assert(#shipped.setup.expectedMacros == 4
             and shipped.setup.expectedMacros[1] == "turret_arg_m_beam_02_mk1_macro"
             and shipped.setup.expectedMacros[2] == "turret_arg_m_beam_02_mk1_macro"
@@ -854,7 +854,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-diagnostic-r1", 1, true),
+    assert(specLabelText:find("issue-67-arc-barrel-diagnostic-r2", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

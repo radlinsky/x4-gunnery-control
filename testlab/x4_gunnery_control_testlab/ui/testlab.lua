@@ -157,20 +157,21 @@ local function validateSpec(raw)
         end
         if role == "shooter" then
             if group.loadout ~= "issue65_odysseus_mixed_missiles"
-                    and group.loadout ~= "issue67_behemoth_arc_barrel" then
+                    and group.loadout ~= "issue67_colossus_arc_barrel" then
                 return nil, where .. ".loadout is not a supported shooter loadout"
             end
             local missileCensus = expectedMissileTurrets > 0
                 and expectedGuided + expectedDumbfire == expectedMissileTurrets
                 and expectedAmmo > 0
-            -- issue67 arms a beam group and a plasma group (2 turrets each) via
-            -- per-group loadout entries. Live-proven: `.weapons` and `.turrets`
-            -- both report 4 (turret-mounted weapons count in both).
+            -- issue67 arms group_front_left_up (beam, 2 turrets) and
+            -- group_front_right_up (plasma, 2 turrets) via per-group loadout
+            -- entries. Live-proven: `.weapons` and `.turrets` both report 4
+            -- (turret-mounted weapons count in both).
             local conventionalCensus = expectedWeapons == 4 and expectedTurrets == 4
                 and expectedBeam == 2 and expectedPlasma == 2
                 and expectedMissileTurrets == 0 and expectedAmmo == 0
             if (group.loadout == "issue65_odysseus_mixed_missiles" and not missileCensus)
-                    or (group.loadout == "issue67_behemoth_arc_barrel" and not conventionalCensus) then
+                    or (group.loadout == "issue67_colossus_arc_barrel" and not conventionalCensus) then
                 return nil, where .. " has an inconsistent shooter census"
             end
         end
