@@ -888,19 +888,22 @@ local function onScenarioReady(_, param)
 end
 
 -- Phase-two acknowledgement for the #67 station B discriminator. MD keeps the
--- preserved station root designated, but reports root-origin/root-aim geometry
--- and per-module origin/aim geometry independently. Qualify only when the exact
--- two-laser, four-shield module loadout is present AND either the root split is
--- real or a module aim-point candidate also has a clear external muzzle ray.
+-- preserved station root designated while moving that same station through a
+-- bounded in-system search. It reports the terminal attempt, root-origin/root-
+-- aim geometry, and per-module origin/aim geometry independently. Qualify only
+-- when the exact two-laser, four-shield module loadout is present AND either the
+-- root split is real or a module aim-point candidate has a clear external
+-- muzzle line of fire.
 local function onGeometryQualified(_, param)
-    local token, qualified, equipped, rootSplits, moduleOriginCandidates,
+    local token, qualified, equipped, attempt, searchCount, rootSplits, moduleOriginCandidates,
         moduleAimCandidates, moduleClearCandidates, measured, modulePairs,
         modules, turrets, standardLasers, missileTurrets, shields, engines =
-        tostring(param or ""):match("^x4gcq4:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        tostring(param or ""):match("^x4gcq5:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
     qualified, equipped = tonumber(qualified), tonumber(equipped)
+    attempt, searchCount = tonumber(attempt), tonumber(searchCount)
     rootSplits = tonumber(rootSplits)
     moduleOriginCandidates = tonumber(moduleOriginCandidates)
     moduleAimCandidates = tonumber(moduleAimCandidates)
@@ -915,13 +918,15 @@ local function onGeometryQualified(_, param)
         applyExactGroup(request.selection)
         remoteScenarioReady = false
         remoteGeometryPending = false
-        scenarioActionStatus = "QUALIFIED: station B root remains designated (root splits="
+        scenarioActionStatus = "QUALIFIED: station B root remains designated after search attempt "
+            .. attempt .. "/" .. searchCount .. " (root splits="
             .. rootSplits .. ", module origin/aim/clear candidates="
             .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
             .. moduleClearCandidates .. ", " .. modulePairs .. " module pairs); "
             .. request.selection.label
             .. " armed; returning to Gunnery Control"
         log("geometry_qualify", { action = "qualified", request_id = request.requestId,
+            search_attempt = attempt, search_count = searchCount,
             root_splits = rootSplits, module_origin_candidates = moduleOriginCandidates,
             module_aim_candidates = moduleAimCandidates,
             module_clear_candidates = moduleClearCandidates,
@@ -943,14 +948,17 @@ local function onGeometryQualified(_, param)
                 .. shields .. " shields, and " .. engines
                 .. " engines; expected 5/2/2/0/4/0; diagnostic not started"
         else
-            scenarioActionStatus = "FAILED: station B root stayed outside elevation and no qualifying aim point was found (root splits="
+            scenarioActionStatus = "FAILED: bounded station B search exhausted "
+                .. attempt .. "/" .. searchCount
+                .. " attempts with no qualifying aim point (root splits="
                 .. rootSplits .. ", module origin/aim/clear candidates="
                 .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
                 .. moduleClearCandidates .. ", " .. modulePairs
                 .. " module pairs); diagnostic not started"
         end
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
-            equipped = equipped, root_splits = rootSplits,
+            equipped = equipped, search_attempt = attempt, search_count = searchCount,
+            root_splits = rootSplits,
             module_origin_candidates = moduleOriginCandidates,
             module_aim_candidates = moduleAimCandidates,
             module_clear_candidates = moduleClearCandidates,
@@ -1077,7 +1085,7 @@ function menu.onShowMenu()
                     deadline = getElapsedTime() + 30 }
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })
-                scenarioActionStatus = "QUALIFYING: re-measuring preserved station B in system with "
+                scenarioActionStatus = "QUALIFYING: searching bounded positions with preserved station B in system and "
                     .. selection.label .. " (" .. selection.memberIDs .. ")"
                 log("geometry_qualify", { action = "requested", request_id = token,
                     ship_id = selection.shipID, group = selection.rawGroup,

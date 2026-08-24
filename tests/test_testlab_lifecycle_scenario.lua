@@ -548,7 +548,7 @@ local function shippedTwoPhaseToQualify()
     -- equipment census may still be zero; MD logs it and a delayed census before
     -- the in-system qualifier enforces the exact light module loadout.
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r7:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r8:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending")
             and harness.fix.logContains("geometry_splits=0"),
@@ -590,7 +590,7 @@ do
     assert(issued == 1, "a pending discriminator must not be re-issued on a repeat open")
 
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq4:" .. qToken .. ":1:1:0:2:2:2:4:20:5:2:2:0:4:0")
+        "x4gcq5:" .. qToken .. ":1:1:3:8:0:2:2:2:4:20:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
         "an in-system split must arm the exact turret set and return to Gunnery")
     assert(harness.fix.logContains("action=qualified")
@@ -598,6 +598,8 @@ do
             and harness.fix.logContains("module_origin_candidates=2")
             and harness.fix.logContains("module_aim_candidates=2")
             and harness.fix.logContains("module_clear_candidates=2")
+            and harness.fix.logContains("search_attempt=3")
+            and harness.fix.logContains("search_count=8")
             and harness.fix.logContains("designated_target=station_root")
             and harness.fix.logContains("station_standard_lasers=2")
             and harness.fix.logContains(beam) and harness.fix.logContains(plasma),
@@ -620,11 +622,13 @@ do
         end
     end
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq4:" .. qToken .. ":0:1:0:0:0:0:4:20:5:2:2:0:4:0")
+        "x4gcq5:" .. qToken .. ":0:1:8:8:0:0:0:0:4:20:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "a no-split in-system result must fail closed and not begin the diagnostic")
-    assert(harness.fix.logContains("action=failed"),
-        "a no-split in-system result must log a machine-readable failure")
+    assert(harness.fix.logContains("action=failed")
+            and harness.fix.logContains("search_attempt=8")
+            and harness.fix.logContains("search_count=8"),
+        "an exhausted in-system search must log a machine-readable terminal attempt")
     local observeAfter = 0
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
         if event.control == "observe_toggle" and event.params.enabled == true then
@@ -640,7 +644,7 @@ end
 do
     local harness, qToken = shippedTwoPhaseToQualify()
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq4:" .. qToken .. ":0:0:2:2:2:2:4:20:5:0:0:0:0:0")
+        "x4gcq5:" .. qToken .. ":0:0:1:8:2:2:2:2:4:20:5:0:0:0:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "an unequipped station must not arm the diagnostic even when a split exists")
     assert(harness.fix.logContains("action=failed")
@@ -979,7 +983,7 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-two-phase-r7"
+    assert(shipped.id == "issue-67-arc-barrel-two-phase-r8"
             and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
             and shipped.setup.turretGroup == "group_front_left_up"
             and shipped.setup.selectAll == true
@@ -1039,7 +1043,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r7", 1, true),
+    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r8", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

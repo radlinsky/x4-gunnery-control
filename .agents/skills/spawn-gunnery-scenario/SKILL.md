@@ -32,10 +32,12 @@ For a `setup.remote = true` fixture, use this distinct workflow:
    - a READY fixture auto-arms the exact group and immediately returns to
      Gunnery Control;
    - a PENDING fixture runs its in-system qualification on that single open. It
+     may automatically move the same preserved object through a bounded logged
+     position search, with a nonzero delay before measuring each position. It
      auto-arms and returns to Gunnery Control ONLY on `QUALIFIED`. On `FAILED`
      (or a timeout) it stops closed: leave X4 open, preserve the evidence, and
      report the displayed text. Do not press Create, Reload UI, or Despawn, and
-     do not retry coordinates.
+     do not retry coordinates manually.
 4. Continue the gameplay checklist. Never press Create after teleport.
 
 Create is destructive replacement. In a live 2026-08-23 failure, a second

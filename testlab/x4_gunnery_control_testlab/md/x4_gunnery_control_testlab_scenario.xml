@@ -1085,28 +1085,63 @@
         <!-- GeometryQualify
              AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                {requestId = "..."})
-             Phase two of the #67 station B discriminator.  The owner has
-             teleported aboard the preserved Colossus and opened Test Lab once;
-             Lua verifies the exact turret set and fires this event.  Re-measure
-             the SAME preserved station B (ScenarioRoot.$GeometryStation) against
-             the SAME exact beam/plasma turrets (ScenarioRoot.$GeometryShooter),
-             now in system so the hittable aim target resolves to a real hull
-             surface.  Keep the station ROOT designated for the timed test, but
-             measure four destinations independently for every exact turret:
-             station-root origin, station-root hittable aim point, each module
-             origin, and each module hittable aim point.  The module loop mirrors
-             vanilla's modular-target fallback without assuming which bearing is
-             correct for our explicit elevation gate.  Report the independent
-             candidate counts back to Lua and fail closed unless either the root
-             split survives or a module aim-point candidate also has a clear
-             external muzzle ray.  Nothing here recreates, retargets, or repositions
-             the station. -->
+             Phase two of the #67 station B discriminator. The owner opens Test
+             Lab once after teleporting to the preserved remote Colossus. A
+             bounded deterministic search warps the SAME preserved station B in
+             the shooter's sector, then GeometryQualifyMeasure waits for a later
+             MD update before measuring it. The search never recreates the
+             station, changes its exact loadout, or asks the owner to retry a
+             coordinate. The timed test still designates the station ROOT.
+
+             r7 live evidence disproved the authored 6000/-800 position but
+             found a clear module aim point just outside plasma range. These
+             eight closer positions are an experimental search around that
+             observation, not a knowledge-base claim. Every trial independently
+             records root origin/aim, module origin/aim, range, and external
+             muzzle line of fire. Qualification remains fail-closed: the exact
+             station census must survive and either a root split or a clear
+             module aim-point candidate must exist. -->
         <cue name="GeometryQualify" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'qualify_geometry'"/>
           </conditions>
           <actions>
-            <set_value name="$RequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
+            <set_value name="ScenarioRoot.$GeometryQualifyRequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
+            <set_value name="ScenarioRoot.$GeometrySearchAttempt" exact="1"/>
+            <set_value name="ScenarioRoot.$GeometrySearchDistances" exact="[3500m, 3500m, 3750m, 3750m, 4000m, 4000m, 4250m, 4250m]"/>
+            <set_value name="ScenarioRoot.$GeometrySearchYs" exact="[-600m, -650m, -650m, -700m, -700m, -750m, -750m, -800m]"/>
+            <set_value name="ScenarioRoot.$GeometrySearchCount" exact="ScenarioRoot.$GeometrySearchDistances.count"/>
+            <do_if value="ScenarioRoot.$GeometryStation? and ScenarioRoot.$GeometryStation != null and ScenarioRoot.$GeometryStation.exists
+                          and ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null and ScenarioRoot.$GeometryShooter.exists">
+              <set_value name="$TrialDistance" exact="ScenarioRoot.$GeometrySearchDistances.{ScenarioRoot.$GeometrySearchAttempt}"/>
+              <set_value name="$TrialY" exact="ScenarioRoot.$GeometrySearchYs.{ScenarioRoot.$GeometrySearchAttempt}"/>
+              <warp object="ScenarioRoot.$GeometryStation" sector="ScenarioRoot.$GeometryShooter.sector">
+                <position object="ScenarioRoot.$GeometryShooter" x="0m" y="$TrialY" z="$TrialDistance"/>
+              </warp>
+              <debug_text text="'[X4GC TEST QUALIFY SEARCH] request_id=' + ScenarioRoot.$GeometryQualifyRequestId + ' attempt=' + ScenarioRoot.$GeometrySearchAttempt + '/' + ScenarioRoot.$GeometrySearchCount + ' action=warp distance=' + $TrialDistance + ' y=' + $TrialY + ' station=' + ScenarioRoot.$GeometryStation"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST QUALIFY SEARCH] request_id=' + ScenarioRoot.$GeometryQualifyRequestId + ' attempt=1/' + ScenarioRoot.$GeometrySearchCount + ' action=skip_warp reason=preserved_object_missing station=' + (if ScenarioRoot.$GeometryStation? then ScenarioRoot.$GeometryStation else null) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
+            </do_else>
+            <signal_cue cue="GeometryQualifyMeasure"/>
+          </actions>
+        </cue>
+
+        <!-- A nonzero delay makes every post-warp measurement happen in a later
+             MD update. x4ep1_mentor_subscription.xml uses the same 1 ms boundary
+             after warping a station. This is an ordering control, not a claim
+             that remote equipment needs time to materialise (r6 disproved that). -->
+        <cue name="GeometryQualifyMeasure" instantiate="true">
+          <conditions>
+            <event_cue_signalled/>
+          </conditions>
+          <delay exact="1ms"/>
+          <actions>
+            <set_value name="$RequestId" exact="ScenarioRoot.$GeometryQualifyRequestId"/>
+            <set_value name="$Attempt" exact="ScenarioRoot.$GeometrySearchAttempt"/>
+            <set_value name="$SearchCount" exact="ScenarioRoot.$GeometrySearchCount"/>
+            <set_value name="$TrialDistance" exact="ScenarioRoot.$GeometrySearchDistances.{$Attempt}"/>
+            <set_value name="$TrialY" exact="ScenarioRoot.$GeometrySearchYs.{$Attempt}"/>
             <set_value name="$RootSplits" exact="0"/>
             <set_value name="$ModuleOriginCandidates" exact="0"/>
             <set_value name="$ModuleAimCandidates" exact="0"/>
@@ -1189,7 +1224,7 @@
                     <do_if value="$ModuleClearCandidate">
                       <set_value name="$HasModuleClearCandidate" exact="true"/>
                     </do_if>
-                    <debug_text text="'[X4GC TEST QUALIFY MODULE] station=' + $Station + ' station_id=' + $Station.idcode + ' module=' + $GeometryModule + ' module_macro=' + $GeometryModule.macro + ' weapon=' + $GeometryWeapon + ' weapon_macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' module_origin_pitch=' + $ModuleRelative.rotation.pitch + ' module_aim_pitch=' + $ModuleAimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' module_origin_arc_pass=' + $ModuleOriginArcPass + ' module_aim_arc_pass=' + $ModuleAimArcPass + ' inrange=' + $ModuleInRange + ' range=' + $GeometryWeapon.bboxdistanceto.{$GeometryModule} + ' maxrange=' + $GeometryWeapon.maxfirerange + ' muzzle_los_ex=' + $ModuleMuzzleLosEx + ' muzzle_los_self=' + $ModuleMuzzleLosSelf + ' origin_candidate=' + $ModuleOriginCandidate + ' aim_candidate=' + $ModuleAimCandidate + ' clear_candidate=' + $ModuleClearCandidate + ' barrel_x=' + $Barrel.x + ' barrel_y=' + $Barrel.y + ' barrel_z=' + $Barrel.z"/>
+                    <debug_text text="'[X4GC TEST QUALIFY MODULE] request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' trial_distance=' + $TrialDistance + ' trial_y=' + $TrialY + ' station=' + $Station + ' station_id=' + $Station.idcode + ' module=' + $GeometryModule + ' module_macro=' + $GeometryModule.macro + ' weapon=' + $GeometryWeapon + ' weapon_macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' module_origin_pitch=' + $ModuleRelative.rotation.pitch + ' module_aim_pitch=' + $ModuleAimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' module_origin_arc_pass=' + $ModuleOriginArcPass + ' module_aim_arc_pass=' + $ModuleAimArcPass + ' inrange=' + $ModuleInRange + ' range=' + $GeometryWeapon.bboxdistanceto.{$GeometryModule} + ' maxrange=' + $GeometryWeapon.maxfirerange + ' muzzle_los_ex=' + $ModuleMuzzleLosEx + ' muzzle_los_self=' + $ModuleMuzzleLosSelf + ' origin_candidate=' + $ModuleOriginCandidate + ' aim_candidate=' + $ModuleAimCandidate + ' clear_candidate=' + $ModuleClearCandidate + ' barrel_x=' + $Barrel.x + ' barrel_y=' + $Barrel.y + ' barrel_z=' + $Barrel.z"/>
                   </do_for_each>
                   <do_if value="$HasModuleOriginCandidate">
                     <set_value name="$ModuleOriginCandidates" operation="add"/>
@@ -1200,17 +1235,37 @@
                   <do_if value="$HasModuleClearCandidate">
                     <set_value name="$ModuleClearCandidates" operation="add"/>
                   </do_if>
-                  <debug_text text="'[X4GC TEST QUALIFY ROOT] station=' + $Station + ' station_id=' + $Station.idcode + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' root_aim_pitch=' + $AimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' root_aim_arc_pass=' + $AimArcPass + ' inrange=' + $InRange + ' range=' + $GeometryWeapon.bboxdistanceto.{$Station} + ' maxrange=' + $GeometryWeapon.maxfirerange + ' muzzle_los_ex=' + $RootMuzzleLosEx + ' muzzle_los_self=' + $RootMuzzleLosSelf + ' barrel_x=' + $Barrel.x + ' barrel_y=' + $Barrel.y + ' barrel_z=' + $Barrel.z + ' module_origin_candidate=' + $HasModuleOriginCandidate + ' module_aim_candidate=' + $HasModuleAimCandidate + ' module_clear_candidate=' + $HasModuleClearCandidate"/>
+                  <debug_text text="'[X4GC TEST QUALIFY ROOT] request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' trial_distance=' + $TrialDistance + ' trial_y=' + $TrialY + ' station=' + $Station + ' station_id=' + $Station.idcode + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' root_aim_pitch=' + $AimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' root_aim_arc_pass=' + $AimArcPass + ' inrange=' + $InRange + ' range=' + $GeometryWeapon.bboxdistanceto.{$Station} + ' maxrange=' + $GeometryWeapon.maxfirerange + ' muzzle_los_ex=' + $RootMuzzleLosEx + ' muzzle_los_self=' + $RootMuzzleLosSelf + ' barrel_x=' + $Barrel.x + ' barrel_y=' + $Barrel.y + ' barrel_z=' + $Barrel.z + ' module_origin_candidate=' + $HasModuleOriginCandidate + ' module_aim_candidate=' + $HasModuleAimCandidate + ' module_clear_candidate=' + $HasModuleClearCandidate"/>
                 </do_if>
               </do_for_each>
-              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=insystem request_id=' + $RequestId + ' station=' + $Station + ' module=' + ScenarioRoot.$StationLoadoutModule + ' modules=' + $Modules + ' turrets=' + $Turrets + ' standard_lasers=' + $StandardLasers + ' missile_turrets=' + $MissileTurrets + ' shields=' + $Shields + ' engines=' + $Engines + ' equipped=' + $Equipped"/>
-              <debug_text text="'[X4GC TEST QUALIFY] station_census station=' + $Station + ' station_id=' + $Station.idcode + ' modules=' + $Modules + ' turrets=' + $Turrets + ' missile_turrets=' + $MissileTurrets + ' shields=' + $Shields + ' engines=' + $Engines + ' equipped=' + $Equipped + ' root_splits=' + $RootSplits + ' module_origin_candidates=' + $ModuleOriginCandidates + ' module_aim_candidates=' + $ModuleAimCandidates + ' module_clear_candidates=' + $ModuleClearCandidates + ' measured=' + $Measured + ' module_pairs=' + $ModulePairs"/>
+              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=insystem request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' station=' + $Station + ' module=' + ScenarioRoot.$StationLoadoutModule + ' modules=' + $Modules + ' turrets=' + $Turrets + ' standard_lasers=' + $StandardLasers + ' missile_turrets=' + $MissileTurrets + ' shields=' + $Shields + ' engines=' + $Engines + ' equipped=' + $Equipped"/>
+              <debug_text text="'[X4GC TEST QUALIFY] station_census request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' trial_distance=' + $TrialDistance + ' trial_y=' + $TrialY + ' station=' + $Station + ' station_id=' + $Station.idcode + ' modules=' + $Modules + ' turrets=' + $Turrets + ' missile_turrets=' + $MissileTurrets + ' shields=' + $Shields + ' engines=' + $Engines + ' equipped=' + $Equipped + ' root_splits=' + $RootSplits + ' module_origin_candidates=' + $ModuleOriginCandidates + ' module_aim_candidates=' + $ModuleAimCandidates + ' module_clear_candidates=' + $ModuleClearCandidates + ' measured=' + $Measured + ' module_pairs=' + $ModulePairs"/>
             </do_if>
             <do_else>
-              <debug_text text="'[X4GC TEST QUALIFY] FAILED; preserved station or shooter missing station=' + (if ScenarioRoot.$GeometryStation? then ScenarioRoot.$GeometryStation else null) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
+              <debug_text text="'[X4GC TEST QUALIFY] FAILED request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' reason=preserved_object_missing station=' + (if ScenarioRoot.$GeometryStation? then ScenarioRoot.$GeometryStation else null) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
             </do_else>
-            <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
-                             param="'x4gcq4:' + $RequestId + ':' + (if $Equipped and ($RootSplits ge 1 or $ModuleClearCandidates ge 1) then 1 else 0) + ':' + (if $Equipped then 1 else 0) + ':' + $RootSplits + ':' + $ModuleOriginCandidates + ':' + $ModuleAimCandidates + ':' + $ModuleClearCandidates + ':' + $Measured + ':' + $ModulePairs + ':' + $Modules + ':' + $Turrets + ':' + $StandardLasers + ':' + $MissileTurrets + ':' + $Shields + ':' + $Engines"/>
+            <set_value name="$Qualified" exact="$Equipped and ($RootSplits ge 1 or $ModuleClearCandidates ge 1)"/>
+            <do_if value="not $Qualified and $Equipped and $Attempt lt $SearchCount">
+              <set_value name="ScenarioRoot.$GeometrySearchAttempt" operation="add"/>
+              <set_value name="$NextAttempt" exact="ScenarioRoot.$GeometrySearchAttempt"/>
+              <set_value name="$NextDistance" exact="ScenarioRoot.$GeometrySearchDistances.{$NextAttempt}"/>
+              <set_value name="$NextY" exact="ScenarioRoot.$GeometrySearchYs.{$NextAttempt}"/>
+              <warp object="ScenarioRoot.$GeometryStation" sector="ScenarioRoot.$GeometryShooter.sector">
+                <position object="ScenarioRoot.$GeometryShooter" x="0m" y="$NextY" z="$NextDistance"/>
+              </warp>
+              <debug_text text="'[X4GC TEST QUALIFY SEARCH] request_id=' + $RequestId + ' attempt=' + $NextAttempt + '/' + $SearchCount + ' action=warp distance=' + $NextDistance + ' y=' + $NextY + ' station=' + ScenarioRoot.$GeometryStation"/>
+              <signal_cue cue="GeometryQualifyMeasure"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST QUALIFY SEARCH] request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' action=' + (if $Qualified then 'qualified' else 'exhausted') + ' equipped=' + $Equipped + ' root_splits=' + $RootSplits + ' module_clear_candidates=' + $ModuleClearCandidates"/>
+              <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
+                               param="'x4gcq5:' + $RequestId + ':' + (if $Qualified then 1 else 0) + ':' + (if $Equipped then 1 else 0) + ':' + $Attempt + ':' + $SearchCount + ':' + $RootSplits + ':' + $ModuleOriginCandidates + ':' + $ModuleAimCandidates + ':' + $ModuleClearCandidates + ':' + $Measured + ':' + $ModulePairs + ':' + $Modules + ':' + $Turrets + ':' + $StandardLasers + ':' + $MissileTurrets + ':' + $Shields + ':' + $Engines"/>
+              <remove_value name="ScenarioRoot.$GeometryQualifyRequestId"/>
+              <remove_value name="ScenarioRoot.$GeometrySearchAttempt"/>
+              <remove_value name="ScenarioRoot.$GeometrySearchDistances"/>
+              <remove_value name="ScenarioRoot.$GeometrySearchYs"/>
+              <remove_value name="ScenarioRoot.$GeometrySearchCount"/>
+            </do_else>
           </actions>
         </cue>
 

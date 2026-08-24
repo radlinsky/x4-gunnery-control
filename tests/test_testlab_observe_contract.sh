@@ -255,12 +255,21 @@ grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryStation\" exact=\"\$Station\"
   || fail "station B is not persisted for the in-system GeometryQualify cue"
 grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryShooter\" exact=\"\$Ship\"/>" "$scenario" \
   || fail "the exact shooter is not persisted for the in-system GeometryQualify cue"
-# Phase two: the in-system discriminator re-measures the SAME preserved station
-# against the SAME exact turrets. The timed test keeps the station root selected,
-# while the qualifier records root origin/aim plus every operational module's
-# origin/aim independently. It must not recreate or reposition the station.
+# Phase two: the in-system discriminator moves the SAME preserved station through
+# a bounded search against the SAME exact turrets. The timed test keeps the station
+# root selected, while the qualifier records root origin/aim plus every operational
+# module's origin/aim independently after a nonzero post-warp delay. It must not
+# recreate the station or require manual coordinate retries.
 grep -Fq "control=\"'qualify_geometry'\"" "$scenario" \
   || fail "there is no in-system qualify_geometry cue"
+grep -Fq "<warp object=\"ScenarioRoot.\$GeometryStation\" sector=\"ScenarioRoot.\$GeometryShooter.sector\">" "$scenario" \
+  || fail "the in-system discriminator does not move the same preserved station"
+grep -Fq '<delay exact="1ms"/>' "$scenario" \
+  || fail "the in-system discriminator does not cross a nonzero MD-update boundary after each warp"
+grep -Fq "ScenarioRoot.\$GeometrySearchDistances" "$scenario" \
+  || fail "the in-system discriminator does not define a bounded deterministic position search"
+grep -Fq "\$Attempt lt \$SearchCount" "$scenario" \
+  || fail "the in-system position search is not explicitly bounded"
 grep -Fq "not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
   || fail "the in-system discriminator does not retain the root-outside / root-aim-inside split"
 grep -Fq "\$RootSplits\" operation=\"add\"" "$scenario" \
@@ -283,10 +292,10 @@ grep -Fq "raise_lua_event name=\"'X4GunneryTestLab.GeometryQualified'\"" "$scena
   || fail "the in-system discriminator does not report the split back to Lua"
 grep -Fq "\$Modules == 5 and \$Turrets == 2 and \$StandardLasers == 2" "$scenario" \
   || fail "the in-system discriminator does not require the exact standard station loadout"
-grep -Fq "'x4gcq4:'" "$scenario" \
-  || fail "the in-system acknowledgement does not carry independent root/module geometry and station census"
+grep -Fq "'x4gcq5:'" "$scenario" \
+  || fail "the in-system acknowledgement does not carry search attempt, independent geometry, and station census"
 if grep -Fq 'create_station' <(grep -A40 "control=\"'qualify_geometry'\"" "$scenario"); then
-  fail "the in-system discriminator recreates the station instead of re-measuring the preserved one"
+  fail "the in-system discriminator recreates the station instead of moving the preserved one"
 fi
 grep -Fq "cease_fire object=\"\$Station\"" "$scenario" \
   || fail "station B is not force-ceased-fire for the held-fire safety census"
