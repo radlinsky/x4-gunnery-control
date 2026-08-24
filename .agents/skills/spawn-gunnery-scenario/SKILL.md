@@ -22,10 +22,20 @@ For a `setup.remote = true` fixture, use this distinct workflow:
 
 1. Sit at any safe launcher's gunnery console and click **Create test scenario**
    exactly once.
-2. Wait for `READY: remote fixture verified`; teleport to the exact named
-   spawned player ship.
-3. Open that ship's gunnery console and open **Test Lab exactly once**. Test Lab
-   auto-arms the exact group and immediately returns to Gunnery Control.
+2. Wait for the acknowledgement, then teleport to the exact named spawned player
+   ship. Two acknowledgements are possible:
+   - `READY: remote fixture verified` — the fixture is fully qualified.
+   - `PENDING: ... geometry is NOT qualified` — the census passed but a geometry
+     discriminator must still run in system (a fixture whose classification
+     split only resolves once the player shares the fixture's system).
+3. Open that ship's gunnery console and open **Test Lab exactly once**:
+   - a READY fixture auto-arms the exact group and immediately returns to
+     Gunnery Control;
+   - a PENDING fixture runs its in-system qualification on that single open. It
+     auto-arms and returns to Gunnery Control ONLY on `QUALIFIED`. On `FAILED`
+     (or a timeout) it stops closed: leave X4 open, preserve the evidence, and
+     report the displayed text. Do not press Create, Reload UI, or Despawn, and
+     do not retry coordinates.
 4. Continue the gameplay checklist. Never press Create after teleport.
 
 Create is destructive replacement. In a live 2026-08-23 failure, a second
@@ -132,10 +142,22 @@ construction plan.
 
 Remote stations must be created with the resolved remote `sector` and an exact
 sector-space `position`; `player.zone` still belongs to the safe launcher at
-Create time. When the test depends on mesh-selected aim geometry, prefer a
-small bounded automatic position search. Keep only a candidate that satisfies
-the required per-weapon classification split, and withhold READY if none does,
-instead of asking the owner to retry guessed coordinates.
+Create time. When the test depends on mesh-selected aim geometry, decide where
+the discriminating measurement can actually run:
+
+- If the classification split resolves at Create time, prefer a small bounded
+  automatic position search. Keep only a candidate that satisfies the required
+  per-weapon split, and withhold READY if none does.
+- If the split can only resolve once the player is in the fixture's system (a
+  hittable-aim-target measurement that does not resolve out of system), do NOT
+  run an out-of-system search or destroy candidates: preserve exactly one
+  deterministic candidate at its authored position, verify its census, and
+  report a distinct geometry-PENDING state rather than READY. Re-measure that
+  same preserved object against the same exact weapons on the single
+  post-teleport Test Lab open, and qualify only on the required split; no split
+  fails closed.
+
+Never ask the owner to retry guessed coordinates in either case.
 
 Do not use the equipped defence station as a clean per-turret arc fixture: it
 launches defence drones and clusters many surfaces at nearly the same bearing.
@@ -277,8 +299,11 @@ The final instruction before the live run must contain all of these, in order:
 3. Exact menu path.
 4. Exact displayed scenario id.
 5. Exactly one setup action: **Create test scenario**. For a remote fixture,
-   explicitly add the teleport and the single post-teleport Test Lab opening;
-   state that this opening auto-arms and that Create must not be pressed again.
+   explicitly add the teleport and the single post-teleport Test Lab opening.
+   State whether that opening auto-arms directly (a READY fixture) or first runs
+   an in-system qualification that auto-arms only on `QUALIFIED` and stops closed
+   on `FAILED` (a geometry-PENDING fixture), and that Create must not be pressed
+   again either way.
 6. What success does automatically, including the selected turret group.
 7. Exact spawned names and expected distances/roles.
 8. Every test action in click order.
@@ -299,6 +324,13 @@ The one-click path logs `[X4GC TEST] event=scenario_create`:
 - `action=requested`: exact request token, spec, expected count, group, turret ids;
 - `action=ready`: the same request token, acknowledged count, selected group;
 - `action=rejected|failed|timeout`: do not continue the gameplay checklist.
+
+For a geometry-PENDING remote fixture, Create instead logs
+`action=remote_geometry_pending`, and the single post-teleport Test Lab open
+logs `event=geometry_qualify action=requested` followed by exactly one of
+`action=qualified` (split confirmed, group armed, observation on) or
+`action=failed|timeout` (stop closed). Treat those as the qualification's
+distinct evidence records; the fixture is not armed until `action=qualified`.
 
 MD logs `[X4GC TEST SCENARIO]` creation details and the final spawned count.
 After the owner reports completion, inspect logs yourself. Do not ask the owner
