@@ -6,6 +6,7 @@ md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml
 scenario=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
 loadouts=testlab/x4_gunnery_control_testlab/libraries/loadouts.xml
 arclimits=ui/turret_arc_limits.lua
+testlab_ui=testlab/x4_gunnery_control_testlab/ui/testlab.lua
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
@@ -205,12 +206,51 @@ for arc_macro in turret_arg_m_beam_02_mk1_macro turret_arg_m_plasma_02_mk1_macro
   grep -Fq "[\"$arc_macro\"] = { -10, 90 }" "$arclimits" \
     || fail "generated arc limits for $arc_macro are not { -10, 90 }; #67 preflight bounds would drift"
 done
-[[ $(grep -Fc 'ge -10deg and $RootRelative.rotation.pitch le 90deg' "$scenario") -eq 1 ]] \
-  || fail "#67 root-arc preflight is not gated on the generated -10/90 elevation stops"
-[[ $(grep -Fc 'ge -10deg and $AimLocal.pitch le 90deg' "$scenario") -eq 1 ]] \
-  || fail "#67 aim-arc preflight is not gated on the generated -10/90 elevation stops"
-grep -Fq '$RootRelative.rotation.pitch lt -10deg and $AimLocal.pitch lt -10deg' "$scenario" \
+# Both the A/C control preflight and the station-B aim_split search gate on the
+# same generated -10/90 stops, so each bound appears exactly twice.
+[[ $(grep -Fc "ge -10deg and \$RootRelative.rotation.pitch le 90deg" "$scenario") -eq 2 ]] \
+  || fail "#67 root-arc preflight (A/C + station aim_split) is not gated on the generated -10/90 elevation stops"
+[[ $(grep -Fc "ge -10deg and \$AimLocal.pitch le 90deg" "$scenario") -eq 2 ]] \
+  || fail "#67 aim-arc preflight (A/C + station aim_split) is not gated on the generated -10/90 elevation stops"
+grep -Fq "\$RootRelative.rotation.pitch lt -10deg and \$AimLocal.pitch lt -10deg" "$scenario" \
   || fail "#67 below-arc control does not require both bearings below the generated -10 stop"
+
+# Issue #67 station B: a deterministic REMOTE equipped xen_defence aim-target,
+# created in the shooter's sector space (schema: create_station sector= auto-
+# tempzones), equipped via an operational construction plan, with a bounded
+# DOWNWARD Y sweep that keeps only a root-outside / aim-inside split and
+# otherwise fails closed. No owner trial-and-error coordinates.
+grep -Fq "constructionplan=\"'xen_defence'\"" "$scenario" \
+  || fail "station B is not built from the shipped xen_defence construction plan"
+grep -Fq 'state="componentstate.operational"' "$scenario" \
+  || fail "station B is not created operational (equipped surfaces)"
+grep -Fq "sector=\"\$ScenarioSector\" macro=\"macro.station_gen_factory_base_01_macro\"" "$scenario" \
+  || fail "station B is not created remotely in the shooter's sector space"
+grep -Fq 'set_module_loadout_level' "$scenario" \
+  || fail "station B does not set a module loadout level"
+grep -Fq "<do_while value=\"\$Attempt lt \$Def.\$searchattempts" "$scenario" \
+  || fail "station B has no bounded search over searchAttempts"
+grep -Fq "\$Attempt * \$Def.\$searchstepy" "$scenario" \
+  || fail "station B search does not step deterministically by searchStepY (vertical sweep)"
+grep -Fq "not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
+  || fail "station B does not require a root-outside / aim-inside in-range split"
+grep -Fq "\$GeometrySplits\" operation=\"add\"" "$scenario" \
+  || fail "station B does not count a geometry split when one is found"
+grep -Fq 'FAILED role=aim_split' "$scenario" \
+  || fail "station B does not fail closed when the bounded search is exhausted"
+# Exhausted search must raise a preflight failure so READY is withheld; there
+# are now >= 2 add sites (the A/C controls and station B).
+[[ $(grep -Fc "\$PreflightFailures\" operation=\"add\"" "$scenario") -ge 2 ]] \
+  || fail "station B exhausted search does not raise a preflight failure"
+grep -Fq "cease_fire object=\"\$Station\"" "$scenario" \
+  || fail "station B is not force-ceased-fire for the held-fire safety census"
+# The UI gate makes READY require the real split and withholds it when the
+# search is exhausted: an aim_split station raises the required split count, and
+# READY fails unless the reported count matches it.
+grep -Fq 'expectedGeometrySplits = expectedGeometrySplits + 1' "$testlab_ui" \
+  || fail "aim_split stations do not raise the required geometry-split count"
+grep -Fq 'geometrySplits ~= request.expectedGeometrySplits' "$testlab_ui" \
+  || fail "READY does not gate on the required geometry-split count"
 
 # Issue #67 staged get_loadout probe. Shipped source proves the get_loadout
 # syntax and one successful use, but NOT what a missing ID leaves in result

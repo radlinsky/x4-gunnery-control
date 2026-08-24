@@ -829,10 +829,33 @@ do
             and shipped.setup.expectedMacros[3] == "turret_arg_m_plasma_02_mk1_macro"
             and shipped.setup.expectedMacros[4] == "turret_arg_m_plasma_02_mk1_macro",
         "the shipped issue #67 fixture must have two-beam/two-plasma per-group loadout")
-    assert(#shipped.groups == 3 and shipped.stations == nil
+    assert(#shipped.groups == 3 and #shipped.stations == 1
             and shipped.groups[2].geometryRole == "clear_arc"
             and shipped.groups[3].geometryRole == "below_arc",
-        "the shipped issue #67 fixture must retain both ship geometry roles and have no stations")
+        "the shipped issue #67 fixture must retain both ship geometry roles and add station B")
+    local stationB = shipped.stations[1]
+    assert(stationB.recipe == "xen_defence" and stationB.geometryRole == "aim_split"
+            and stationB.hostile == true and stationB.holdFire == true
+            and stationB.expectedModules == 5 and stationB.minSurfaces >= 1
+            and stationB.searchAttempts >= 1 and stationB.searchStepY < 0,
+        "station B must be a held-fire xen_defence aim_split target with a bounded downward Y search")
+end
+
+-- The shipped spec streams station B as a deterministic aim_split target with
+-- the bounded-search and census fields the MD consumer needs. Stream order is
+-- begin, the three groups, the station, then commit.
+do
+    local harness = loadHarness()
+    harness.openFromGunnery({ label = "station-b launcher", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == 6, "shipped Create must stream begin + 3 groups + 1 station + commit")
+    local station = events[5].params
+    assert(station.recipe == "xen_defence" and station.geometryRole == "aim_split"
+            and station.expectedModules == 5 and station.minSurfaces >= 1
+            and station.searchAttempts >= 1 and station.searchStepY < 0
+            and station.hostile == true and station.holdFire == true,
+        "station B transport must carry recipe, aim_split role, census, and bounded downward search")
 end
 
 -- The shipped spec must be ACCEPTED by validateSpec/loadSpec, not merely well

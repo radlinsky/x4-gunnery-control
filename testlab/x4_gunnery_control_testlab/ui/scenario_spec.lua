@@ -145,5 +145,26 @@ X4GunneryTestLabScenarioSpec = {
           stripDefenceUnits = true, repairGuard = true,
           geometryRole = "below_arc" },
     },
+    stations = {
+        -- B: the LARGE ROOT AIM-POINT target. A deterministic equipped Xenon
+        -- xen_defence station (five modules) placed forward of the shooter and
+        -- below it, so its root origin can drop below the front-upper turrets'
+        -- generated -10 degree elevation stop while a hittable upper-module
+        -- surface stays inside the arc. Test Lab runs a bounded DOWNWARD Y sweep
+        -- (searchStepY < 0) and keeps only a candidate where at least one exact
+        -- selected beam/plasma turret is root OUTSIDE arc and aim point INSIDE
+        -- arc, in range; if the sweep is exhausted with no split it fails closed
+        -- (preflight failure, no READY) rather than accepting a non-split shell.
+        -- Held fire, drones stripped. Anchor/step/minSurfaces are deterministic
+        -- starting values the later live qualification run tunes; the remote
+        -- equipped census is unverified offline (see md-ai.md station records).
+        { label = "B LARGE ROOT AIM-POINT STATION",
+          recipe = "xen_defence", faction = "xenon",
+          distance = 6000, x = 0, y = -800, spread = 0,
+          hostile = true, holdFire = true,
+          geometryRole = "aim_split",
+          expectedModules = 5, minSurfaces = 100,
+          searchAttempts = 8, searchStepY = -400 },
+    },
 }
 return X4GunneryTestLabScenarioSpec

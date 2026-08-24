@@ -181,6 +181,51 @@
   unverified and the `_02` beam/plasma slot compatibility on this hull remains
   inference (see the compatibility record above).
 
+### Remote equipped stations can be created in sector space with an operational construction plan
+- X4: 9.00
+- Status: shipped-source
+- Source: `libraries/common.xsd` `create_station` (the `sector` attribute
+  documents "Creates a tempzone if a zone does not exist at the coordinates";
+  `state` defaults to `construction`); vanilla `md/scenario_advanced.xml:86`
+  (`create_station macro="macro.station_gen_factory_base_01_macro" owner=...
+  sector="$cluster_13_sector001" state="componentstate.operational"
+  constructionplan="'scenario2_spp'"`); `md/placedobjects.xml:177,207`
+  (operational Xenon stations created by `sector`); `set_module_loadout_level`
+  (`common.xsd`: sets the 0.0–1.0 module loadout level used for surfaces)
+- Live test: no — schema + vanilla source only; a remote-tempzone equipped
+  census has not been observed for `xen_defence`
+- Finding: `create_station` accepts `sector` plus a sector-space `<position>`
+  and auto-creates a tempzone, so an equipped station can be placed at a remote
+  anchor without the player's zone (`player.zone` belongs to the safe launcher
+  at Test Lab Create time). `state="componentstate.operational"` together with a
+  `constructionplan` yields a finished, equipped station; the vanilla scenarios
+  above use exactly this with no per-module loadout step. This is the
+  deterministic remote-station path for a #67 hittable-aim-target fixture; the
+  operational surface census must still be confirmed live before READY.
+
+### The `xen_defence` plan is five modules, and no `md.$EquipmentTable` pool is needed to equip it
+- X4: 9.00
+- Status: shipped-source
+- Source: `libraries/constructionplans.xml` plan `id="xen_defence"` — five
+  entries: one `dockarea_xen_m_station_01_macro` and four
+  `xenon_small_station_01_base_macro`; prior Test Lab station block reading
+  `md.$EquipmentTable` (that global is set in no committed revision of this
+  repository)
+- Live test: partial — a LOCAL 2026-08-13 run reported five modules, 120
+  turrets, 60 shields, 185 total module/surface entries; the remote-tempzone
+  census is not yet observed
+- Finding: the `xen_defence` construction plan expands to five modules. The
+  earlier Test Lab station path that generated a per-module loadout from
+  `md.$EquipmentTable` was dead code: that table is populated nowhere, so its
+  guard was always false and the `generate_loadout`/`apply_loadout` branch never
+  ran; equipping came from `state="componentstate.operational"` plus the plan
+  (and `set_module_loadout_level`). It is therefore an **inference** that the
+  operational construction plan alone equips the surfaces, corroborated by the
+  local live census above but not yet reproduced remotely. The 185-surface count
+  is a LOCAL observation; the earlier bounded remote search produced no
+  root-outside/aim-inside arc split for a #67 turret, so that split remains
+  unreproduced.
+
 ### Official extensions register loadout entries with a full root, and MD can consume an extension-defined ID
 - X4: 9.00
 - Status: shipped-source
