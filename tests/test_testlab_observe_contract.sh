@@ -270,6 +270,10 @@ grep -Fq "ScenarioRoot.\$GeometrySearchDistances" "$scenario" \
   || fail "the in-system discriminator does not define a bounded deterministic position search"
 grep -Fq "\$Attempt lt \$SearchCount" "$scenario" \
   || fail "the in-system position search is not explicitly bounded"
+grep -Fq '<signal_cue cue="GeometryQualifyContinue"/>' "$scenario" \
+  || fail "the active measurement cue incorrectly tries to signal another instance of itself"
+grep -Fq '<cue name="GeometryQualifyContinue" instantiate="true">' "$scenario" \
+  || fail "the bounded search has no separate continuation cue"
 grep -Fq "not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
   || fail "the in-system discriminator does not retain the root-outside / root-aim-inside split"
 grep -Fq "\$RootSplits\" operation=\"add\"" "$scenario" \

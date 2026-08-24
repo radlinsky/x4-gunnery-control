@@ -1254,7 +1254,11 @@
                 <position object="ScenarioRoot.$GeometryShooter" x="0m" y="$NextY" z="$NextDistance"/>
               </warp>
               <debug_text text="'[X4GC TEST QUALIFY SEARCH] request_id=' + $RequestId + ' attempt=' + $NextAttempt + '/' + $SearchCount + ' action=warp distance=' + $NextDistance + ' y=' + $NextY + ' station=' + ScenarioRoot.$GeometryStation"/>
-              <signal_cue cue="GeometryQualifyMeasure"/>
+              <!-- Do not signal this instantiated cue from its own active
+                   instance: X4 resolves that reference to the consumed
+                   instance, which has no remaining listener. Hand the loop to
+                   a distinct cue that can instantiate the next measurement. -->
+              <signal_cue cue="GeometryQualifyContinue"/>
             </do_if>
             <do_else>
               <debug_text text="'[X4GC TEST QUALIFY SEARCH] request_id=' + $RequestId + ' attempt=' + $Attempt + '/' + $SearchCount + ' action=' + (if $Qualified then 'qualified' else 'exhausted') + ' equipped=' + $Equipped + ' root_splits=' + $RootSplits + ' module_clear_candidates=' + $ModuleClearCandidates"/>
@@ -1266,6 +1270,15 @@
               <remove_value name="ScenarioRoot.$GeometrySearchYs"/>
               <remove_value name="ScenarioRoot.$GeometrySearchCount"/>
             </do_else>
+          </actions>
+        </cue>
+
+        <cue name="GeometryQualifyContinue" instantiate="true">
+          <conditions>
+            <event_cue_signalled/>
+          </conditions>
+          <actions>
+            <signal_cue cue="GeometryQualifyMeasure"/>
           </actions>
         </cue>
 
