@@ -41,6 +41,41 @@
 
 ## Turret firing solutions from MD
 
+### Behemoth E Front Upper Mid uses `con_turret_m_03` and `_04`
+- X4: 9.00
+- Status: shipped-source
+- Source: `assets/units/size_l/ship_arg_l_destroyer_02.xml:490-500`;
+  `libraries/loadouts.xml:405-446` (`scenario_combat_arg_destroyer`)
+- Live test: no — the corrected singular assignments are not yet reproduced
+- Finding: Behemoth E macro `ship_arg_l_destroyer_02_a_macro` references hull
+  component `ship_arg_l_destroyer_02`. Its two `group_front_up_mid` medium
+  turret connections are exactly `con_turret_m_03` and `con_turret_m_04`.
+  Names such as `con_turret_005` and `con_turret_006` do not occur on this hull.
+  The same hull exposes engines `con_engine_01..03`, large shields
+  `con_shield_l_01..03`, and two medium shields in `group_front_up_mid`; those
+  engine, shield, software, and thruster selections match the shipped
+  `scenario_combat_arg_destroyer` loadout. The `_02` Argon M beam and plasma
+  components expose `turret medium standard hittable component combat` tags,
+  matching the hull's `combat hittable medium missile standard turret` slots
+  on the relevant compatibility dimensions.
+
+### Transient singular-turret loadouts are unreliable on the Behemoth E
+- X4: 9.00
+- Status: live-tested
+- Source: Test Lab `debug.log` at game times 248864.65 and 249183.19 on
+  2026-08-23; `x4_gunnery_control_testlab_scenario.xml`
+- Live test: yes — two creation-time attempts in one X4 process, the second
+  using source-verified `con_turret_m_03` and `con_turret_m_04`
+- Finding: passing an MD `<create_loadout>` result through
+  `<create_ship><loadout loadout="$Issue67BehemothLoadout"/></create_ship>`
+  produced a Behemoth E with zero operational engines, shields, weapons, and
+  turrets. Correcting the singular turret paths did not change the result.
+  This does not establish why X4 rejected the transient definition, nor does it
+  generalize to other hulls. For this fixture the method is abandoned. The
+  static named-loadout `ref` route used by shipped `scenario_combat.xml:741-748`
+  is the next source-backed route; it remains untested for the custom Test Lab
+  definition until reproduced.
+
 ### Per-turret firing solution is computable from MD
 - X4: 9.00
 - Status: shipped-source

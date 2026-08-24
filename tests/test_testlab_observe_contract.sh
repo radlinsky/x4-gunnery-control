@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 
 md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml
 scenario=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
+loadouts=testlab/x4_gunnery_control_testlab/libraries/loadouts.xml
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
@@ -108,8 +109,8 @@ grep -Fq "':' + \$UnsafeWeapons + ':' + \$DefenceUnits" "$scenario" \
   || fail "scenario acknowledgement omits the remaining defence-unit census"
 grep -Fq "':' + \$DefenceUnits + ':' + \$Hostiles" "$scenario" \
   || fail "scenario acknowledgement omits the attackable-hostile census"
-grep -Fq "'x4gct7:'" "$scenario" \
-  || fail "scenario acknowledgement does not use remote-shooter census protocol x4gct7"
+grep -Fq "'x4gct8:'" "$scenario" \
+  || fail "scenario acknowledgement does not use geometry/shooter census protocol x4gct8"
 grep -Fq "':' + \$Hostiles + ':' + \$RepairObjectCount" "$scenario" \
   || fail "scenario acknowledgement omits the repair-guard census"
 grep -Fq "groupname=\"ScenarioRoot.\$RepairObjects\" object=\"\$Ship\"" "$scenario" \
@@ -167,5 +168,30 @@ grep -Fq "\$ShipSectorPosition.x lt ScenarioRoot.\$PendingAnchorX + \$Def.\$x - 
 if grep -Fq "\$Ship.position.x lt ScenarioRoot.\$PendingAnchorX" "$scenario"; then
   fail "remote placement validation compares a zone-local ship position against the sector anchor"
 fi
+
+# Issue #67 reusable prerequisites: per-group conventional loadout, and
+# fail-closed control census.  Station-B (aim_split) was removed in the r2
+# refactor; the fixture now spawns in Hatikvah's Choice I for the Q1 arc test.
+[[ $(grep -Fc '<turrets macro="turret_arg_m_beam_02_mk1_macro" group="group_front_up_mid" exact="2"/>' "$loadouts") -eq 1 ]] \
+  || fail "issue #67 loadout does not install 2 beam turrets in group_front_up_mid"
+[[ $(grep -Fc '<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_mid_up_mid" exact="2"/>' "$loadouts") -eq 1 ]] \
+  || fail "issue #67 loadout does not install 2 plasma turrets in group_mid_up_mid"
+grep -Fq '<loadout id="x4gc_testlab_issue67_behemoth_arc_barrel" macro="ship_arg_l_destroyer_02_a_macro">' "$loadouts" \
+  || fail "issue #67 static loadout does not bind itself to the exact Behemoth E macro"
+[[ $(grep -Fc '<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>' "$scenario") -eq 2 ]] \
+  || fail "issue #67 static loadout ref is not used in both remote and local creation paths"
+if grep -Fq 'Issue67BehemothLoadout' "$scenario"; then
+  fail "issue #67 fixture regressed to a live-proven-unreliable transient loadout"
+fi
+grep -Fq 'issue67 loadout_transport=static_ref' "$scenario" \
+  || fail "issue #67 fixture does not log its source-backed loadout transport"
+grep -Fq 'slot_paths=con_turret_m_03,con_turret_m_04' "$scenario" \
+  || fail "issue #67 fixture does not log the shipped Behemoth slot paths"
+grep -Fq "\$Control.\$role == 'clear_arc'" "$scenario" \
+  || fail "clear in-arc control has no fail-closed geometry preflight"
+grep -Fq "\$Control.\$role == 'below_arc'" "$scenario" \
+  || fail "true CANNOT BEAR control has no fail-closed geometry preflight"
+grep -Fq "':' + \$ShooterWeapons + ':' + \$ShooterTurrets + ':' + \$ShooterBeam + ':' + \$ShooterPlasma + ':' + \$PreflightFailures + ':' + \$GeometrySplits" "$scenario" \
+  || fail "READY omits ordinary-shooter and geometry-preflight census"
 
 echo "testlab observability contract tests passed"

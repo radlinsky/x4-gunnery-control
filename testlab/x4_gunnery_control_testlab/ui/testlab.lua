@@ -133,11 +133,22 @@ local function validateSpec(raw)
         if role ~= "" and role ~= "shooter" then
             return nil, where .. ".role must be empty or shooter"
         end
+        local geometryRole = tostring(group.geometryRole or "")
+        if geometryRole ~= "" and geometryRole ~= "clear_arc" and geometryRole ~= "below_arc" then
+            return nil, where .. ".geometryRole must be empty, clear_arc, or below_arc"
+        end
         local expectedMissileTurrets = tonumber(group.expectedMissileTurrets) or 0
         local expectedGuided = tonumber(group.expectedGuided) or 0
         local expectedDumbfire = tonumber(group.expectedDumbfire) or 0
         local expectedAmmo = tonumber(group.expectedAmmo) or 0
-        for field, value in pairs({ expectedMissileTurrets = expectedMissileTurrets,
+        local expectedWeapons = tonumber(group.expectedWeapons) or 0
+        local expectedTurrets = tonumber(group.expectedTurrets) or 0
+        local expectedBeam = tonumber(group.expectedBeam) or 0
+        local expectedPlasma = tonumber(group.expectedPlasma) or 0
+        for field, value in pairs({ expectedWeapons = expectedWeapons,
+                expectedTurrets = expectedTurrets, expectedBeam = expectedBeam,
+                expectedPlasma = expectedPlasma,
+                expectedMissileTurrets = expectedMissileTurrets,
                 expectedGuided = expectedGuided, expectedDumbfire = expectedDumbfire,
                 expectedAmmo = expectedAmmo }) do
             if value < 0 or value ~= math.floor(value) then
@@ -145,11 +156,21 @@ local function validateSpec(raw)
             end
         end
         if role == "shooter" then
-            if group.loadout ~= "issue65_odysseus_mixed_missiles" then
+            if group.loadout ~= "issue65_odysseus_mixed_missiles"
+                    and group.loadout ~= "issue67_behemoth_arc_barrel" then
                 return nil, where .. ".loadout is not a supported shooter loadout"
             end
-            if expectedMissileTurrets < 1 or expectedGuided + expectedDumbfire ~= expectedMissileTurrets
-                    or expectedAmmo < 1 then
+            local missileCensus = expectedMissileTurrets > 0
+                and expectedGuided + expectedDumbfire == expectedMissileTurrets
+                and expectedAmmo > 0
+            -- issue67 arms a beam group and a plasma group (2 turrets each) via
+            -- per-group loadout entries. Live-proven: `.weapons` and `.turrets`
+            -- both report 4 (turret-mounted weapons count in both).
+            local conventionalCensus = expectedWeapons == 4 and expectedTurrets == 4
+                and expectedBeam == 2 and expectedPlasma == 2
+                and expectedMissileTurrets == 0 and expectedAmmo == 0
+            if (group.loadout == "issue65_odysseus_mixed_missiles" and not missileCensus)
+                    or (group.loadout == "issue67_behemoth_arc_barrel" and not conventionalCensus) then
                 return nil, where .. " has an inconsistent shooter census"
             end
         end
@@ -170,6 +191,11 @@ local function validateSpec(raw)
             yaw = tonumber(group.yaw) or 0,
             role = role,
             loadout = tostring(group.loadout or ""),
+            geometryRole = geometryRole,
+            expectedWeapons = expectedWeapons,
+            expectedTurrets = expectedTurrets,
+            expectedBeam = expectedBeam,
+            expectedPlasma = expectedPlasma,
             expectedMissileTurrets = expectedMissileTurrets,
             expectedGuided = expectedGuided,
             expectedDumbfire = expectedDumbfire,
@@ -198,6 +224,14 @@ local function validateSpec(raw)
         if type(station.minSurfaces) ~= "number" or station.minSurfaces < 1 then
             return nil, where .. ".minSurfaces must be a positive number"
         end
+        local geometryRole = tostring(station.geometryRole or "")
+        if geometryRole ~= "" and geometryRole ~= "aim_split" then
+            return nil, where .. ".geometryRole must be empty or aim_split"
+        end
+        local searchAttempts = tonumber(station.searchAttempts) or 1
+        if searchAttempts < 1 or searchAttempts > 12 or searchAttempts ~= math.floor(searchAttempts) then
+            return nil, where .. ".searchAttempts must be an integer from 1 to 12"
+        end
         stations[#stations + 1] = {
             label = tostring(station.label or ("station" .. index)),
             recipe = station.recipe,
@@ -208,6 +242,9 @@ local function validateSpec(raw)
             y = tonumber(station.y) or 0,
             hostile = station.hostile == true,
             holdFire = station.holdFire == true,
+            geometryRole = geometryRole,
+            searchAttempts = searchAttempts,
+            searchStepY = tonumber(station.searchStepY) or 0,
             expectedModules = math.floor(station.expectedModules),
             minSurfaces = math.floor(station.minSurfaces),
         }
@@ -226,6 +263,22 @@ local function validateSpec(raw)
         if type(raw.setup.expectedTurrets) ~= "number" or raw.setup.expectedTurrets < 1 then
             return nil, "spec.setup.expectedTurrets must be a positive number"
         end
+        local expectedMacros = {}
+        if raw.setup.expectedMacros ~= nil then
+            if type(raw.setup.expectedMacros) ~= "table" then
+                return nil, "spec.setup.expectedMacros must be a list"
+            end
+            for index, macro in ipairs(raw.setup.expectedMacros) do
+                if type(macro) ~= "string" or macro == "" then
+                    return nil, "spec.setup.expectedMacros[" .. index .. "] must be a non-empty string"
+                end
+                expectedMacros[#expectedMacros + 1] = macro
+            end
+            if #expectedMacros ~= math.floor(raw.setup.expectedTurrets) then
+                return nil, "spec.setup.expectedMacros must match expectedTurrets"
+            end
+            table.sort(expectedMacros)
+        end
         setup = {
             remote = raw.setup.remote == true,
             shipMacro = raw.setup.shipMacro,
@@ -233,6 +286,7 @@ local function validateSpec(raw)
             turretGroup = raw.setup.turretGroup,
             turretLabel = raw.setup.turretLabel,
             expectedTurrets = math.floor(raw.setup.expectedTurrets),
+            expectedMacros = expectedMacros,
             selectAll = raw.setup.selectAll == true,
         }
     end
@@ -328,6 +382,11 @@ local function sendScenarioSpec(force, requestId)
             holdFire = group.holdFire, stripDefenceUnits = group.stripDefenceUnits,
             repairGuard = group.repairGuard,
             yaw = group.yaw, role = group.role, loadout = group.loadout,
+            geometryRole = group.geometryRole,
+            expectedWeapons = group.expectedWeapons,
+            expectedTurrets = group.expectedTurrets,
+            expectedBeam = group.expectedBeam,
+            expectedPlasma = group.expectedPlasma,
             expectedMissileTurrets = group.expectedMissileTurrets,
             expectedGuided = group.expectedGuided,
             expectedDumbfire = group.expectedDumbfire,
@@ -339,7 +398,8 @@ local function sendScenarioSpec(force, requestId)
             label = station.label, recipe = station.recipe, faction = station.faction,
             distance = station.distance, spread = station.spread,
             x = station.x, y = station.y, hostile = station.hostile,
-            holdFire = station.holdFire,
+            holdFire = station.holdFire, geometryRole = station.geometryRole,
+            searchAttempts = station.searchAttempts, searchStepY = station.searchStepY,
             expectedModules = station.expectedModules, minSurfaces = station.minSurfaces,
         })
     end
@@ -385,14 +445,23 @@ local function resolveExactGroup()
     local session = bridge.getSession()
     if not session then return nil, "no Gunnery session" end
 
-    local memberIDs, groupKeys = {}, {}
+    local memberIDs, memberMacros, groupKeys = {}, {}, {}
     for _, group in ipairs(selectedGroups) do
         groupKeys[#groupKeys + 1] = tostring(group.key)
-        for _, member in ipairs(group.members or {}) do memberIDs[#memberIDs + 1] = tostring(member.id) end
+        for _, member in ipairs(group.members or {}) do
+            memberIDs[#memberIDs + 1] = tostring(member.id)
+            memberMacros[#memberMacros + 1] = tostring(member.macro or "")
+        end
     end
     if #memberIDs ~= setup.expectedTurrets then
         return nil, setup.turretLabel .. " needs " .. setup.expectedTurrets
             .. " operational turrets, found " .. #memberIDs
+    end
+    table.sort(memberMacros)
+    if #setup.expectedMacros > 0
+            and table.concat(memberMacros, ",") ~= table.concat(setup.expectedMacros, ",") then
+        return nil, setup.turretLabel .. " needs macros " .. table.concat(setup.expectedMacros, ",")
+            .. ", found " .. table.concat(memberMacros, ",")
     end
     table.sort(memberIDs)
     table.sort(groupKeys)
@@ -400,6 +469,7 @@ local function resolveExactGroup()
         label = setup.turretLabel,
         rawGroup = setup.turretGroup,
         memberIDs = table.concat(memberIDs, ","),
+        memberMacros = table.concat(memberMacros, ","),
         shipID = tostring(ship.id),
         groupKey = table.concat(groupKeys, ","),
         exactGroupKey = selected and selected.key or nil,
@@ -463,11 +533,17 @@ local function createTestScenario()
     local expectedShips, expectedHostiles, expectedRepairFixtures = 0, 0, 0
     local expectedShooters, expectedMissileTurrets, expectedGuided = 0, 0, 0
     local expectedDumbfire, expectedAmmo = 0, 0
+    local expectedWeapons, expectedTurrets, expectedBeam, expectedPlasma = 0, 0, 0, 0
+    local expectedGeometrySplits = 0
     for _, group in ipairs(scenarioSpec.groups) do
         expectedShips = expectedShips + group.count
         if group.hostile then expectedHostiles = expectedHostiles + group.count end
         if group.repairGuard then expectedRepairFixtures = expectedRepairFixtures + group.count end
         if group.role == "shooter" then expectedShooters = expectedShooters + group.count end
+        expectedWeapons = expectedWeapons + group.expectedWeapons * group.count
+        expectedTurrets = expectedTurrets + group.expectedTurrets * group.count
+        expectedBeam = expectedBeam + group.expectedBeam * group.count
+        expectedPlasma = expectedPlasma + group.expectedPlasma * group.count
         expectedMissileTurrets = expectedMissileTurrets + group.expectedMissileTurrets * group.count
         expectedGuided = expectedGuided + group.expectedGuided * group.count
         expectedDumbfire = expectedDumbfire + group.expectedDumbfire * group.count
@@ -480,7 +556,9 @@ local function createTestScenario()
     for _, station in ipairs(scenarioSpec.stations) do
         expectedModules = expectedModules + station.expectedModules
         minSurfaces = minSurfaces + station.minSurfaces
+        if station.hostile then expectedHostiles = expectedHostiles + 1 end
         if station.holdFire then expectedSafeFixtures = expectedSafeFixtures + 1 end
+        if station.geometryRole == "aim_split" then expectedGeometrySplits = expectedGeometrySplits + 1 end
     end
     scenarioRequestSerial = scenarioRequestSerial + 1
     local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(scenarioRequestSerial)
@@ -496,13 +574,20 @@ local function createTestScenario()
         expectedDefenceUnits = 0,
         expectedHostiles = expectedHostiles,
         expectedShooters = expectedShooters,
+        expectedWeapons = expectedWeapons,
+        expectedTurrets = expectedTurrets,
+        expectedBeam = expectedBeam,
+        expectedPlasma = expectedPlasma,
         expectedMissileTurrets = expectedMissileTurrets,
         expectedGuided = expectedGuided,
         expectedDumbfire = expectedDumbfire,
         expectedAmmo = expectedAmmo,
         expectedLocationFailures = 0,
         expectedLoadoutFailures = 0,
-        deadline = getElapsedTime() + (expectedStations > 0 and 20 or 10),
+        expectedPreflightFailures = 0,
+        expectedGeometrySplits = expectedGeometrySplits,
+        deadline = getElapsedTime() + (expectedGeometrySplits > 0 and 60
+            or expectedStations > 0 and 20 or 10),
         selection = selection,
         remote = remote,
     }
@@ -516,6 +601,7 @@ local function createTestScenario()
         request_id = requestId, load_time = scenarioLoadTime,
         group = selection and selection.rawGroup or "deferred_remote",
         member_ids = selection and selection.memberIDs or "deferred_remote",
+        member_macros = selection and selection.memberMacros or "deferred_remote",
     })
     menu.display()
 end
@@ -545,14 +631,26 @@ local function onScenarioReady(_, param)
     local value = tostring(param or "")
     local requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
         safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures,
-        shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
-        value:match("^x4gct7:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures,
+        shooterWeapons, shooterTurrets, shooterBeam, shooterPlasma,
+        preflightFailures, geometrySplits =
+        value:match("^x4gct8:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+    if not requestId then
+        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
+            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures,
+            shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
+            value:match("^x4gct7:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        shooterWeapons, shooterTurrets, shooterBeam, shooterPlasma,
+            preflightFailures, geometrySplits = "0", "0", "0", "0", "0", "0"
+    end
     if not requestId then
         requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
             safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures =
             value:match("^x4gct6:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
         shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
             "0", "0", "0", "0", "0", "0", "0"
+        shooterWeapons, shooterTurrets, shooterBeam, shooterPlasma,
+            preflightFailures, geometrySplits = "0", "0", "0", "0", "0", "0"
     end
     if not requestId then
         requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
@@ -596,6 +694,9 @@ local function onScenarioReady(_, param)
     shooters, shooterMissileTurrets = tonumber(shooters), tonumber(shooterMissileTurrets)
     guided, dumbfire, ammo = tonumber(guided), tonumber(dumbfire), tonumber(ammo)
     loadoutFailures, locationFailures = tonumber(loadoutFailures), tonumber(locationFailures)
+    shooterWeapons, shooterTurrets = tonumber(shooterWeapons), tonumber(shooterTurrets)
+    shooterBeam, shooterPlasma = tonumber(shooterBeam), tonumber(shooterPlasma)
+    preflightFailures, geometrySplits = tonumber(preflightFailures), tonumber(geometrySplits)
     local surfaces = modules + turrets + missileTurrets + shields + engines
     local request = pendingScenario
     pendingScenario = nil
@@ -653,21 +754,41 @@ local function onScenarioReady(_, param)
         return
     end
     if shooters ~= request.expectedShooters
+            or shooterWeapons ~= request.expectedWeapons or shooterTurrets ~= request.expectedTurrets
+            or shooterBeam ~= request.expectedBeam or shooterPlasma ~= request.expectedPlasma
             or shooterMissileTurrets ~= request.expectedMissileTurrets
             or guided ~= request.expectedGuided or dumbfire ~= request.expectedDumbfire
             or ammo ~= request.expectedAmmo or loadoutFailures ~= request.expectedLoadoutFailures then
         scenarioActionStatus = "FAILED: shooter census was " .. shooters .. " ships, "
+            .. shooterWeapons .. " weapons/" .. shooterTurrets .. " ordinary turrets ("
+            .. shooterBeam .. " beam/" .. shooterPlasma .. " plasma), "
             .. shooterMissileTurrets .. " missile turrets (" .. guided .. " guided/"
             .. dumbfire .. " dumbfire), " .. ammo .. " missiles, and "
             .. loadoutFailures .. " loadout failures; inspect debug.log"
         log("scenario_create", { action = "failed", request_id = request.requestId,
             expected_shooters = request.expectedShooters, shooters = shooters,
+            expected_weapons = request.expectedWeapons, weapons = shooterWeapons,
+            expected_turrets = request.expectedTurrets, ordinary_turrets = shooterTurrets,
+            expected_beam = request.expectedBeam, beam = shooterBeam,
+            expected_plasma = request.expectedPlasma, plasma = shooterPlasma,
             expected_missile_turrets = request.expectedMissileTurrets,
             shooter_missile_turrets = shooterMissileTurrets,
             expected_guided = request.expectedGuided, guided = guided,
             expected_dumbfire = request.expectedDumbfire, dumbfire = dumbfire,
             expected_ammo = request.expectedAmmo, ammo = ammo,
             loadout_failures = loadoutFailures })
+        menu.display()
+        return
+    end
+    if preflightFailures ~= request.expectedPreflightFailures
+            or geometrySplits ~= request.expectedGeometrySplits then
+        scenarioActionStatus = "FAILED: geometry preflight found " .. geometrySplits
+            .. " discriminating station targets and " .. preflightFailures
+            .. " failed controls; expected " .. request.expectedGeometrySplits
+            .. "/0; inspect debug.log"
+        log("scenario_create", { action = "failed", request_id = request.requestId,
+            expected_geometry_splits = request.expectedGeometrySplits,
+            geometry_splits = geometrySplits, preflight_failures = preflightFailures })
         menu.display()
         return
     end
@@ -687,8 +808,11 @@ local function onScenarioReady(_, param)
             .. scenarioSpec.setup.turretLabel
         log("scenario_create", { action = "remote_ready", request_id = request.requestId,
             spawned_ships = spawned, shooters = shooters,
+            weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
+            beam = shooterBeam, plasma = shooterPlasma,
             missile_turrets = shooterMissileTurrets, guided = guided,
-            dumbfire = dumbfire, ammo = ammo, location_failures = locationFailures })
+            dumbfire = dumbfire, ammo = ammo, geometry_splits = geometrySplits,
+            preflight_failures = preflightFailures, location_failures = locationFailures })
         returnToGunnery("remote_scenario_ready")
         return
     end
@@ -829,7 +953,8 @@ function menu.onShowMenu()
             scenarioActionStatus = "ARMED: " .. selection.label
                 .. " verified and selected; returning to Gunnery Control"
             log("scenario_activate", { action = "ready", ship_id = selection.shipID,
-                group = selection.rawGroup, member_ids = selection.memberIDs })
+                group = selection.rawGroup, member_ids = selection.memberIDs,
+                member_macros = selection.memberMacros })
             setObserving(true)
             returnToGunnery("remote_scenario_armed")
             return

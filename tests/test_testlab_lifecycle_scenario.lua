@@ -360,6 +360,133 @@ do
         "current and previously active Despawn handlers must re-check occupancy and send no event")
 end
 
+-- Issue #67 streams one exact mixed conventional shooter and two independent P
+-- controls; the shooter arms BOTH equipped medium turret groups via selectAll.
+-- READY v8 must carry the complete ordinary-emitter and geometry census, and
+-- post-teleport activation must reject the right count with the wrong
+-- multiset composition.
+do
+    local beam = "turret_arg_m_beam_02_mk1_macro"
+    local plasma = "turret_arg_m_plasma_02_mk1_macro"
+    local harness = loadHarness({
+        id = "issue-67-contract", enabled = false,
+        location = { sectorMacro = "Cluster_29_Sector001_macro", x = 500000, y = 0, z = 0 },
+        setup = {
+            remote = true, shipMacro = "ship_arg_l_destroyer_02_a_macro",
+            shipLabel = "ISSUE ARC-BARREL BEHEMOTH E 1",
+            turretGroup = "group_front_up_mid", turretLabel = "Front Upper Mid",
+            selectAll = true, expectedTurrets = 4,
+            expectedMacros = { beam, beam, plasma, plasma },
+        },
+        groups = {
+            { label = "ISSUE ARC-BARREL BEHEMOTH E", macro = "ship_arg_l_destroyer_02_a_macro",
+              faction = "player", count = 1, distance = 1, behaviour = "wait",
+              role = "shooter", loadout = "issue67_behemoth_arc_barrel",
+              expectedWeapons = 4, expectedTurrets = 4, expectedBeam = 2,
+              expectedPlasma = 2 },
+            { label = "A CLEAR IN-ARC BARREL CONTROL P", macro = "ship_xen_m_fighter_01_a_macro",
+              faction = "xenon", count = 1, distance = 2201, behaviour = "wait",
+              hostile = true, holdFire = true, repairGuard = true,
+              geometryRole = "clear_arc" },
+            { label = "C TRUE CANNOT BEAR CONTROL P", macro = "ship_xen_m_fighter_01_a_macro",
+              faction = "xenon", count = 1, distance = 1801, behaviour = "wait",
+              hostile = true, holdFire = true, repairGuard = true,
+              geometryRole = "below_arc" },
+        },
+    })
+    harness.openFromGunnery({ label = "safe launcher", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == 5, "issue #67 Create must stream begin + 3 groups + commit")
+    assert(events[2].params.loadout == "issue67_behemoth_arc_barrel"
+            and events[2].params.expectedWeapons == 4
+            and events[2].params.expectedTurrets == 4
+            and events[2].params.expectedBeam == 2
+            and events[2].params.expectedPlasma == 2,
+        "issue #67 shooter payload must carry the exact conventional census")
+    assert(events[3].params.geometryRole == "clear_arc"
+            and events[4].params.geometryRole == "below_arc",
+        "issue #67 P controls must carry independent geometry roles")
+
+    -- x4gct8 field order (after the specId): ships, stations, modules,
+    -- stationTurrets, stationMissileTurrets, stationShields, stationEngines,
+    -- safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles,
+    -- repairFixtures, shooters, shooterMissileTurrets, guided, dumbfire, ammo,
+    -- loadoutFailures, locationFailures, shooterWeapons, shooterTurrets,
+    -- shooterBeam, shooterPlasma, preflightFailures, geometrySplits. Decoded
+    -- from the MD producer and the onScenarioReady consumer. With no station:
+    -- 3 ships, 0 stations, 2 safe/repair fixtures, 2 hostiles, 1 shooter with
+    -- weapons=4/turrets=4/beam=2/plasma=2, and 0 geometry splits.
+    local requestId = events[1].params.requestId
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct8:" .. requestId .. ":issue-67-contract:3:0:0:0:0:0:0:2:2:0:0:2:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
+            and harness.fix.logContains("geometry_splits=0")
+            and harness.fix.logContains("turrets=4")
+            and harness.fix.logContains("beam=2") and harness.fix.logContains("plasma=2"),
+        "v8 READY must verify the exact four-turret shooter with no station")
+
+    -- selectAll arms BOTH equipped medium groups: group_front_up_mid holds two
+    -- beams (components 27,28) and group_mid_up_mid holds two plasmas (29,30),
+    -- four turrets total. The flattened, sorted member multiset must equal
+    -- {beam,beam,plasma,plasma}; a fourth beam breaks it.
+    local groupBuffer = {
+        [0] = { path = "p", group = "group_front_up_mid", contextid = 5 },
+        [1] = { path = "p", group = "group_mid_up_mid", contextid = 5 },
+    }
+    harness.fix.ffiStub.new = function() return groupBuffer end
+    harness.fix.C.GetNumUpgradeGroups = function() return 2 end
+    harness.fix.C.GetUpgradeGroups2 = function() return 2 end
+    harness.fix.C.GetUpgradeGroupInfo2 = function(_, _, _, _, group)
+        if group == "group_mid_up_mid" then
+            return { count = 2, currentcomponent = 29, currentmacro = plasma,
+                slotsize = "medium", total = 2, operational = 2 }
+        end
+        return { count = 2, currentcomponent = 27, currentmacro = beam,
+            slotsize = "medium", total = 2, operational = 2 }
+    end
+    harness.fix.C.GetNumUpgradeSlots = function() return 4 end
+    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot)
+        return 26 + slot
+    end
+    harness.fix.C.GetUpgradeSlotGroup = function(_, _, _, slot)
+        if slot <= 2 then return { path = "p", group = "group_front_up_mid" } end
+        return { path = "p", group = "group_mid_up_mid" }
+    end
+    local wrongComposition = true
+    GetComponentData = function(component, field)
+        if field == "macro" then
+            local value = tonumber(component)
+            if value == 27 or value == 28 then return beam end
+            if value == 29 then return plasma end
+            if value == 30 then return wrongComposition and beam or plasma end
+            return "ship_arg_l_destroyer_02_a_macro"
+        end
+        if field == "isplayerowned" then return true end
+        return nil
+    end
+    harness.fix.C.GetComponentName = function(component)
+        local value = tonumber(component)
+        if value == 27 or value == 28 then return "Beam" end
+        if value == 29 or value == 30 then return "Plasma" end
+        return "ISSUE ARC-BARREL BEHEMOTH E 1"
+    end
+
+    harness.fix.gcMenu.onShowMenu()
+    harness.fix.gcMenu.display()
+    harness.fix.buttonByText(ReadText(20991, 32)).handlers.onClick()
+    harness.testMenu.onShowMenu()
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "three beams and one plasma must not arm the two-beam/two-plasma shooter")
+    wrongComposition = false
+    harness.testMenu.onShowMenu()
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2
+            and harness.fix.logContains("event=scenario_activate")
+            and harness.fix.logContains("action=ready")
+            and harness.fix.logContains("member_macros="),
+        "the exact two-beam/two-plasma shooter must auto-arm after teleport")
+end
+
 -- Outside an occupied remote shooter, Despawn remains active and emits the
 -- one cleanup event that MD owns.
 do
@@ -690,6 +817,50 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
+    assert(shipped.id == "issue-67-arc-barrel-diagnostic-r1"
+            and shipped.setup.shipMacro == "ship_arg_l_destroyer_02_a_macro"
+            and shipped.setup.turretGroup == "group_front_up_mid"
+            and shipped.setup.selectAll == true
+            and shipped.setup.expectedTurrets == 4,
+        "the shipped issue #67 fixture must retain its exact Behemoth E setup")
+    assert(#shipped.setup.expectedMacros == 4
+            and shipped.setup.expectedMacros[1] == "turret_arg_m_beam_02_mk1_macro"
+            and shipped.setup.expectedMacros[2] == "turret_arg_m_beam_02_mk1_macro"
+            and shipped.setup.expectedMacros[3] == "turret_arg_m_plasma_02_mk1_macro"
+            and shipped.setup.expectedMacros[4] == "turret_arg_m_plasma_02_mk1_macro",
+        "the shipped issue #67 fixture must have two-beam/two-plasma per-group loadout")
+    assert(#shipped.groups == 3 and shipped.stations == nil
+            and shipped.groups[2].geometryRole == "clear_arc"
+            and shipped.groups[3].geometryRole == "below_arc",
+        "the shipped issue #67 fixture must retain both ship geometry roles and have no stations")
+end
+
+-- The shipped spec must be ACCEPTED by validateSpec/loadSpec, not merely well
+-- formed. validateSpec carries a hardcoded shooter-census guard; if it drifts
+-- from the shipped spec (as it did when the greyed-out Create button shipped),
+-- loadSpec returns an error, scenarioSpecLabel() renders "invalid (...)", and
+-- Create is disabled in game. This offline guard is the one that catches that
+-- drift: loadHarness() with no argument loads the real shipped spec file.
+do
+    local harness = loadHarness()
+    harness.openFromGunnery({ label = "shipped-spec launcher", phase = "console" })
+    harness.testMenu.onShowMenu()
+    local specLabelText
+    for _, entry in ipairs(harness.fix.getCreatedTexts()) do
+        if type(entry.text) == "string" and entry.text:find(ReadText(20992, 27), 1, true) then
+            specLabelText = entry.text
+        end
+    end
+    assert(specLabelText, "Test Lab must render the shipped spec label row")
+    assert(not specLabelText:find("invalid (", 1, true),
+        "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
+    assert(specLabelText:find("issue-67-arc-barrel-diagnostic-r1", 1, true),
+        "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
+    for _, line in ipairs(harness.fix.getCapturedLog()) do
+        assert(not (line:find("action=rejected", 1, true)
+                and line:find("inconsistent_shooter_census", 1, true)),
+            "loadSpec rejected the shipped spec on its census guard: " .. line)
+    end
 end
 
 print("testlab lifecycle scenario tests passed")

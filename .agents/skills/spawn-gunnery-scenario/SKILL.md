@@ -86,6 +86,29 @@ Prefer `behaviour = "wait"`, `spread = 0`, and targets outside weapon range when
 the test only concerns menus. Use multiple roles only when each distinguishes a
 specific predicate. Never depend on the owner flying targets into position.
 
+For an isolated conventional-turret shooter, the deterministic loadout must
+omit pilot-operated main guns and every turret outside the selected group.
+Before READY, census `weapons.operational`, `turrets.operational`, and
+`missileturrets.operational` separately, verify the exact required turret-macro
+multiset, and put both ordinary and missile turrets in HOLD FIRE until the
+post-teleport group activation. A member count alone cannot distinguish two
+copies of the wrong macro.
+
+When one turret group needs different macros in individual slots, resolve the
+hull's exact connection names from current extracted assets and use singular
+`<turret macro="..." path="../connection_name"/>` entries in a Test-Lab-only
+static named `libraries/loadouts.xml` definition, then create the ship with
+`<loadout ref="..."/>`. Do not use an MD `<create_loadout>` result for this
+case: two X4 9.00 Behemoth E attempts returned a completely empty ship even
+after the singular paths were source-verified. Verify more than macro
+existence: compare the hull connection tags with the equipment component's
+connection tags. An alias may reference a component with different slot
+compatibility than its canonical macro. Keep the live operational macro census
+as the fail-closed proof that both connection assignments took. Never derive a
+connection name from visible order, a previous hull, or an assumed zero-padded
+sequence; record the exact shipped component source beside the fixture evidence
+before the first live run.
+
 Verify every macro against the installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
 
@@ -97,6 +120,13 @@ correlated live census confirms the expected modules and minimum operational
 turrets, missile turrets, shields, and engines. This path is reproduced for X4
 9.00's `xen_defence` plan: five modules, 120 turrets, 60 shields, and 185 total
 module/surface entries on the live fixture tested 2026-08-13.
+
+Remote stations must be created with the resolved remote `sector` and an exact
+sector-space `position`; `player.zone` still belongs to the safe launcher at
+Create time. When the test depends on mesh-selected aim geometry, prefer a
+small bounded automatic position search. Keep only a candidate that satisfies
+the required per-weapon classification split, and withhold READY if none does,
+instead of asking the owner to retry guessed coordinates.
 
 Do not use the equipped defence station as a clean per-turret arc fixture: it
 launches defence drones and clusters many surfaces at nearly the same bearing.

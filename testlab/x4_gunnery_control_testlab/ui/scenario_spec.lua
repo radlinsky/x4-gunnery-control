@@ -29,6 +29,7 @@
 --     turretGroup     string  Raw group id, not the display label.
 --     turretLabel     string  Human-readable group label.
 --     expectedTurrets number  Exact operational-member count.
+--     expectedMacros  list    Optional exact sorted member-macro multiset.
 --     selectAll       boolean Select every mutable turret group and verify the
 --                             aggregate member count instead of one raw group.
 --   groups    list     One entry per batch of identical ships.
@@ -59,6 +60,9 @@
 --     yaw       number   Optional absolute yaw in degrees. Default 0.
 --     role      string   Optional "shooter" role for strict loadout census.
 --     loadout   string   Optional supported deterministic Test Lab loadout.
+--     geometryRole string Optional "clear_arc" or "below_arc" preflight role.
+--     expectedWeapons / expectedTurrets / expectedBeam / expectedPlasma
+--                        Exact ordinary-emitter census required before READY.
 --     expectedMissileTurrets / expectedGuided / expectedDumbfire / expectedAmmo
 --                        Exact shooter census required before READY.
 --   stations  list     Deterministic equipped stations. Readiness is withheld
@@ -74,59 +78,68 @@
 --                            turrets, shields, and engines required.
 --     holdFire       boolean Keep all station weapons in HOLD FIRE and refuse
 --                            READY unless the live mode census proves it.
+--     geometryRole   string  Optional "aim_split" role. Test Lab keeps only a
+--                            station where root and hittable-aim arc results
+--                            differ for an exact #67 turret.
+--     searchAttempts/searchStepY
+--                        Bounded deterministic vertical position search.
 --
--- Issue #65 final obstruction control: one mixed-loadout Odysseus E and a
--- small Xenon P directly behind a named, player-owned capital blocker at the remote
--- Argon Prime range. R2's blocked Xenon K was too large: targetable parts were
--- exposed around the carrier, so every per-turret ray remained externally
--- clear. R3 exposed a transport/default edge case: a zero group distance was
--- read as missing and placed the shooter at the 5 km default, beyond both the
--- target and blocker. R4 uses a nonzero 1 m shooter offset and shifts the
--- other absolute offsets by the same metre, preserving exact relative lanes.
--- R4 then proved the Colossus's outer silhouette was large enough but its
--- physical mesh had openings through which four unguided muzzle rays could
--- see the P. R5 attempted to substitute a broadside Asgard but used the wrong
--- `ship_ter` macro prefix and failed closed. R6 uses the catalog-verified ATF
--- macro for the Asgard's solid central hull.
+-- Issue #67 combines the origin-vs-hittable-aim arc question with the
+-- zero-barrel conventional-ray question. The station height is searched
+-- automatically and READY fails closed unless a real classification split is
+-- found; the owner never retries guessed coordinates.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-65-remote-odysseus-e-r6",
-    enabled = false,
+    id      = "issue-67-arc-barrel-diagnostic-r1",
+    enabled = true,
     location = {
-        sectorMacro = "Cluster_14_Sector001_macro", -- Argon Prime, X4 9.00.
+        sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
         x = 500000, y = 0, z = 0,
     },
     setup   = {
         remote          = true,
-        shipMacro       = "ship_par_l_destroyer_02_a_macro",
-        shipLabel       = "ISSUE65 ODYSSEUS E - 9 GUIDED 7 DUMBFIRE 1",
-        turretGroup     = "all_missile_turrets",
-        turretLabel     = "All Missile Turrets",
-        expectedTurrets = 16,
+        shipMacro       = "ship_arg_l_destroyer_02_a_macro",
+        shipLabel       = "ISSUE ARC-BARREL BEHEMOTH E 1",
+        turretGroup     = "group_front_up_mid",
+        turretLabel     = "Front Upper Mid",
         selectAll       = true,
+        expectedTurrets = 4,
+        expectedMacros  = {
+            "turret_arg_m_beam_02_mk1_macro",
+            "turret_arg_m_beam_02_mk1_macro",
+            "turret_arg_m_plasma_02_mk1_macro",
+            "turret_arg_m_plasma_02_mk1_macro",
+        },
     },
     groups = {
-        { label = "ISSUE65 ODYSSEUS E - 9 GUIDED 7 DUMBFIRE",
-          macro = "ship_par_l_destroyer_02_a_macro", faction = "player",
+        { label = "ISSUE ARC-BARREL BEHEMOTH E",
+          macro = "ship_arg_l_destroyer_02_a_macro", faction = "player",
           count = 1, distance = 1, x = 0, y = 0, spread = 0, yaw = 0,
           behaviour = "wait", role = "shooter",
-          loadout = "issue65_odysseus_mixed_missiles",
+          loadout = "issue67_behemoth_arc_barrel",
           stripDefenceUnits = true,
-          expectedMissileTurrets = 16, expectedGuided = 9,
-          expectedDumbfire = 7, expectedAmmo = 160 },
-        { label = "ISSUE65 FULLY BLOCKED RIGHT IN-ARC XENON P - REPAIRED HOLD FIRE",
+          -- Live-proven (issue-67 run, X4 9.00): `.weapons.operational.count`
+          -- reports 4 here, matching `.turrets` — turret-mounted weapons are
+          -- counted in both. 4 turrets => weapons=4.
+          expectedWeapons = 4, expectedTurrets = 4,
+          expectedBeam = 2, expectedPlasma = 2,
+          expectedMissileTurrets = 0, expectedGuided = 0,
+          expectedDumbfire = 0, expectedAmmo = 0 },
+        { label = "A CLEAR IN-ARC BARREL CONTROL P",
           macro = "ship_xen_m_fighter_01_a_macro", faction = "xenon",
-          count = 1, distance = 4201, x = 1600, y = 0, spread = 0, yaw = 180,
+          count = 1, distance = 2201, x = -1200, y = 400, spread = 0, yaw = 180,
           behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true },
-        { label = "ISSUE65 RIGHT-LANE SOLID BLOCKER - PLAYER ASGARD HOLD FIRE",
-          macro = "ship_atf_xl_battleship_01_a_macro", faction = "player",
-          count = 1, distance = 2101, x = 800, y = 0, spread = 0, yaw = 90,
-          behaviour = "wait", holdFire = true, stripDefenceUnits = true },
+          stripDefenceUnits = true, repairGuard = true,
+          geometryRole = "clear_arc" },
+        { label = "C TRUE CANNOT BEAR CONTROL P",
+          macro = "ship_xen_m_fighter_01_a_macro", faction = "xenon",
+          count = 1, distance = 1801, x = 1600, y = -1200, spread = 0, yaw = 180,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true,
+          geometryRole = "below_arc" },
     },
-    stations = {},
 }
 return X4GunneryTestLabScenarioSpec
