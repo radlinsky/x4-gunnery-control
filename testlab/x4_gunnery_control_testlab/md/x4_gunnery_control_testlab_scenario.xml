@@ -63,7 +63,10 @@
 
   get_loadout: lookup a named loadout by ID string (loadout=) and optional
   defining macro (macro=) into result=; the shipped call site consumes the
-  result via apply_loadout, and a not-found ID leaves result null/absent:
+  result via apply_loadout. Shipped source does NOT state what a missing ID
+  leaves in result, or that execution even continues after it, so the
+  pre-spawn probe logs a stage/result marker around each lookup instead of
+  assuming anything about a failed lookup:
     .x4-research-cache/extracted/schemas-9.00/libraries/common.xsd:24489-24519
     .x4-research-cache/extracted/issue67-vanilla-md-9.00/md/showcases.xml:23
 
@@ -378,20 +381,28 @@
 
                 <!-- Issue #67 pre-spawn diagnostic (one controlled run, 2026-08-23:
                      static ref reached create_ship, Behemoth ended with 0
-                     weapons/turrets). Before creation, look up the custom static-ref
-                     ID and the shipped known-good control loadout for the SAME
-                     Behemoth macro this create_ship uses. Read-only: nothing below
-                     branches on the result, so creation proceeds exactly as before.
-                     Interpretation of the logged pair:
-                       control not resolved          -> probe invalid; infer nothing, incl. about custom
-                       control resolved, custom not  -> custom registration/lookup failure
-                       both resolved                 -> lookup fine; create/apply failed later -->
+                     weapons/turrets). Shipped source proves the get_loadout
+                     syntax and one successful use, but NOT what a missing ID
+                     leaves in result - or that execution even continues after
+                     it - so each lookup is bracketed by its own stage/result
+                     log and the live run is read from the LAST reached marker:
+                       no control result log            -> control lookup did not return; probe invalid
+                       control ok, no custom result log -> failure is at the custom lookup stage
+                       both results, custom not_resolved -> custom registration/lookup failure
+                       both resolved                    -> lookup fine; failure is later create/apply
+                     The shipped control is probed FIRST, so a custom-ID abort
+                     can never hide its own result. Read-only: nothing here
+                     branches on the results, so creation proceeds exactly as
+                     before. -->
                 <do_if value="$Def.$loadout == 'issue67_behemoth_arc_barrel'">
-                  <get_loadout result="$Issue67ProbeCustom" loadout="'x4gc_testlab_issue67_behemoth_arc_barrel'" macro="macro.{$Def.$macro}"/>
                   <get_loadout result="$Issue67ProbeControl" loadout="'scenario_combat_arg_destroyer'" macro="macro.{$Def.$macro}"/>
-                  <set_value name="$Issue67ProbeCustomOk" exact="$Issue67ProbeCustom? and $Issue67ProbeCustom != null"/>
                   <set_value name="$Issue67ProbeControlOk" exact="$Issue67ProbeControl? and $Issue67ProbeControl != null"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 pre-spawn get_loadout macro=' + $Def.$macro + ' custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved')"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=control_result control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved') + ' macro=' + $Def.$macro"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=custom_start macro=' + $Def.$macro"/>
+                  <get_loadout result="$Issue67ProbeCustom" loadout="'x4gc_testlab_issue67_behemoth_arc_barrel'" macro="macro.{$Def.$macro}"/>
+                  <set_value name="$Issue67ProbeCustomOk" exact="$Issue67ProbeCustom? and $Issue67ProbeCustom != null"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=custom_result custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' macro=' + $Def.$macro"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=summary macro=' + $Def.$macro + ' custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved')"/>
                 </do_if>
                 <do_if value="$Remote">
                   <do_if value="not $ScenarioSector">
