@@ -158,6 +158,72 @@
   connection tags at all; under the inferred rule only the `_02_mk1`
   standard/hittable variants can fit these slots on this hull.
 
+### Official extensions register loadout entries with a full root, and MD can consume an extension-defined ID
+- X4: 9.00
+- Status: shipped-source
+- Source: installed official `ego_dlc_boron`, `ego_dlc_split`,
+  `ego_dlc_terran`, `ego_dlc_pirate`, `ego_dlc_timelines`, `ego_dlc_mini_01`,
+  and `ego_dlc_mini_02` `ext_03.cat!libraries/loadouts.xml`; in particular,
+  `ego_dlc_mini_01/ext_03.cat!libraries/loadouts.xml` and
+  `!md/story_hyperion.xml:1021,1034`
+- Live test: no — source inspection only, as of 2026-08-23
+- Finding: each of the seven installed official extensions that contains
+  `libraries/loadouts.xml` declares a complete `<loadouts>` root with direct
+  `<loadout id="...">` children; none uses a `<diff>` root in that file. The
+  Hyperion Pack defines `story_hyperion_reward_special` in its own library and
+  uses `<loadout ref="story_hyperion_reward_special"/>` inside its own MD
+  `create_ship` actions. This proves the extension-defined-ID route, including
+  the full-root registration shape, in current shipped content. The MD schema
+  also describes `get_loadout` as lookup by ID and accepts an optional macro
+  (`libraries/common.xsd:24489-24523`).
+- Load-order bound: an extension must be enabled and meet its base-version
+  dependency. `content.xml` comments in the installed official extensions say
+  dependencies are loaded first; use an explicit dependency when one extension
+  consumes content supplied by another. The official same-extension library/MD
+  pair has no self-dependency, so the inspected source does not establish any
+  additional intra-extension ordering declaration.
+
+### Issue #67 custom static named loadout reached MD but did not yield its expected turret census
+- X4: 9.00
+- Status: live-tested
+- Source: full-restart Issue #67 run reported 2026-08-23; installed
+  `extensions/x4_gunnery_control_testlab/libraries/loadouts.xml` SHA-256
+  `2bcd09c954153942ac6f76da724cbede82ddd0de172ec145cdb992ca38d8a645`, matching
+  the repository file; Test Lab MD
+  `x4_gunnery_control_testlab_scenario.xml:376-432`
+- Live test: yes — one full-X4-restart run reached the `static_ref` branch and
+  created `x4gc_testlab_issue67_behemoth_arc_barrel`; the resulting Behemoth
+  reported 0 weapons and 0 turrets, with no identified log error, on 2026-08-23
+- Finding: the former "untested" status is stale. This is a bounded negative
+  result: it does NOT distinguish a missing/unresolved library ID from a
+  resolved definition whose entries did not apply. It also does not establish
+  a general failure of custom loadouts or of MD `<loadout ref>`.
+
+### Issue #67 static-ref structure matches the shipped registration shape, but its failure cause is not source-proven
+- X4: 9.00
+- Status: inference
+- Bound: source comparison plus the single live-tested failure above; no source
+  inspected exposes the engine's loadout-registration diagnostic or the
+  per-entry apply decision
+- Source: Test Lab `libraries/loadouts.xml:5-31`; vanilla
+  `libraries/loadouts.xml:405-451`; official extension census in the preceding
+  record
+- Live test: no — this is an inference from the current source and existing
+  run, not a new reproduction
+- Finding: the Test Lab file uses the same full `<loadouts>` root and direct
+  ID form as official extensions, and its ID is referenced inside the
+  corresponding `create_ship`, as in shipped scenarios. Its Behemoth macro,
+  engine/shield paths, and `groups` form also have shipped counterparts;
+  deliberately absent fixed `<weapon>` entries do not explain the expected
+  four turret-mounted weapons being absent. Source therefore does not prove a
+  registration or application cause. The single smallest distinguishing next
+  instrumentation is one pre-spawn MD `get_loadout` for
+  `x4gc_testlab_issue67_behemoth_arc_barrel` with macro
+  `ship_arg_l_destroyer_02_a_macro`, logging whether its result is present;
+  that separates ID lookup/registration failure from a later create/apply
+  failure without redesigning the Colossus fixture. Do not infer a corrective
+  XML change from the current evidence.
+
 ### Transient singular-turret loadouts are unreliable on the Behemoth E
 - X4: 9.00
 - Status: live-tested
@@ -172,8 +238,8 @@
   This does not establish why X4 rejected the transient definition, nor does it
   generalize to other hulls. For this fixture the method is abandoned. The
   static named-loadout `ref` route used by shipped `scenario_combat.xml:741-748`
-  is the next source-backed route; it remains untested for the custom Test Lab
-  definition until reproduced.
+  was subsequently exercised by the custom Test Lab definition; see the
+  bounded static-ref live result above.
 
 ### Per-turret firing solution is computable from MD
 - X4: 9.00
