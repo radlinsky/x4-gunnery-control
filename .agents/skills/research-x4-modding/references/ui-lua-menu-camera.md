@@ -11,6 +11,44 @@
   control group reported to UI Lua is `gunnercontrol`; do not compare them as
   the same identifier.
 
+### Colossus E's resolved bridge carries the full gunner-control station
+- X4: 9.00
+- Status: shipped-source
+- Source: `assets/units/size_xl/macros/ship_arg_xl_carrier_02_a_macro.xml` (05.cat),
+  `assets/units/size_xl/ship_arg_xl_carrier_02.xml` (01.cat),
+  `assets/interiors/bridges/macros/bridge_arg_xl_01_macro.xml` (01.cat),
+  `assets/interiors/bridges/bridge_arg_xl_01.xml` (01.cat), freshly extracted
+  from the installed X4 9.00 Steam catalogs
+- Live test: no — presence established from shipped source 2026-08-23; the
+  Colossus E gunner chair is untested live
+- Finding: `ship_arg_xl_carrier_02_a_macro` (class `ship_xl`) references
+  component `ship_arg_xl_carrier_02` and mounts `bridge_arg_xl_01_macro`
+  (class `cockpit`, component `bridge_arg_xl_01`, geometry
+  `bridge_arg_xl_01_data`) at its only `con_cockpit_01` connection. The
+  component declares exactly one `con_cockpit` connection tagged
+  `cockpit component groups = gunnertrigger`, and the same component carries
+  a five-connection `gunnercontrol` group: `Connection34` (physical
+  `part_console_gunner` console part with `bridge_arg_xl_gunner` sound),
+  `Connection109` (terminal display part), `con_UI002` (`uianchor`),
+  `con_tochair004` (`tochair` seat), and `con_commander002` (`npc service`
+  `stand_terminal_forward`). That is the complete gunner-control station
+  structure, matching the `gunnercontrol` identifier this mod's UI gates on
+  (`ui/gunnery_control.lua` checks `controlGroup() == "gunnercontrol"`), so
+  the Colossus E is a source-supported candidate for the physical gunner
+  chair.
+  Decision for issue #67: SOURCE-SUPPORTED CANDIDATE — presence only. The
+  chair's live clickability/sit behavior on this hull remains untested; do
+  not treat this as a live-tested or working console.
+- Context: every Argon XL macro (builder 01 a/b, carrier 01 a/b, carrier 02 a,
+  resupplier 01 a/b) mounts the same `bridge_arg_xl_01_macro`, so this result
+  covers the whole Argon XL family. The in-install L bridge
+  (`bridge_arg_l_01.xml`) contrasts: its `con_cockpit` carries NO
+  `gunnertrigger` and its `gunnercontrol` group has no `tochair` seat or UI
+  anchor, only a console part and an NPC service connection. The intended
+  known-working contrast hull, the Boron L destroyer ("Ray" in prior live
+  tests), is DLC content absent from this base-game installation, so the
+  contrast was taken from the in-install L bridge instead.
+
 ### Secondary controls may lack an occupied-ship ID
 - X4: 9.00
 - Status: shipped-source
