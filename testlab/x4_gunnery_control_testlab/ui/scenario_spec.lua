@@ -96,7 +96,7 @@
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-arc-barrel-two-phase-r8",
+    id      = "issue-67-arc-barrel-two-phase-r9",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -165,9 +165,12 @@ X4GunneryTestLabScenarioSpec = {
         -- spawn. Test Lab PRESERVES exactly one station at this attempt-0 position
         -- (searchAttempts = 1; no OOS repositioning), verifies its census, and
         -- reports geometry PENDING. After the owner teleports to the Colossus,
-        -- opening Test Lab once moves this same station through eight bounded
-        -- in-system positions around the closest r7 near-miss. Each warp is
-        -- followed by a 1 ms delayed measurement against the same four turrets.
+        -- opening Test Lab once moves this same station through eight bounded,
+        -- safely separated in-system positions. r8 disproved its close/low band;
+        -- r9 applies a deterministic 180-degree station roll so the construction
+        -- plan's negative-Y module offsets sit above the root, and samples the
+        -- measured elevation boundary. Each warp is followed by a 1 ms delayed
+        -- measurement against the same four turrets.
         -- It records root origin/aim plus every operational module's origin/aim
         -- independently. Qualification accepts either a
         -- root-OUTSIDE/root-aim-INSIDE/in-range turret or a root-OUTSIDE/

@@ -268,13 +268,17 @@ grep -Fq '<delay exact="1ms"/>' "$scenario" \
   || fail "the in-system discriminator does not cross a nonzero MD-update boundary after each warp"
 grep -Fq "ScenarioRoot.\$GeometrySearchDistances" "$scenario" \
   || fail "the in-system discriminator does not define a bounded deterministic position search"
+grep -Fq "<rotation yaw=\"0deg\" pitch=\"0deg\" roll=\"ScenarioRoot.\$GeometrySearchRoll\"/>" "$scenario" \
+  || fail "the in-system discriminator does not apply its deterministic station rotation"
+grep -Fq "exact=\"\$RootSeparation ge 250m\"" "$scenario" \
+  || fail "the in-system discriminator does not reject station/shooter bounding-box overlap"
 grep -Fq "\$Attempt lt \$SearchCount" "$scenario" \
   || fail "the in-system position search is not explicitly bounded"
 grep -Fq '<signal_cue cue="GeometryQualifyContinue"/>' "$scenario" \
   || fail "the active measurement cue incorrectly tries to signal another instance of itself"
 grep -Fq '<cue name="GeometryQualifyContinue" instantiate="true">' "$scenario" \
   || fail "the bounded search has no separate continuation cue"
-grep -Fq "not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
+grep -Fq "\$Separated and not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
   || fail "the in-system discriminator does not retain the root-outside / root-aim-inside split"
 grep -Fq "\$RootSplits\" operation=\"add\"" "$scenario" \
   || fail "the in-system discriminator does not count root geometry splits"
@@ -288,7 +292,7 @@ grep -Fq "target=\"\$GeometryModule\" excludeself=\"true\" useaimtarget=\"true\"
   || fail "the in-system discriminator does not measure each module's external muzzle line of fire"
 grep -Fq "target=\"\$GeometryModule\" excludeself=\"false\" useaimtarget=\"true\"" "$scenario" \
   || fail "the in-system discriminator does not retain the self-inclusive diagnostic ray"
-grep -Fq "not \$RootArcPass and \$ModuleAimArcPass and \$ModuleInRange" "$scenario" \
+grep -Fq "\$Separated and not \$RootArcPass and \$ModuleAimArcPass and \$ModuleInRange" "$scenario" \
   || fail "the in-system discriminator does not count root-outside/module-aim-inside candidates"
 grep -Fq "exact=\"\$ModuleAimCandidate and \$ModuleMuzzleLosEx\"" "$scenario" \
   || fail "the in-system discriminator does not distinguish externally clear module candidates"

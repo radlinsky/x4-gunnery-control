@@ -548,7 +548,7 @@ local function shippedTwoPhaseToQualify()
     -- equipment census may still be zero; MD logs it and a delayed census before
     -- the in-system qualifier enforces the exact light module loadout.
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r8:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r9:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending")
             and harness.fix.logContains("geometry_splits=0"),
@@ -983,7 +983,7 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-two-phase-r8"
+    assert(shipped.id == "issue-67-arc-barrel-two-phase-r9"
             and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
             and shipped.setup.turretGroup == "group_front_left_up"
             and shipped.setup.selectAll == true
@@ -1043,7 +1043,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r8", 1, true),
+    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r9", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

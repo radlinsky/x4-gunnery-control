@@ -186,6 +186,14 @@ the discriminating measurement can actually run:
   post-teleport Test Lab open, and qualify only on the required split; no split
   fails closed.
 
+For a position search around a large station, reject candidates whose station-
+root bounding box overlaps or nearly touches the shooter; a geometrically useful
+module is not a safe fixture when the hull volumes intersect. When module layout
+orientation matters, set and log a deterministic station rotation for every
+trial rather than inheriting an implicit creation orientation. Keep position,
+rotation, separation, range, bearing, and external line of fire as independent
+fields.
+
 Never ask the owner to retry guessed coordinates in either case.
 
 Do not use the equipped defence station as a clean per-turret arc fixture: it
