@@ -85,15 +85,17 @@
 --                        Bounded deterministic vertical position search.
 --
 -- Issue #67 combines the origin-vs-hittable-aim arc question with the
--- zero-barrel conventional-ray question. The station height is searched
--- automatically and READY fails closed unless a real classification split is
--- found; the owner never retries guessed coordinates.
+-- zero-barrel conventional-ray question. The station B split cannot be measured
+-- out of system, so it is a two-phase probe: the OOS create preserves one
+-- station and reports geometry PENDING, then a single post-teleport in-system
+-- open re-measures it and fails closed unless a real root-outside/aim-inside
+-- classification split is found. The owner never retries guessed coordinates.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-arc-barrel-diagnostic-r2",
+    id      = "issue-67-arc-barrel-two-phase-r3",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -150,21 +152,26 @@ X4GunneryTestLabScenarioSpec = {
         -- xen_defence station (five modules) placed forward of the shooter and
         -- below it, so its root origin can drop below the front-upper turrets'
         -- generated -10 degree elevation stop while a hittable upper-module
-        -- surface stays inside the arc. Test Lab runs a bounded DOWNWARD Y sweep
-        -- (searchStepY < 0) and keeps only a candidate where at least one exact
-        -- selected beam/plasma turret is root OUTSIDE arc and aim point INSIDE
-        -- arc, in range; if the sweep is exhausted with no split it fails closed
-        -- (preflight failure, no READY) rather than accepting a non-split shell.
-        -- Held fire, drones stripped. Anchor/step/minSurfaces are deterministic
-        -- starting values the later live qualification run tunes; the remote
-        -- equipped census is unverified offline (see md-ai.md station records).
+        -- surface stays inside the arc. Two-phase: out of system the aim target
+        -- does not resolve to a real hull surface, so root and hittable-aim pitch
+        -- are near-identical and no split can be measured at spawn. Test Lab
+        -- therefore PRESERVES exactly one station at this attempt-0 position
+        -- (searchAttempts = 1; no OOS repositioning), verifies its census, and
+        -- reports geometry PENDING. After the owner teleports to the Colossus,
+        -- opening Test Lab once re-measures this same station IN SYSTEM against the
+        -- same four turrets and qualifies only on at least one root-OUTSIDE /
+        -- aim-INSIDE / in-range turret; no split fails closed. Held fire, drones
+        -- stripped. Anchor/minSurfaces are deterministic starting values the live
+        -- run tunes; the remote equipped census is unverified offline (see
+        -- md-ai.md station records). searchStepY is retained (unused by the
+        -- single-attempt preserve) only as a downward-search marker.
         { label = "B LARGE ROOT AIM-POINT STATION",
           recipe = "xen_defence", faction = "xenon",
           distance = 6000, x = 0, y = -800, spread = 0,
           hostile = true, holdFire = true,
           geometryRole = "aim_split",
           expectedModules = 5, minSurfaces = 100,
-          searchAttempts = 8, searchStepY = -400 },
+          searchAttempts = 1, searchStepY = -400 },
     },
 }
 return X4GunneryTestLabScenarioSpec

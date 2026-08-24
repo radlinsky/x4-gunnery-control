@@ -487,6 +487,144 @@ do
         "the exact two-beam/two-plasma shooter must auto-arm after teleport")
 end
 
+-- Two-phase #67 station B discriminator. The out-of-system census cannot measure
+-- the root-vs-aim split, so the OOS acknowledgement preserves exactly one station
+-- and reports geometry PENDING (never geometrically ready). A single post-teleport
+-- in-system open re-measures that SAME station against the SAME exact four turrets
+-- and qualifies only on a real split; no split fails closed without arming the
+-- A/B/C diagnostic. These helpers drive the shipped fixture through both outcomes.
+local beam = "turret_arg_m_beam_02_mk1_macro"
+local plasma = "turret_arg_m_plasma_02_mk1_macro"
+local function modelColossusTurrets(harness)
+    local groupBuffer = {
+        [0] = { path = "p", group = "group_front_left_up", contextid = 5 },
+        [1] = { path = "p", group = "group_front_right_up", contextid = 5 },
+    }
+    harness.fix.ffiStub.new = function() return groupBuffer end
+    harness.fix.C.GetNumUpgradeGroups = function() return 2 end
+    harness.fix.C.GetUpgradeGroups2 = function() return 2 end
+    harness.fix.C.GetUpgradeGroupInfo2 = function(_, _, _, _, group)
+        if group == "group_front_right_up" then
+            return { count = 2, currentcomponent = 29, currentmacro = plasma,
+                slotsize = "medium", total = 2, operational = 2 }
+        end
+        return { count = 2, currentcomponent = 27, currentmacro = beam,
+            slotsize = "medium", total = 2, operational = 2 }
+    end
+    harness.fix.C.GetNumUpgradeSlots = function() return 4 end
+    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 26 + slot end
+    harness.fix.C.GetUpgradeSlotGroup = function(_, _, _, slot)
+        if slot <= 2 then return { path = "p", group = "group_front_left_up" } end
+        return { path = "p", group = "group_front_right_up" }
+    end
+    GetComponentData = function(component, field)
+        if field == "macro" then
+            local value = tonumber(component)
+            if value == 27 or value == 28 then return beam end
+            if value == 29 or value == 30 then return plasma end
+            return "ship_arg_xl_carrier_02_a_macro"
+        end
+        if field == "isplayerowned" then return true end
+        return nil
+    end
+    harness.fix.C.GetComponentName = function(component)
+        local value = tonumber(component)
+        if value == 27 or value == 28 then return "Beam" end
+        if value == 29 or value == 30 then return "Plasma" end
+        return "ISSUE ARC-BARREL COLOSSUS E 1"
+    end
+end
+
+-- Drives the shipped fixture from OOS Create through the post-teleport open that
+-- fires the single in-system discriminator, leaving it waiting on GeometryQualified.
+local function shippedTwoPhaseToQualify()
+    local harness = loadHarness()
+    harness.openFromGunnery({ label = "two-phase launcher", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    local events = scenarioEvents(harness)
+    assert(#events == 6, "shipped Create must stream begin + 3 groups + station + commit")
+    local requestId = events[1].params.requestId
+    -- OOS census passes with geometry_splits=0 and preflight_failures=0; station B
+    -- preserved (185 operational surfaces from the local KB census).
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r3:3:1:5:120:0:60:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
+            and harness.fix.logContains("action=remote_geometry_pending")
+            and harness.fix.logContains("geometry_splits=0"),
+        "OOS station B must verify census and report geometry PENDING")
+    assert(not harness.fix.logContains("action=qualified"),
+        "no OOS candidate may be silently called geometrically qualified")
+
+    modelColossusTurrets(harness)
+    harness.fix.gcMenu.onShowMenu()
+    harness.fix.gcMenu.display()
+    harness.fix.buttonByText(ReadText(20991, 32)).handlers.onClick()
+    harness.testMenu.onShowMenu()
+    local qualifyEvents = {}
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "qualify_geometry" then qualifyEvents[#qualifyEvents + 1] = event end
+    end
+    assert(#qualifyEvents == 1,
+        "the single post-teleport open must trigger exactly one in-system qualify")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "the in-system discriminator must not return to Gunnery before it qualifies")
+    assert(harness.fix.logContains("event=geometry_qualify")
+            and harness.fix.logContains("action=requested"),
+        "the discriminator request must be logged")
+    return harness, qualifyEvents[1].params.requestId
+end
+
+-- A real in-system split qualifies: the exact preserved-B turret set is armed,
+-- observation is enabled, and control returns to Gunnery exactly once.
+do
+    local harness, qToken = shippedTwoPhaseToQualify()
+    -- Re-opening while the discriminator is pending must not re-issue it.
+    harness.testMenu.onShowMenu()
+    local issued = 0
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "qualify_geometry" then issued = issued + 1 end
+    end
+    assert(issued == 1, "a pending discriminator must not be re-issued on a repeat open")
+
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified", "x4gcq1:" .. qToken .. ":1:2:4")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
+        "an in-system split must arm the exact turret set and return to Gunnery")
+    assert(harness.fix.logContains("action=qualified")
+            and harness.fix.logContains("splits=2")
+            and harness.fix.logContains(beam) and harness.fix.logContains(plasma),
+        "qualification must log the split and the exact armed two-beam/two-plasma set")
+    local observed = false
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_toggle" and event.params.enabled == true then observed = true end
+    end
+    assert(observed, "qualification must arm firing-solution observation for the diagnostic")
+end
+
+-- No in-system split: fail closed. The group is not armed, observation is not
+-- enabled, and control does not return to the diagnostic.
+do
+    local harness, qToken = shippedTwoPhaseToQualify()
+    local observeBefore = 0
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_toggle" and event.params.enabled == true then
+            observeBefore = observeBefore + 1
+        end
+    end
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified", "x4gcq1:" .. qToken .. ":0:0:4")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "a no-split in-system result must fail closed and not begin the diagnostic")
+    assert(harness.fix.logContains("action=failed"),
+        "a no-split in-system result must log a machine-readable failure")
+    local observeAfter = 0
+    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_toggle" and event.params.enabled == true then
+            observeAfter = observeAfter + 1
+        end
+    end
+    assert(observeAfter == observeBefore,
+        "failing the discriminator must not arm firing-solution observation")
+end
+
 -- Outside an occupied remote shooter, Despawn remains active and emits the
 -- one cleanup event that MD owns.
 do
@@ -817,7 +955,7 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-diagnostic-r2"
+    assert(shipped.id == "issue-67-arc-barrel-two-phase-r3"
             and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
             and shipped.setup.turretGroup == "group_front_left_up"
             and shipped.setup.selectAll == true
@@ -877,7 +1015,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-diagnostic-r2", 1, true),
+    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r3", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

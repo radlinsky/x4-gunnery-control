@@ -4,6 +4,10 @@ local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
 local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
 local scenarioActionStatus, scenarioRequestSerial, pendingScenario, remoteScenarioReady = nil, 0, nil, false
+-- Two-phase #67 station B geometry discriminator: after the OOS census the
+-- fixture is only geometry-PENDING; the split is measured in system once the
+-- owner teleports aboard the preserved Colossus. onGeometryQualified.
+local pendingQualify, remoteGeometryPending = nil, false
 local finishGroups, emitSummary, returnToGunnery
 
 local function text(id) return ReadText(20992, id) end
@@ -337,6 +341,16 @@ local function scenarioSpecLabel()
     return scenarioSpec.id .. (scenarioSpec.enabled and " (enabled)" or " (disabled)")
 end
 
+-- A spec with an aim_split station cannot be qualified from the out-of-system
+-- census: its root-vs-aim split only resolves in system, so the remote READY is
+-- a PENDING state that a post-teleport in-system re-measurement must clear.
+local function specHasAimSplit()
+    for _, station in ipairs(scenarioSpec and scenarioSpec.stations or {}) do
+        if station.geometryRole == "aim_split" then return true end
+    end
+    return false
+end
+
 -- A remote fixture's player ship is disposable only while the owner is not
 -- aboard it.  Keep this identity check deliberately narrower than
 -- resolveExactGroup(): damaged/missing turrets must not make an occupied
@@ -561,7 +575,9 @@ local function createTestScenario()
         minSurfaces = minSurfaces + station.minSurfaces
         if station.hostile then expectedHostiles = expectedHostiles + 1 end
         if station.holdFire then expectedSafeFixtures = expectedSafeFixtures + 1 end
-        if station.geometryRole == "aim_split" then expectedGeometrySplits = expectedGeometrySplits + 1 end
+        -- An aim_split station produces NO out-of-system split: it is preserved at
+        -- attempt-0 and the split is re-measured in system by GeometryQualify, so
+        -- the OOS acknowledgement must still expect zero splits.
     end
     scenarioRequestSerial = scenarioRequestSerial + 1
     local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(scenarioRequestSerial)
@@ -589,8 +605,7 @@ local function createTestScenario()
         expectedLoadoutFailures = 0,
         expectedPreflightFailures = 0,
         expectedGeometrySplits = expectedGeometrySplits,
-        deadline = getElapsedTime() + (expectedGeometrySplits > 0 and 60
-            or expectedStations > 0 and 20 or 10),
+        deadline = getElapsedTime() + (expectedStations > 0 and 60 or 10),
         selection = selection,
         remote = remote,
     }
@@ -806,16 +821,32 @@ local function onScenarioReady(_, param)
     end
     if request.remote then
         remoteScenarioReady = true
-        scenarioActionStatus = "READY: remote fixture verified; teleport to "
-            .. scenarioSpec.setup.shipLabel .. " and open Test Lab once to arm "
-            .. scenarioSpec.setup.turretLabel
-        log("scenario_create", { action = "remote_ready", request_id = request.requestId,
-            spawned_ships = spawned, shooters = shooters,
-            weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
-            beam = shooterBeam, plasma = shooterPlasma,
-            missile_turrets = shooterMissileTurrets, guided = guided,
-            dumbfire = dumbfire, ammo = ammo, geometry_splits = geometrySplits,
-            preflight_failures = preflightFailures, location_failures = locationFailures })
+        remoteGeometryPending = specHasAimSplit()
+        if remoteGeometryPending then
+            -- Census verified, but station B geometry is NOT yet qualified: the
+            -- root-vs-aim split only resolves in system. Do not call it READY.
+            scenarioActionStatus = "PENDING: remote census verified but station B geometry is NOT qualified; teleport to "
+                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it re-measures station B "
+                .. "in system and qualifies only on a root-outside/aim-inside split"
+            log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
+                spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
+                operational_surfaces = surfaces, shooters = shooters,
+                weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
+                beam = shooterBeam, plasma = shooterPlasma,
+                geometry_splits = geometrySplits, preflight_failures = preflightFailures,
+                location_failures = locationFailures })
+        else
+            scenarioActionStatus = "READY: remote fixture verified; teleport to "
+                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once to arm "
+                .. scenarioSpec.setup.turretLabel
+            log("scenario_create", { action = "remote_ready", request_id = request.requestId,
+                spawned_ships = spawned, shooters = shooters,
+                weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
+                beam = shooterBeam, plasma = shooterPlasma,
+                missile_turrets = shooterMissileTurrets, guided = guided,
+                dumbfire = dumbfire, ammo = ammo, geometry_splits = geometrySplits,
+                preflight_failures = preflightFailures, location_failures = locationFailures })
+        end
         returnToGunnery("remote_scenario_ready")
         return
     end
@@ -851,6 +882,43 @@ local function onScenarioReady(_, param)
     local currentSession = api() and api().getSession and api().getSession()
     setObserving(true, currentSession and currentSession.aimTargetID)
     returnToGunnery("scenario_ready")
+end
+
+-- Phase-two acknowledgement for the #67 station B discriminator. MD re-measured
+-- the preserved station against the exact turrets in system and reported the
+-- split count. Qualify (arm the group, observe, return to Gunnery) only on at
+-- least one root-outside/aim-inside/in-range turret; otherwise fail closed and
+-- never begin the A/B/C diagnostic.
+local function onGeometryQualified(_, param)
+    local token, qualified, splits, measured =
+        tostring(param or ""):match("^x4gcq1:([^:]+):(%d+):(%d+):(%d+)$")
+    if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
+    local request = pendingQualify
+    pendingQualify = nil
+    qualified, splits, measured = tonumber(qualified), tonumber(splits), tonumber(measured)
+    if qualified == 1 and splits >= 1 then
+        applyExactGroup(request.selection)
+        remoteScenarioReady = false
+        remoteGeometryPending = false
+        scenarioActionStatus = "QUALIFIED: station B in-system split confirmed (splits=" .. splits
+            .. "/" .. measured .. " measured); " .. request.selection.label
+            .. " armed; returning to Gunnery Control"
+        log("geometry_qualify", { action = "qualified", request_id = request.requestId,
+            splits = splits, measured = measured, ship_id = request.selection.shipID,
+            group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
+            member_macros = request.selection.memberMacros })
+        setObserving(true)
+        returnToGunnery("geometry_qualified")
+    else
+        -- Fail closed: no in-system split means the discriminator cannot separate
+        -- root from hittable aim, so do not arm the group, do not observe, and do
+        -- not begin the diagnostic. The owner teleports away and re-runs.
+        scenarioActionStatus = "FAILED: in-system station B had no root-outside/aim-inside split (splits="
+            .. splits .. "/" .. measured .. " measured); diagnostic not started"
+        log("geometry_qualify", { action = "failed", request_id = request.requestId,
+            splits = splits, measured = measured })
+        menu.display()
+    end
 end
 
 local function shipFields(item)
@@ -948,9 +1016,33 @@ end
 
 function menu.onShowMenu()
     closing, suppressReopen = false, false
+    if pendingQualify then
+        -- The in-system station B discriminator is still running; keep the menu
+        -- up and wait for GeometryQualify rather than re-issuing it.
+        menu.display()
+        return
+    end
     if remoteScenarioReady then
         local selection, reason = resolveExactGroup()
         if selection then
+            if remoteGeometryPending then
+                -- Phase two: the exact turret set is verified, so fire the single
+                -- in-system re-measurement of the preserved station B. Do NOT arm
+                -- the group or return to Gunnery until a real split qualifies it.
+                scenarioRequestSerial = scenarioRequestSerial + 1
+                local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
+                pendingQualify = { requestId = token, selection = selection,
+                    deadline = getElapsedTime() + 30 }
+                AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
+                    { requestId = token })
+                scenarioActionStatus = "QUALIFYING: re-measuring preserved station B in system with "
+                    .. selection.label .. " (" .. selection.memberIDs .. ")"
+                log("geometry_qualify", { action = "requested", request_id = token,
+                    ship_id = selection.shipID, group = selection.rawGroup,
+                    member_ids = selection.memberIDs, member_macros = selection.memberMacros })
+                menu.display()
+                return
+            end
             applyExactGroup(selection)
             remoteScenarioReady = false
             scenarioActionStatus = "ARMED: " .. selection.label
@@ -1093,6 +1185,14 @@ function menu.onUpdate()
         menu.display()
         return
     end
+    if pendingQualify and now >= pendingQualify.deadline then
+        local request = pendingQualify
+        pendingQualify = nil
+        scenarioActionStatus = "FAILED: no in-system geometry acknowledgement; inspect debug.log"
+        log("geometry_qualify", { action = "timeout", request_id = request.requestId })
+        menu.display()
+        return
+    end
     if not sweep or sweep.phase ~= "inspecting" then return end
     local item = State.current(sweep)
     if not item then return end
@@ -1144,6 +1244,7 @@ local function init()
     end
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
+    RegisterEvent("X4GunneryTestLab.GeometryQualified", onGeometryQualified)
     if api() then
         api().registerTestLab({ open = function()
             local main = Helper.getMenu("X4GunneryMenu")

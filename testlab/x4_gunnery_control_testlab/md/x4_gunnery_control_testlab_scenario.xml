@@ -267,7 +267,10 @@
             <set_value name="$UnsafeDormantShooterWeapons" exact="0"/>
             <set_value name="$PreflightFailures" exact="0"/>
             <set_value name="$GeometrySplits" exact="0"/>
+            <set_value name="$GeometryPending" exact="0"/>
             <set_value name="$GeometryShooter" exact="null"/>
+            <set_value name="ScenarioRoot.$GeometryShooter" exact="null"/>
+            <set_value name="ScenarioRoot.$GeometryStation" exact="null"/>
             <set_value name="$ClearArcTarget" exact="null"/>
             <set_value name="$BelowArcTarget" exact="null"/>
             <set_value name="$ClearArcRequested" exact="false"/>
@@ -502,6 +505,10 @@
                   <set_value name="$ShooterCount" operation="add"/>
                   <add_to_group groupname="ScenarioRoot.$PlayerShooters" object="$Ship"/>
                   <set_value name="$GeometryShooter" exact="$Ship"/>
+                  <!-- Persist the exact shooter so the in-system GeometryQualify
+                       cue can re-measure station B against these same turrets
+                       after the owner teleports aboard. -->
+                  <set_value name="ScenarioRoot.$GeometryShooter" exact="$Ship"/>
                   <set_value name="$ShooterWeapons" operation="add" exact="$Ship.weapons.operational.count"/>
                   <set_value name="$ShooterTurrets" operation="add" exact="$Ship.turrets.operational.count"/>
                   <set_value name="$LocalBeam" exact="0"/>
@@ -665,114 +672,82 @@
               <do_if value="not $Owner">
                 <set_value name="$Owner" exact="faction.xenon"/>
               </do_if>
+              <!-- Two-phase #67 station B.  Out of system at ScenarioCommit time
+                   the turret aim target does not resolve to a real hull surface,
+                   so root and hittable-aim pitch are near-identical (~1e-6 rad
+                   apart in the live run) and no root-outside/aim-inside split can
+                   be measured here; the old bounded OOS search only ever destroyed
+                   equivalent shells.  Preserve exactly ONE station at the attempt-0
+                   position, verify its census, and mark geometry PENDING.  The
+                   discriminating split is re-measured IN SYSTEM by GeometryQualify
+                   after the owner teleports to the Colossus; nothing here reports
+                   the fixture as geometrically ready. -->
               <set_value name="$AimSplit" exact="$Def.$geometryrole == 'aim_split'"/>
-              <set_value name="$StationAccepted" exact="false"/>
-              <set_value name="$Attempt" exact="0"/>
-
-              <do_while value="$Attempt lt $Def.$searchattempts and not $StationAccepted">
-                <create_station name="$Station"
-                                sector="$ScenarioSector" macro="macro.station_gen_factory_base_01_macro"
-                                constructionplan="'xen_defence'" owner="$Owner"
-                                state="componentstate.operational">
-                  <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
-                            y="ScenarioRoot.$PendingAnchorY + $Def.$y + ($Attempt * $Def.$searchstepy)"
-                            z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
-                </create_station>
-                <set_module_loadout_level object="$Station" exact="1.0"/>
-
-                <!-- Classify the aim_split candidate against the exact selected
-                     turrets: accept only root OUTSIDE / aim INSIDE the generated
-                     [-10,90] arc, in range.  Same geometry primitives as the A/C
-                     preflight below; range is reported separately from arc. -->
-                <set_value name="$StationSplit" exact="false"/>
-                <do_if value="$AimSplit and $GeometryShooter">
-                  <do_for_each name="$GeometryWeapon" in="$GeometryShooter.turrets.operational.list">
-                    <do_if value="$GeometryWeapon.macro == macro.turret_arg_m_beam_02_mk1_macro
-                                  or $GeometryWeapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
-                      <set_value name="$RootRelative" exact="$Station.relativeposition.{$GeometryWeapon}"/>
-                      <create_orientation name="$AimLocal" orientation="look_at"
-                                          refobject="$Station" useaimtarget="true">
-                        <position object="$GeometryWeapon" space="$GeometryWeapon"/>
-                      </create_orientation>
-                      <set_value name="$RootArcPass" exact="$RootRelative.rotation.pitch ge -10deg and $RootRelative.rotation.pitch le 90deg"/>
-                      <set_value name="$AimArcPass" exact="$AimLocal.pitch ge -10deg and $AimLocal.pitch le 90deg"/>
-                      <set_value name="$InRange" exact="$GeometryWeapon.bboxdistanceto.{$Station} le $GeometryWeapon.maxfirerange"/>
-                      <do_if value="not $RootArcPass and $AimArcPass and $InRange">
-                        <set_value name="$StationSplit" exact="true"/>
-                      </do_if>
-                      <debug_text text="'[X4GC TEST PREFLIGHT] role=aim_split station=' + $Def.$label + ' attempt=' + $Attempt + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' aim_pitch=' + $AimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' aim_arc_pass=' + $AimArcPass + ' inrange=' + $InRange"/>
-                    </do_if>
-                  </do_for_each>
-                </do_if>
-
-                <do_if value="(not $AimSplit) or $StationSplit">
-                  <set_value name="$StationAccepted" exact="true"/>
-                  <add_to_group groupname="ScenarioRoot.$SpawnedStations" object="$Station"/>
-                  <set_object_name object="$Station" name="$Def.$label"/>
-                  <do_if value="$StationSplit">
-                    <set_value name="$GeometrySplits" operation="add"/>
-                  </do_if>
-
-                  <!-- Strip carried defence drones before hostility. -->
-                  <do_if value="$Station.units.{unitcategory.defence}.count">
-                    <remove_units object="$Station" category="unitcategory.defence" mk="1"
-                                  exact="$Station.units.{unitcategory.defence}.count"/>
-                  </do_if>
-                  <set_value name="$DefenceUnits" operation="add"
-                             exact="$Station.units.{unitcategory.defence}.count"/>
-
-                  <do_if value="$Def.$hostile">
-                    <add_relation_boost object="$Station" otherobject="player.ship"
-                                        value="$Station.owner.relation.kill.max"
-                                        decay="1" delay="60min" silent="true"/>
-                    <do_if value="player.ship.mayattack.{$Station}">
-                      <set_value name="$Hostiles" operation="add"/>
-                    </do_if>
-                  </do_if>
-                  <signal_objects object="player.galaxy" param="'init station'" param2="$Station" param3="true"/>
-
-                  <!-- A hostile surface fixture must never return fire: keep the
-                       weapon surfaces installed for the arc test but hold every
-                       emitter and stop any queued shot.  ScenarioSafetyGuard
-                       reasserts this for as long as the station exists. -->
-                  <do_if value="$Def.$holdfire">
-                    <set_value name="$SafeObjectCount" operation="add"/>
-                    <add_to_group groupname="ScenarioRoot.$SafeObjects" object="$Station"/>
-                    <cease_fire object="$Station"/>
-                    <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
-                      <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
-                      <do_if value="$Weapon.mode == weaponmode.holdfire">
-                        <set_value name="$SafeWeapons" operation="add"/>
-                      </do_if>
-                      <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
-                    </do_for_each>
-                    <do_for_each name="$Weapon" in="$Station.missileturrets.operational.list">
-                      <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
-                      <do_if value="$Weapon.mode == weaponmode.holdfire">
-                        <set_value name="$SafeWeapons" operation="add"/>
-                      </do_if>
-                      <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
-                    </do_for_each>
-                  </do_if>
-
-                  <set_value name="$StationModules" operation="add" exact="$Station.modules.operational.count"/>
-                  <set_value name="$StationTurrets" operation="add" exact="$Station.turrets.operational.count"/>
-                  <set_value name="$StationMissileTurrets" operation="add" exact="$Station.missileturrets.operational.count"/>
-                  <set_value name="$StationShields" operation="add" exact="$Station.shields.operational.count"/>
-                  <set_value name="$StationEngines" operation="add" exact="$Station.engines.operational.count"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] created station=' + $Station + ' name=' + $Station.knownname + ' recipe=' + $Def.$recipe + ' attempt=' + $Attempt + ' split=' + $StationSplit + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
-                </do_if>
-                <do_else>
-                  <debug_text text="'[X4GC TEST SCENARIO] aim_split candidate rejected station=' + $Def.$label + ' attempt=' + $Attempt + '; destroying and continuing the bounded search'"/>
-                  <destroy_object object="$Station" explosion="false"/>
-                </do_else>
-                <set_value name="$Attempt" operation="add"/>
-              </do_while>
-
-              <do_if value="$AimSplit and not $StationAccepted">
-                <set_value name="$PreflightFailures" operation="add"/>
-                <debug_text text="'[X4GC TEST PREFLIGHT] FAILED role=aim_split station=' + $Def.$label + ' attempts=' + $Def.$searchattempts + '; no root-outside/aim-inside split found'"/>
+              <create_station name="$Station"
+                              sector="$ScenarioSector" macro="macro.station_gen_factory_base_01_macro"
+                              constructionplan="'xen_defence'" owner="$Owner"
+                              state="componentstate.operational">
+                <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
+                          y="ScenarioRoot.$PendingAnchorY + $Def.$y"
+                          z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+              </create_station>
+              <set_module_loadout_level object="$Station" exact="1.0"/>
+              <add_to_group groupname="ScenarioRoot.$SpawnedStations" object="$Station"/>
+              <set_object_name object="$Station" name="$Def.$label"/>
+              <do_if value="$AimSplit">
+                <set_value name="ScenarioRoot.$GeometryStation" exact="$Station"/>
+                <set_value name="$GeometryPending" operation="add"/>
+                <debug_text text="'[X4GC TEST SCENARIO] station ' + $Def.$label + ' preserved at attempt-0 for in-system qualification; geometry pending station=' + $Station + '; teleport to the Colossus and open Test Lab once'"/>
               </do_if>
+
+              <!-- Strip carried defence drones before hostility. -->
+              <do_if value="$Station.units.{unitcategory.defence}.count">
+                <remove_units object="$Station" category="unitcategory.defence" mk="1"
+                              exact="$Station.units.{unitcategory.defence}.count"/>
+              </do_if>
+              <set_value name="$DefenceUnits" operation="add"
+                         exact="$Station.units.{unitcategory.defence}.count"/>
+
+              <do_if value="$Def.$hostile">
+                <add_relation_boost object="$Station" otherobject="player.ship"
+                                    value="$Station.owner.relation.kill.max"
+                                    decay="1" delay="60min" silent="true"/>
+                <do_if value="player.ship.mayattack.{$Station}">
+                  <set_value name="$Hostiles" operation="add"/>
+                </do_if>
+              </do_if>
+              <signal_objects object="player.galaxy" param="'init station'" param2="$Station" param3="true"/>
+
+              <!-- A hostile surface fixture must never return fire: keep the
+                   weapon surfaces installed for the arc test but hold every
+                   emitter and stop any queued shot.  ScenarioSafetyGuard
+                   reasserts this for as long as the station exists. -->
+              <do_if value="$Def.$holdfire">
+                <set_value name="$SafeObjectCount" operation="add"/>
+                <add_to_group groupname="ScenarioRoot.$SafeObjects" object="$Station"/>
+                <cease_fire object="$Station"/>
+                <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
+                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                  <do_if value="$Weapon.mode == weaponmode.holdfire">
+                    <set_value name="$SafeWeapons" operation="add"/>
+                  </do_if>
+                  <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
+                </do_for_each>
+                <do_for_each name="$Weapon" in="$Station.missileturrets.operational.list">
+                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
+                  <do_if value="$Weapon.mode == weaponmode.holdfire">
+                    <set_value name="$SafeWeapons" operation="add"/>
+                  </do_if>
+                  <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
+                </do_for_each>
+              </do_if>
+
+              <set_value name="$StationModules" operation="add" exact="$Station.modules.operational.count"/>
+              <set_value name="$StationTurrets" operation="add" exact="$Station.turrets.operational.count"/>
+              <set_value name="$StationMissileTurrets" operation="add" exact="$Station.missileturrets.operational.count"/>
+              <set_value name="$StationShields" operation="add" exact="$Station.shields.operational.count"/>
+              <set_value name="$StationEngines" operation="add" exact="$Station.engines.operational.count"/>
+              <debug_text text="'[X4GC TEST SCENARIO] created station=' + $Station + ' name=' + $Station.knownname + ' recipe=' + $Def.$recipe + ' geometry_pending=' + $AimSplit + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
             </do_for_each>
 
             <!-- Fail-closed controls for #67.  READY requires both exact
@@ -985,6 +960,12 @@
             <do_if value="ScenarioRoot.$RepairObjects?">
               <remove_value name="ScenarioRoot.$RepairObjects"/>
             </do_if>
+            <do_if value="ScenarioRoot.$GeometryStation?">
+              <remove_value name="ScenarioRoot.$GeometryStation"/>
+            </do_if>
+            <do_if value="ScenarioRoot.$GeometryShooter?">
+              <remove_value name="ScenarioRoot.$GeometryShooter"/>
+            </do_if>
             <reset_cue cue="ScenarioRepairArm"/>
             <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
           </actions>
@@ -1038,6 +1019,59 @@
             <do_else>
               <debug_text text="'[X4GC TEST SCENARIO] capture skipped; target no longer exists'"/>
             </do_else>
+          </actions>
+        </cue>
+
+        <!-- GeometryQualify
+             AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
+               {requestId = "..."})
+             Phase two of the #67 station B discriminator.  The owner has
+             teleported aboard the preserved Colossus and opened Test Lab once;
+             Lua verifies the exact turret set and fires this event.  Re-measure
+             the SAME preserved station B (ScenarioRoot.$GeometryStation) against
+             the SAME exact beam/plasma turrets (ScenarioRoot.$GeometryShooter),
+             now in system so the hittable aim target resolves to a real hull
+             surface.  Count root-OUTSIDE / aim-INSIDE / in-range turrets and
+             report the split back to Lua, which qualifies only on at least one
+             and fails closed otherwise.  Same geometry primitives as the OOS A/C
+             preflight; nothing here recreates or repositions the station. -->
+        <cue name="GeometryQualify" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'qualify_geometry'"/>
+          </conditions>
+          <actions>
+            <set_value name="$RequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
+            <set_value name="$Splits" exact="0"/>
+            <set_value name="$Measured" exact="0"/>
+            <do_if value="ScenarioRoot.$GeometryStation? and ScenarioRoot.$GeometryStation != null and ScenarioRoot.$GeometryStation.exists
+                          and ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null and ScenarioRoot.$GeometryShooter.exists">
+              <set_value name="$Station" exact="ScenarioRoot.$GeometryStation"/>
+              <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
+              <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
+                <do_if value="$GeometryWeapon.macro == macro.turret_arg_m_beam_02_mk1_macro
+                              or $GeometryWeapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
+                  <set_value name="$Measured" operation="add"/>
+                  <set_value name="$RootRelative" exact="$Station.relativeposition.{$GeometryWeapon}"/>
+                  <create_orientation name="$AimLocal" orientation="look_at"
+                                      refobject="$Station" useaimtarget="true">
+                    <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                  </create_orientation>
+                  <set_value name="$RootArcPass" exact="$RootRelative.rotation.pitch ge -10deg and $RootRelative.rotation.pitch le 90deg"/>
+                  <set_value name="$AimArcPass" exact="$AimLocal.pitch ge -10deg and $AimLocal.pitch le 90deg"/>
+                  <set_value name="$InRange" exact="$GeometryWeapon.bboxdistanceto.{$Station} le $GeometryWeapon.maxfirerange"/>
+                  <do_if value="not $RootArcPass and $AimArcPass and $InRange">
+                    <set_value name="$Splits" operation="add"/>
+                  </do_if>
+                  <debug_text text="'[X4GC TEST QUALIFY] role=aim_split_insystem station=' + $Station + ' station_id=' + $Station.idcode + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' aim_pitch=' + $AimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' aim_arc_pass=' + $AimArcPass + ' inrange=' + $InRange + ' range=' + $GeometryWeapon.bboxdistanceto.{$Station} + ' maxrange=' + $GeometryWeapon.maxfirerange"/>
+                </do_if>
+              </do_for_each>
+              <debug_text text="'[X4GC TEST QUALIFY] station_census station=' + $Station + ' station_id=' + $Station.idcode + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count + ' splits=' + $Splits + ' measured=' + $Measured"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST QUALIFY] FAILED; preserved station or shooter missing station=' + (if ScenarioRoot.$GeometryStation? then ScenarioRoot.$GeometryStation else null) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
+            </do_else>
+            <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
+                             param="'x4gcq1:' + $RequestId + ':' + (if $Splits ge 1 then 1 else 0) + ':' + $Splits + ':' + $Measured"/>
           </actions>
         </cue>
 

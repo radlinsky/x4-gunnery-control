@@ -217,11 +217,13 @@ grep -Fq "\$RootRelative.rotation.pitch lt -10deg and \$AimLocal.pitch lt -10deg
 
 # Issue #67 station B: a deterministic REMOTE xen_defence aim-target, created in
 # the shooter's sector space (schema: create_station sector= auto-tempzones) in
-# operational state with a construction plan, with a bounded DOWNWARD Y sweep
-# that keeps only a root-outside / aim-inside split and otherwise fails closed.
-# These assertions pin the creation SYNTAX only; the equipped surface census is
-# proven by the live READY census, not by operational state. No owner
-# trial-and-error coordinates.
+# operational state with a construction plan.  Two-phase: out of system the aim
+# target does not resolve to a real hull surface, so no root-outside/aim-inside
+# split can be measured at spawn.  The OOS create therefore PRESERVES exactly one
+# station at the attempt-0 position (no bounded search, no repositioning) and
+# marks geometry PENDING; the split is re-measured IN SYSTEM by GeometryQualify
+# after teleport.  These assertions pin the creation SYNTAX only; the equipped
+# surface census is proven by the live READY census, not by operational state.
 grep -Fq "constructionplan=\"'xen_defence'\"" "$scenario" \
   || fail "station B is not built from the shipped xen_defence construction plan"
 grep -Fq 'state="componentstate.operational"' "$scenario" \
@@ -230,29 +232,52 @@ grep -Fq "sector=\"\$ScenarioSector\" macro=\"macro.station_gen_factory_base_01_
   || fail "station B is not created remotely in the shooter's sector space"
 grep -Fq 'set_module_loadout_level' "$scenario" \
   || fail "station B does not set a module loadout level"
-grep -Fq "<do_while value=\"\$Attempt lt \$Def.\$searchattempts" "$scenario" \
-  || fail "station B has no bounded search over searchAttempts"
-grep -Fq "\$Attempt * \$Def.\$searchstepy" "$scenario" \
-  || fail "station B search does not step deterministically by searchStepY (vertical sweep)"
+# The OOS create must NOT run a bounded search or destroy candidate shells: the
+# split cannot be measured out of system, so exactly one station is preserved.
+if grep -Fq "<do_while value=\"\$Attempt lt \$Def.\$searchattempts" "$scenario"; then
+  fail "station B still runs a bounded OOS search; it must preserve exactly one attempt-0 station"
+fi
+grep -Fq 'preserved at attempt-0 for in-system qualification; geometry pending' "$scenario" \
+  || fail "station B is not preserved at attempt-0 with a geometry-pending marker"
+grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryStation\" exact=\"\$Station\"/>" "$scenario" \
+  || fail "station B is not persisted for the in-system GeometryQualify cue"
+grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryShooter\" exact=\"\$Ship\"/>" "$scenario" \
+  || fail "the exact shooter is not persisted for the in-system GeometryQualify cue"
+# Phase two: the in-system discriminator re-measures the SAME preserved station
+# against the SAME exact turrets, counts root-outside/aim-inside/in-range splits,
+# and reports them to Lua.  It must not recreate or reposition the station.
+grep -Fq "control=\"'qualify_geometry'\"" "$scenario" \
+  || fail "there is no in-system qualify_geometry cue"
 grep -Fq "not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
-  || fail "station B does not require a root-outside / aim-inside in-range split"
-grep -Fq "\$GeometrySplits\" operation=\"add\"" "$scenario" \
-  || fail "station B does not count a geometry split when one is found"
-grep -Fq 'FAILED role=aim_split' "$scenario" \
-  || fail "station B does not fail closed when the bounded search is exhausted"
-# Exhausted search must raise a preflight failure so READY is withheld; there
-# are now >= 2 add sites (the A/C controls and station B).
-[[ $(grep -Fc "\$PreflightFailures\" operation=\"add\"" "$scenario") -ge 2 ]] \
-  || fail "station B exhausted search does not raise a preflight failure"
+  || fail "the in-system discriminator does not require a root-outside / aim-inside in-range split"
+grep -Fq "\$Splits\" operation=\"add\"" "$scenario" \
+  || fail "the in-system discriminator does not count a geometry split"
+grep -Fq "raise_lua_event name=\"'X4GunneryTestLab.GeometryQualified'\"" "$scenario" \
+  || fail "the in-system discriminator does not report the split back to Lua"
+if grep -Fq 'create_station' <(grep -A40 "control=\"'qualify_geometry'\"" "$scenario"); then
+  fail "the in-system discriminator recreates the station instead of re-measuring the preserved one"
+fi
 grep -Fq "cease_fire object=\"\$Station\"" "$scenario" \
   || fail "station B is not force-ceased-fire for the held-fire safety census"
-# The UI gate makes READY require the real split and withholds it when the
-# search is exhausted: an aim_split station raises the required split count, and
-# READY fails unless the reported count matches it.
-grep -Fq 'expectedGeometrySplits = expectedGeometrySplits + 1' "$testlab_ui" \
-  || fail "aim_split stations do not raise the required geometry-split count"
+# The A/C controls still raise preflight failures; the station split is no longer
+# an OOS preflight gate (it is a separate in-system discriminator).
+[[ $(grep -Fc "\$PreflightFailures\" operation=\"add\"" "$scenario") -ge 2 ]] \
+  || fail "the A/C fail-closed controls no longer raise preflight failures"
+# The OOS acknowledgement must NOT expect any geometry split (they only resolve in
+# system), and the two-phase discriminator qualifies only on a real split.
+if grep -Fq 'expectedGeometrySplits = expectedGeometrySplits + 1' "$testlab_ui"; then
+  fail "aim_split stations must not expect an out-of-system geometry split"
+fi
 grep -Fq 'geometrySplits ~= request.expectedGeometrySplits' "$testlab_ui" \
-  || fail "READY does not gate on the required geometry-split count"
+  || fail "READY does not gate on the (zero) OOS geometry-split count"
+grep -Fq 'remoteGeometryPending = specHasAimSplit()' "$testlab_ui" \
+  || fail "the OOS acknowledgement does not enter the geometry-pending state for an aim_split station"
+grep -Fq 'action = "remote_geometry_pending"' "$testlab_ui" \
+  || fail "the OOS acknowledgement does not distinctly log geometry-pending (never geometrically ready)"
+grep -Fq 'qualify_geometry' "$testlab_ui" \
+  || fail "the post-teleport open does not trigger the in-system discriminator"
+grep -Fq 'qualified == 1 and splits >= 1' "$testlab_ui" \
+  || fail "qualification does not require at least one in-system root-outside/aim-inside split"
 
 # Issue #67 staged get_loadout probe. Shipped source proves the get_loadout
 # syntax and one successful use, but NOT what a missing ID leaves in result
