@@ -121,10 +121,13 @@ X4GunneryTestLabScenarioSpec = {
           behaviour = "wait", role = "shooter",
           loadout = "issue67_colossus_arc_barrel",
           stripDefenceUnits = true,
-          -- Live-proven (issue-67 run, X4 9.00): `.weapons.operational.count`
-          -- reports 4 here, matching `.turrets` — turret-mounted weapons are
-          -- counted in both. Colossus E arms group_front_left_up (beam) and
-          -- group_front_right_up (plasma), 2 turrets each. 4 turrets => weapons=4.
+          -- Census invariant: turret-mounted weapons are counted in both
+          -- `.weapons.operational.count` and `.turrets`, so 4 turrets =>
+          -- weapons=4. That invariant is live-tested on Behemoth E only
+          -- (X4 9.00, d7e3870). Colossus E arms group_front_left_up (beam) and
+          -- group_front_right_up (plasma), 2 turrets each: those slot/group
+          -- facts are shipped-source and the _02 beam/plasma compatibility is
+          -- inference — the Colossus mount and census are not yet live-verified.
           expectedWeapons = 4, expectedTurrets = 4,
           expectedBeam = 2, expectedPlasma = 2,
           expectedMissileTurrets = 0, expectedGuided = 0,

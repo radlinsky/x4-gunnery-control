@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml
 scenario=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
 loadouts=testlab/x4_gunnery_control_testlab/libraries/loadouts.xml
+arclimits=ui/turret_arc_limits.lua
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
@@ -193,6 +194,23 @@ grep -Fq "\$Control.\$role == 'below_arc'" "$scenario" \
   || fail "true CANNOT BEAR control has no fail-closed geometry preflight"
 grep -Fq "':' + \$ShooterWeapons + ':' + \$ShooterTurrets + ':' + \$ShooterBeam + ':' + \$ShooterPlasma + ':' + \$PreflightFailures + ':' + \$GeometrySplits" "$scenario" \
   || fail "READY omits ordinary-shooter and geometry-preflight census"
+
+# Issue #67 arc preflight is anchored to the production-generated elevation
+# limits for the EXACT turret macros the fixture mounts. The MD hardcodes the
+# -10/90 stops; they must stay equal to ui/turret_arc_limits.lua's generated
+# bounds for the chosen beam and plasma, or the in-arc/below-arc controls stop
+# exercising the real production arc gate. This is a shipped-source/generated
+# offline lock, not a live-mount claim.
+for arc_macro in turret_arg_m_beam_02_mk1_macro turret_arg_m_plasma_02_mk1_macro; do
+  grep -Fq "[\"$arc_macro\"] = { -10, 90 }" "$arclimits" \
+    || fail "generated arc limits for $arc_macro are not { -10, 90 }; #67 preflight bounds would drift"
+done
+[[ $(grep -Fc 'ge -10deg and $RootRelative.rotation.pitch le 90deg' "$scenario") -eq 1 ]] \
+  || fail "#67 root-arc preflight is not gated on the generated -10/90 elevation stops"
+[[ $(grep -Fc 'ge -10deg and $AimLocal.pitch le 90deg' "$scenario") -eq 1 ]] \
+  || fail "#67 aim-arc preflight is not gated on the generated -10/90 elevation stops"
+grep -Fq '$RootRelative.rotation.pitch lt -10deg and $AimLocal.pitch lt -10deg' "$scenario" \
+  || fail "#67 below-arc control does not require both bearings below the generated -10 stop"
 
 # Issue #67 staged get_loadout probe. Shipped source proves the get_loadout
 # syntax and one successful use, but NOT what a missing ID leaves in result

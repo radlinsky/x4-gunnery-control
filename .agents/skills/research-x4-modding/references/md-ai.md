@@ -158,6 +158,29 @@
   connection tags at all; under the inferred rule only the `_02_mk1`
   standard/hittable variants can fit these slots on this hull.
 
+### Issue #67 zero-barrel premise: the tested `_02` M turrets had nonzero barrelposition, and no source-backed zero-barrel case exists for the Colossus set
+- X4: 9.00
+- Status: live-tested
+- Source: Behemoth E issue-67 spawn-time preflight, full-restart run on SHA
+  `d7e3870`; Colossus turret geometry
+  `assets/units/size_xl/ship_arg_xl_carrier_02.xml:707-808`
+- Live test: partial — `weapon.barrelposition` was measured on Behemoth E only;
+  no beam or plasma has been live-mounted on a Colossus E
+- Finding: at spawn-time preflight the tested `_02` Argon M turrets reported
+  clearly nonzero `weapon.barrelposition` — beam ≈ `(-2.39787, 2.59794,
+  2.69955)`, plasma ≈ `(-2.44541, 2.47571, 3.40943)`. This is a bounded
+  negative for a zero/degenerate-barrel self-block premise on those exact
+  macros in that run. It does NOT prove Colossus-mounted barrel behavior: the
+  values are Behemoth E measurements, and the chosen Colossus set
+  (`turret_arg_m_beam_02_mk1_macro` in `group_front_left_up`,
+  `turret_arg_m_plasma_02_mk1_macro` in `group_front_right_up`) has an
+  unverified live mount. No source-backed zero-barrel premise exists for that
+  Colossus set, so the zero-barrel question stays an unreproduced bounded
+  negative for these macros, not a confirmed condition to fix.
+- Bound: barrel measurements are Behemoth-only; the Colossus mount is
+  unverified and the `_02` beam/plasma slot compatibility on this hull remains
+  inference (see the compatibility record above).
+
 ### Official extensions register loadout entries with a full root, and MD can consume an extension-defined ID
 - X4: 9.00
 - Status: shipped-source

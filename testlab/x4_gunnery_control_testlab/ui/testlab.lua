@@ -165,8 +165,10 @@ local function validateSpec(raw)
                 and expectedAmmo > 0
             -- issue67 arms group_front_left_up (beam, 2 turrets) and
             -- group_front_right_up (plasma, 2 turrets) via per-group loadout
-            -- entries. Live-proven: `.weapons` and `.turrets` both report 4
-            -- (turret-mounted weapons count in both).
+            -- entries. The census invariant (`.weapons` and `.turrets` both
+            -- count turret-mounted weapons => 4) is live-tested on Behemoth E
+            -- only (d7e3870); the Colossus mount/census is not yet live-verified
+            -- (slots shipped-source, _02 compatibility inference).
             local conventionalCensus = expectedWeapons == 4 and expectedTurrets == 4
                 and expectedBeam == 2 and expectedPlasma == 2
                 and expectedMissileTurrets == 0 and expectedAmmo == 0
