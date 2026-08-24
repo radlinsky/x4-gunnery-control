@@ -114,12 +114,21 @@ Verify every macro against the installed/current X4 sources through
 
 The proven Test Lab transport creates equipped ships. For stations, a
 `create_station` result, construction-plan module count, or visible shell is
-not evidence of an equipped surface-targeting fixture. Generate a faction
-loadout for each operational module, apply it, then withhold READY until the
-correlated live census confirms the expected modules and minimum operational
-turrets, missile turrets, shields, and engines. This path is reproduced for X4
-9.00's `xen_defence` plan: five modules, 120 turrets, 60 shields, and 185 total
-module/surface entries on the live fixture tested 2026-08-13.
+NOT evidence of an equipped surface-targeting fixture: withhold READY until the
+correlated live census confirms the expected modules and the minimum
+operational turrets, missile turrets, shields, and engines. Create the station
+`state="componentstate.operational"` with a shipped construction plan (e.g.
+`xen_defence`) plus `set_module_loadout_level`; do NOT hand-generate and apply a
+per-module faction loadout. The older `md.$EquipmentTable` generate/apply branch
+was dead code — that table is populated in no revision, so its guard was always
+false and the prior census occurred without it. Evidence bounds: the sector-space
+`create_station`/tempzone and operational-construction-plan syntax are
+shipped-source; the LOCAL `xen_defence` census — five modules, 120 turrets, 60
+shields, 185 total module/surface entries (2026-08-13) — is live-tested; that the
+dead branch was not responsible for that census is inference; and the
+remote-tempzone equipped census is unverified until the next live run, which is
+exactly why READY must re-verify the operational surfaces rather than trust the
+construction plan.
 
 Remote stations must be created with the resolved remote `sector` and an exact
 sector-space `position`; `player.zone` still belongs to the safe launcher at

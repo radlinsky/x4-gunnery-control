@@ -215,15 +215,17 @@ done
 grep -Fq "\$RootRelative.rotation.pitch lt -10deg and \$AimLocal.pitch lt -10deg" "$scenario" \
   || fail "#67 below-arc control does not require both bearings below the generated -10 stop"
 
-# Issue #67 station B: a deterministic REMOTE equipped xen_defence aim-target,
-# created in the shooter's sector space (schema: create_station sector= auto-
-# tempzones), equipped via an operational construction plan, with a bounded
-# DOWNWARD Y sweep that keeps only a root-outside / aim-inside split and
-# otherwise fails closed. No owner trial-and-error coordinates.
+# Issue #67 station B: a deterministic REMOTE xen_defence aim-target, created in
+# the shooter's sector space (schema: create_station sector= auto-tempzones) in
+# operational state with a construction plan, with a bounded DOWNWARD Y sweep
+# that keeps only a root-outside / aim-inside split and otherwise fails closed.
+# These assertions pin the creation SYNTAX only; the equipped surface census is
+# proven by the live READY census, not by operational state. No owner
+# trial-and-error coordinates.
 grep -Fq "constructionplan=\"'xen_defence'\"" "$scenario" \
   || fail "station B is not built from the shipped xen_defence construction plan"
 grep -Fq 'state="componentstate.operational"' "$scenario" \
-  || fail "station B is not created operational (equipped surfaces)"
+  || fail "station B is not created in operational state (equip path; surface census is verified live at READY, not here)"
 grep -Fq "sector=\"\$ScenarioSector\" macro=\"macro.station_gen_factory_base_01_macro\"" "$scenario" \
   || fail "station B is not created remotely in the shooter's sector space"
 grep -Fq 'set_module_loadout_level' "$scenario" \
