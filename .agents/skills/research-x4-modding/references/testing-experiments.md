@@ -229,3 +229,92 @@ Create after teleport despawned the occupied shooter and crashed the game; the
 UI now rejects that action. Also, an outer silhouette is not a valid obstruction
 control when the physical mesh has holes. Require complete visual occlusion and
 all exact muzzle rays blocked before permitting fire.
+
+## Issue #67 Colossus r9 diagnostic 2026-08-24: useful evidence, false qualification
+
+Experimental record; do not promote the arc or shoot-controller conclusions
+without the clean follow-up. X4 9.00 (611726), UI Extensions 9.00, X4 Gunnery
+Control 0.31, Test Lab 0.10, scenario
+`issue-67-arc-barrel-two-phase-r9`, tested HEAD `b751b4f`. The player began on
+a safe launcher in Two Grand, created the fixture remotely in Hatikvah's Choice
+I, teleported to `ISSUE ARC-BARREL COLOSSUS E 1`, and used its physical gunnery
+console. Evidence is the correlated game `debug.log` from the disposable save.
+
+What this session proved or reproduced:
+
+- Remote station equipment is not a locality or next-tick problem for the
+  tested path. `apply_loadout object="$Module"` immediately produced exactly
+  five modules, two `turret_xen_m_laser_02_mk1_macro`, four
+  `shield_xen_m_standard_02_mk1_macro`, no missile turrets, and no engines.
+  The 1 ms and in-system censuses matched. Together with r6 this is reproduced
+  live evidence; the durable bounded result is in `md-ai.md`.
+- The Colossus static loadout produced exactly two
+  `turret_arg_m_beam_02_mk1_macro` and two
+  `turret_arg_m_plasma_02_mk1_macro`, no other weapons or missile turrets. All
+  four fired, and all four produced attributed hits on clear control A. This
+  reproduces the r3 operational census and resolves the `_02_mk1` positive
+  compatibility question.
+- None of those four conventional turrets had a zero/degenerate
+  `weapon.barrelposition`. The spawn/qualification values matched the earlier
+  Behemoth measurements, then changed as the turrets trained. The exact #67
+  zero-barrel premise is therefore a bounded negative for these macros; the
+  one-session dynamic-value observation remains experimental.
+
+The in-system qualifier nevertheless false-qualified attempt 1/8 at station
+distance 5750 m, vertical offset -900 m, and roll 180 degrees. It logged
+`root_splits=0` but accepted `module_clear_candidates=2`. Those two candidates
+were plasma turrets against module `0x1789da`: each station-root origin and aim
+pitch was below the -10 degree lower limit, while that DIFFERENT module's origin
+and aim were both inside the arc. This was root-outside/module-inside, not the
+required same-component origin-outside/aim-inside split. The timed test still
+designated the station root, so the acceptance condition did not match the
+object under test.
+
+The A/B/C observations must remain separated:
+
+- A was the valid clear control. At settled mark 2 all four were in range,
+  inside the arc, externally clear, self-inclusive clear, ready, and firing.
+  The hull refreshed from 0/4 to 4/4 ENGAGEABLE after roughly two seconds, but
+  the five alternative surface rows remained at the 0/4 values computed in the
+  page snapshot. No surface element was directly designated, so this is a
+  suspected stale-snapshot UI defect, not evidence that the surface elements
+  themselves were or were not engageable.
+- B's station root was in range but below -10 degrees for all four turrets and
+  its root rays were blocked. Across the 20 exact station-module probes, every
+  self-inclusive muzzle ray was blocked. For every shooter turret, at least one
+  module ray became clear with the firing ship excluded, isolating own-Colossus
+  hull masking in the mod's geometry check. The two qualifying plasma/module
+  pairs were also in arc and in range, making them clean candidates for a direct
+  component test. B was not a clean engine-behavior result because the actual
+  designation remained the below-arc station root. In the later
+  `attackenemies` interval, 130 FIRED and 62 HIT events occurred while B was the
+  selected/aimed object; every hit was on fallback A and none had `istgt=1`.
+  That is consistent with CANNOT BEAR fallback and does not answer how X4 would
+  handle the in-arc module's own-hull-masked path.
+- C was in range and externally clear for all four, but below the lower arc
+  limit; its self-inclusive rays were also blocked. It did not fire and remains
+  a valid CANNOT BEAR control, not a line-of-fire discriminator.
+
+Questions still open for Issue #67:
+
+1. Can a deterministic station surface be placed so the SAME exact component's
+   origin pitch is outside the generated arc while its hittable aim-point pitch
+   is inside, with range and external line of fire independently clear? If no
+   bounded search finds one, record a bounded negative rather than weakening
+   the qualifier.
+2. When an exact conventional turret and exact directly designated component
+   are in arc and range, and `muzzle_los_ex=1` while `muzzle_los_self=0`, does
+   X4 fire and hit that component or hold fire? The r9 module candidates make
+   this the next clean test.
+3. Does directing `set_turret_targets` at a station root cause any engine-side
+   root-to-module selection, or is module engagement seen in vanilla solely the
+   result of explicit AI-script retargeting? Test this separately from the
+   direct-component masking case.
+4. Why did A's surface-page snapshot remain 0/4 after the pinned hull refreshed
+   to 4/4? Re-open/recompute and directly select one exact surface before
+   classifying this as a UI bug.
+
+Fixture rule: a qualifying component must be the component the timed action
+actually designates. Keep the arc split and own-hull masking as independent
+branches; a target with both CANNOT BEAR and a blocked line of fire cannot
+decide which condition controls firing.

@@ -130,15 +130,15 @@ NOT evidence of an equipped surface-targeting fixture: withhold READY until the
 correlated live census confirms the expected modules and the minimum
 operational turrets, missile turrets, shields, and engines.
 
-Remote station creation and equipment are live-tested in X4 9.00. Scenario
-`issue-67-arc-barrel-two-phase-r6` created a remote operational `xen_defence`
-station, selected one real operational defence module, and applied an exact
-loadout to that module. Its same-action-list census already showed 5 modules,
-2 standard M lasers, and 4 M shields; the 1 ms remote census and post-teleport
-in-system census were identical. Do not switch to local creation or add a delay
-to solve an empty census. See research `md-ai.md` "A remote operational station
-can receive exact turret and shield equipment synchronously" for the bounded
-evidence and rejected control.
+Remote station creation and equipment are live-tested in X4 9.00. Scenarios
+`issue-67-arc-barrel-two-phase-r6` and r9 independently created a remote
+operational `xen_defence` station, selected one real operational defence module,
+and applied an exact loadout to that module. Their same-action-list censuses
+already showed 5 modules, 2 standard M lasers, and 4 M shields; the 1 ms remote
+and post-teleport in-system censuses were identical. Do not switch to local
+creation or add a delay to solve an empty census. See research `md-ai.md` "A
+remote operational station can receive exact turret and shield equipment
+synchronously" for the bounded evidence and rejected control.
 
 The object target is critical: X4 documents `apply_loadout object=` as either a
 ship or a **station module**. Never pass the station root. After
@@ -195,6 +195,22 @@ rotation, separation, range, bearing, and external line of fire as independent
 fields.
 
 Never ask the owner to retry guessed coordinates in either case.
+
+A geometry qualifier must qualify the exact component that the timed test will
+designate. For an origin-vs-hittable-aim arc discriminator, require that SAME
+component's origin be outside the generated arc and its hittable aim point be
+inside, while range and the intended external/self-inclusive line-of-fire gates
+are independently satisfied. Never qualify a station-root test because the root
+is outside while some different module has both origin and aim inside. If the
+question is whether a root designation becomes a module engagement, make that a
+separate test: designate the root and instrument exact firing/hit components.
+
+Likewise, a self-excluding-clear/self-inclusive-blocked ray pair proves only
+that the firing ship masks the mod's direct ray. It does not establish what
+X4's shoot controller will do. To answer that engine-behavior question, directly
+designate the exact in-arc, in-range component producing the pair and observe
+per-turret firing plus attributed hits. Do not combine that discriminator with
+a below-arc target; CANNOT BEAR and LINE OF FIRE BLOCKED must be isolated.
 
 Do not use the equipped defence station as a clean per-turret arc fixture: it
 launches defence drones and clusters many surfaces at nearly the same bearing.

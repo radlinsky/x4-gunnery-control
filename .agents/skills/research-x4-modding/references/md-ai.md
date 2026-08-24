@@ -105,12 +105,11 @@
   across the centerline, so one forward target placement can exercise both
   groups without repositioning the ship.
 
-### Colossus E M slots accept the `_02_mk1` beam and plasma, not the `_01_mk1` pair
+### Colossus E live-mounts the `_02_mk1` beam and plasma; `_01_mk1` rejection remains inferred
 - X4: 9.00
-- Status: inference
-- Bound: the slot/socket tag sets and the census are shipped-source; the
-  compatibility rule that turns them into the accept/reject conclusion is
-  inference, and the conclusion is only as strong as that rule
+- Status: live-tested
+- Bound: the `_02_mk1` positive is live-tested on Colossus E. The `_01_mk1`
+  negative is still inferred from shipped tag geometry and was not live-tried.
 - Source: `assets/props/WeaponSystems/energy/turret_arg_m_beam_02_mk1.xml:328`
   (socket `con_beam_turret_01`), `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_02_mk1.xml:331`
   (socket `con_plasma_turret`); macros `turret_arg_m_beam_02_mk1_macro` and
@@ -119,9 +118,17 @@
   and `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_01_mk1.xml:11`; family
   census over all Argon M/L turret components in `01.cat`; vanilla loadouts
   `scenario_combat_arg_carrier_02` and `scenario_combat_arg_destroyer` in
-  `libraries/loadouts.xml`
-- Live test: no — tag comparison only; not yet live-mounted on a Colossus E
-- Finding: the tag facts are shipped-source: the slot tag set
+  `libraries/loadouts.xml`; controlled Test Lab runs
+  `issue-67-arc-barrel-two-phase-r3` at `f230345` and r9 at `b751b4f`, game
+  `debug.log`, 2026-08-24
+- Live test: yes — two fresh X4 processes produced the exact operational
+  Colossus census of two `turret_arg_m_beam_02_mk1_macro` and two
+  `turret_arg_m_plasma_02_mk1_macro` in the intended four slot paths, with no
+  other weapons or missile turrets. In r9 all four emitted FIRED events and
+  produced attributed hits on the clear A control.
+- Finding: the positive compatibility is no longer inference: the exact
+  `_02_mk1` pair mounts and fires on Colossus E. The tag facts that predicted it
+  are shipped-source: the slot tag set
   `combat hittable medium missile standard turret` matches
   `turret_arg_m_beam_02_mk1` (socket tags
   `turret medium standard component hittable combat`) and
@@ -130,13 +137,10 @@
   tag-comparison axis: kind `turret`, size `medium`, generation `standard`,
   durability `hittable`, and a weapon-family axis on which the slot
   advertises BOTH `combat` and `missile` and the equipment carries `combat`.
-  The extra `component` tag appears only on equipment sides. On that base the
-  `_02_mk1` beam and plasma are source-backed compatibility candidates for
-  these slots — nothing here proves a live mount; the vanilla Colossus loadout
-  mounts the M missile turrets in these front groups, and no beam or plasma
-  has yet been live-mounted on a Colossus E. The compatibility rule itself is
-  **inference** (the matching is engine-side C++ and no shipped script states
-  it): the family axis is two-valued on the slot and single-valued on the
+  The extra `component` tag appears only on equipment sides. The compatibility
+  rule inferred from those tags remains **inference** (matching is engine-side
+  C++ and no shipped script states it): the family axis is two-valued on the
+  slot and single-valued on the
   equipment — Argon M missile turrets (`turret_arg_m_guided_02_mk1`,
   `turret_arg_m_dumbfire_02_mk1`) are tagged `turret medium missile component
   hittable standard` (no `combat`) and the vanilla Colossus loadout mounts
@@ -158,38 +162,40 @@
   connection tags at all; under the inferred rule only the `_02_mk1`
   standard/hittable variants can fit these slots on this hull.
 
-### Issue #67 zero-barrel premise: the tested `_02` M turrets had nonzero barrelposition, and no source-backed zero-barrel case exists for the Colossus set
+### Issue #67 zero-barrel premise did not reproduce for the tested `_02` M turrets
 - X4: 9.00
 - Status: live-tested
 - Source: Behemoth E issue-67 spawn-time preflight, full-restart run on SHA
-  `d7e3870`; Colossus turret geometry
-  `assets/units/size_xl/ship_arg_xl_carrier_02.xml:707-808`
-- Live test: partial — `weapon.barrelposition` was measured on Behemoth E only;
-  no beam or plasma has been live-mounted on a Colossus E
+  `d7e3870`; Colossus E run `issue-67-arc-barrel-two-phase-r9` at `b751b4f`,
+  game `debug.log`, 2026-08-24
+- Live test: yes — the same exact beam/plasma macros reported nonzero barrel
+  positions on Behemoth E and on an operational Colossus E in separate X4
+  processes; the Colossus turrets also fired and hit the clear A control
 - Finding: at spawn-time preflight the tested `_02` Argon M turrets reported
   clearly nonzero `weapon.barrelposition` — beam ≈ `(-2.39787, 2.59794,
-  2.69955)`, plasma ≈ `(-2.44541, 2.47571, 3.40943)`. This is a bounded
-  negative for a zero/degenerate-barrel self-block premise on those exact
-  macros in that run. It does NOT prove Colossus-mounted barrel behavior: the
-  values are Behemoth E measurements, and the chosen Colossus set
-  (`turret_arg_m_beam_02_mk1_macro` in `group_front_left_up`,
-  `turret_arg_m_plasma_02_mk1_macro` in `group_front_right_up`) has an
-  unverified live mount. No source-backed zero-barrel premise exists for that
-  Colossus set, so the zero-barrel question stays an unreproduced bounded
-  negative for these macros, not a confirmed condition to fix.
-- Bound: barrel measurements are Behemoth-only; the Colossus mount is
-  unverified and the `_02` beam/plasma slot compatibility on this hull remains
-  inference (see the compatibility record above).
+  2.69955)`, plasma ≈ `(-2.44541, 2.47571, 3.40943)` — on both hulls. The r9
+  values then changed substantially as the Colossus turrets trained on A, B,
+  and C; for example, the settled A values were approximately
+  `(-2.68, 5.64, 6.06)` for the beams and `(-4.24, 5.76, 5.84)` for the
+  plasmas. Thus the exact zero/degenerate premise in #67 is a reproduced
+  negative for these macros, and `barrelposition` must not be assumed static.
+  No speculative production line-of-fire change follows from a zero-barrel
+  condition that was not observed.
+- Bound: the nonzero result is macro-specific. The changing Colossus values
+  were observed in one r9 session and are experimental as a claim about their
+  exact relationship to turret animation; reproduce that behavior before
+  generalizing it to other turrets or hulls.
 
 ### A remote operational station can receive exact turret and shield equipment synchronously
 - X4: 9.00
 - Status: live-tested
 - Source: `libraries/common.xsd:24586-24614` (`apply_loadout`; `object` is
   documented as either a ship or a station module); controlled Test Lab runs
-  `issue-67-arc-barrel-two-phase-r5` and `r6`, game `debug.log`, 2026-08-24;
+  `issue-67-arc-barrel-two-phase-r5`, r6, and r9, game `debug.log`, 2026-08-24;
   fixture implementation
   `testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml`
-- Live test: yes — two fresh X4 9.00 sessions from the same disposable save;
+- Live test: yes — r6 and r9 reproduced the successful exact census in two
+  fresh X4 9.00 processes from the same disposable save;
   the player began in Two Grand while Test Lab created the station in
   Hatikvah's Choice I, then the player teleported to the remote fixture
 - Finding: local station creation is NOT required for the tested path.
@@ -197,8 +203,9 @@
   constructionplan="'xen_defence'"` created the five-module shell remotely.
   Test Lab selected one operational
   `xenon_small_station_01_base_macro` module and applied an exact loadout to
-  that MODULE, not the station root. In r6 the immediate same-action-list census
-  was exactly 5 modules, 2 `turret_xen_m_laser_02_mk1_macro` standard lasers,
+  that MODULE, not the station root. In both r6 and r9 the immediate
+  same-action-list census was exactly 5 modules, 2
+  `turret_xen_m_laser_02_mk1_macro` standard lasers,
   4 `shield_xen_m_standard_02_mk1_macro` shields, 0 missile turrets, and 0
   engines. A cue delayed by 1 ms reported the same census while still remote;
   the post-teleport in-system census also matched and returned `equipped=1`.
@@ -466,6 +473,13 @@
   - `.defensible` is a base `component` property returning the component's containing defensible context. For a surface element (a turret/shield/engine component) it resolves to the PARENT ship or station, not the element itself. On a whole-object root, `$target == $target.defensible` holds (vanilla treats the two interchangeably, e.g. `move.attack.object.capital.xml:718` passes `$target.defensible` where `$target` is the attack target). This equality is the reliable root-vs-sub-element discriminator.
   - Two DISTINCT engine notions of "has separately-targetable parts": `ismodular` is true for STATIONS built from modules (production/storage/dock/**defence**/build). `canhaveattackablemodules` is a **ship-only** property (`ship` datatype) — "true iff the ship is defined to contain a defence module which indicates it may have targetable modules". A `defencemodule` is its own component class (`type="module"`); the disc/tube/claim defence-platform structures, the Khaak hive cluster, and asteroid turret bases are `defencemodule`-class. `.defencemodules` lists them.
   - Vanilla's per-module LOS retarget fallback (`move.attack.object.capital.xml:664`) is gated ONLY on `$target.defensible.ismodular and modules.operational.count gt 1`; when the root ray is blocked it iterates modules and RETARGETS the weapon to the first visible one (`$target = $locmodule`, `:684`). It does NOT reference `canhaveattackablemodules`. The `canhaveattackablemodules` gate lives in higher-level TARGET SELECTION (`lib.target.selection.xml:306-347`), which acquires a module as the target via `find_module`/`find_object_component` with `match module="ismodular or canhaveattackablemodules"` — a different mechanism than the move-script's retarget.
+  - That fallback is explicit AI-script retargeting, not proof that the
+    engine-side shoot controller automatically converts a station-root
+    `set_turret_targets` designation into a module designation. An ENGAGEABLE
+    implementation may mirror the geometry as a design choice, but must not
+    describe that approximation as observed engine behavior. Test
+    root-to-module behavior by logging the exact designated component and the
+    firing/hit component separately.
   - CONSEQUENCE for an ENGAGEABLE-style per-module fallback (#62): mirroring the vanilla `ismodular` fallback but running it against a player-selected SURFACE ELEMENT over-counts, because that element's `.defensible` is the whole modular station, so any weapon that can see ANY station module gets counted as engageable against the one element. Fix: gate the fallback on `$target == $target.defensible` (whole root only). Extending the gate with `or @$target.canhaveattackablemodules` (always `@`-guarded — the property errors on a non-ship, so a station root must read it via `@`) admits the rare capital ships that embed a defence module, matching vanilla target selection; it is inert where a ship's defence modules are not exposed through `.modules.operational.list`.
   - Subsystem taxonomy (Allectus mod, community `third-party-technique`, corroborates the engine grouping): SHIP subsystems are engines, missile launchers, S/M turrets, L/XL turrets, shield generators, and main (fixed) batteries; STATION subsystems are dock/storage/production/defence/shipyard modules. The mod also notes capital attackers only accept subsystems within line of sight at order start — the same LOS constraint this project models in ENGAGEABLE.
 
@@ -621,18 +635,24 @@
   That is the structural reason the passive polling capture of 2026-08-11 failed
   (see `testing-experiments.md`).
 
-### `weapon.barrelposition` is a static muzzle offset, not an aim direction
+### `weapon.barrelposition` is a muzzle position, not an aim direction
 - X4: 9.00
 - Status: shipped-source
 - Source: `props-9.00/libraries/scriptproperties.xml:1452` ("The position of the
   weapon's barrel (may be 0,0,0 for weapons with no collision)", type `position`);
   vanilla's only meaningful use at `md/cinematiccamera.xml:3224`, which reads
   `$Anchor.barrelposition` and immediately takes `.z` to frame a camera shot
-- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Live test: experimental — Issue #67 Colossus E r9 on 2026-08-24 logged
+  materially different values for the same four turrets after they trained on
+  different targets; this dynamic behavior has not yet been reproduced
 - Finding: the property is real, but it is a POSITION, not a direction, and the
-  one shipped consumer uses it as a static muzzle offset for camera framing on
-  fixed nose guns. Nothing indicates it tracks turret swivel, and it is
-  explicitly allowed to be `0,0,0`. Do not build aim-direction logic on it.
+  one shipped consumer uses its `.z` value for camera framing on fixed nose
+  guns. It is explicitly allowed to be `0,0,0`. The earlier inference that it
+  was static was wrong: r9 observed the values change as turrets trained. That
+  still does not make the property an aim direction or document its coordinate
+  frame. Do not build aim-direction logic on it, and do not classify a turret
+  as zero-barrel from an OOS or untrained sample without an in-system settled
+  measurement.
 
 ### No aiscript reads a turret's rotation
 - X4: 9.00
