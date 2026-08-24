@@ -217,21 +217,33 @@ grep -Fq "\$RootRelative.rotation.pitch lt -10deg and \$AimLocal.pitch lt -10deg
 
 # Issue #67 station B: a deterministic REMOTE xen_defence aim-target, created in
 # the shooter's sector space (schema: create_station sector= auto-tempzones) in
-# operational state with a construction plan.  Two-phase: out of system the aim
+# operational state with a construction plan. Two-phase: out of system the aim
 # target does not resolve to a real hull surface, so no root-outside/aim-inside
 # split can be measured at spawn.  The OOS create therefore PRESERVES exactly one
 # station at the attempt-0 position (no bounded search, no repositioning) and
-# marks geometry PENDING; the split is re-measured IN SYSTEM by GeometryQualify
-# after teleport.  These assertions pin the creation SYNTAX only; the equipped
-# surface census is proven by the live READY census, not by operational state.
+# marks geometry PENDING; the split and exact light module loadout are verified
+# IN SYSTEM by GeometryQualify after teleport.
 grep -Fq "constructionplan=\"'xen_defence'\"" "$scenario" \
   || fail "station B is not built from the shipped xen_defence construction plan"
 grep -Fq 'state="componentstate.operational"' "$scenario" \
-  || fail "station B is not created in operational state (equip path; surface census is verified live at READY, not here)"
+  || fail "station B is not created in operational state (equipment is verified separately in system)"
 grep -Fq "sector=\"\$ScenarioSector\" macro=\"macro.station_gen_factory_base_01_macro\"" "$scenario" \
   || fail "station B is not created remotely in the shooter's sector space"
-grep -Fq 'set_module_loadout_level' "$scenario" \
-  || fail "station B does not set a module loadout level"
+grep -Fq "\$Module.macro == macro.xenon_small_station_01_base_macro" "$scenario" \
+  || fail "station B does not select an actual Xenon defence module for its loadout"
+grep -Fq "apply_loadout object=\"\$StationLoadoutModule\" loadout=\"\$StationLoadout\"" "$scenario" \
+  || fail "station B does not apply the deterministic loadout to a station module"
+grep -Fq '<turrets macro="turret_xen_m_laser_02_mk1_macro" group="group01" exact="2"/>' "$scenario" \
+  || fail "station B does not request two non-integrated standard Xenon lasers in its medium group"
+if grep -Fq "apply_loadout object=\"\$Station\" loadout=\"\$StationLoadout\"" "$scenario"; then
+  fail "station B still applies its loadout to the station root instead of a module"
+fi
+for phase in immediate delayed_1ms insystem; do
+  grep -Fq "phase=$phase" "$scenario" \
+    || fail "station B does not log the $phase loadout census"
+done
+grep -Fq '<delay exact="1ms"/>' "$scenario" \
+  || fail "station B's delayed census does not yield to a later MD update"
 # The OOS create must NOT run a bounded search or destroy candidate shells: the
 # split cannot be measured out of system, so exactly one station is preserved.
 if grep -Fq "<do_while value=\"\$Attempt lt \$Def.\$searchattempts" "$scenario"; then
@@ -254,6 +266,10 @@ grep -Fq "\$Splits\" operation=\"add\"" "$scenario" \
   || fail "the in-system discriminator does not count a geometry split"
 grep -Fq "raise_lua_event name=\"'X4GunneryTestLab.GeometryQualified'\"" "$scenario" \
   || fail "the in-system discriminator does not report the split back to Lua"
+grep -Fq "\$Modules == 5 and \$Turrets == 2 and \$StandardLasers == 2" "$scenario" \
+  || fail "the in-system discriminator does not require the exact standard station loadout"
+grep -Fq "'x4gcq3:'" "$scenario" \
+  || fail "the in-system acknowledgement does not carry the station equipment census"
 if grep -Fq 'create_station' <(grep -A40 "control=\"'qualify_geometry'\"" "$scenario"); then
   fail "the in-system discriminator recreates the station instead of re-measuring the preserved one"
 fi
@@ -276,8 +292,8 @@ grep -Fq 'action = "remote_geometry_pending"' "$testlab_ui" \
   || fail "the OOS acknowledgement does not distinctly log geometry-pending (never geometrically ready)"
 grep -Fq 'qualify_geometry' "$testlab_ui" \
   || fail "the post-teleport open does not trigger the in-system discriminator"
-grep -Fq 'qualified == 1 and splits >= 1' "$testlab_ui" \
-  || fail "qualification does not require at least one in-system root-outside/aim-inside split"
+grep -Fq 'qualified == 1 and equipped == 1 and splits >= 1' "$testlab_ui" \
+  || fail "qualification does not require both exact station equipment and an in-system split"
 
 # Issue #67 staged get_loadout probe. Shipped source proves the get_loadout
 # syntax and one successful use, but NOT what a missing ID leaves in result

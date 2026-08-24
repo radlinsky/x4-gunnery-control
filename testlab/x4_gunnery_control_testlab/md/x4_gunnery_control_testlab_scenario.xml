@@ -271,6 +271,8 @@
             <set_value name="$GeometryShooter" exact="null"/>
             <set_value name="ScenarioRoot.$GeometryShooter" exact="null"/>
             <set_value name="ScenarioRoot.$GeometryStation" exact="null"/>
+            <set_value name="ScenarioRoot.$StationLoadoutModule" exact="null"/>
+            <set_value name="ScenarioRoot.$StationLoadoutRequestId" exact="''"/>
             <set_value name="$ClearArcTarget" exact="null"/>
             <set_value name="$BelowArcTarget" exact="null"/>
             <set_value name="$ClearArcRequested" exact="false"/>
@@ -642,20 +644,15 @@
               <debug_text text="'[X4GC TEST SCENARIO] group ' + $Def.$label + ' macro=' + $Def.$macro + ' faction=' + $Def.$faction + ' count=' + $Count + ' distance=' + $Def.$distance + ' behaviour=' + $Def.$behaviour"/>
             </do_for_each>
 
-            <!-- ScenarioStation consumer (#67 station B).  Deterministic remote
-                 equipped station via an operational xen_defence construction
-                 plan.  Shipped-source: common.xsd create_station sector= "creates
-                 a tempzone if a zone does not exist at the coordinates", and
-                 vanilla scenario_advanced.xml creates operational stations with a
-                 construction plan (see research md-ai.md).  For an aim_split role
-                 run a bounded DOWNWARD Y sweep and keep only a candidate where at
-                 least one exact selected beam/plasma turret is root-origin OUTSIDE
-                 the generated [-10,90] arc while its hittable aim point is INSIDE,
-                 in range.  Exhaust the sweep with no split -> fail closed:
-                 increment preflight failures and do not report READY.  The
-                 EquipmentTable/generate_loadout path used previously was dead code
-                 (that table is populated nowhere); equipping is from the
-                 operational plan plus set_module_loadout_level. -->
+            <!-- ScenarioStation consumer (#67 station B).  Create one preserved
+                 station remotely, then run a deliberately narrow station-module
+                 loadout discriminator.  common.xsd documents apply_loadout
+                 object= for a ship OR a station MODULE, not a station root.  Apply
+                 the deterministic standard loadout to one exact operational defence
+                 module and observe the station census immediately, after a
+                 delayed MD cue, and again in system.  Those observations are the
+                 experiment; no timing or remote-equipment conclusion is assumed
+                 here. -->
             <do_for_each name="$Def" in="ScenarioRoot.$PendingStations">
               <do_if value="$Def.$recipe != 'xen_defence'">
                 <debug_text text="'[X4GC TEST SCENARIO] skipping station ' + $Def.$label + '; unknown recipe=' + $Def.$recipe"/>
@@ -691,7 +688,34 @@
                           y="ScenarioRoot.$PendingAnchorY + $Def.$y"
                           z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
               </create_station>
-              <set_module_loadout_level object="$Station" exact="1.0"/>
+              <!-- Safe deterministic discriminator loadout: one defence module,
+                   two non-integrated standard medium lasers in group01, one
+                   medium shield in each of groups01-04, and no large group05
+                   equipment. -->
+              <create_loadout result="$StationLoadout">
+                <groups>
+                  <turrets macro="turret_xen_m_laser_02_mk1_macro" group="group01" exact="2"/>
+                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group01"/>
+                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group02"/>
+                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group03"/>
+                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group04"/>
+                </groups>
+              </create_loadout>
+              <set_value name="$StationLoadoutModule" exact="null"/>
+              <do_for_each name="$Module" in="$Station.modules.operational.list">
+                <do_if value="not $StationLoadoutModule and $Module.macro == macro.xenon_small_station_01_base_macro">
+                  <set_value name="$StationLoadoutModule" exact="$Module"/>
+                </do_if>
+              </do_for_each>
+              <do_if value="$StationLoadoutModule">
+                <apply_loadout object="$StationLoadoutModule" loadout="$StationLoadout"/>
+                <set_value name="ScenarioRoot.$StationLoadoutModule" exact="$StationLoadoutModule"/>
+                <set_value name="ScenarioRoot.$StationLoadoutRequestId" exact="ScenarioRoot.$PendingRequestId"/>
+              </do_if>
+              <do_else>
+                <set_value name="$StationLoadoutFailures" operation="add"/>
+                <debug_text text="'[X4GC TEST STATION LOADOUT] phase=apply FAILED reason=no_matching_module station=' + $Station + ' modules=' + $Station.modules.operational.count"/>
+              </do_else>
               <add_to_group groupname="ScenarioRoot.$SpawnedStations" object="$Station"/>
               <set_object_name object="$Station" name="$Def.$label"/>
               <do_if value="$AimSplit">
@@ -699,6 +723,15 @@
                 <set_value name="$GeometryPending" operation="add"/>
                 <debug_text text="'[X4GC TEST SCENARIO] station ' + $Def.$label + ' preserved at attempt-0 for in-system qualification; geometry pending station=' + $Station + '; teleport to the Colossus and open Test Lab once'"/>
               </do_if>
+
+              <set_value name="$ImmediateLasers" exact="0"/>
+              <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
+                <do_if value="$Weapon.macro == macro.turret_xen_m_laser_02_mk1_macro">
+                  <set_value name="$ImmediateLasers" operation="add"/>
+                </do_if>
+              </do_for_each>
+              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=immediate request_id=' + ScenarioRoot.$PendingRequestId + ' station=' + $Station + ' module=' + $StationLoadoutModule + ' module_macro=' + (if $StationLoadoutModule then $StationLoadoutModule.macro else null) + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' standard_lasers=' + $ImmediateLasers + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
+              <signal_cue cue="StationLoadoutDelayedCensus"/>
 
               <!-- Strip carried defence drones before hostility. -->
               <do_if value="$Station.units.{unitcategory.defence}.count">
@@ -848,6 +881,30 @@
           </actions>
         </cue>
 
+        <!-- The first post-action-list census.  A nonzero delay forces this into
+             a later MD update while the station remains remote/out of system. -->
+        <cue name="StationLoadoutDelayedCensus" instantiate="true">
+          <conditions>
+            <event_cue_signalled/>
+          </conditions>
+          <delay exact="1ms"/>
+          <actions>
+            <do_if value="ScenarioRoot.$GeometryStation? and ScenarioRoot.$GeometryStation != null and ScenarioRoot.$GeometryStation.exists">
+              <set_value name="$Station" exact="ScenarioRoot.$GeometryStation"/>
+              <set_value name="$DelayedLasers" exact="0"/>
+              <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
+                <do_if value="$Weapon.macro == macro.turret_xen_m_laser_02_mk1_macro">
+                  <set_value name="$DelayedLasers" operation="add"/>
+                </do_if>
+              </do_for_each>
+              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=delayed_1ms request_id=' + ScenarioRoot.$StationLoadoutRequestId + ' station=' + $Station + ' module=' + ScenarioRoot.$StationLoadoutModule + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' standard_lasers=' + $DelayedLasers + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=delayed_1ms FAILED reason=station_missing request_id=' + ScenarioRoot.$StationLoadoutRequestId"/>
+            </do_else>
+          </actions>
+        </cue>
+
         <!-- Repair only after a real player-ship hit. Unlike minimum-hull or
              invulnerability flags, this leaves the fixture attackable and its
              surface elements eligible for the vanilla shoot controller. -->
@@ -951,6 +1008,9 @@
               </do_for_each>
               <remove_value name="ScenarioRoot.$SpawnedStations"/>
             </do_if>
+            <set_value name="ScenarioRoot.$GeometryStation" exact="null"/>
+            <set_value name="ScenarioRoot.$StationLoadoutModule" exact="null"/>
+            <set_value name="ScenarioRoot.$StationLoadoutRequestId" exact="''"/>
             <do_if value="ScenarioRoot.$SafeObjects?">
               <remove_value name="ScenarioRoot.$SafeObjects"/>
             </do_if>
@@ -1043,10 +1103,29 @@
             <set_value name="$RequestId" exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
             <set_value name="$Splits" exact="0"/>
             <set_value name="$Measured" exact="0"/>
+            <set_value name="$Equipped" exact="false"/>
+            <set_value name="$StandardLasers" exact="0"/>
+            <set_value name="$Modules" exact="0"/>
+            <set_value name="$Turrets" exact="0"/>
+            <set_value name="$MissileTurrets" exact="0"/>
+            <set_value name="$Shields" exact="0"/>
+            <set_value name="$Engines" exact="0"/>
             <do_if value="ScenarioRoot.$GeometryStation? and ScenarioRoot.$GeometryStation != null and ScenarioRoot.$GeometryStation.exists
                           and ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null and ScenarioRoot.$GeometryShooter.exists">
               <set_value name="$Station" exact="ScenarioRoot.$GeometryStation"/>
               <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
+              <set_value name="$Modules" exact="$Station.modules.operational.count"/>
+              <set_value name="$Turrets" exact="$Station.turrets.operational.count"/>
+              <set_value name="$MissileTurrets" exact="$Station.missileturrets.operational.count"/>
+              <set_value name="$Shields" exact="$Station.shields.operational.count"/>
+              <set_value name="$Engines" exact="$Station.engines.operational.count"/>
+              <do_for_each name="$StationWeapon" in="$Station.turrets.operational.list">
+                <do_if value="$StationWeapon.macro == macro.turret_xen_m_laser_02_mk1_macro">
+                  <set_value name="$StandardLasers" operation="add"/>
+                </do_if>
+              </do_for_each>
+              <set_value name="$Equipped" exact="$Modules == 5 and $Turrets == 2 and $StandardLasers == 2
+                                                 and $MissileTurrets == 0 and $Shields == 4 and $Engines == 0"/>
               <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
                 <do_if value="$GeometryWeapon.macro == macro.turret_arg_m_beam_02_mk1_macro
                               or $GeometryWeapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
@@ -1065,13 +1144,14 @@
                   <debug_text text="'[X4GC TEST QUALIFY] role=aim_split_insystem station=' + $Station + ' station_id=' + $Station.idcode + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' aim_pitch=' + $AimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' aim_arc_pass=' + $AimArcPass + ' inrange=' + $InRange + ' range=' + $GeometryWeapon.bboxdistanceto.{$Station} + ' maxrange=' + $GeometryWeapon.maxfirerange"/>
                 </do_if>
               </do_for_each>
-              <debug_text text="'[X4GC TEST QUALIFY] station_census station=' + $Station + ' station_id=' + $Station.idcode + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count + ' splits=' + $Splits + ' measured=' + $Measured"/>
+              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=insystem request_id=' + $RequestId + ' station=' + $Station + ' module=' + ScenarioRoot.$StationLoadoutModule + ' modules=' + $Modules + ' turrets=' + $Turrets + ' standard_lasers=' + $StandardLasers + ' missile_turrets=' + $MissileTurrets + ' shields=' + $Shields + ' engines=' + $Engines + ' equipped=' + $Equipped"/>
+              <debug_text text="'[X4GC TEST QUALIFY] station_census station=' + $Station + ' station_id=' + $Station.idcode + ' modules=' + $Modules + ' turrets=' + $Turrets + ' missile_turrets=' + $MissileTurrets + ' shields=' + $Shields + ' engines=' + $Engines + ' equipped=' + $Equipped + ' splits=' + $Splits + ' measured=' + $Measured"/>
             </do_if>
             <do_else>
               <debug_text text="'[X4GC TEST QUALIFY] FAILED; preserved station or shooter missing station=' + (if ScenarioRoot.$GeometryStation? then ScenarioRoot.$GeometryStation else null) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
             </do_else>
             <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
-                             param="'x4gcq1:' + $RequestId + ':' + (if $Splits ge 1 then 1 else 0) + ':' + $Splits + ':' + $Measured"/>
+                             param="'x4gcq3:' + $RequestId + ':' + (if $Equipped and $Splits ge 1 then 1 else 0) + ':' + (if $Equipped then 1 else 0) + ':' + $Splits + ':' + $Measured + ':' + $Modules + ':' + $Turrets + ':' + $StandardLasers + ':' + $MissileTurrets + ':' + $Shields + ':' + $Engines"/>
           </actions>
         </cue>
 

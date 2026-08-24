@@ -95,7 +95,7 @@
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-arc-barrel-two-phase-r3",
+    id      = "issue-67-arc-barrel-two-phase-r6",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -148,29 +148,35 @@ X4GunneryTestLabScenarioSpec = {
           geometryRole = "below_arc" },
     },
     stations = {
-        -- B: the LARGE ROOT AIM-POINT target. A deterministic equipped Xenon
-        -- xen_defence station (five modules) placed forward of the shooter and
-        -- below it, so its root origin can drop below the front-upper turrets'
-        -- generated -10 degree elevation stop while a hittable upper-module
-        -- surface stays inside the arc. Two-phase: out of system the aim target
-        -- does not resolve to a real hull surface, so root and hittable-aim pitch
-        -- are near-identical and no split can be measured at spawn. Test Lab
-        -- therefore PRESERVES exactly one station at this attempt-0 position
+        -- B: the LARGE ROOT AIM-POINT target. A Xenon xen_defence station (five
+        -- modules) placed forward of the shooter and below it, so its root origin
+        -- can drop below the front-upper turrets' generated -10 degree elevation
+        -- stop while a hittable upper-module surface stays inside the arc.
+        -- Equipment discriminator: apply one deterministic SAFE loadout to one
+        -- actual xenon_small_station_01_base module, never to the station root:
+        -- two standard medium lasers in group01, four medium shields in groups01-04,
+        -- and no large/graviton equipment. The MD records the station census
+        -- immediately, after a 1 ms delayed cue, and in system. Only the in-system
+        -- census is a qualification gate; the earlier two are observations that
+        -- will tell us whether remote equipment is synchronous. Two-phase: OOS the
+        -- aim target does not resolve to a real hull surface, so root and
+        -- hittable-aim pitch are near-identical and no split can be measured at
+        -- spawn. Test Lab PRESERVES exactly one station at this attempt-0 position
         -- (searchAttempts = 1; no OOS repositioning), verifies its census, and
         -- reports geometry PENDING. After the owner teleports to the Colossus,
         -- opening Test Lab once re-measures this same station IN SYSTEM against the
         -- same four turrets and qualifies only on at least one root-OUTSIDE /
-        -- aim-INSIDE / in-range turret; no split fails closed. Held fire, drones
-        -- stripped. Anchor/minSurfaces are deterministic starting values the live
-        -- run tunes; the remote equipped census is unverified offline (see
-        -- md-ai.md station records). searchStepY is retained (unused by the
-        -- single-attempt preserve) only as a downward-search marker.
+        -- aim-INSIDE / in-range turret; no split fails closed. At Create,
+        -- minSurfaces intentionally requires only the five-module shell so a
+        -- deferred loadout can reach the in-system discriminator. The exact
+        -- turret-and-shield census is enforced only by that in-system check.
+        -- searchStepY is retained only as a downward-search marker.
         { label = "B LARGE ROOT AIM-POINT STATION",
           recipe = "xen_defence", faction = "xenon",
           distance = 6000, x = 0, y = -800, spread = 0,
           hostile = true, holdFire = true,
           geometryRole = "aim_split",
-          expectedModules = 5, minSurfaces = 100,
+          expectedModules = 5, minSurfaces = 5,
           searchAttempts = 1, searchStepY = -400 },
     },
 }

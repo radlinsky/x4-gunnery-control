@@ -126,19 +126,46 @@ The proven Test Lab transport creates equipped ships. For stations, a
 `create_station` result, construction-plan module count, or visible shell is
 NOT evidence of an equipped surface-targeting fixture: withhold READY until the
 correlated live census confirms the expected modules and the minimum
-operational turrets, missile turrets, shields, and engines. Create the station
-`state="componentstate.operational"` with a shipped construction plan (e.g.
-`xen_defence`) plus `set_module_loadout_level`; do NOT hand-generate and apply a
-per-module faction loadout. The older `md.$EquipmentTable` generate/apply branch
-was dead code — that table is populated in no revision, so its guard was always
-false and the prior census occurred without it. Evidence bounds: the sector-space
-`create_station`/tempzone and operational-construction-plan syntax are
-shipped-source; the LOCAL `xen_defence` census — five modules, 120 turrets, 60
-shields, 185 total module/surface entries (2026-08-13) — is live-tested; that the
-dead branch was not responsible for that census is inference; and the
-remote-tempzone equipped census is unverified until the next live run, which is
-exactly why READY must re-verify the operational surfaces rather than trust the
-construction plan.
+operational turrets, missile turrets, shields, and engines.
+
+Remote station creation and equipment are live-tested in X4 9.00. Scenario
+`issue-67-arc-barrel-two-phase-r6` created a remote operational `xen_defence`
+station, selected one real operational defence module, and applied an exact
+loadout to that module. Its same-action-list census already showed 5 modules,
+2 standard M lasers, and 4 M shields; the 1 ms remote census and post-teleport
+in-system census were identical. Do not switch to local creation or add a delay
+to solve an empty census. See research `md-ai.md` "A remote operational station
+can receive exact turret and shield equipment synchronously" for the bounded
+evidence and rejected control.
+
+The object target is critical: X4 documents `apply_loadout object=` as either a
+ship or a **station module**. Never pass the station root. After
+`create_station`, choose the intended object from
+`$Station.modules.operational.list`, verify its exact macro, and apply to that
+module:
+
+- For an EXACT safe set, build a `create_loadout` with group-targeted
+  `<turrets .../>` and `<shields .../>`, then
+  `apply_loadout object="$Module"`. Verify the equipment macro's component tags
+  and integrated/path semantics against the module's connection tags before the
+  run. The r6 control used non-integrated
+  `turret_xen_m_laser_02_mk1_macro` in `group01` and succeeded immediately.
+  The preceding r5 request used integrated
+  `turret_xen_m_gatling_01_mk1_macro` as a group entry and silently installed
+  zero turrets while its shields succeeded; shipped loadouts use that gatling
+  through singular path-targeted entries. Macro existence alone is insufficient.
+- For a full faction loadout on already-operational modules, follow the earlier
+  proven Test Lab shape: iterate the module list, `generate_loadout` with the
+  station macro plus the exact module macro and faction equipment pool, then
+  `apply_loadout object="$Module"`. Vanilla also supports sequence/index
+  generation and application while finalising a construction sequence.
+  `md.$EquipmentTable` is a vanilla global populated in `md/setup.xml`, including
+  Xenon; do not mistake the absence of a repository assignment for an absent
+  game-global table.
+
+Keep the immediate, delayed, and final operational census when timing itself is
+under test, but READY must always depend on the final exact census rather than
+on creation success, module count, or an assumed timing rule.
 
 Remote stations must be created with the resolved remote `sector` and an exact
 sector-space `position`; `player.zone` still belongs to the safe launcher at

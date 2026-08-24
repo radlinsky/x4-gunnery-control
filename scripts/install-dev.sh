@@ -23,5 +23,10 @@ if [[ -n "${X4GC_INSTALL_TESTLAB:-}" ]]; then
   rm -rf "$testlab"
   mkdir -p "$testlab"
   cp -R testlab/x4_gunnery_control_testlab/. "$testlab/"
-  echo "Installed loose Test Lab files to $testlab"
+  # The committed spec stays enabled=false so the offline suite passes; a dev
+  # install is always for a live run, so enable only the installed copy.
+  spec="$testlab/ui/scenario_spec.lua"
+  sed -i 's/^    enabled = false,/    enabled = true,/' "$spec"
+  grep -q '^    enabled = true,' "$spec" || { echo "Failed to enable installed Test Lab spec" >&2; exit 3; }
+  echo "Installed loose Test Lab files to $testlab (spec enabled)"
 fi

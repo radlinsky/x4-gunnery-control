@@ -823,14 +823,17 @@ local function onScenarioReady(_, param)
         remoteScenarioReady = true
         remoteGeometryPending = specHasAimSplit()
         if remoteGeometryPending then
-            -- Census verified, but station B geometry is NOT yet qualified: the
-            -- root-vs-aim split only resolves in system. Do not call it READY.
-            scenarioActionStatus = "PENDING: remote census verified but station B geometry is NOT qualified; teleport to "
+            -- The remote shell/module census is verified, but both station
+            -- equipment and geometry remain experimental until the in-system
+            -- qualifier reports them. Do not call the fixture READY here.
+            scenarioActionStatus = "PENDING: remote station shell verified; equipment and geometry are NOT qualified; teleport to "
                 .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it re-measures station B "
-                .. "in system and qualifies only on a root-outside/aim-inside split"
+                .. "in system and qualifies only with the exact standard loadout and a root-outside/aim-inside split"
             log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
                 spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
-                operational_surfaces = surfaces, shooters = shooters,
+                operational_surfaces = surfaces, turrets = turrets,
+                missile_turrets = missileTurrets, shields = shields, engines = engines,
+                shooters = shooters,
                 weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
                 beam = shooterBeam, plasma = shooterPlasma,
                 geometry_splits = geometrySplits, preflight_failures = preflightFailures,
@@ -885,18 +888,24 @@ local function onScenarioReady(_, param)
 end
 
 -- Phase-two acknowledgement for the #67 station B discriminator. MD re-measured
--- the preserved station against the exact turrets in system and reported the
--- split count. Qualify (arm the group, observe, return to Gunnery) only on at
--- least one root-outside/aim-inside/in-range turret; otherwise fail closed and
--- never begin the A/B/C diagnostic.
+-- the preserved station against the exact turrets in system and reported both
+-- its equipment census and split count. Qualify only when the exact two-laser,
+-- four-shield module loadout is present AND at least one turret has the required
+-- root-outside/aim-inside/in-range split.
 local function onGeometryQualified(_, param)
-    local token, qualified, splits, measured =
-        tostring(param or ""):match("^x4gcq1:([^:]+):(%d+):(%d+):(%d+)$")
+    local token, qualified, equipped, splits, measured, modules, turrets, standardLasers,
+        missileTurrets, shields, engines =
+        tostring(param or ""):match("^x4gcq3:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
-    qualified, splits, measured = tonumber(qualified), tonumber(splits), tonumber(measured)
-    if qualified == 1 and splits >= 1 then
+    qualified, equipped = tonumber(qualified), tonumber(equipped)
+    splits, measured = tonumber(splits), tonumber(measured)
+    modules, turrets, standardLasers = tonumber(modules), tonumber(turrets), tonumber(standardLasers)
+    missileTurrets, shields, engines = tonumber(missileTurrets), tonumber(shields), tonumber(engines)
+    if qualified == 1 and equipped == 1 and splits >= 1
+            and modules == 5 and turrets == 2 and standardLasers == 2
+            and missileTurrets == 0 and shields == 4 and engines == 0 then
         applyExactGroup(request.selection)
         remoteScenarioReady = false
         remoteGeometryPending = false
@@ -905,18 +914,30 @@ local function onGeometryQualified(_, param)
             .. " armed; returning to Gunnery Control"
         log("geometry_qualify", { action = "qualified", request_id = request.requestId,
             splits = splits, measured = measured, ship_id = request.selection.shipID,
+            station_modules = modules, station_turrets = turrets,
+            station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
+            station_shields = shields, station_engines = engines,
             group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
             member_macros = request.selection.memberMacros })
         setObserving(true)
         returnToGunnery("geometry_qualified")
     else
-        -- Fail closed: no in-system split means the discriminator cannot separate
-        -- root from hittable aim, so do not arm the group, do not observe, and do
-        -- not begin the diagnostic. The owner teleports away and re-runs.
-        scenarioActionStatus = "FAILED: in-system station B had no root-outside/aim-inside split (splits="
-            .. splits .. "/" .. measured .. " measured); diagnostic not started"
+        -- Fail closed on either branch of the combined discriminator.
+        if equipped ~= 1 then
+            scenarioActionStatus = "FAILED: in-system station B loadout census was "
+                .. modules .. " modules, " .. turrets .. " turrets (" .. standardLasers
+                .. " standard lasers), " .. missileTurrets .. " missile turrets, "
+                .. shields .. " shields, and " .. engines
+                .. " engines; expected 5/2/2/0/4/0; diagnostic not started"
+        else
+            scenarioActionStatus = "FAILED: in-system station B had no root-outside/aim-inside split (splits="
+                .. splits .. "/" .. measured .. " measured); diagnostic not started"
+        end
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
-            splits = splits, measured = measured })
+            equipped = equipped, splits = splits, measured = measured,
+            station_modules = modules, station_turrets = turrets,
+            station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
+            station_shields = shields, station_engines = engines })
         menu.display()
     end
 end

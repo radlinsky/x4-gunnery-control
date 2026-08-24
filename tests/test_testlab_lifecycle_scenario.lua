@@ -544,10 +544,11 @@ local function shippedTwoPhaseToQualify()
     local events = scenarioEvents(harness)
     assert(#events == 6, "shipped Create must stream begin + 3 groups + station + commit")
     local requestId = events[1].params.requestId
-    -- OOS census passes with geometry_splits=0 and preflight_failures=0; station B
-    -- preserved (185 operational surfaces from the local KB census).
+    -- OOS Create deliberately requires only the five-module shell. The immediate
+    -- equipment census may still be zero; MD logs it and a delayed census before
+    -- the in-system qualifier enforces the exact light module loadout.
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r3:3:1:5:120:0:60:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r6:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending")
             and harness.fix.logContains("geometry_splits=0"),
@@ -586,13 +587,15 @@ do
     end
     assert(issued == 1, "a pending discriminator must not be re-issued on a repeat open")
 
-    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified", "x4gcq1:" .. qToken .. ":1:2:4")
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq3:" .. qToken .. ":1:1:2:4:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
         "an in-system split must arm the exact turret set and return to Gunnery")
     assert(harness.fix.logContains("action=qualified")
             and harness.fix.logContains("splits=2")
+            and harness.fix.logContains("station_standard_lasers=2")
             and harness.fix.logContains(beam) and harness.fix.logContains(plasma),
-        "qualification must log the split and the exact armed two-beam/two-plasma set")
+        "qualification must log the split, station lasers, and exact armed two-beam/two-plasma set")
     local observed = false
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
         if event.control == "observe_toggle" and event.params.enabled == true then observed = true end
@@ -610,7 +613,8 @@ do
             observeBefore = observeBefore + 1
         end
     end
-    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified", "x4gcq1:" .. qToken .. ":0:0:4")
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq3:" .. qToken .. ":0:1:0:4:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "a no-split in-system result must fail closed and not begin the diagnostic")
     assert(harness.fix.logContains("action=failed"),
@@ -623,6 +627,20 @@ do
     end
     assert(observeAfter == observeBefore,
         "failing the discriminator must not arm firing-solution observation")
+end
+
+-- A geometry split cannot conceal an unequipped station. The in-system module
+-- census is an independent fail-closed branch of the combined discriminator.
+do
+    local harness, qToken = shippedTwoPhaseToQualify()
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq3:" .. qToken .. ":0:0:2:4:5:0:0:0:0:0")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "an unequipped station must not arm the diagnostic even when a split exists")
+    assert(harness.fix.logContains("action=failed")
+            and harness.fix.logContains("station_turrets=0")
+            and harness.fix.logContains("station_shields=0"),
+        "equipment failure must log the exact in-system station census")
 end
 
 -- Outside an occupied remote shooter, Despawn remains active and emits the
@@ -955,7 +973,7 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-two-phase-r3"
+    assert(shipped.id == "issue-67-arc-barrel-two-phase-r6"
             and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
             and shipped.setup.turretGroup == "group_front_left_up"
             and shipped.setup.selectAll == true
@@ -974,9 +992,9 @@ do
     local stationB = shipped.stations[1]
     assert(stationB.recipe == "xen_defence" and stationB.geometryRole == "aim_split"
             and stationB.hostile == true and stationB.holdFire == true
-            and stationB.expectedModules == 5 and stationB.minSurfaces >= 1
+            and stationB.expectedModules == 5 and stationB.minSurfaces == 5
             and stationB.searchAttempts >= 1 and stationB.searchStepY < 0,
-        "station B must be a held-fire xen_defence aim_split target with a bounded downward Y search")
+        "station B must be a held-fire xen_defence aim_split target at the preserved attempt-0 position")
 end
 
 -- The shipped spec streams station B as a deterministic aim_split target with
@@ -990,10 +1008,10 @@ do
     assert(#events == 6, "shipped Create must stream begin + 3 groups + 1 station + commit")
     local station = events[5].params
     assert(station.recipe == "xen_defence" and station.geometryRole == "aim_split"
-            and station.expectedModules == 5 and station.minSurfaces >= 1
+            and station.expectedModules == 5 and station.minSurfaces == 5
             and station.searchAttempts >= 1 and station.searchStepY < 0
             and station.hostile == true and station.holdFire == true,
-        "station B transport must carry recipe, aim_split role, census, and bounded downward search")
+        "station B transport must carry its recipe, aim_split role, census, and preserved-position marker")
 end
 
 -- The shipped spec must be ACCEPTED by validateSpec/loadSpec, not merely well
@@ -1015,7 +1033,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r3", 1, true),
+    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r6", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)
