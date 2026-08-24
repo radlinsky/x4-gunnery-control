@@ -192,7 +192,7 @@
   the repository file; Test Lab MD
   `x4_gunnery_control_testlab_scenario.xml:376-432`
 - Live test: yes — one full-X4-restart run reached the `static_ref` branch and
-  created `x4gc_testlab_issue67_behemoth_arc_barrel`; the resulting Behemoth
+  created a Behemoth using `<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>`; the resulting Behemoth
   reported 0 weapons and 0 turrets, with no identified log error, on 2026-08-23
 - Finding: the former "untested" status is stale. This is a bounded negative
   result: it does NOT distinguish a missing/unresolved library ID from a
@@ -221,7 +221,7 @@
   `x4gc_testlab_issue67_behemoth_arc_barrel` with macro
   `ship_arg_l_destroyer_02_a_macro`, logging whether its result is present;
   that separates ID lookup/registration failure from a later create/apply
-  failure without redesigning the Colossus fixture. Do not infer a corrective
+  failure without redesigning the current Behemoth fixture. Do not infer a corrective
   XML change from the current evidence.
 
 ### Transient singular-turret loadouts are unreliable on the Behemoth E
