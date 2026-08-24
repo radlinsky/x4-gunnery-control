@@ -255,11 +255,9 @@ grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryStation\" exact=\"\$Station\"
   || fail "station B is not persisted for the in-system GeometryQualify cue"
 grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryShooter\" exact=\"\$Ship\"/>" "$scenario" \
   || fail "the exact shooter is not persisted for the in-system GeometryQualify cue"
-# Phase two: the in-system discriminator moves the SAME preserved station through
-# a bounded search against the SAME exact turrets. The timed test keeps the station
-# root selected, while the qualifier records root origin/aim plus every operational
-# module's origin/aim independently after a nonzero post-warp delay. It must not
-# recreate the station or require manual coordinate retries.
+# Phase two: the in-system discriminator moves the SAME preserved station to the
+# one r9 position and measures the SAME exact turrets. The timed test directly
+# designates the exact qualifying module; root geometry remains diagnostic.
 grep -Fq "control=\"'qualify_geometry'\"" "$scenario" \
   || fail "there is no in-system qualify_geometry cue"
 grep -Fq "<warp object=\"ScenarioRoot.\$GeometryStation\" sector=\"ScenarioRoot.\$GeometryShooter.sector\">" "$scenario" \
@@ -296,11 +294,21 @@ grep -Fq "\$Separated and not \$RootArcPass and \$ModuleAimArcPass and \$ModuleI
   || fail "the in-system discriminator does not count root-outside/module-aim-inside candidates"
 grep -Fq "exact=\"\$ModuleAimCandidate and \$ModuleMuzzleLosEx\"" "$scenario" \
   || fail "the in-system discriminator does not distinguish externally clear module candidates"
+grep -Fq "and \$Separated and \$ModuleOriginArcPass and \$ModuleAimArcPass" "$scenario" \
+  || fail "the direct-module discriminator does not require origin and hittable aim in the same arc"
+grep -Fq "and \$ModuleInRange and \$ModuleMuzzleLosEx and not \$ModuleMuzzleLosSelf" "$scenario" \
+  || fail "the direct-module discriminator does not isolate external-clear/self-inclusive-blocked line of fire"
+grep -Fq "exact=\"@\$Shooter.mayattack.{\$GeometryModule}\"" "$scenario" \
+  || fail "the direct-module discriminator does not require legal attackability"
+grep -Fq "exact=\"\$Equipped and \$MaskingModule != null and \$MaskingModuleMembers == 2\"" "$scenario" \
+  || fail "qualification does not require both exact plasma turrets against one masking module"
+grep -Fq "raise_lua_event name=\"'X4GunneryTestLab.GeometryQualifiedTarget'\" param=\"\$MaskingModule\"" "$scenario" \
+  || fail "the exact qualifying component is not transported to Lua as a component"
 grep -Fq "raise_lua_event name=\"'X4GunneryTestLab.GeometryQualified'\"" "$scenario" \
   || fail "the in-system discriminator does not report the split back to Lua"
 grep -Fq "\$Modules == 5 and \$Turrets == 2 and \$StandardLasers == 2" "$scenario" \
   || fail "the in-system discriminator does not require the exact standard station loadout"
-grep -Fq "'x4gcq5:'" "$scenario" \
+grep -Fq "'x4gcq6:'" "$scenario" \
   || fail "the in-system acknowledgement does not carry search attempt, independent geometry, and station census"
 if grep -Fq 'create_station' <(grep -A40 "control=\"'qualify_geometry'\"" "$scenario"); then
   fail "the in-system discriminator recreates the station instead of moving the preserved one"
@@ -311,8 +319,8 @@ grep -Fq "cease_fire object=\"\$Station\"" "$scenario" \
 # an OOS preflight gate (it is a separate in-system discriminator).
 [[ $(grep -Fc "\$PreflightFailures\" operation=\"add\"" "$scenario") -ge 2 ]] \
   || fail "the A/C fail-closed controls no longer raise preflight failures"
-# The OOS acknowledgement must NOT expect any geometry split (they only resolve in
-# system), and the two-phase discriminator qualifies only on a real split.
+# The OOS acknowledgement must NOT expect any geometry split. The post-teleport
+# direct-module discriminator has its own exact masking qualification.
 if grep -Fq 'expectedGeometrySplits = expectedGeometrySplits + 1' "$testlab_ui"; then
   fail "aim_split stations must not expect an out-of-system geometry split"
 fi
@@ -324,10 +332,14 @@ grep -Fq 'action = "remote_geometry_pending"' "$testlab_ui" \
   || fail "the OOS acknowledgement does not distinctly log geometry-pending (never geometrically ready)"
 grep -Fq 'qualify_geometry' "$testlab_ui" \
   || fail "the post-teleport open does not trigger the in-system discriminator"
-grep -Fq 'and (rootSplits >= 1 or moduleClearCandidates >= 1)' "$testlab_ui" \
-  || fail "qualification does not require exact equipment plus either a root split or clear module aim candidate"
-grep -Fq 'designated_target = "station_root"' "$testlab_ui" \
-  || fail "qualification does not explicitly preserve the station root as the timed-test designation"
+grep -Fq 'and maskingMembers == 2 and request.designatedComponent ~= nil' "$testlab_ui" \
+  || fail "Lua does not independently require both masking plasma members and an exact component"
+grep -Fq 'bridge.engageTarget(request.designatedComponent)' "$testlab_ui" \
+  || fail "Test Lab does not directly engage the exact transported component"
+grep -Fq 'X4GunneryState.setDirectMode(request.selection.session, "autoassist")' "$testlab_ui" \
+  || fail "the clean component test does not force strict Direct-control"
+grep -Fq 'designated_target = "station_module"' "$testlab_ui" \
+  || fail "qualification does not log the exact station module as the timed-test designation"
 
 # Issue #67 staged get_loadout probe. Shipped source proves the get_loadout
 # syntax and one successful use, but NOT what a missing ID leaves in result

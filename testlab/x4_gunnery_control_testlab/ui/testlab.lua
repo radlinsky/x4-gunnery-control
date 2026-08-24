@@ -887,18 +887,25 @@ local function onScenarioReady(_, param)
     returnToGunnery("scenario_ready")
 end
 
--- Phase-two acknowledgement for the #67 station B discriminator. MD keeps the
--- preserved station root designated while moving that same station through a
--- bounded in-system search. It reports the terminal attempt, root-origin/root-
--- aim geometry, and per-module origin/aim geometry independently. Qualify only
--- when the exact two-laser, four-shield module loadout is present AND either the
--- root split is real or a module aim-point candidate has a clear external
--- muzzle line of fire.
+-- MD sends the exact qualifying component as a component-valued event before
+-- the packed terminal census. Keeping the component typed avoids parsing the
+-- engine's platform-dependent UniverseID string form.
+local function onGeometryQualifiedTarget(_, component)
+    if not pendingQualify or component == nil then return end
+    pendingQualify.designatedComponent = component
+end
+
+-- Phase-two acknowledgement for the #67 direct-component masking
+-- discriminator. Qualify only when the exact station loadout is present and
+-- both selected plasma turrets reproduce, against the SAME module: origin and
+-- hittable aim in arc, in range, externally clear, and self-inclusive blocked.
+-- Test Lab then directly engages that transported module in strict autoassist;
+-- the below-arc station root is never the timed target.
 local function onGeometryQualified(_, param)
     local token, qualified, equipped, attempt, searchCount, rootSplits, moduleOriginCandidates,
-        moduleAimCandidates, moduleClearCandidates, measured, modulePairs,
+        moduleAimCandidates, moduleClearCandidates, maskingMembers, measured, modulePairs,
         modules, turrets, standardLasers, missileTurrets, shields, engines =
-        tostring(param or ""):match("^x4gcq5:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        tostring(param or ""):match("^x4gcq6:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
@@ -908,30 +915,46 @@ local function onGeometryQualified(_, param)
     moduleOriginCandidates = tonumber(moduleOriginCandidates)
     moduleAimCandidates = tonumber(moduleAimCandidates)
     moduleClearCandidates = tonumber(moduleClearCandidates)
+    maskingMembers = tonumber(maskingMembers)
     measured, modulePairs = tonumber(measured), tonumber(modulePairs)
     modules, turrets, standardLasers = tonumber(modules), tonumber(turrets), tonumber(standardLasers)
     missileTurrets, shields, engines = tonumber(missileTurrets), tonumber(shields), tonumber(engines)
     if qualified == 1 and equipped == 1
-            and (rootSplits >= 1 or moduleClearCandidates >= 1)
+            and maskingMembers == 2 and request.designatedComponent ~= nil
             and modules == 5 and turrets == 2 and standardLasers == 2
             and missileTurrets == 0 and shields == 4 and engines == 0 then
         applyExactGroup(request.selection)
+        X4GunneryState.setDirectMode(request.selection.session, "autoassist")
+        local bridge = api()
+        local engaged = bridge and bridge.engageTarget
+            and bridge.engageTarget(request.designatedComponent)
+        if not engaged then
+            scenarioActionStatus = "FAILED: exact station module qualified but could not be directly designated; diagnostic not started"
+            log("geometry_qualify", { action = "failed", request_id = request.requestId,
+                reason = "direct_component_designation_failed",
+                designated_target = "station_module",
+                designated_component = request.designatedComponent,
+                masking_members = maskingMembers })
+            menu.display()
+            return
+        end
         remoteScenarioReady = false
         remoteGeometryPending = false
-        scenarioActionStatus = "QUALIFIED: station B root remains designated after search attempt "
-            .. attempt .. "/" .. searchCount .. " (root splits="
-            .. rootSplits .. ", module origin/aim/clear candidates="
-            .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
-            .. moduleClearCandidates .. ", " .. modulePairs .. " module pairs); "
-            .. request.selection.label
-            .. " armed; returning to Gunnery Control"
+        scenarioActionStatus = "QUALIFIED: exact station module "
+            .. tostring(request.designatedComponent) .. " directly designated in strict mode after attempt "
+            .. attempt .. "/" .. searchCount .. " (masking plasma members="
+            .. maskingMembers .. ", " .. modulePairs .. " module pairs); "
+            .. request.selection.label .. " armed; returning to Gunnery Control"
         log("geometry_qualify", { action = "qualified", request_id = request.requestId,
             search_attempt = attempt, search_count = searchCount,
             root_splits = rootSplits, module_origin_candidates = moduleOriginCandidates,
             module_aim_candidates = moduleAimCandidates,
             module_clear_candidates = moduleClearCandidates,
+            masking_members = maskingMembers,
             measured = measured, module_pairs = modulePairs,
-            designated_target = "station_root", ship_id = request.selection.shipID,
+            designated_target = "station_module",
+            designated_component = request.designatedComponent,
+            direct_mode = "autoassist", ship_id = request.selection.shipID,
             station_modules = modules, station_turrets = turrets,
             station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
             station_shields = shields, station_engines = engines,
@@ -940,7 +963,8 @@ local function onGeometryQualified(_, param)
         setObserving(true)
         returnToGunnery("geometry_qualified")
     else
-        -- Fail closed on either branch of the combined discriminator.
+        -- Fail closed on equipment, exact same-component masking, or missing
+        -- component transport. Root splits are diagnostic and cannot qualify.
         if equipped ~= 1 then
             scenarioActionStatus = "FAILED: in-system station B loadout census was "
                 .. modules .. " modules, " .. turrets .. " turrets (" .. standardLasers
@@ -948,12 +972,13 @@ local function onGeometryQualified(_, param)
                 .. shields .. " shields, and " .. engines
                 .. " engines; expected 5/2/2/0/4/0; diagnostic not started"
         else
-            scenarioActionStatus = "FAILED: bounded station B search exhausted "
+            scenarioActionStatus = "FAILED: station B masking discriminator exhausted "
                 .. attempt .. "/" .. searchCount
-                .. " attempts with no qualifying aim point (root splits="
+                .. " attempts without both plasma turrets qualifying on the same module (root splits="
                 .. rootSplits .. ", module origin/aim/clear candidates="
                 .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
-                .. moduleClearCandidates .. ", " .. modulePairs
+                .. moduleClearCandidates .. ", masking members=" .. maskingMembers
+                .. ", " .. modulePairs
                 .. " module pairs); diagnostic not started"
         end
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
@@ -962,8 +987,10 @@ local function onGeometryQualified(_, param)
             module_origin_candidates = moduleOriginCandidates,
             module_aim_candidates = moduleAimCandidates,
             module_clear_candidates = moduleClearCandidates,
+            masking_members = maskingMembers,
             measured = measured, module_pairs = modulePairs,
-            designated_target = "station_root",
+            designated_target = "station_module",
+            designated_component = request.designatedComponent or "none",
             station_modules = modules, station_turrets = turrets,
             station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
             station_shields = shields, station_engines = engines })
@@ -1076,16 +1103,16 @@ function menu.onShowMenu()
         local selection, reason = resolveExactGroup()
         if selection then
             if remoteGeometryPending then
-                -- Phase two: the exact turret set is verified, so fire the single
-                -- in-system re-measurement of the preserved station B. Do NOT arm
-                -- the group or return to Gunnery until a real split qualifies it.
+                -- Phase two: the exact plasma group is verified, so fire the
+                -- single in-system re-measurement of preserved station B. Do NOT
+                -- arm or return until one exact module qualifies for both guns.
                 scenarioRequestSerial = scenarioRequestSerial + 1
                 local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
                 pendingQualify = { requestId = token, selection = selection,
                     deadline = getElapsedTime() + 30 }
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })
-                scenarioActionStatus = "QUALIFYING: searching bounded positions with preserved station B in system and "
+                scenarioActionStatus = "QUALIFYING: measuring the direct-module masking position with preserved station B and "
                     .. selection.label .. " (" .. selection.memberIDs .. ")"
                 log("geometry_qualify", { action = "requested", request_id = token,
                     ship_id = selection.shipID, group = selection.rawGroup,
@@ -1294,6 +1321,7 @@ local function init()
     end
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
+    RegisterEvent("X4GunneryTestLab.GeometryQualifiedTarget", onGeometryQualifiedTarget)
     RegisterEvent("X4GunneryTestLab.GeometryQualified", onGeometryQualified)
     if api() then
         api().registerTestLab({ open = function()

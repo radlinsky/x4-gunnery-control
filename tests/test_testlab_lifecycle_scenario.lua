@@ -490,9 +490,9 @@ end
 -- Two-phase #67 station B discriminator. The out-of-system census cannot measure
 -- the root-vs-aim split, so the OOS acknowledgement preserves exactly one station
 -- and reports geometry PENDING (never geometrically ready). A single post-teleport
--- in-system open re-measures that SAME station against the SAME exact four turrets
--- and qualifies only on a real split; no split fails closed without arming the
--- A/B/C diagnostic. These helpers drive the shipped fixture through both outcomes.
+-- in-system open re-measures that SAME station and qualifies only when both
+-- selected plasma turrets reproduce the direct-component masking gates against
+-- one exact module. These helpers drive the shipped fixture through both outcomes.
 local beam = "turret_arg_m_beam_02_mk1_macro"
 local plasma = "turret_arg_m_plasma_02_mk1_macro"
 local function modelColossusTurrets(harness)
@@ -548,7 +548,7 @@ local function shippedTwoPhaseToQualify()
     -- equipment census may still be zero; MD logs it and a delayed census before
     -- the in-system qualifier enforces the exact light module loadout.
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r9:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+        "x4gct8:" .. requestId .. ":issue-67-direct-module-mask-r10:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending")
             and harness.fix.logContains("geometry_splits=0"),
@@ -575,12 +575,16 @@ local function shippedTwoPhaseToQualify()
     return harness, qualifyEvents[1].params.requestId
 end
 
--- A real per-module aim-point candidate with a clear external muzzle ray
--- qualifies even when the station-root aim point does not split. The exact
--- preserved-B turret set is armed, observation is enabled, and the station
--- root remains the designated target for the timed diagnostic.
+-- Both selected plasma turrets qualifying against one exact module transport
+-- that component to Lua, force strict Direct-control, directly designate it,
+-- arm observation, and return to Gunnery.
 do
     local harness, qToken = shippedTwoPhaseToQualify()
+    local designated = {}
+    harness.fix.API.engageTarget = function(target)
+        designated[#designated + 1] = target
+        return true
+    end
     -- Re-opening while the discriminator is pending must not re-issue it.
     harness.testMenu.onShowMenu()
     local issued = 0
@@ -589,21 +593,34 @@ do
     end
     assert(issued == 1, "a pending discriminator must not be re-issued on a repeat open")
 
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq5:" .. qToken .. ":1:1:3:8:0:2:2:2:4:20:5:2:2:0:4:0")
+        "x4gcq6:" .. qToken .. ":1:1:1:1:0:2:2:2:2:4:20:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
-        "an in-system split must arm the exact turret set and return to Gunnery")
+        "an exact masking module must arm the plasma group and return to Gunnery")
     assert(harness.fix.logContains("action=qualified")
             and harness.fix.logContains("root_splits=0")
             and harness.fix.logContains("module_origin_candidates=2")
             and harness.fix.logContains("module_aim_candidates=2")
             and harness.fix.logContains("module_clear_candidates=2")
-            and harness.fix.logContains("search_attempt=3")
-            and harness.fix.logContains("search_count=8")
-            and harness.fix.logContains("designated_target=station_root")
+            and harness.fix.logContains("masking_members=2")
+            and harness.fix.logContains("search_attempt=1")
+            and harness.fix.logContains("search_count=1")
+            and harness.fix.logContains("designated_target=station_module")
+            and harness.fix.logContains("direct_mode=autoassist")
             and harness.fix.logContains("station_standard_lasers=2")
-            and harness.fix.logContains(beam) and harness.fix.logContains(plasma),
-        "qualification must log independent geometry counts, the root designation, station lasers, and exact armed set")
+            and harness.fix.logContains(plasma),
+        "qualification must log independent geometry, the module designation, station lasers, and exact armed set")
+    assert(#designated == 1 and tonumber(designated[1]) == 31337
+            and harness.fix.API.getSession().directMode == "autoassist",
+        "qualification must directly designate the transported module in strict Direct-control")
+    local checked, checkedKey = 0, nil
+    for key in pairs(harness.fix.API.getSession().checkedGroupKeys or {}) do
+        checked, checkedKey = checked + 1, key
+    end
+    assert(checked == 1 and checkedKey
+            and checkedKey:find("group_front_right_up", 1, true),
+        "the clean masking run must tick only the exact two-plasma group")
     local observed = false
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
         if event.control == "observe_toggle" and event.params.enabled == true then observed = true end
@@ -622,12 +639,12 @@ do
         end
     end
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq5:" .. qToken .. ":0:1:8:8:0:0:0:0:4:20:5:2:2:0:4:0")
+        "x4gcq6:" .. qToken .. ":0:1:1:1:0:0:0:0:0:4:20:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "a no-split in-system result must fail closed and not begin the diagnostic")
     assert(harness.fix.logContains("action=failed")
-            and harness.fix.logContains("search_attempt=8")
-            and harness.fix.logContains("search_count=8"),
+            and harness.fix.logContains("search_attempt=1")
+            and harness.fix.logContains("search_count=1"),
         "an exhausted in-system search must log a machine-readable terminal attempt")
     local observeAfter = 0
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
@@ -643,8 +660,9 @@ end
 -- census is an independent fail-closed branch of the combined discriminator.
 do
     local harness, qToken = shippedTwoPhaseToQualify()
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq5:" .. qToken .. ":0:0:1:8:2:2:2:2:4:20:5:0:0:0:0:0")
+        "x4gcq6:" .. qToken .. ":0:0:1:1:2:2:2:2:2:4:20:5:0:0:0:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "an unequipped station must not arm the diagnostic even when a split exists")
     assert(harness.fix.logContains("action=failed")
@@ -983,18 +1001,16 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-two-phase-r9"
+    assert(shipped.id == "issue-67-direct-module-mask-r10"
             and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
-            and shipped.setup.turretGroup == "group_front_left_up"
-            and shipped.setup.selectAll == true
-            and shipped.setup.expectedTurrets == 4,
+            and shipped.setup.turretGroup == "group_front_right_up"
+            and shipped.setup.selectAll == false
+            and shipped.setup.expectedTurrets == 2,
         "the shipped issue #67 fixture must retain its exact Colossus E setup")
-    assert(#shipped.setup.expectedMacros == 4
-            and shipped.setup.expectedMacros[1] == "turret_arg_m_beam_02_mk1_macro"
-            and shipped.setup.expectedMacros[2] == "turret_arg_m_beam_02_mk1_macro"
-            and shipped.setup.expectedMacros[3] == "turret_arg_m_plasma_02_mk1_macro"
-            and shipped.setup.expectedMacros[4] == "turret_arg_m_plasma_02_mk1_macro",
-        "the shipped issue #67 fixture must have two-beam/two-plasma per-group loadout")
+    assert(#shipped.setup.expectedMacros == 2
+            and shipped.setup.expectedMacros[1] == "turret_arg_m_plasma_02_mk1_macro"
+            and shipped.setup.expectedMacros[2] == "turret_arg_m_plasma_02_mk1_macro",
+        "the shipped issue #67 fixture must isolate the two-plasma group")
     assert(#shipped.groups == 3 and #shipped.stations == 1
             and shipped.groups[2].geometryRole == "clear_arc"
             and shipped.groups[3].geometryRole == "below_arc",
@@ -1043,7 +1059,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r9", 1, true),
+    assert(specLabelText:find("issue-67-direct-module-mask-r10", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

@@ -78,25 +78,24 @@
 --                            turrets, shields, and engines required.
 --     holdFire       boolean Keep all station weapons in HOLD FIRE and refuse
 --                            READY unless the live mode census proves it.
---     geometryRole   string  Optional "aim_split" role. Test Lab keeps only a
---                            station where root and hittable-aim arc results
---                            differ for an exact #67 turret.
+--     geometryRole   string  Optional "aim_split" transport role. The current
+--                            #67 phase uses its post-teleport qualifier to find
+--                            one exact directly designated masking module.
 --     searchAttempts/searchStepY
 --                        Bounded deterministic vertical position search.
 --
--- Issue #67 combines the origin-vs-hittable-aim arc question with the
--- conventional-ray question. The station B geometry cannot be measured
--- out of system, so it is a two-phase probe: the OOS create preserves one
--- station and reports geometry PENDING, then a single post-teleport in-system
--- open moves that same station through a bounded deterministic search. Every
--- position is measured on a later MD update; the timed test still designates
--- station B's root. The owner never retries guessed coordinates.
+-- Issue #67's arc and conventional-ray questions are now separate. r10 answers
+-- only the direct-component masking question. The OOS create preserves one
+-- station and reports geometry PENDING; a single post-teleport in-system open
+-- re-measures r9's known position on a later MD update, directly designates the
+-- exact qualifying station module, and starts strict Direct-control. The owner
+-- never retries guessed coordinates or selects the root manually.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-arc-barrel-two-phase-r9",
+    id      = "issue-67-direct-module-mask-r10",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -106,13 +105,11 @@ X4GunneryTestLabScenarioSpec = {
         remote          = true,
         shipMacro       = "ship_arg_xl_carrier_02_a_macro",
         shipLabel       = "ISSUE ARC-BARREL COLOSSUS E 1",
-        turretGroup     = "group_front_left_up",
-        turretLabel     = "Front Upper Left",
-        selectAll       = true,
-        expectedTurrets = 4,
+        turretGroup     = "group_front_right_up",
+        turretLabel     = "Front Upper Right Plasma",
+        selectAll       = false,
+        expectedTurrets = 2,
         expectedMacros  = {
-            "turret_arg_m_beam_02_mk1_macro",
-            "turret_arg_m_beam_02_mk1_macro",
             "turret_arg_m_plasma_02_mk1_macro",
             "turret_arg_m_plasma_02_mk1_macro",
         },
@@ -129,8 +126,8 @@ X4GunneryTestLabScenarioSpec = {
           -- weapons=4. That invariant is live-tested on Behemoth E only
           -- (X4 9.00, d7e3870). Colossus E arms group_front_left_up (beam) and
           -- group_front_right_up (plasma), 2 turrets each: those slot/group
-          -- facts are shipped-source and the _02 beam/plasma compatibility is
-          -- inference — the Colossus mount and census are not yet live-verified.
+          -- facts are shipped-source; r3 and r9 live-verified the exact
+          -- Colossus mount, and r9 observed all four firing and hitting A.
           expectedWeapons = 4, expectedTurrets = 4,
           expectedBeam = 2, expectedPlasma = 2,
           expectedMissileTurrets = 0, expectedGuided = 0,
@@ -149,10 +146,9 @@ X4GunneryTestLabScenarioSpec = {
           geometryRole = "below_arc" },
     },
     stations = {
-        -- B: the LARGE ROOT AIM-POINT target. A Xenon xen_defence station (five
-        -- modules) placed forward of the shooter and below it, so its root origin
-        -- can drop below the front-upper turrets' generated -10 degree elevation
-        -- stop while a hittable upper-module surface stays inside the arc.
+        -- B: a Xenon xen_defence station used to expose one exact directly
+        -- designated construction module. The station root remains below the
+        -- front-upper turrets and is NOT the timed target in r10.
         -- Equipment discriminator: apply one deterministic SAFE loadout to one
         -- actual xenon_small_station_01_base module, never to the station root:
         -- two standard medium lasers in group01, four medium shields in groups01-04,
@@ -165,26 +161,23 @@ X4GunneryTestLabScenarioSpec = {
         -- spawn. Test Lab PRESERVES exactly one station at this attempt-0 position
         -- (searchAttempts = 1; no OOS repositioning), verifies its census, and
         -- reports geometry PENDING. After the owner teleports to the Colossus,
-        -- opening Test Lab once moves this same station through eight bounded,
-        -- safely separated in-system positions. r8 disproved its close/low band;
-        -- r9 applies a deterministic 180-degree station roll so the construction
-        -- plan's negative-Y module offsets sit above the root, and samples the
-        -- measured elevation boundary. Each warp is followed by a 1 ms delayed
-        -- measurement against the same four turrets.
-        -- It records root origin/aim plus every operational module's origin/aim
-        -- independently. Qualification accepts either a
-        -- root-OUTSIDE/root-aim-INSIDE/in-range turret or a root-OUTSIDE/
-        -- module-aim-INSIDE/in-range turret with clear external muzzle LOS; if
-        -- neither exists it fails closed. The timed test still designates B's
-        -- station root, so these measurements do not pre-judge engine behavior.
+        -- opening Test Lab once repositions this same station to r9's first
+        -- measured position (5750 m forward, -900 m vertical, 180-degree roll),
+        -- then waits 1 ms before re-measuring every exact pair. Qualification
+        -- requires BOTH front-right plasma turrets against the SAME module to
+        -- have origin and hittable aim inside -10/+90, be in range, have clear
+        -- self-excluding muzzle LOS, have blocked self-inclusive muzzle LOS, and
+        -- be legally attackable. Test Lab transports that exact module as a
+        -- component, ticks only the plasma group, selects strict autoassist, and
+        -- directly engages it. Root splits remain diagnostic and cannot qualify.
         -- The search coordinates are experimental fixture inputs, not verified
         -- X4 behavior or a knowledge-base conclusion.
         -- At Create,
         -- minSurfaces intentionally requires only the five-module shell so a
         -- deferred loadout can reach the in-system discriminator. The exact
         -- turret-and-shield census is enforced only by that in-system check.
-        -- searchStepY is retained only as a downward-search marker.
-        { label = "B LARGE ROOT AIM-POINT STATION",
+        -- searchStepY is retained only as a historical downward-search marker.
+        { label = "B DIRECT MODULE MASK STATION",
           recipe = "xen_defence", faction = "xenon",
           distance = 6000, x = 0, y = -800, spread = 0,
           hostile = true, holdFire = true,
