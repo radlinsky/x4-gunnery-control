@@ -256,20 +256,35 @@ grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryStation\" exact=\"\$Station\"
 grep -Fq "<set_value name=\"ScenarioRoot.\$GeometryShooter\" exact=\"\$Ship\"/>" "$scenario" \
   || fail "the exact shooter is not persisted for the in-system GeometryQualify cue"
 # Phase two: the in-system discriminator re-measures the SAME preserved station
-# against the SAME exact turrets, counts root-outside/aim-inside/in-range splits,
-# and reports them to Lua.  It must not recreate or reposition the station.
+# against the SAME exact turrets. The timed test keeps the station root selected,
+# while the qualifier records root origin/aim plus every operational module's
+# origin/aim independently. It must not recreate or reposition the station.
 grep -Fq "control=\"'qualify_geometry'\"" "$scenario" \
   || fail "there is no in-system qualify_geometry cue"
 grep -Fq "not \$RootArcPass and \$AimArcPass and \$InRange" "$scenario" \
-  || fail "the in-system discriminator does not require a root-outside / aim-inside in-range split"
-grep -Fq "\$Splits\" operation=\"add\"" "$scenario" \
-  || fail "the in-system discriminator does not count a geometry split"
+  || fail "the in-system discriminator does not retain the root-outside / root-aim-inside split"
+grep -Fq "\$RootSplits\" operation=\"add\"" "$scenario" \
+  || fail "the in-system discriminator does not count root geometry splits"
+grep -Fq "<do_for_each name=\"\$GeometryModule\" in=\"\$Station.modules.operational.list\">" "$scenario" \
+  || fail "the in-system discriminator does not inspect every operational station module"
+grep -Fq "refobject=\"\$GeometryModule\" useaimtarget=\"true\"" "$scenario" \
+  || fail "the in-system discriminator does not measure module hittable aim points"
+grep -Fq "exact=\"\$GeometryModule.relativeposition.{\$GeometryWeapon}\"" "$scenario" \
+  || fail "the in-system discriminator does not measure module origins"
+grep -Fq "target=\"\$GeometryModule\" excludeself=\"true\" useaimtarget=\"true\"" "$scenario" \
+  || fail "the in-system discriminator does not measure each module's external muzzle line of fire"
+grep -Fq "target=\"\$GeometryModule\" excludeself=\"false\" useaimtarget=\"true\"" "$scenario" \
+  || fail "the in-system discriminator does not retain the self-inclusive diagnostic ray"
+grep -Fq "not \$RootArcPass and \$ModuleAimArcPass and \$ModuleInRange" "$scenario" \
+  || fail "the in-system discriminator does not count root-outside/module-aim-inside candidates"
+grep -Fq "exact=\"\$ModuleAimCandidate and \$ModuleMuzzleLosEx\"" "$scenario" \
+  || fail "the in-system discriminator does not distinguish externally clear module candidates"
 grep -Fq "raise_lua_event name=\"'X4GunneryTestLab.GeometryQualified'\"" "$scenario" \
   || fail "the in-system discriminator does not report the split back to Lua"
 grep -Fq "\$Modules == 5 and \$Turrets == 2 and \$StandardLasers == 2" "$scenario" \
   || fail "the in-system discriminator does not require the exact standard station loadout"
-grep -Fq "'x4gcq3:'" "$scenario" \
-  || fail "the in-system acknowledgement does not carry the station equipment census"
+grep -Fq "'x4gcq4:'" "$scenario" \
+  || fail "the in-system acknowledgement does not carry independent root/module geometry and station census"
 if grep -Fq 'create_station' <(grep -A40 "control=\"'qualify_geometry'\"" "$scenario"); then
   fail "the in-system discriminator recreates the station instead of re-measuring the preserved one"
 fi
@@ -292,8 +307,10 @@ grep -Fq 'action = "remote_geometry_pending"' "$testlab_ui" \
   || fail "the OOS acknowledgement does not distinctly log geometry-pending (never geometrically ready)"
 grep -Fq 'qualify_geometry' "$testlab_ui" \
   || fail "the post-teleport open does not trigger the in-system discriminator"
-grep -Fq 'qualified == 1 and equipped == 1 and splits >= 1' "$testlab_ui" \
-  || fail "qualification does not require both exact station equipment and an in-system split"
+grep -Fq 'and (rootSplits >= 1 or moduleClearCandidates >= 1)' "$testlab_ui" \
+  || fail "qualification does not require exact equipment plus either a root split or clear module aim candidate"
+grep -Fq 'designated_target = "station_root"' "$testlab_ui" \
+  || fail "qualification does not explicitly preserve the station root as the timed-test designation"
 
 # Issue #67 staged get_loadout probe. Shipped source proves the get_loadout
 # syntax and one successful use, but NOT what a missing ID leaves in result

@@ -355,9 +355,15 @@ The one-click path logs `[X4GC TEST] event=scenario_create`:
 For a geometry-PENDING remote fixture, Create instead logs
 `action=remote_geometry_pending`, and the single post-teleport Test Lab open
 logs `event=geometry_qualify action=requested` followed by exactly one of
-`action=qualified` (split confirmed, group armed, observation on) or
+`action=qualified` (a measured fixture-specific geometry candidate passed, group
+armed, observation on) or
 `action=failed|timeout` (stop closed). Treat those as the qualification's
 distinct evidence records; the fixture is not armed until `action=qualified`.
+When a qualifier compares root and module geometry, inspect and preserve its
+independent root-origin/root-aim, module-origin/module-aim, range, and external
+line-of-fire fields. Do not collapse `qualified` into a claim about which target
+point the engine actually uses; only the subsequent timed test can establish
+that behavior.
 
 MD logs `[X4GC TEST SCENARIO]` creation details and the final spawned count.
 After the owner reports completion, inspect logs yourself. Do not ask the owner

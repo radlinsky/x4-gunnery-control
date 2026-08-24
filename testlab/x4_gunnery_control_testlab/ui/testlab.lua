@@ -828,7 +828,7 @@ local function onScenarioReady(_, param)
             -- qualifier reports them. Do not call the fixture READY here.
             scenarioActionStatus = "PENDING: remote station shell verified; equipment and geometry are NOT qualified; teleport to "
                 .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it re-measures station B "
-                .. "in system and qualifies only with the exact standard loadout and a root-outside/aim-inside split"
+                .. "in system and qualifies only with the exact standard loadout plus a measured root or clear module aim-point candidate"
             log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
                 spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
                 operational_surfaces = surfaces, turrets = turrets,
@@ -887,33 +887,46 @@ local function onScenarioReady(_, param)
     returnToGunnery("scenario_ready")
 end
 
--- Phase-two acknowledgement for the #67 station B discriminator. MD re-measured
--- the preserved station against the exact turrets in system and reported both
--- its equipment census and split count. Qualify only when the exact two-laser,
--- four-shield module loadout is present AND at least one turret has the required
--- root-outside/aim-inside/in-range split.
+-- Phase-two acknowledgement for the #67 station B discriminator. MD keeps the
+-- preserved station root designated, but reports root-origin/root-aim geometry
+-- and per-module origin/aim geometry independently. Qualify only when the exact
+-- two-laser, four-shield module loadout is present AND either the root split is
+-- real or a module aim-point candidate also has a clear external muzzle ray.
 local function onGeometryQualified(_, param)
-    local token, qualified, equipped, splits, measured, modules, turrets, standardLasers,
-        missileTurrets, shields, engines =
-        tostring(param or ""):match("^x4gcq3:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+    local token, qualified, equipped, rootSplits, moduleOriginCandidates,
+        moduleAimCandidates, moduleClearCandidates, measured, modulePairs,
+        modules, turrets, standardLasers, missileTurrets, shields, engines =
+        tostring(param or ""):match("^x4gcq4:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
     qualified, equipped = tonumber(qualified), tonumber(equipped)
-    splits, measured = tonumber(splits), tonumber(measured)
+    rootSplits = tonumber(rootSplits)
+    moduleOriginCandidates = tonumber(moduleOriginCandidates)
+    moduleAimCandidates = tonumber(moduleAimCandidates)
+    moduleClearCandidates = tonumber(moduleClearCandidates)
+    measured, modulePairs = tonumber(measured), tonumber(modulePairs)
     modules, turrets, standardLasers = tonumber(modules), tonumber(turrets), tonumber(standardLasers)
     missileTurrets, shields, engines = tonumber(missileTurrets), tonumber(shields), tonumber(engines)
-    if qualified == 1 and equipped == 1 and splits >= 1
+    if qualified == 1 and equipped == 1
+            and (rootSplits >= 1 or moduleClearCandidates >= 1)
             and modules == 5 and turrets == 2 and standardLasers == 2
             and missileTurrets == 0 and shields == 4 and engines == 0 then
         applyExactGroup(request.selection)
         remoteScenarioReady = false
         remoteGeometryPending = false
-        scenarioActionStatus = "QUALIFIED: station B in-system split confirmed (splits=" .. splits
-            .. "/" .. measured .. " measured); " .. request.selection.label
+        scenarioActionStatus = "QUALIFIED: station B root remains designated (root splits="
+            .. rootSplits .. ", module origin/aim/clear candidates="
+            .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
+            .. moduleClearCandidates .. ", " .. modulePairs .. " module pairs); "
+            .. request.selection.label
             .. " armed; returning to Gunnery Control"
         log("geometry_qualify", { action = "qualified", request_id = request.requestId,
-            splits = splits, measured = measured, ship_id = request.selection.shipID,
+            root_splits = rootSplits, module_origin_candidates = moduleOriginCandidates,
+            module_aim_candidates = moduleAimCandidates,
+            module_clear_candidates = moduleClearCandidates,
+            measured = measured, module_pairs = modulePairs,
+            designated_target = "station_root", ship_id = request.selection.shipID,
             station_modules = modules, station_turrets = turrets,
             station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
             station_shields = shields, station_engines = engines,
@@ -930,11 +943,19 @@ local function onGeometryQualified(_, param)
                 .. shields .. " shields, and " .. engines
                 .. " engines; expected 5/2/2/0/4/0; diagnostic not started"
         else
-            scenarioActionStatus = "FAILED: in-system station B had no root-outside/aim-inside split (splits="
-                .. splits .. "/" .. measured .. " measured); diagnostic not started"
+            scenarioActionStatus = "FAILED: station B root stayed outside elevation and no qualifying aim point was found (root splits="
+                .. rootSplits .. ", module origin/aim/clear candidates="
+                .. moduleOriginCandidates .. "/" .. moduleAimCandidates .. "/"
+                .. moduleClearCandidates .. ", " .. modulePairs
+                .. " module pairs); diagnostic not started"
         end
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
-            equipped = equipped, splits = splits, measured = measured,
+            equipped = equipped, root_splits = rootSplits,
+            module_origin_candidates = moduleOriginCandidates,
+            module_aim_candidates = moduleAimCandidates,
+            module_clear_candidates = moduleClearCandidates,
+            measured = measured, module_pairs = modulePairs,
+            designated_target = "station_root",
             station_modules = modules, station_turrets = turrets,
             station_standard_lasers = standardLasers, station_missile_turrets = missileTurrets,
             station_shields = shields, station_engines = engines })

@@ -548,7 +548,7 @@ local function shippedTwoPhaseToQualify()
     -- equipment census may still be zero; MD logs it and a delayed census before
     -- the in-system qualifier enforces the exact light module loadout.
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r6:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
+        "x4gct8:" .. requestId .. ":issue-67-arc-barrel-two-phase-r7:3:1:5:0:0:0:0:3:1:0:0:3:2:1:0:0:0:0:0:0:4:4:2:2:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending")
             and harness.fix.logContains("geometry_splits=0"),
@@ -575,8 +575,10 @@ local function shippedTwoPhaseToQualify()
     return harness, qualifyEvents[1].params.requestId
 end
 
--- A real in-system split qualifies: the exact preserved-B turret set is armed,
--- observation is enabled, and control returns to Gunnery exactly once.
+-- A real per-module aim-point candidate with a clear external muzzle ray
+-- qualifies even when the station-root aim point does not split. The exact
+-- preserved-B turret set is armed, observation is enabled, and the station
+-- root remains the designated target for the timed diagnostic.
 do
     local harness, qToken = shippedTwoPhaseToQualify()
     -- Re-opening while the discriminator is pending must not re-issue it.
@@ -588,14 +590,18 @@ do
     assert(issued == 1, "a pending discriminator must not be re-issued on a repeat open")
 
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq3:" .. qToken .. ":1:1:2:4:5:2:2:0:4:0")
+        "x4gcq4:" .. qToken .. ":1:1:0:2:2:2:4:20:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
         "an in-system split must arm the exact turret set and return to Gunnery")
     assert(harness.fix.logContains("action=qualified")
-            and harness.fix.logContains("splits=2")
+            and harness.fix.logContains("root_splits=0")
+            and harness.fix.logContains("module_origin_candidates=2")
+            and harness.fix.logContains("module_aim_candidates=2")
+            and harness.fix.logContains("module_clear_candidates=2")
+            and harness.fix.logContains("designated_target=station_root")
             and harness.fix.logContains("station_standard_lasers=2")
             and harness.fix.logContains(beam) and harness.fix.logContains(plasma),
-        "qualification must log the split, station lasers, and exact armed two-beam/two-plasma set")
+        "qualification must log independent geometry counts, the root designation, station lasers, and exact armed set")
     local observed = false
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
         if event.control == "observe_toggle" and event.params.enabled == true then observed = true end
@@ -614,7 +620,7 @@ do
         end
     end
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq3:" .. qToken .. ":0:1:0:4:5:2:2:0:4:0")
+        "x4gcq4:" .. qToken .. ":0:1:0:0:0:0:4:20:5:2:2:0:4:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "a no-split in-system result must fail closed and not begin the diagnostic")
     assert(harness.fix.logContains("action=failed"),
@@ -634,7 +640,7 @@ end
 do
     local harness, qToken = shippedTwoPhaseToQualify()
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq3:" .. qToken .. ":0:0:2:4:5:0:0:0:0:0")
+        "x4gcq4:" .. qToken .. ":0:0:2:2:2:2:4:20:5:0:0:0:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "an unequipped station must not arm the diagnostic even when a split exists")
     assert(harness.fix.logContains("action=failed")
@@ -973,7 +979,7 @@ do
     assert(type(shipped) == "table", "the shipped spec must return a table")
     assert(shipped.enabled == false,
         "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-arc-barrel-two-phase-r6"
+    assert(shipped.id == "issue-67-arc-barrel-two-phase-r7"
             and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
             and shipped.setup.turretGroup == "group_front_left_up"
             and shipped.setup.selectAll == true
@@ -1033,7 +1039,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r6", 1, true),
+    assert(specLabelText:find("issue-67-arc-barrel-two-phase-r7", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

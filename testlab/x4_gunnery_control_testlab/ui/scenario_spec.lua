@@ -85,17 +85,18 @@
 --                        Bounded deterministic vertical position search.
 --
 -- Issue #67 combines the origin-vs-hittable-aim arc question with the
--- zero-barrel conventional-ray question. The station B split cannot be measured
+-- conventional-ray question. The station B geometry cannot be measured
 -- out of system, so it is a two-phase probe: the OOS create preserves one
 -- station and reports geometry PENDING, then a single post-teleport in-system
--- open re-measures it and fails closed unless a real root-outside/aim-inside
--- classification split is found. The owner never retries guessed coordinates.
+-- open measures root origin/aim and every module origin/aim independently. The
+-- timed test still designates station B's root. The owner never retries guessed
+-- coordinates.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-arc-barrel-two-phase-r6",
+    id      = "issue-67-arc-barrel-two-phase-r7",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
@@ -165,8 +166,13 @@ X4GunneryTestLabScenarioSpec = {
         -- (searchAttempts = 1; no OOS repositioning), verifies its census, and
         -- reports geometry PENDING. After the owner teleports to the Colossus,
         -- opening Test Lab once re-measures this same station IN SYSTEM against the
-        -- same four turrets and qualifies only on at least one root-OUTSIDE /
-        -- aim-INSIDE / in-range turret; no split fails closed. At Create,
+        -- same four turrets. It records root origin/aim plus every operational
+        -- module's origin/aim independently. Qualification accepts either a
+        -- root-OUTSIDE/root-aim-INSIDE/in-range turret or a root-OUTSIDE/
+        -- module-aim-INSIDE/in-range turret with clear external muzzle LOS; if
+        -- neither exists it fails closed. The timed test still designates B's
+        -- station root, so these measurements do not pre-judge engine behavior.
+        -- At Create,
         -- minSurfaces intentionally requires only the five-module shell so a
         -- deferred loadout can reach the in-system discriminator. The exact
         -- turret-and-shield census is enforced only by that in-system check.
