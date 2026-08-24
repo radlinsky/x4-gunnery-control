@@ -107,7 +107,10 @@
 
 ### Colossus E M slots accept the `_02_mk1` beam and plasma, not the `_01_mk1` pair
 - X4: 9.00
-- Status: shipped-source
+- Status: inference
+- Bound: the slot/socket tag sets and the census are shipped-source; the
+  compatibility rule that turns them into the accept/reject conclusion is
+  inference, and the conclusion is only as strong as that rule
 - Source: `assets/props/WeaponSystems/energy/turret_arg_m_beam_02_mk1.xml:328`
   (socket `con_beam_turret_01`), `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_02_mk1.xml:331`
   (socket `con_plasma_turret`); macros `turret_arg_m_beam_02_mk1_macro` and
@@ -118,17 +121,22 @@
   `scenario_combat_arg_carrier_02` and `scenario_combat_arg_destroyer` in
   `libraries/loadouts.xml`
 - Live test: no — tag comparison only; not yet live-mounted on a Colossus E
-- Finding: the slot tag set `combat hittable medium missile standard turret`
-  matches `turret_arg_m_beam_02_mk1` (socket tags
+- Finding: the tag facts are shipped-source: the slot tag set
+  `combat hittable medium missile standard turret` matches
+  `turret_arg_m_beam_02_mk1` (socket tags
   `turret medium standard component hittable combat`) and
   `turret_arg_m_plasma_02_mk1` (socket tags
-  `turret medium standard hittable component combat`) on every compatibility
-  axis: kind `turret`, size `medium`, generation `standard`, durability
-  `hittable`, and a weapon-family axis on which the slot advertises BOTH
-  `combat` and `missile` and the equipment carries `combat`. The extra
-  `component` tag appears only on equipment sides. The rule (inference from
-  the census, the matching is engine-side C++ and no shipped script states it):
-  the family axis is two-valued on the slot and single-valued on the
+  `turret medium standard hittable component combat`) on every
+  tag-comparison axis: kind `turret`, size `medium`, generation `standard`,
+  durability `hittable`, and a weapon-family axis on which the slot
+  advertises BOTH `combat` and `missile` and the equipment carries `combat`.
+  The extra `component` tag appears only on equipment sides. On that base the
+  `_02_mk1` beam and plasma are source-backed compatibility candidates for
+  these slots — nothing here proves a live mount; the vanilla Colossus loadout
+  mounts the M missile turrets in these front groups, and no beam or plasma
+  has yet been live-mounted on a Colossus E. The compatibility rule itself is
+  **inference** (the matching is engine-side C++ and no shipped script states
+  it): the family axis is two-valued on the slot and single-valued on the
   equipment — Argon M missile turrets (`turret_arg_m_guided_02_mk1`,
   `turret_arg_m_dumbfire_02_mk1`) are tagged `turret medium missile component
   hittable standard` (no `combat`) and the vanilla Colossus loadout mounts
@@ -141,12 +149,14 @@
   `combat large missile standard turret` slots accept `turret_arg_l_beam_01_mk1`
   (`turret large standard component combat`, no `hittable`, none required by
   the slot) and `turret_arg_l_guided_01_mk1` / `turret_arg_l_dumbfire_01_mk1`
-  (`turret large missile component standard`). The negative result: the
-  `_01_mk1` beam and plasma sockets are tagged `advanced combat component
-  medium turret unhittable` — wrong on both the generation axis (`advanced` vs
-  `standard`) and the durability axis (`unhittable` vs `hittable`), and the
-  Colossus hull has no `advanced` connection tags at all, so on this hull only
-  the `_02_mk1` standard/hittable variants can fit these slots.
+  (`turret large missile component standard`). The `_01_mk1` rejection — and
+  the "only the `_02_mk1` fits" conclusion built on it — is inference, not
+  engine fact: the `_01_mk1` beam and plasma sockets are tagged
+  `advanced combat component medium turret unhittable`, wrong on both the
+  generation axis (`advanced` vs `standard`) and the durability axis
+  (`unhittable` vs `hittable`), and the Colossus hull has no `advanced`
+  connection tags at all; under the inferred rule only the `_02_mk1`
+  standard/hittable variants can fit these slots on this hull.
 
 ### Transient singular-turret loadouts are unreliable on the Behemoth E
 - X4: 9.00
