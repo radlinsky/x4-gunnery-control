@@ -61,6 +61,12 @@
     .x4-research-cache/extracted/issue67-vanilla-md-9.00/md/scenario_combat.xml:738-748
     .x4-research-cache/extracted/issue67-vanilla-md-9.00/libraries/loadouts.xml:405-451
 
+  get_loadout: lookup a named loadout by ID string (loadout=) and optional
+  defining macro (macro=) into result=; the shipped call site consumes the
+  result via apply_loadout, and a not-found ID leaves result null/absent:
+    .x4-research-cache/extracted/schemas-9.00/libraries/common.xsd:24489-24519
+    .x4-research-cache/extracted/issue67-vanilla-md-9.00/md/showcases.xml:23
+
   safepos with a z distance plus a max scatter:
     .x4-research-cache/extracted/scripts-9.00/md/tutorial_map_missions.xml:523
 
@@ -369,6 +375,24 @@
               <set_value name="$Index" exact="0"/>
               <do_all exact="$Count">
                 <set_value name="$Index" operation="add"/>
+
+                <!-- Issue #67 pre-spawn diagnostic (one controlled run, 2026-08-23:
+                     static ref reached create_ship, Behemoth ended with 0
+                     weapons/turrets). Before creation, look up the custom static-ref
+                     ID and the shipped known-good control loadout for the SAME
+                     Behemoth macro this create_ship uses. Read-only: nothing below
+                     branches on the result, so creation proceeds exactly as before.
+                     Interpretation of the logged pair:
+                       control not resolved          -> probe invalid; infer nothing, incl. about custom
+                       control resolved, custom not  -> custom registration/lookup failure
+                       both resolved                 -> lookup fine; create/apply failed later -->
+                <do_if value="$Def.$loadout == 'issue67_behemoth_arc_barrel'">
+                  <get_loadout result="$Issue67ProbeCustom" loadout="'x4gc_testlab_issue67_behemoth_arc_barrel'" macro="macro.{$Def.$macro}"/>
+                  <get_loadout result="$Issue67ProbeControl" loadout="'scenario_combat_arg_destroyer'" macro="macro.{$Def.$macro}"/>
+                  <set_value name="$Issue67ProbeCustomOk" exact="$Issue67ProbeCustom? and $Issue67ProbeCustom != null"/>
+                  <set_value name="$Issue67ProbeControlOk" exact="$Issue67ProbeControl? and $Issue67ProbeControl != null"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] issue67 pre-spawn get_loadout macro=' + $Def.$macro + ' custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved')"/>
+                </do_if>
                 <do_if value="$Remote">
                   <do_if value="not $ScenarioSector">
                     <continue/>

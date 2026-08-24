@@ -194,4 +194,29 @@ grep -Fq "\$Control.\$role == 'below_arc'" "$scenario" \
 grep -Fq "':' + \$ShooterWeapons + ':' + \$ShooterTurrets + ':' + \$ShooterBeam + ':' + \$ShooterPlasma + ':' + \$PreflightFailures + ':' + \$GeometrySplits" "$scenario" \
   || fail "READY omits ordinary-shooter and geometry-preflight census"
 
+# Issue #67 pre-spawn get_loadout probe. The 2026-08-23 full-restart run
+# reached the static ref inside create_ship, yet the Behemoth ended with 0
+# weapons/turrets; that single result cannot separate a failed custom ID
+# lookup/registration from a later create/apply failure. Before the next live
+# run the probe must query BOTH the custom ID and a shipped, known-good
+# control loadout against the same Behemoth macro the adjacent create_ship
+# uses ($Def.$macro is the spec-resolved Behemoth E macro), log each result
+# distinctly so a not-resolved control invalidates the probe, run BEFORE the
+# static-ref create_ship, and never block or alter creation. The -eq 2 check
+# above keeps pinning both <loadout ref> creation sites, which stay unchanged.
+[[ $(grep -Fc "<get_loadout result=\"\$Issue67ProbeCustom\" loadout=\"'x4gc_testlab_issue67_behemoth_arc_barrel'\" macro=\"macro.{\$Def.\$macro}\"/>" "$scenario") -eq 1 ]] \
+  || fail "issue #67 probe does not query the custom loadout ID with the Behemoth macro"
+[[ $(grep -Fc "<get_loadout result=\"\$Issue67ProbeControl\" loadout=\"'scenario_combat_arg_destroyer'\" macro=\"macro.{\$Def.\$macro}\"/>" "$scenario") -eq 1 ]] \
+  || fail "issue #67 probe does not query the shipped control loadout ID with the Behemoth macro"
+grep -Fq "issue67 pre-spawn get_loadout macro=" "$scenario" \
+  || fail "issue #67 probe does not log the Behemoth macro it probed"
+grep -Fq "' custom=' + (if \$Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + " "$scenario" \
+  || fail "issue #67 probe log does not report the custom lookup result distinctly"
+grep -Fq "' control=' + (if \$Issue67ProbeControlOk then 'resolved' else 'not_resolved')" "$scenario" \
+  || fail "issue #67 probe log does not report the control lookup result distinctly"
+probe_line=$( { grep -Fn "<get_loadout result=\"\$Issue67ProbeCustom\"" "$scenario" || true; } | head -n 1 | cut -d: -f1)
+first_ref_line=$( { grep -Fn '<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>' "$scenario" || true; } | head -n 1 | cut -d: -f1)
+[[ -n "$probe_line" && -n "$first_ref_line" && "$probe_line" -lt "$first_ref_line" ]] \
+  || fail "issue #67 probe must run before the static-ref create_ship"
+
 echo "testlab observability contract tests passed"
