@@ -59,6 +59,95 @@
   matching the hull's `combat hittable medium missile standard turret` slots
   on the relevant compatibility dimensions.
 
+### Colossus E exposes eight STANDARD/HITTABLE medium turret groups of two slots each
+- X4: 9.00
+- Status: shipped-source
+- Source: `assets/units/size_xl/ship_arg_xl_carrier_02.xml:707-808` (component
+  referenced by `assets/units/size_xl/macros/ship_arg_xl_carrier_02_a_macro.xml`);
+  group-name corroboration `libraries/loadouts.xml` (`scenario_combat_arg_carrier_02`)
+- Live test: no — source enumeration only, as of 2026-08-23
+- Finding: the Colossus E component has exactly 76 connections, of which 17 are
+  turret connections: 16 medium plus 1 large, and there are no `small` tagged
+  connections. All 16 medium connections carry the exact tag set
+  `combat hittable medium missile standard turret`; the large one
+  (`con_turret_l_01`) carries `combat large missile standard turret` (no
+  `hittable`). The 16 medium connections form exactly eight groups of two.
+  Raw group IDs carry padding whitespace; the vanilla Colossus loadout
+  references all eight names in trimmed form, so the trimmed name is the
+  usable group ID:
+
+  | raw group ID (exact) | connections | position (x / y / z, m) |
+  |---|---|---|
+  | `"        group_front_right_down  "` | `con_turret_m_09`, `con_turret_m_01` | +270.40 / −24.62 / +720.62, +808.64 |
+  | `"       group_front_left_up "` | `con_turret_m_06`, `con_turret_m_14` | −295.70 / +118.89 / +720.62, +808.64 |
+  | `"       group_front_right_up  "` | `con_turret_m_08`, `con_turret_m_16` | +295.70 / +118.89 / +720.62, +808.64 |
+  | `"       group_front_left_down  "` | `con_turret_m_07`, `con_turret_m_15` | −270.40 / −24.62 / +720.62, +808.64 |
+  | `"      group_rear_left_up "` | `con_turret_m_02`, `con_turret_m_10` | −372.95…−372.98 / +116.31…+116.38 / −616.02, −535.32 |
+  | `"       group_rear_right_up "` | `con_turret_m_03`, `con_turret_m_11` | +372.95…+372.99 / +116.31…+116.37 / −616.02, −535.32 |
+  | `"      group_rear_left_down  "` | `con_turret_m_04`, `con_turret_m_12` | −343.86…−343.88 / −48.63…−48.71 / −616.06, −535.22 |
+  | `"       group_rear_right_down  "` | `con_turret_m_05`, `con_turret_m_13` | +343.85…+343.89 / −48.64…−48.71 / −616.06, −535.22 |
+
+  Geometry, with +Z the bow and +Y up: front groups at z≈+721/+809 m, rear
+  groups at z≈−535/−616 m (each group's two slots are ~88 m apart front, ~81 m
+  apart rear, longitudinally); `*_up` groups at y≈+116…+119 m (upper deck),
+  `*_down` at y≈−25…−49 m; left is negative x, right positive x. The L turret
+  sits at (0, +159.33, −245.59). Front mount quaternions are near-identity
+  with a mirrored ~10° tilt about the longitudinal axis, e.g.
+  `con_turret_m_06` `qx=-8.47e-08 qy=3.147e-07 qz=-0.08715479 qw=-0.9961948`,
+  `con_turret_m_08` `qx=-1.38e-07 qy=2.952e-07 qz=0.08715667 qw=-0.9961947`.
+  The bow assignment (+Z = front) is an inference, not a coordinate
+  document: the Behemoth E's bow main guns `con_weapon_01/02` sit at z=+327.6
+  (`assets/units/size_l/ship_arg_l_destroyer_02.xml:526-530`), and Egosoft's
+  own `group_front_*` / `group_rear_*` names here agree with that reading.
+- Fixture-design inference, not an engine claim: for #67 the pair
+  `group_front_left_up` (beam) + `group_front_right_up` (plasma) is the
+  simplest choice — both on the upper deck, in the bow hemisphere, mirrored
+  across the centerline, so one forward target placement can exercise both
+  groups without repositioning the ship.
+
+### Colossus E M slots accept the `_02_mk1` beam and plasma, not the `_01_mk1` pair
+- X4: 9.00
+- Status: shipped-source
+- Source: `assets/props/WeaponSystems/energy/turret_arg_m_beam_02_mk1.xml:328`
+  (socket `con_beam_turret_01`), `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_02_mk1.xml:331`
+  (socket `con_plasma_turret`); macros `turret_arg_m_beam_02_mk1_macro` and
+  `turret_arg_m_plasma_02_mk1_macro` (each a `class="turret"` macro referencing
+  exactly that component); negative: `assets/props/WeaponSystems/energy/turret_arg_m_beam_01_mk1.xml:11`
+  and `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_01_mk1.xml:11`; family
+  census over all Argon M/L turret components in `01.cat`; vanilla loadouts
+  `scenario_combat_arg_carrier_02` and `scenario_combat_arg_destroyer` in
+  `libraries/loadouts.xml`
+- Live test: no — tag comparison only; not yet live-mounted on a Colossus E
+- Finding: the slot tag set `combat hittable medium missile standard turret`
+  matches `turret_arg_m_beam_02_mk1` (socket tags
+  `turret medium standard component hittable combat`) and
+  `turret_arg_m_plasma_02_mk1` (socket tags
+  `turret medium standard hittable component combat`) on every compatibility
+  axis: kind `turret`, size `medium`, generation `standard`, durability
+  `hittable`, and a weapon-family axis on which the slot advertises BOTH
+  `combat` and `missile` and the equipment carries `combat`. The extra
+  `component` tag appears only on equipment sides. The rule (inference from
+  the census, the matching is engine-side C++ and no shipped script states it):
+  the family axis is two-valued on the slot and single-valued on the
+  equipment — Argon M missile turrets (`turret_arg_m_guided_02_mk1`,
+  `turret_arg_m_dumbfire_02_mk1`) are tagged `turret medium missile component
+  hittable standard` (no `combat`) and the vanilla Colossus loadout mounts
+  them in these very front groups, while the energy/heavy M turrets (beam,
+  plasma, laser, flak, gatling, shotgun `_02_mk1`) carry `combat` without
+  `missile`, and the vanilla Behemoth loadout mounts the M laser in the
+  identical slot tag set. Subset matching in either direction is therefore
+  false for these slots; missing `missile` (or `combat`) on the equipment side
+  does not exclude it. L-slot evidence matches the same model: the
+  `combat large missile standard turret` slots accept `turret_arg_l_beam_01_mk1`
+  (`turret large standard component combat`, no `hittable`, none required by
+  the slot) and `turret_arg_l_guided_01_mk1` / `turret_arg_l_dumbfire_01_mk1`
+  (`turret large missile component standard`). The negative result: the
+  `_01_mk1` beam and plasma sockets are tagged `advanced combat component
+  medium turret unhittable` — wrong on both the generation axis (`advanced` vs
+  `standard`) and the durability axis (`unhittable` vs `hittable`), and the
+  Colossus hull has no `advanced` connection tags at all, so on this hull only
+  the `_02_mk1` standard/hittable variants can fit these slots.
+
 ### Transient singular-turret loadouts are unreliable on the Behemoth E
 - X4: 9.00
 - Status: live-tested
