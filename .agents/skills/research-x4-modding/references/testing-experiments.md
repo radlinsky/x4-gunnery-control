@@ -411,3 +411,39 @@ Do not revisit remote/local station timing: r6 and r9 already reproduced the
 exact remote module loadout synchronously. Do not revisit zero/degenerate
 barrels for the tested `_02` macros or weaken the conventional line-of-fire
 gate: those branches are resolved within their stated bounds.
+
+### r12 live negative: direct-surface arc split stayed blocked
+
+Live-tested on X4 9.00 (611726), UI Extensions 9.00, X4 Gunnery Control 0.31,
+Test Lab 0.10, branch `feature/issue-67-arc-barrel-fixture`, in the validated
+uncommitted r12 worktree based on `78d3b95`, scenario
+`issue-67-direct-surface-arc-r12`. Correlated log identities: scenario request
+`60583111_1` at game time `248897.03/04`; geometry request `79714088_q2` at
+`248916.16/19`. The production runtime marker in `debug.log` remained
+`2026-08-24-testlab-manual-designation-1` unchanged from r11, so this r12
+run is distinguished by the scenario id and the correlated request ids.
+
+Accepted controls: Create produced 6 ships -- one Colossus E and five
+independently pre-positioned stationary Xenon Ks -- with safe_fixtures=5,
+safe_weapons=65, unsafe_weapons=0, defence_units=0, hostiles=5,
+repair_fixtures=5. Shooter census: weapons=4, turrets=4, beam=2, plasma=2,
+missile turrets/ammo=0. Loadout/location/preflight failures=0. The in-system
+qualifier measured 5 targets, 175 operational surfaces, 2 exact plasma
+turrets, 350 exact pairs; origin_outside_pairs=150, aim_inside_pairs=201,
+arc_split_pairs=1, arc_candidate_pairs=0.
+
+The sole split reproduced on ARC CANDIDATE K 3 1, target `0x17c800` / ELU-983,
+surface `0x17c808`, `shield_xen_m_standard_02_mk1_macro`, plasma `0x17c76c`.
+Origin/aim pitch was exactly `-0.174791/-0.174418` rad, range `3812.5` of
+`5500` m, separated=1, inrange=1, mayattack=1, but muzzle_los_ex=0 and
+muzzle_los_self=0. These pitches reproduce the r11 same-component split on a
+fresh process/instance at the authored K3 geometry, but the shot remained
+independently line-of-fire blocked. Runtime IDs are run-local.
+
+Conclusion: r12 is a bounded negative for the required clean discriminator. It
+correctly failed closed before manual designation; no FIRED/HIT behavior was
+tested. It provides no basis for a production arc-input change, and the engine
+behavior for a clean origin-outside/aim-inside pair remains open. Per the
+agreed stop rule, do not weaken gates, reposition manually, or infer from the
+blocked pair. Station-root retargeting and stale surface-page refresh remain
+separate.

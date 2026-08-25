@@ -108,17 +108,32 @@ multiset, and put both ordinary and missile turrets in HOLD FIRE until the
 post-teleport group activation. A member count alone cannot distinguish two
 copies of the wrong macro.
 
-When one turret group needs different macros in individual slots, resolve the
-hull's exact connection names from current extracted assets and use singular
-`<turret macro="..." path="../connection_name"/>` entries in a Test-Lab-only
-static named `libraries/loadouts.xml` definition, then create the ship with
-`<loadout ref="..."/>`. Do not use an MD `<create_loadout>` result for this
-case: two X4 9.00 Behemoth E attempts returned a completely empty ship even
-after the singular paths were source-verified. Verify more than macro
-existence: compare the hull connection tags with the equipment component's
-connection tags. An alias may reference a component with different slot
-compatibility than its canonical macro. Keep the live operational macro census
-as the fail-closed proof that both connection assignments took. Never derive a
+Mount turrets with GROUP-TARGETED `<turrets macro="..." group="..." exact="N"/>`
+entries under `<groups>`, never with singular `<turret macro="..." path="..."/>`
+entries under `<macros>`. Singular per-slot `<turret>` entries are live-proven
+UNRELIABLE on the Behemoth E (`ship_arg_l_destroyer_02_a_macro`): both the MD
+`<create_loadout>` route AND the static named `<loadout ref>` route returned a
+completely empty ship (zero engines/shields/turrets, `loadout_failures=1`) with
+a singular `<turret>` entry, while the exact same hull equips cleanly when the
+turret is mounted via `<turrets group= exact=>` — this is how every shipped
+`scenario_combat_arg_destroyer`-style loadout mounts turrets. Singular `<...
+path>` under `<macros>` is fine for engines, large shields, and main `<weapon>`
+guns; it is turrets specifically that fail. This is the exact regression that
+sent Issue #67 in circles: do not reintroduce a singular `<turret>` entry to
+"isolate one slot."
+
+Because a group-targeted entry arms the WHOLE group with one macro, you cannot
+put different macros in individual slots of the same group on this hull, and a
+group with two slots gives you two turrets, not one. If the test needs exactly
+one turret's behaviour, mount the whole group and isolate the turret of interest
+by PER-TURRET hit/fire attribution (the observe module attributes each hit to
+its firing weapon component), not by trying to mount a single slot. Resolve the
+hull's exact group ids and slot counts from current extracted assets before
+authoring, and verify more than macro existence: compare the hull connection
+tags with the equipment component's connection tags — an alias may reference a
+component with different slot compatibility than its canonical macro. Keep the
+live operational macro census (expected turret count AND exact member-macro
+multiset) as the fail-closed proof that the mount took. Never derive a group or
 connection name from visible order, a previous hull, or an assumed zero-padded
 sequence; record the exact shipped component source beside the fixture evidence
 before the first live run.

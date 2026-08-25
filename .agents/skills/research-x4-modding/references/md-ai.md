@@ -323,22 +323,41 @@
   create/apply outcome should the earlier zero ever recur. Do not infer a
   corrective XML change from the current evidence.
 
-### Transient singular-turret loadouts are unreliable on the Behemoth E
+### Singular-turret loadouts are unreliable on the Behemoth E (both transient and static-ref routes)
 - X4: 9.00
 - Status: live-tested
 - Source: Test Lab `debug.log` at game times 248864.65 and 249183.19 on
-  2026-08-23; `x4_gunnery_control_testlab_scenario.xml`
-- Live test: yes — two creation-time attempts in one X4 process, the second
-  using source-verified `con_turret_m_03` and `con_turret_m_04`
-- Finding: passing an MD `<create_loadout>` result through
-  `<create_ship><loadout loadout="$Issue67BehemothLoadout"/></create_ship>`
-  produced a Behemoth E with zero operational engines, shields, weapons, and
-  turrets. Correcting the singular turret paths did not change the result.
-  This does not establish why X4 rejected the transient definition, nor does it
-  generalize to other hulls. For this fixture the method is abandoned. The
-  static named-loadout `ref` route used by shipped `scenario_combat.xml:741-748`
-  was subsequently exercised by the custom Test Lab definition; see the
-  bounded static-ref live result above.
+  2026-08-23 (transient route); Issue #67 r14 arc-survey Create at game time
+  248874.28 on 2026-08-25 (static-ref route), `debug.log`
+  `[X4GC TEST] action=failed ... loadout_failures=1 ... plasma=0 shooter_turrets=0`;
+  `x4_gunnery_control_testlab_scenario.xml`,
+  `libraries/loadouts.xml`
+- Live test: yes — three creation attempts across two X4 processes; the
+  2026-08-23 pair used source-verified `con_turret_m_03`/`con_turret_m_04`, and
+  the 2026-08-25 run used a static named `<loadout ref>` with one singular
+  `<turret macro="turret_arg_m_plasma_02_mk1_macro" path="../con_turret_m_04"/>`
+- Finding: a singular per-slot `<turret ... path="..."/>` entry produces an
+  EMPTY Behemoth E on BOTH loadout routes. The transient route — an MD
+  `<create_loadout>` result through
+  `<create_ship><loadout loadout="$Issue67BehemothLoadout"/></create_ship>` —
+  produced zero operational engines, shields, weapons, and turrets (correcting
+  the paths did not help). The static named-loadout `ref` route — proven to
+  equip this hull cleanly when its turrets are mounted as GROUP-TARGETED
+  `<turrets group="..." exact="N"/>` entries (see the arc-barrel static-ref
+  result above, turrets=4) — ALSO failed (`loadout_failures=1`, empty shooter)
+  the moment a single turret was moved to a singular `<turret path>` entry under
+  `<macros>`; replacing it with
+  `<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_front_up_mid" exact="2"/>`
+  under `<groups>` is the fix. So the defect is specific to singular `<turret>`
+  entries, not the loadout route: shipped `scenario_combat_arg_destroyer`
+  (`libraries/loadouts.xml:405-451`) mounts every turret via `<turrets group=>`
+  and mounts only engines, large shields, and main `<weapon>` guns via singular
+  `<... path>` under `<macros>`. Consequence: a group with two medium slots
+  (`group_front_up_mid` = `con_turret_m_03` + `con_turret_m_04`) can only be
+  armed with two identical turrets; isolate the one under test by per-turret hit
+  attribution, not by mounting a single slot. Bound: established for the
+  Behemoth E macro `ship_arg_l_destroyer_02_a_macro`; not generalized to other
+  hulls.
 
 ### Per-turret firing solution is computable from MD
 - X4: 9.00
