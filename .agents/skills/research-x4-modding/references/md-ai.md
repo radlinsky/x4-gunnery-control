@@ -1301,6 +1301,27 @@
   paths retain this gate when considering `player.target`; selecting a neutral,
   friendly, or player-owned object does not make normal turret AI fire on it.
 
+### `create_ship` macro and faction are independent parameters (mismatch has no shipped precedent)
+- X4: 9.00
+- Status: inference
+- Source: `libraries/common.xsd` (`create_ship`); scoped scan of extracted
+  vanilla 9.00 MD (306 `create_ship` instances: every literal macro/faction
+  pair matched, the remainder used variables — no literal mismatch); Test Lab
+  `md/x4_gunnery_control_testlab_scenario.xml` (the `surface_mask` target
+  branch passes `macro.{$Def.$macro}` and `<owner exact="$Owner"/>`
+  independently, with no `<pilot>` element); `ui/testlab.lua` (`validateSpec`
+  requires only non-empty macro/faction strings)
+- Live test: no — a mismatched spawn has not been reproduced
+- Finding: the hull macro and the owner/faction are supplied independently,
+  so e.g. an Argon hull under xenon ownership is structurally supported, with
+  attackability expected through the owner's kill relation (see the `mayattack`
+  record above). But no shipped 9.00 MD exhibits a literal macro/faction
+  mismatch, so treat such a spawn as unproven until a live reproduction. The
+  fail-closed detection path is the live hostiles census: MD increments the
+  hostile count only when `mayattack` is true, and the readiness check refuses
+  READY on a mismatch. Pair with the Osaka record in the spawn skill: a
+  relation boost alone did not legalize a friendly-owned target.
+
 ### Preferred turret targets do not legalize an attack
 - X4: 9.00
 - Status: shipped-source
@@ -1397,3 +1418,61 @@ whole-object, engine, shield, turret, and station-module surface tests.
   issue #36 sessions (2026-08-13..16, X4 9.00, mixed-mode fixture). With no API found
   to clear a turret's supplied target list, the ship-wide override was removed
   entirely (issue #38) rather than shipped with an unreachable release.
+
+### Ship component connection-offset quaternions are stored inverted (child-to-parent)
+- X4: 9.00
+- Status: live-tested
+- Source: r16 Test Lab `debug.log` `WEAPONPOSE` instrumentation, request
+  55003123_q2 at game time 248895.15 on 2026-08-26;
+  `assets/units/size_l/ship_par_l_destroyer_01.xml` con_turret_laser_l_01
+  quaternion `(-0.1274921,0,0,-0.9918396)` vs measured weapon
+  `rotation.pitch=-0.25568` rad; 70-surface pitch cross-check
+- Live test: yes — one instrumented run; the conjugate of the raw XML
+  connection quaternion predicted all 70 measured surface pitches with zero
+  error (rmse 0.000 deg), while the as-given form erred up to 27 deg
+- Finding: to get an equipment component's live orientation frame from a ship
+  component XML connection offset, use the CONJUGATE of the stored quaternion
+  (the stored value maps child frame to parent). Position offsets are direct.
+  The earlier Colossus E r13 calibration could not detect this because that
+  mount's quaternion was a pure boresight roll, invisible to pitch
+  measurements. Bound: verified for one turret mount on one hull; the
+  conjugation rule itself is consistent with all shipped loadouts observed.
+
+### X4 fires when a component's origin is outside a turret's authored pitch stop but its hittable aim point is inside
+- X4: 9.00
+- Status: live-tested
+- Source: r32 Test Lab `debug.log` on 2026-08-26, game time 248913-249157;
+  qualify `request_id=84394242_q2` (`group_front_up_mid2`, shooter ship
+  `1544423`, weapon `0x1790f5` `turret_par_l_plasma_01_mk1_macro`, authored
+  band {-5,+80} => +80 deg = 1.39626 rad); closes the open question left at
+  the own-hull masking record above
+- Live test: yes — one instrumented run, one arc-split case plus one
+  in-arc positive control, both manually designated through Direct control
+- Finding: the fixture qualified two exact `turret_arg_l_beam_01_mk1_macro`
+  surfaces on two Argon L destroyers. Arc-split case `SKY SURVEY A 000`
+  (`0x179112`) surface `0x17911d`: `origin_pitch=1.41806` (outside +80 deg),
+  `aim_pitch=1.37386` (inside), `arc_split=1 origin_outside=1 aim_inside=1
+  inrange=1 mayattack=1`. Positive control `SKY SURVEY A 100` (`0x179135`)
+  surface `0x179140`: `origin_pitch=1.22173 aim_pitch=1.21314 arc_split=0`.
+  With the predicate evaluating the `useaimtarget` bearing, both surfaces
+  rendered `1 / 1  ENGAGEABLE` (`0x179140` at 249125.95, `0x17911d` at
+  249148.82; pinned refresh of `1544477` still `engageable=1` at 249155.83).
+  The owner then destroyed both exact components: `0x179140` FIRED 249138.45
+  / HIT 249140.77 `hitcomp=0x179140 istgt=1`, `0x17911d` FIRED 249155.79 /
+  HIT 249156.10 `hitcomp=0x17911d istgt=1`, each row leaving the browser
+  immediately after (`all=4` -> `all=3`). X4 therefore does engage across an
+  authored pitch limit when the hittable aim point is inside it, so an
+  origin-based arc check refuses shots the engine will take.
+- Consequence: evaluate arc membership on the weapon-local `useaimtarget`
+  look_at bearing, not on `$target.relativeposition.{$weapon}.rotation.pitch`.
+- Note on granularity: ship-root and surface engageability legitimately
+  disagree under this geometry. At 249156.48 root `1544466` read `0 / 1`
+  while its own surface `1544477` read `1 / 1  ENGAGEABLE` — exactly the
+  `origin_outside=1 / aim_inside=1` split. Do not read a root row as a
+  verdict on its surfaces.
+- Boundaries: one shooter macro, one authored band, one target hull, pitch
+  axis only. Yaw stops and modded macros are untested. An unresolved
+  anomaly on a NON-designated component from the same run is tracked
+  separately: engine `0x179141` read `0 / 1` at 249125.03 (pinned,
+  `hull_percent=18`) yet was hit at 249125.11 and 249129.11 with
+  `aimed=0x179141 istgt=1` under `mode=autoassist`.
