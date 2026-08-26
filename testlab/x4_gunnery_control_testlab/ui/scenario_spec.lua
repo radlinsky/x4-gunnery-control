@@ -29,7 +29,7 @@
 --     turretGroup     string  Raw group id, not the display label.
 --     turretLabel     string  Human-readable group label.
 --     expectedTurrets number  Exact operational-member count.
---     expectedMacros  list    Optional exact sorted member-macro multiset.
+--     expectedMemberMacros list Optional exact sorted member-macro multiset (expectedMacros is accepted for legacy specs).
 --     selectAll       boolean Select every mutable turret group and verify the
 --                             aggregate member count instead of one raw group.
 --   groups    list     One entry per batch of identical ships.
@@ -44,6 +44,9 @@
 --                        right, negative = left). Default 0.
 --     y         number   Optional. Metres above the player ship (positive = up,
 --                        negative = down). Default 0.
+--     ox / oy / oz number Optional. Finite P*-relative target-root offsets.
+--                        All three are required when geometryRole is
+--                        "surface_mask"; ordinary groups transport numeric 0 defaults.
 --                        Axes: positive x = right, positive y = up,
 --                        positive z (distance) = forward.
 --     behaviour string   "wait"  = hold position (a patient target)
@@ -57,11 +60,25 @@
 --                        hostile relation is applied.
 --     repairGuard boolean Restore the ship and struck component after each
 --                        player-ship hit without making either indestructible.
---     yaw       number   Optional absolute yaw in degrees. Default 0.
+--     yaw       number   Optional absolute spawn-orientation yaw, degrees.
+--     pitch     number   Optional absolute spawn-orientation pitch, degrees.
+--     roll      number   Optional absolute spawn-orientation roll, degrees.
+--                        Spawn orientation is how the spawned ship faces when
+--                        it is created; it is not a weapon aim angle or a
+--                        turret traverse/elevation limit. Default 0.
+--     preserveOrientation boolean Optional. For Wait targets, set the shipped
+--                        order's internal skipalignment parameter so it does
+--                        not replace authored pitch/roll with ecliptic zeroes.
+--                        Default false.
 --     role      string   Optional "shooter" role for strict loadout census.
 --     loadout   string   Optional supported deterministic Test Lab loadout.
 --     geometryRole string Optional "clear_arc", "below_arc", or
 --                         "surface_mask" post-teleport qualifier role.
+--                         "surface_mask" is the sky-survey pending
+--                         exact-ship-surface transport role used to qualify one
+--                         authored arc-split component for manual designation.
+--     geometryWeaponMacro string Exact qualifier weapon macro for the shooter.
+--     expectedGeometryWeapons number Exact operational members of that macro.
 --     expectedWeapons / expectedTurrets / expectedBeam / expectedPlasma
 --                        Exact ordinary-emitter census required before READY.
 --     expectedMissileTurrets / expectedGuided / expectedDumbfire / expectedAmmo
@@ -79,92 +96,74 @@
 --                            turrets, shields, and engines required.
 --     holdFire       boolean Keep all station weapons in HOLD FIRE and refuse
 --                            READY unless the live mode census proves it.
---     geometryRole   string  Optional "aim_split" transport role. The current
---                            #67 phase uses its post-teleport qualifier to find
---                            one exact masking component for manual designation.
+--     geometryRole   string  Optional "aim_split" transport role.
 --     searchAttempts/searchStepY
 --                        Bounded deterministic vertical position search.
 --
--- Issue #67's arc and conventional-ray questions are separate. r11 answers only
--- the direct ship-surface masking question. Four Xenon K candidates are created
--- once at authored positions and left settled; the post-teleport qualifier does
--- not warp anything. It enumerates every operational surface element, then
--- marks one exact surface only when BOTH selected plasma turrets
--- can bear, are in range, have externally clear muzzle rays, have self-inclusive
--- blocked muzzle rays, and may legally attack that same component. The owner
--- then performs Direct-control, target-ship, and marked-surface clicks; Test Lab
--- does not set the soft target. Xenon K is the ship surface route already
--- exercised successfully by issue 65. Candidate coordinates remain
--- experimental fixture inputs until a fresh run qualifies.
+-- Issue #67 r32 is the Argon half of the Paranid L-destroyer sky-cap arc
+-- survey. The r15 Colossus E ring could not answer goal 1 (own-hull
+-- occlusion at the {-10,+90} lower limit); r16..r32 mount the plasma survey
+-- on the Paranid destroyer top deck so out-of-arc directions face open sky.
+-- Two independently spawned Argon L destroyers (xenon-owned, the r16
+-- hostility mechanism) carry the same sky parameters, so the A/B isolates the
+-- target hull. r32 splits the two survey roles explicitly through geometryCase:
+-- A000 is the straddling arc_split surface (origin above the +80 arc stop,
+-- hittable aim inside it) and A100 is the positive_control that is fully inside
+-- the arc and must fire. They retain authored transforms while the owner
+-- manually selects the qualified root and surface; Test Lab never automates
+-- Direct control.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-direct-surface-mask-r11",
+    id      = "issue-67-argon-sky-survey-r32",
     enabled = false,
     location = {
-        sectorMacro = "Cluster_29_Sector001_macro", -- Hatikvah's Choice I (Argon-friendly), one gate from Xenon Tharka's Cascade XV. X4 9.00.
+        sectorMacro = "Cluster_29_Sector001_macro",
         x = 500000, y = 0, z = 0,
     },
     setup   = {
         remote          = true,
-        shipMacro       = "ship_arg_xl_carrier_02_a_macro",
-        shipLabel       = "ISSUE ARC-BARREL COLOSSUS E 1",
-        turretGroup     = "group_front_right_up",
-        turretLabel     = "Front Upper Right Plasma",
+        shipMacro       = "ship_par_l_destroyer_01_a_macro",
+        shipLabel       = "ISSUE SKY-SURVEY PARANID DESTROYER 1",
+        turretGroup     = "group_front_up_mid2",
+        turretLabel     = "Front Upper Mid Plasma",
         selectAll       = false,
-        expectedTurrets = 2,
-        expectedMacros  = {
-            "turret_arg_m_plasma_02_mk1_macro",
-            "turret_arg_m_plasma_02_mk1_macro",
-        },
+        expectedTurrets = 1,
+        expectedMemberMacros = { "turret_par_l_plasma_01_mk1_macro" },
     },
     groups = {
-        { label = "ISSUE ARC-BARREL COLOSSUS E",
-          macro = "ship_arg_xl_carrier_02_a_macro", faction = "player",
-          count = 1, distance = 1, x = 0, y = 0, spread = 0, yaw = 0,
-          behaviour = "wait", role = "shooter",
-          loadout = "issue67_colossus_arc_barrel",
-          stripDefenceUnits = true,
-          -- Census invariant: turret-mounted weapons are counted in both
-          -- `.weapons.operational.count` and `.turrets`, so 4 turrets =>
-          -- weapons=4. That invariant is live-tested on Behemoth E only
-          -- (X4 9.00, d7e3870). Colossus E arms group_front_left_up (beam) and
-          -- group_front_right_up (plasma), 2 turrets each: those slot/group
-          -- facts are shipped-source; r3 and r9 live-verified the exact
-          -- Colossus mount, and r9 observed all four firing and hitting A.
-          expectedWeapons = 4, expectedTurrets = 4,
-          expectedBeam = 2, expectedPlasma = 2,
-          expectedMissileTurrets = 0, expectedGuided = 0,
-          expectedDumbfire = 0, expectedAmmo = 0 },
-        -- The shipped macro is explicitly called Xenon K by vanilla MD despite
-        -- its xl_destroyer name. Separate one-count groups preserve four exact
-        -- authored positions and make each candidate unmistakable in logs.
-        { label = "MASK CANDIDATE K 1",
-          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
-          count = 1, distance = 4201, x = 0, y = -550, spread = 0, yaw = 180,
+        { label = "ISSUE SKY-SURVEY PARANID DESTROYER",
+          macro = "ship_par_l_destroyer_01_a_macro", faction = "player",
+          count = 1, distance = 1, x = 0, y = 0, spread = 0, behaviour = "wait",
+          role = "shooter", loadout = "issue67_paranid_sky_survey",
+          geometryWeaponMacro = "turret_par_l_plasma_01_mk1_macro",
+          expectedGeometryWeapons = 1,
+          expectedWeapons = 1, expectedTurrets = 1, expectedPlasma = 1, expectedBeam = 0,
+          expectedMissileTurrets = 0, expectedGuided = 0, expectedDumbfire = 0, expectedAmmo = 0 },
+        { label = "SKY SURVEY A 000",
+          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+          -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
+          count = 1, distance = 263.535, x = -39.429, y = 699.533, spread = 0,
+          ox = -39.429, oy = 601.324, oz = 25.352,
+          yaw = 218.0993, pitch = 78.6164, roll = 171.2717,
+          preserveOrientation = true,
           behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true,
-          geometryRole = "surface_mask" },
-        { label = "MASK CANDIDATE K 2",
-          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
-          count = 1, distance = 4601, x = 700, y = -650, spread = 0, yaw = 180,
+          stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
+          loadout = "issue67_argon_sky_target",
+          geometryCase = "arc_split" },
+        { label = "SKY SURVEY A 100",
+          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+          -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
+          count = 1, distance = 74.485, x = -223.612, y = 1886.521, spread = 0,
+          ox = -223.612, oy = 1788.313, oz = -163.698,
+          yaw = 214.0265, pitch = 68.9246, roll = -166.8782,
+          preserveOrientation = true,
           behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true,
-          geometryRole = "surface_mask" },
-        { label = "MASK CANDIDATE K 3",
-          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
-          count = 1, distance = 5001, x = 1400, y = -750, spread = 0, yaw = 180,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true,
-          geometryRole = "surface_mask" },
-        { label = "MASK CANDIDATE K 4",
-          macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
-          count = 1, distance = 5401, x = 2100, y = -850, spread = 0, yaw = 180,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true,
-          geometryRole = "surface_mask" },
+          stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
+          loadout = "issue67_argon_sky_target",
+          geometryCase = "positive_control" },
     },
     stations = {},
 }

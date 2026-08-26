@@ -246,6 +246,196 @@ do
     assert(#events == 3, "omitted-bearing spec must fire begin + 1 group + commit; got " .. #events)
     assert(events[2].params.x == 0 and events[2].params.y == 0,
         "omitted x/y must default to 0 in the group payload")
+    assert(events[2].params.ox == 0 and events[2].params.oy == 0 and events[2].params.oz == 0
+            and type(events[2].params.ox) == "number" and type(events[2].params.oy) == "number"
+            and type(events[2].params.oz) == "number",
+        "omitted ox/oy/oz must default to the number 0 in an ordinary group payload")
+end
+
+-- Optional pitch and roll ride the same flat scenario_group transport as yaw:
+-- explicit values are forwarded as numbers, omitted ones default to 0.
+do
+    local harness = loadHarness({
+        id = "orientation-explicit",
+        enabled = true,
+        groups = {
+            { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+              count = 1, distance = 3000, behaviour = "wait",
+              yaw = 180, pitch = 15, roll = -7 },
+            { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+              count = 1, distance = 4000, behaviour = "wait" },
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 4, "orientation spec must fire begin + 2 groups + commit; got " .. #events)
+    assert(events[2].params.yaw == 180 and events[2].params.pitch == 15 and events[2].params.roll == -7,
+        "explicit yaw/pitch/roll must be forwarded in the group payload")
+    assert(type(events[2].params.pitch) == "number" and type(events[2].params.roll) == "number",
+        "explicit pitch/roll must be numbers in the group payload")
+    assert(events[3].params.yaw == 0 and events[3].params.pitch == 0 and events[3].params.roll == 0
+            and events[3].params.preserveOrientation == false,
+        "omitted orientation fields must default to 0/false in the group payload")
+    assert(type(events[3].params.pitch) == "number" and type(events[3].params.roll) == "number",
+        "omitted pitch/roll must default to the number 0, not nil")
+end
+
+-- Authored spawn orientation is exact fixture geometry. Supplied non-numeric
+-- or non-finite values must reject the spec rather than silently level a ship.
+for _, case in ipairs({
+    { field = "yaw", value = "level" },
+    { field = "pitch", value = 0 / 0 },
+    { field = "roll", value = math.huge },
+    { field = "roll", value = -math.huge },
+}) do
+    local group = { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+        count = 1, distance = 3000, behaviour = "wait" }
+    group[case.field] = case.value
+    local harness = loadHarness({ id = "orientation-invalid-" .. case.field,
+        enabled = true, groups = { group } })
+    assert(#scenarioEvents(harness) == 0,
+        "an invalid " .. case.field .. " must reject the spec before transport")
+    harness.openFromGunnery({ label = "invalid orientation", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    assert(#scenarioEvents(harness) == 0
+            and harness.fix.logContains("groups_1_." .. case.field .. "_must_be_a_finite_number"),
+        "invalid " .. case.field .. " must fail closed with the exact reason")
+end
+
+do
+    local harness = loadHarness({ id = "orientation-invalid-preserve", enabled = true,
+        groups = { { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+            count = 1, distance = 3000, behaviour = "wait",
+            preserveOrientation = "yes" } } })
+    assert(#scenarioEvents(harness) == 0,
+        "a non-boolean preserveOrientation must reject the spec before transport")
+end
+
+do
+    local harness = loadHarness({ id = "target-loadout-cannot-be-shooter", enabled = true,
+        groups = { { macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+            count = 1, distance = 3000, behaviour = "wait", role = "shooter",
+            loadout = "issue67_argon_sky_target",
+            expectedWeapons = 1, expectedTurrets = 1, expectedBeam = 1 } } })
+    assert(#scenarioEvents(harness) == 0,
+        "the sparse Argon target loadout must not be accepted as a shooter loadout")
+    harness.openFromGunnery({ label = "invalid target shooter", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    assert(#scenarioEvents(harness) == 0
+            and harness.fix.logContains("loadout_is_not_a_supported_shooter_loadout"),
+        "the target-only loadout must fail closed with the shooter-loadout reason")
+end
+
+-- surface_mask groups require ox/oy/oz to each be present and finite; omitting
+-- any one of them must reject the spec before transport with a field-specific
+-- finite-number reason.
+for _, field in ipairs({ "ox", "oy", "oz" }) do
+    local group = { macro = "ship_xen_xl_destroyer_01_a_macro", faction = "xenon",
+        count = 1, distance = 3000, behaviour = "wait", geometryRole = "surface_mask",
+        geometryCase = "arc_split",
+        hostile = true, holdFire = true, stripDefenceUnits = true, repairGuard = true,
+        ox = -96.369, oy = 568.111, oz = -323.707 }
+    group[field] = nil
+    local harness = loadHarness({ id = "surface-mask-missing-" .. field, enabled = true,
+        groups = { group } })
+    assert(#scenarioEvents(harness) == 0,
+        "a surface_mask group missing " .. field .. " must reject the spec before transport")
+    harness.openFromGunnery({ label = "missing offset", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    assert(#scenarioEvents(harness) == 0
+            and harness.fix.logContains("groups_1_." .. field .. "_must_be_a_finite_number"),
+        "a surface_mask group missing " .. field .. " must fail closed with the exact reason")
+end
+
+-- Non-surface groups tolerate omitted offsets (default 0) but a non-finite
+-- supplied value must still reject, mirroring the yaw/pitch/roll guard.
+do
+    local harness = loadHarness({ id = "offset-non-finite", enabled = true,
+        groups = { { macro = "ship_xen_s_fighter_01_a_macro", faction = "xenon",
+            count = 1, distance = 3000, behaviour = "wait", ox = math.huge } } })
+    assert(#scenarioEvents(harness) == 0,
+        "a non-finite supplied ox in a non-surface group must reject the spec before transport")
+    harness.openFromGunnery({ label = "bad offset", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    assert(#scenarioEvents(harness) == 0
+            and harness.fix.logContains("groups_1_.ox_must_be_a_finite_number"),
+        "a non-finite supplied ox must fail closed with the exact reason")
+end
+
+local function readLines(path)
+    local file = io.open(path)
+    assert(file, "cannot read " .. path)
+    local lines = {}
+    for line in file:lines() do lines[#lines + 1] = line end
+    file:close()
+    return lines
+end
+
+-- The MD spawner side of the transport contract. The ScenarioGroup cue must
+-- store pitch and roll in the Pending table with the same missing-key guard
+-- and 0 default as yaw, and every one of the four create_ship branches
+-- (remote and local, named-loadout and default-loadout) must apply all three
+-- angles so a spawned ship cannot silently inherit a yaw-only orientation.
+do
+    local xml = readLines("testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml")
+    local pending
+    for index, line in ipairs(xml) do
+        if line:find('<cue name="ScenarioGroup"', 1, true) then
+            local block = {}
+            for candidate = index, #xml do
+                block[#block + 1] = xml[candidate]
+                if xml[candidate]:find("</cue>", 1, true) then break end
+            end
+            pending = table.concat(block, "\n")
+            break
+        end
+    end
+    assert(pending, "ScenarioGroup cue is missing")
+    for _, angle in ipairs({ "yaw", "pitch", "roll" }) do
+        assert(pending:find("$" .. angle .. "%s*=%s*if @event%.param3%.$" .. angle
+                .. "%s*then%s+event%.param3%.$" .. angle .. "%s*else%s+0"),
+            "ScenarioGroup Pending table must store $" .. angle
+                .. " with the same missing-key guard and 0 default as the other angles")
+    end
+    assert(pending:find("$preserveorientation%s*=%s*@event%.param3%.$preserveOrientation == true"),
+        "ScenarioGroup Pending table must store the exact preserveOrientation flag")
+    local spawnRotations = {}
+    for _, line in ipairs(xml) do
+        if line:find('<rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>', 1, true) then
+            spawnRotations[#spawnRotations + 1] = line
+        end
+    end
+    local creates = 0
+    for _, line in ipairs(xml) do
+        if line:find("<create_ship ", 1, true) then creates = creates + 1 end
+    end
+    assert(creates == 8, "expected the eight create_ship branches (colossus + survey shooter + sparse target + generic, per context), found " .. creates)
+    assert(#spawnRotations == 8,
+        "one authored spawn rotation per create_ship branch")
+    for _, line in ipairs(spawnRotations) do
+        assert(line:find('<rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>', 1, true),
+            "every create_ship branch must apply the full yaw/pitch/roll spawn orientation: " .. line)
+    end
+    local scenarioText = table.concat(xml, "\n")
+    assert(scenarioText:find('<param name="skipalignment" value="$Def.$preserveorientation"/>', 1, true),
+        "Wait must transport preserveOrientation to shipped order.wait skipalignment")
+end
+
+-- The spec-file documentation contract: optional absolute spawn-orientation
+-- pitch and roll degrees defaulting to 0 exactly as yaw, documented as spawn
+-- orientation rather than as weapon aim or turret arc terminology.
+do
+    local specDoc = table.concat(readLines("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua"), "\n")
+    for _, sentence in ipairs({
+        "Optional absolute spawn-orientation yaw, degrees.",
+        "Optional absolute spawn-orientation pitch, degrees.",
+        "Optional absolute spawn-orientation roll, degrees.",
+        "Spawn orientation is how the spawned ship faces when",
+        "ox / oy / oz number Optional. Finite P*-relative target-root offsets.",
+        "All three are required when geometryRole is",
+        "ordinary groups transport numeric 0 defaults.",
+    }) do
+        assert(specDoc:find(sentence, 1, true), "scenario_spec.lua must document: " .. sentence)
+    end
 end
 
 -- A remote setup is bootstrapped from an arbitrary safe gunnery ship. Creation
@@ -487,198 +677,142 @@ do
         "the exact two-beam/two-plasma shooter must auto-arm after teleport")
 end
 
--- Two-phase #67 r11 discriminator. The OOS acknowledgement verifies one shooter
--- plus four stationary Xenon Ks and reports geometry PENDING (never geometrically
--- ready). A single post-teleport open enumerates their operational surfaces and
--- qualifies only when both selected plasma turrets reproduce the direct
--- own-hull-masking gates against one exact component.
-local beam = "turret_arg_m_beam_02_mk1_macro"
-local plasma = "turret_arg_m_plasma_02_mk1_macro"
-local function modelColossusTurrets(harness)
-    local groupBuffer = {
-        [0] = { path = "p", group = "group_front_left_up", contextid = 5 },
-        [1] = { path = "p", group = "group_front_right_up", contextid = 5 },
-    }
+-- Two-phase #67 r31 fixture. One Paranid L Plasma turret and two independently
+-- spawned Argon survey destroyers remain geometry-PENDING until the
+-- post-teleport scan.
+local plasmaSurvey = "turret_par_l_plasma_01_mk1_macro"
+local function modelParanidPlasma(harness)
+    local groupBuffer = { [0] = { path = "p", group = "group_front_up_mid2", contextid = 5 } }
     harness.fix.ffiStub.new = function() return groupBuffer end
-    harness.fix.C.GetNumUpgradeGroups = function() return 2 end
-    harness.fix.C.GetUpgradeGroups2 = function() return 2 end
-    harness.fix.C.GetUpgradeGroupInfo2 = function(_, _, _, _, group)
-        if group == "group_front_right_up" then
-            return { count = 2, currentcomponent = 29, currentmacro = plasma,
-                slotsize = "medium", total = 2, operational = 2 }
-        end
-        return { count = 2, currentcomponent = 27, currentmacro = beam,
-            slotsize = "medium", total = 2, operational = 2 }
+    harness.fix.C.GetNumUpgradeGroups = function() return 1 end
+    harness.fix.C.GetUpgradeGroups2 = function() return 1 end
+    harness.fix.C.GetUpgradeGroupInfo2 = function()
+        return { count = 1, currentcomponent = 27, currentmacro = plasmaSurvey,
+            slotsize = "large", total = 1, operational = 1 }
     end
-    harness.fix.C.GetNumUpgradeSlots = function() return 4 end
-    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 26 + slot end
-    harness.fix.C.GetUpgradeSlotGroup = function(_, _, _, slot)
-        if slot <= 2 then return { path = "p", group = "group_front_left_up" } end
-        return { path = "p", group = "group_front_right_up" }
+    harness.fix.C.GetNumUpgradeSlots = function() return 1 end
+    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot)
+        return slot == 1 and 27 or nil
     end
+    harness.fix.C.GetUpgradeSlotGroup = function() return { path = "p", group = "group_front_up_mid2" } end
     GetComponentData = function(component, field)
         if field == "macro" then
-            local value = tonumber(component)
-            if value == 27 or value == 28 then return beam end
-            if value == 29 or value == 30 then return plasma end
-            return "ship_arg_xl_carrier_02_a_macro"
+            local c = tonumber(component)
+            if c == 27 then return plasmaSurvey end
+            return "ship_par_l_destroyer_01_a_macro"
         end
         if field == "isplayerowned" then return true end
-        return nil
     end
     harness.fix.C.GetComponentName = function(component)
-        local value = tonumber(component)
-        if value == 27 or value == 28 then return "Beam" end
-        if value == 29 or value == 30 then return "Plasma" end
-        return "ISSUE ARC-BARREL COLOSSUS E 1"
+        local c = tonumber(component)
+        if c == 27 then return "Plasma 1" end
+        return "ISSUE SKY-SURVEY PARANID DESTROYER 1"
     end
 end
 
--- Reload UI erases Test Lab's Lua latch but not the spawned ships or MD cue
--- groups. While seated in the uniquely named r11 shooter, one Test Lab open
--- must recover geometry-PENDING and reissue only the qualifier—never Create.
-do
-    local harness = loadHarness()
-    modelColossusTurrets(harness)
-    harness.openFromGunnery({ label = "post-reload recovery", phase = "console" })
-    local create, qualify = 0, 0
-    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "scenario_commit" then create = create + 1 end
-        if event.control == "qualify_geometry" then qualify = qualify + 1 end
-    end
-    assert(create == 0 and qualify == 1
-            and harness.fix.logContains("action=recovered_geometry_pending_after_ui_reload"),
-        "post-reload recovery must reuse the occupied r11 fixture and issue exactly one qualifier")
-end
-
--- Drives the shipped fixture from OOS Create through the post-teleport open that
--- fires the settled ship-surface discriminator, leaving it waiting on GeometryQualified.
 local function shippedTwoPhaseToQualify()
     local harness = loadHarness()
-    harness.openFromGunnery({ label = "two-phase launcher", phase = "console" })
+    harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 7, "shipped Create must stream begin + 5 groups + commit")
+    assert(#events == 5, "shipped Create must stream begin + shooter + two targets + commit")
+    assert(events[2].params.geometryWeaponMacro == plasmaSurvey
+            and events[2].params.expectedGeometryWeapons == 1,
+        "Paranid L shooter transport must carry its exact geometry macro/count")
     local requestId = events[1].params.requestId
-    -- Five ships: one exact shooter plus four repaired, held-fire Xenon Ks. No
-    -- station, module, or OOS geometry split participates in r11.
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-direct-surface-mask-r11:5:0:0:0:0:0:0:4:4:0:0:4:4:1:0:0:0:0:0:0:4:4:2:2:0:0")
+        "x4gct8:" .. requestId .. ":issue-67-argon-sky-survey-r32:3:0:0:0:0:0:0:2:20:0:0:2:2:1:0:0:0:0:0:0:1:1:0:1:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
-            and harness.fix.logContains("action=remote_geometry_pending")
-            and harness.fix.logContains("geometry_splits=0"),
-        "OOS ship fixture must verify census and report surface geometry PENDING")
-    assert(not harness.fix.logContains("action=qualified"),
-        "no OOS candidate may be silently called geometrically qualified")
-
-    modelColossusTurrets(harness)
-    harness.fix.gcMenu.onShowMenu()
-    harness.fix.gcMenu.display()
+            and harness.fix.logContains("action=remote_geometry_pending"),
+        "OOS Paranid L survey must verify census and report geometry PENDING")
+    modelParanidPlasma(harness)
+    harness.fix.gcMenu.onShowMenu(); harness.fix.gcMenu.display()
     harness.fix.buttonByText(ReadText(20991, 32)).handlers.onClick()
     harness.testMenu.onShowMenu()
     local qualifyEvents = {}
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
         if event.control == "qualify_geometry" then qualifyEvents[#qualifyEvents + 1] = event end
     end
-    assert(#qualifyEvents == 1,
-        "the single post-teleport open must trigger exactly one in-system qualify")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
-        "the in-system discriminator must not return to Gunnery before it qualifies")
-    assert(harness.fix.logContains("event=geometry_qualify")
-            and harness.fix.logContains("action=requested"),
-        "the discriminator request must be logged")
+    assert(#qualifyEvents == 1 and harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "one post-teleport Test Lab open must issue exactly one Paranid L qualifier")
     return harness, qualifyEvents[1].params.requestId
 end
 
--- Both selected plasma turrets qualifying against one exact ship surface
--- transport that component to Lua, mark it for the owner's normal Direct-control
--- clicks, and return to Gunnery. Observation starts only after the exact manual
--- surface click, represented here by the recommendation callback.
 do
-    local harness, qToken = shippedTwoPhaseToQualify()
+    local harness, token = shippedTwoPhaseToQualify()
     local suggested = {}
     harness.fix.API.suggestTestEngagement = function(target, callback)
-        suggested[#suggested + 1] = { target = target, callback = callback }
-        return true
+        suggested[#suggested + 1] = { target = target, callback = callback }; return true
     end
-    -- Re-opening while the discriminator is pending must not re-issue it.
-    harness.testMenu.onShowMenu()
-    local issued = 0
-    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "qualify_geometry" then issued = issued + 1 end
-    end
-    assert(issued == 1, "a pending discriminator must not be re-issued on a repeat open")
-
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", token)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq7:" .. qToken .. ":1:4:28:2:56:32:32:18:2")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
-        "an exact masking ship surface must arm the plasma group and return to Gunnery")
-    assert(harness.fix.logContains("action=qualified")
-            and harness.fix.logContains("targets=4")
-            and harness.fix.logContains("surfaces=28")
-            and harness.fix.logContains("surface_origin_candidates=32")
-            and harness.fix.logContains("surface_aim_candidates=32")
-            and harness.fix.logContains("surface_clear_candidates=18")
-            and harness.fix.logContains("masking_members=2")
-            and harness.fix.logContains("designated_target=ship_surface")
-            and harness.fix.logContains("direct_mode=autoassist")
-            and harness.fix.logContains(plasma),
-        "qualification must log independent geometry, the ship-surface designation, and exact armed set")
-    assert(#suggested == 1 and tonumber(suggested[1].target) == 31337
-            and harness.fix.API.getSession().directMode == "autoassist",
-        "qualification must mark the transported ship surface for strict manual Direct-control")
-    local checked, checkedKey = 0, nil
-    for key in pairs(harness.fix.API.getSession().checkedGroupKeys or {}) do
-        checked, checkedKey = checked + 1, key
+        "x4gcq9:" .. token .. ":1:2:35:1:35:4:20:1:1:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2
+            and harness.fix.logContains("measured=1") and harness.fix.logContains(plasmaSurvey),
+        "only the exact one-Plasma census may qualify")
+    assert(#suggested == 1 and tonumber(suggested[1].target) == 31337,
+        "qualification may mark the exact surface but cannot automate selection")
+    local session = harness.fix.API.getSession()
+    assert(session.directMode ~= "direct", "qualification must not automate Direct control")
+    local checked = 0
+    for key in pairs(session.checkedGroupKeys or {}) do
+        checked = checked + 1; assert(key:find("group_front_up_mid2", 1, true))
     end
-    assert(checked == 1 and checkedKey
-            and checkedKey:find("group_front_right_up", 1, true),
-        "the clean masking run must tick only the exact two-plasma group")
-    local observedBeforeClick = false
+    assert(checked == 1, "only the exact Plasma group may be selected")
+    local observed = false
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "observe_toggle" and event.params.enabled == true then observedBeforeClick = true end
+        if event.control == "observe_toggle" and event.params.enabled then observed = true end
     end
-    assert(not observedBeforeClick,
-        "geometry qualification alone must not arm observation before the owner's surface click")
+    assert(not observed, "qualification alone must not arm observation")
     suggested[1].callback(true, "")
     assert(harness.fix.logContains("action=operator_designated"),
-        "the exact manual surface click must be logged separately from geometry qualification")
-    local observedAfterClick = false
-    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "observe_toggle" and event.params.enabled == true then observedAfterClick = true end
-    end
-    assert(observedAfterClick,
-        "the exact manual surface click must arm firing-solution observation")
+        "observation begins only after the owner performs the manual surface click")
 end
 
--- No exact two-member surface: fail closed. The group is not armed, observation is not
--- enabled, and control does not return to the diagnostic.
+-- Typed target components are opaque and must be authorized by the current
+-- request token before the q8 terminal message can consume them.
 do
-    local harness, qToken = shippedTwoPhaseToQualify()
-    local observeBefore = 0
-    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "observe_toggle" and event.params.enabled == true then
-            observeBefore = observeBefore + 1
-        end
-    end
+    local harness, token = shippedTwoPhaseToQualify()
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq7:" .. qToken .. ":0:4:28:2:56:32:32:18:0")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
-        "a no-mask in-system result must fail closed and not begin the diagnostic")
-    assert(harness.fix.logContains("action=failed")
-            and harness.fix.logContains("targets=4")
-            and harness.fix.logContains("surfaces=28")
-            and harness.fix.logContains("masking_members=0"),
-        "a failed in-system surface scan must log a machine-readable terminal census")
-    local observeAfter = 0
-    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "observe_toggle" and event.params.enabled == true then
-            observeAfter = observeAfter + 1
-        end
-    end
-    assert(observeAfter == observeBefore,
-        "failing the discriminator must not arm firing-solution observation")
+        "x4gcq9:" .. token .. ":1:2:35:1:35:4:20:1:1:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
+            and harness.fix.logContains("action=failed"),
+        "an uncorrelated typed target must fail closed even with qualified q8")
+end
+
+do
+    local harness, token = shippedTwoPhaseToQualify()
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", "old_q0")
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq9:" .. token .. ":1:2:35:1:35:4:20:1:1:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
+            and harness.fix.logContains("action=failed"),
+        "a stale token plus typed target must fail closed")
+end
+
+do
+    local harness, token = shippedTwoPhaseToQualify()
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq9:" .. token .. ":1:2:35:3:70:8:44:3:1:1:1")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
+            and harness.fix.logContains("action=failed"),
+        "a mismatched measured Plasma count must fail closed")
+end
+
+-- Stale and malformed q8 payloads must not consume the pending qualifier.
+do
+    local harness, token = shippedTwoPhaseToQualify()
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq9:wrong_q0:1:2:35:1:35:4:20:1:1:1:1")
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq9:" .. token .. ":0:2:35:1:35:4:20:1:1")
+    assert(not harness.fix.logContains("action=failed"), "uncorrelated/malformed q8 must be ignored")
+    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
+        "x4gcq9:" .. token .. ":0:2:35:1:35:4:20:0:0:0:0")
+    assert(harness.fix.logContains("action=failed"), "correlated failed q8 must be consumed fail-closed")
 end
 
 -- Outside an occupied remote shooter, Despawn remains active and emits the
@@ -1005,48 +1139,60 @@ for _, case in ipairs(malformed) do
 end
 
 -- The shipped spec file must itself stay loadable and inert, so that an
--- unrelated Reload UI never spawns whatever the last test left behind.
+-- unrelated Reload UI never spawns whatever the last test left behind. These
+-- two authored r32 survey transforms are shared by the integrity and
+-- flat-transport checks; the independent geometry derivation is locked by
+-- tests/test_issue67_sky_ring.sh.
+local expectedRing = {
+    { label = "SKY SURVEY A 000", x = -39.429, y = 699.533, distance = 263.535, yaw = 218.0993, pitch = 78.6164, roll = 171.2717, ox = -39.429, oy = 601.324, oz = 25.352 },
+    { label = "SKY SURVEY A 100", x = -223.612, y = 1886.521, distance = 74.485, yaw = 214.0265, pitch = 68.9246, roll = -166.8782, ox = -223.612, oy = 1788.313, oz = -163.698 },
+}
 do
     local shipped = dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
-    assert(type(shipped) == "table", "the shipped spec must return a table")
-    assert(shipped.enabled == false,
-        "the spec committed to the repository must be disabled; enable it only for a live run")
-    assert(shipped.id == "issue-67-direct-surface-mask-r11"
-            and shipped.setup.shipMacro == "ship_arg_xl_carrier_02_a_macro"
-            and shipped.setup.turretGroup == "group_front_right_up"
-            and shipped.setup.selectAll == false
-            and shipped.setup.expectedTurrets == 2,
-        "the shipped issue #67 fixture must retain its exact Colossus E setup")
-    assert(#shipped.setup.expectedMacros == 2
-            and shipped.setup.expectedMacros[1] == "turret_arg_m_plasma_02_mk1_macro"
-            and shipped.setup.expectedMacros[2] == "turret_arg_m_plasma_02_mk1_macro",
-        "the shipped issue #67 fixture must isolate the two-plasma group")
-    assert(#shipped.groups == 5 and #shipped.stations == 0,
-        "the shipped issue #67 r11 fixture must contain one shooter, four ship candidates, and no station")
-    for index = 2, 5 do
-        local target = shipped.groups[index]
-        assert(target.macro == "ship_xen_xl_destroyer_01_a_macro"
-                and target.geometryRole == "surface_mask"
-                and target.hostile == true and target.holdFire == true
-                and target.stripDefenceUnits == true and target.repairGuard == true,
-            "every r11 candidate must be a repaired held-fire Xenon K surface-mask target")
+    assert(type(shipped) == "table" and shipped.enabled == false, "the repository fixture must load and remain disabled")
+    assert(shipped.id == "issue-67-argon-sky-survey-r32" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
+            and shipped.setup.turretGroup == "group_front_up_mid2" and shipped.setup.turretLabel == "Front Upper Mid Plasma"
+            and shipped.setup.expectedTurrets == 1, "the shipped r32 fixture must retain its exact Paranid L setup")
+    assert(#shipped.setup.expectedMemberMacros == 1
+            and shipped.setup.expectedMemberMacros[1] == "turret_par_l_plasma_01_mk1_macro",
+        "r32 must isolate its one Plasma member")
+    assert(#shipped.groups == 3 and #shipped.stations == 0, "r32 must contain one shooter and two independently spawned Argon survey destroyers")
+    local shooter = shipped.groups[1]
+    assert(shooter.label == "ISSUE SKY-SURVEY PARANID DESTROYER" and shooter.loadout == "issue67_paranid_sky_survey"
+            and shooter.expectedWeapons == 1 and shooter.expectedTurrets == 1 and shooter.expectedBeam == 0 and shooter.expectedPlasma == 1
+            and shooter.geometryWeaponMacro == "turret_par_l_plasma_01_mk1_macro" and shooter.expectedGeometryWeapons == 1,
+        "Paranid L shooter must retain its exact one-Plasma qualifier contract")
+    for index = 2, 3 do
+        local target, expected = shipped.groups[index], expectedRing[index - 1]
+        assert(target.label == expected.label and target.macro == "ship_arg_l_destroyer_02_a_macro" and target.geometryRole == "surface_mask"
+                and target.hostile == true and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true
+                and target.loadout == "issue67_argon_sky_target"
+                and target.geometryCase == (index == 2 and "arc_split" or "positive_control")
+                and target.distance == expected.distance and target.x == expected.x and target.y == expected.y
+                and target.ox == expected.ox and target.oy == expected.oy and target.oz == expected.oz
+                and target.yaw == expected.yaw and target.pitch == expected.pitch and target.roll == expected.roll and target.preserveOrientation == true,
+            "every r32 survey target must retain its authored transform, case, loadout, and safety fields")
     end
 end
 
--- The shipped spec streams four distinct pre-positioned surface-mask targets.
--- Stream order is begin, shooter, four candidates, then commit.
 do
     local harness = loadHarness()
-    harness.openFromGunnery({ label = "surface-mask launcher", phase = "console" })
+    harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 7, "shipped Create must stream begin + 5 groups + commit")
-    for index = 3, 6 do
-        local target = events[index].params
-        assert(target.macro == "ship_xen_xl_destroyer_01_a_macro"
-                and target.geometryRole == "surface_mask"
-                and target.hostile == true and target.holdFire == true,
-            "each Xenon K transport must carry its surface-mask and safety roles")
+    assert(#events == 5, "shipped Create must stream begin + shooter + two targets + commit")
+    assert(events[2].params.geometryWeaponMacro == "turret_par_l_plasma_01_mk1_macro" and events[2].params.expectedGeometryWeapons == 1,
+        "flat shooter transport must include exact qualifier macro/count")
+    for index = 3, 4 do
+        local target, expected = events[index].params, expectedRing[index - 2]
+        assert(target.label == expected.label and target.count == 1 and target.spread == 0 and target.distance == expected.distance
+                and target.x == expected.x and target.y == expected.y and target.ox == expected.ox and target.oy == expected.oy and target.oz == expected.oz
+                and target.yaw == expected.yaw and target.pitch == expected.pitch
+                and target.roll == expected.roll and target.preserveOrientation == true and target.behaviour == "wait" and target.hostile == true
+                and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true and target.geometryRole == "surface_mask"
+                and target.geometryCase == (index == 3 and "arc_split" or "positive_control")
+                and target.loadout == "issue67_argon_sky_target",
+            "each r32 survey target must carry its complete flat authored transform and case")
     end
 end
 
@@ -1069,7 +1215,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-direct-surface-mask-r11", 1, true),
+    assert(specLabelText:find("issue-67-argon-sky-survey-r32", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

@@ -138,6 +138,23 @@ connection name from visible order, a previous hull, or an assumed zero-padded
 sequence; record the exact shipped component source beside the fixture evidence
 before the first live run.
 
+An internal connection/group id is NOT an operator-facing surface label. Before
+a live run, enumerate the exact labels the owner will actually see in Gunnery's
+surface browser. A default faction loadout can install several identical macros
+and therefore several indistinguishable rows (live example: a xenon-owned Argon
+L destroyer exposed repeated `XEN L Graviton Turret Mk1` labels). In that state
+the fixture is not operator-safe even when one internal connection is
+mathematically exact: withhold QUALIFIED and never tell the owner to infer the
+right row from `con_*`, `group_*`, visible order, or hull position.
+
+Make every manually selected exact surface uniquely identifiable. Prefer a
+proven static group-targeted loadout on a one-slot group for the authored
+surface, with every other same-size/same-label group either omitted or equipped
+with a different player-visible macro. Verify the resulting live label and
+exact macro/component census before arming observation. If distinct labels are
+not possible, the fixture must visibly mark the exact row and prove that marker
+survives the handoff; otherwise redesign or split the fixture.
+
 Verify every macro against the installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
 
@@ -238,6 +255,15 @@ is outside while some different module has both origin and aim inside. If the
 question is whether a root designation becomes a module engagement, make that a
 separate test: designate the root and instrument exact firing/hit components.
 
+Qualify every manual test role independently. Finding and returning the first
+arc-split component does not qualify or identify a separate positive-control
+surface, even when both ships were authored from the same connection. Each role
+needs its own exact component id, expected predicates, marker/unique visible
+label, operator-designation record, and result correlation. If the bridge can
+carry only one suggested surface at a time, split the roles into separate runs
+or implement explicit role-by-role sequencing; never ask the owner to select an
+unmarked counterpart by analogy.
+
 For a test of the Direct-control interaction, Test Lab must never call the
 Gunnery `SetSofttarget`/engagement bridge at all. Geometry automation may
 transport the exact component ID, select the exact weapon group, set the test's
@@ -248,7 +274,11 @@ manual surface click, and log geometry qualification separately from operator
 designation. X4 9.00 refused the r11 Xenon K surface write both while Test Lab
 owned the external menu and after two post-return attempts; those failures do
 not establish that the surface is ineligible, because the automated path did
-not reproduce the normal root-then-surface interaction.
+not reproduce the normal root-then-surface interaction. A later failed
+`suggestTestEngagement`/marker handoff on the r31 xenon-owned Argon target is a
+hard fixture failure: preserve the log, withhold observation, and redesign the
+label/marker flow. Do not convert that failure into an instruction to guess
+between duplicate surface rows.
 
 Likewise, a self-excluding-clear/self-inclusive-blocked ray pair proves only
 that the firing ship masks the mod's direct ray. It does not establish what

@@ -6,7 +6,7 @@ local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical
 local scenarioActionStatus, scenarioRequestSerial, pendingScenario, remoteScenarioReady = nil, 0, nil, false
 -- Two-phase #67 surface geometry discriminator: after the OOS census the
 -- fixture is geometry-PENDING; settled ship surfaces are measured in system
--- once the owner teleports aboard the preserved Colossus.
+-- once the owner teleports aboard the preserved Paranid destroyer.
 local pendingQualify, remoteGeometryPending = nil, false
 local finishGroups, emitSummary, returnToGunnery
 
@@ -119,6 +119,7 @@ local function validateSpec(raw)
     if raw.enabled ~= true and raw.enabled ~= false then return nil, "spec.enabled must be true or false" end
     if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
     local groups = {}
+    local geometryCases = { arc_split = 0, positive_control = 0 }
     for index, group in ipairs(raw.groups) do
         local where = "groups[" .. index .. "]"
         if type(group) ~= "table" then return nil, where .. " is not a table" end
@@ -138,9 +139,48 @@ local function validateSpec(raw)
             return nil, where .. ".role must be empty or shooter"
         end
         local geometryRole = tostring(group.geometryRole or "")
+        local geometryCase = tostring(group.geometryCase or "")
         if geometryRole ~= "" and geometryRole ~= "clear_arc" and geometryRole ~= "below_arc"
                 and geometryRole ~= "surface_mask" then
             return nil, where .. ".geometryRole must be empty, clear_arc, below_arc, or surface_mask"
+        end
+        if geometryRole == "surface_mask" then
+            if geometryCase ~= "arc_split" and geometryCase ~= "positive_control" then
+                return nil, where .. ".geometryCase must be arc_split or positive_control for surface_mask"
+            end
+            geometryCases[geometryCase] = geometryCases[geometryCase] + 1
+        elseif geometryCase ~= "" then
+            return nil, where .. ".geometryCase is only valid for surface_mask"
+        end
+        local offset = {}
+        for _, field in ipairs({ "ox", "oy", "oz" }) do
+            local value = group[field]
+            if geometryRole == "surface_mask" then
+                if value == nil then
+                    return nil, where .. "." .. field .. " must be a finite number"
+                end
+            elseif value == nil then
+                value = 0
+            end
+            if type(value) ~= "number" or value ~= value
+                    or value == math.huge or value == -math.huge then
+                return nil, where .. "." .. field .. " must be a finite number"
+            end
+            offset[field] = value
+        end
+        if group.preserveOrientation ~= nil
+                and type(group.preserveOrientation) ~= "boolean" then
+            return nil, where .. ".preserveOrientation must be a boolean"
+        end
+        local orientation = {}
+        for _, field in ipairs({ "yaw", "pitch", "roll" }) do
+            local value = group[field]
+            if value == nil then value = 0 end
+            if type(value) ~= "number" or value ~= value
+                    or value == math.huge or value == -math.huge then
+                return nil, where .. "." .. field .. " must be a finite number"
+            end
+            orientation[field] = value
         end
         local expectedMissileTurrets = tonumber(group.expectedMissileTurrets) or 0
         local expectedGuided = tonumber(group.expectedGuided) or 0
@@ -150,9 +190,12 @@ local function validateSpec(raw)
         local expectedTurrets = tonumber(group.expectedTurrets) or 0
         local expectedBeam = tonumber(group.expectedBeam) or 0
         local expectedPlasma = tonumber(group.expectedPlasma) or 0
+        local geometryWeaponMacro = tostring(group.geometryWeaponMacro or "")
+        local expectedGeometryWeapons = tonumber(group.expectedGeometryWeapons) or 0
         for field, value in pairs({ expectedWeapons = expectedWeapons,
                 expectedTurrets = expectedTurrets, expectedBeam = expectedBeam,
                 expectedPlasma = expectedPlasma,
+                expectedGeometryWeapons = expectedGeometryWeapons,
                 expectedMissileTurrets = expectedMissileTurrets,
                 expectedGuided = expectedGuided, expectedDumbfire = expectedDumbfire,
                 expectedAmmo = expectedAmmo }) do
@@ -162,24 +205,37 @@ local function validateSpec(raw)
         end
         if role == "shooter" then
             if group.loadout ~= "issue65_odysseus_mixed_missiles"
-                    and group.loadout ~= "issue67_colossus_arc_barrel" then
+                    and group.loadout ~= "issue67_colossus_arc_barrel"
+                    and group.loadout ~= "issue67_paranid_sky_survey" then
                 return nil, where .. ".loadout is not a supported shooter loadout"
             end
             local missileCensus = expectedMissileTurrets > 0
                 and expectedGuided + expectedDumbfire == expectedMissileTurrets
                 and expectedAmmo > 0
-            -- issue67 arms group_front_left_up (beam, 2 turrets) and
-            -- group_front_right_up (plasma, 2 turrets) via per-group loadout
-            -- entries. The census invariant (`.weapons` and `.turrets` both
-            -- count turret-mounted weapons => 4) is live-tested on Behemoth E
-            -- only (d7e3870); the Colossus mount/census is not yet live-verified
-            -- (slots shipped-source, _02 compatibility inference).
+            -- issue67_colossus_arc_barrel arms the Colossus E group_front_left_up
+            -- (beam, 2 turrets) and group_front_right_up (plasma, 2 turrets) via a
+            -- static loadout. The census invariant (`.weapons` and `.turrets` both
+            -- count turret-mounted weapons => 4) and the exact mount are
+            -- live-verified on the Colossus E (r9 observed all four firing and
+            -- hitting A).
             local conventionalCensus = expectedWeapons == 4 and expectedTurrets == 4
                 and expectedBeam == 2 and expectedPlasma == 2
                 and expectedMissileTurrets == 0 and expectedAmmo == 0
+            -- issue67_paranid_sky_survey arms one turret_par_l_plasma_01_mk1_macro
+            -- on the Paranid L destroyer group_front_up_mid2. The census invariant
+            -- (turret-mounted weapon counted in both `.weapons` and `.turrets` => 1)
+            -- is live-tested via the r16 sky-survey fixture.
+            local paranidSkyCensus = expectedWeapons == 1 and expectedTurrets == 1
+                and expectedBeam == 0 and expectedPlasma == 1
+                and expectedMissileTurrets == 0 and expectedAmmo == 0
             if (group.loadout == "issue65_odysseus_mixed_missiles" and not missileCensus)
-                    or (group.loadout == "issue67_colossus_arc_barrel" and not conventionalCensus) then
+                    or (group.loadout == "issue67_colossus_arc_barrel" and not conventionalCensus)
+                    or (group.loadout == "issue67_paranid_sky_survey" and not paranidSkyCensus) then
                 return nil, where .. " has an inconsistent shooter census"
+            end
+        elseif tostring(group.loadout or "") ~= "" then
+            if geometryRole ~= "surface_mask" or group.loadout ~= "issue67_argon_sky_target" then
+                return nil, where .. ".loadout is unsupported for a non-shooter group"
             end
         end
         groups[#groups + 1] = {
@@ -191,24 +247,37 @@ local function validateSpec(raw)
             spread = tonumber(group.spread) or 0,
             x = tonumber(group.x) or 0,
             y = tonumber(group.y) or 0,
+            ox = offset.ox,
+            oy = offset.oy,
+            oz = offset.oz,
             behaviour = behaviour,
             hostile = group.hostile == true,
             holdFire = group.holdFire == true,
             stripDefenceUnits = group.stripDefenceUnits == true,
             repairGuard = group.repairGuard == true,
-            yaw = tonumber(group.yaw) or 0,
+            yaw = orientation.yaw,
+            pitch = orientation.pitch,
+            roll = orientation.roll,
+            preserveOrientation = group.preserveOrientation == true,
             role = role,
             loadout = tostring(group.loadout or ""),
             geometryRole = geometryRole,
+            geometryCase = geometryCase,
             expectedWeapons = expectedWeapons,
             expectedTurrets = expectedTurrets,
             expectedBeam = expectedBeam,
             expectedPlasma = expectedPlasma,
+            geometryWeaponMacro = geometryWeaponMacro,
+            expectedGeometryWeapons = expectedGeometryWeapons,
             expectedMissileTurrets = expectedMissileTurrets,
             expectedGuided = expectedGuided,
             expectedDumbfire = expectedDumbfire,
             expectedAmmo = expectedAmmo,
         }
+    end
+    if geometryCases.arc_split + geometryCases.positive_control > 0
+            and (geometryCases.arc_split ~= 1 or geometryCases.positive_control ~= 1) then
+        return nil, "surface_mask requires exactly one arc_split and one positive_control geometryCase"
     end
     local stations = {}
     if raw.stations ~= nil and type(raw.stations) ~= "table" then
@@ -272,18 +341,19 @@ local function validateSpec(raw)
             return nil, "spec.setup.expectedTurrets must be a positive number"
         end
         local expectedMacros = {}
-        if raw.setup.expectedMacros ~= nil then
-            if type(raw.setup.expectedMacros) ~= "table" then
-                return nil, "spec.setup.expectedMacros must be a list"
+        local rawExpectedMacros = raw.setup.expectedMemberMacros or raw.setup.expectedMacros
+        if rawExpectedMacros ~= nil then
+            if type(rawExpectedMacros) ~= "table" then
+                return nil, "spec.setup.expectedMemberMacros must be a list"
             end
-            for index, macro in ipairs(raw.setup.expectedMacros) do
+            for index, macro in ipairs(rawExpectedMacros) do
                 if type(macro) ~= "string" or macro == "" then
-                    return nil, "spec.setup.expectedMacros[" .. index .. "] must be a non-empty string"
+                    return nil, "spec.setup.expectedMemberMacros[" .. index .. "] must be a non-empty string"
                 end
                 expectedMacros[#expectedMacros + 1] = macro
             end
             if #expectedMacros ~= math.floor(raw.setup.expectedTurrets) then
-                return nil, "spec.setup.expectedMacros must match expectedTurrets"
+                return nil, "spec.setup.expectedMemberMacros must match expectedTurrets"
             end
             table.sort(expectedMacros)
         end
@@ -295,6 +365,7 @@ local function validateSpec(raw)
             turretLabel = raw.setup.turretLabel,
             expectedTurrets = math.floor(raw.setup.expectedTurrets),
             expectedMacros = expectedMacros,
+            expectedMemberMacros = expectedMacros,
             selectAll = raw.setup.selectAll == true,
         }
     end
@@ -398,16 +469,21 @@ local function sendScenarioSpec(force, requestId)
         AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group", {
             label = group.label, macro = group.macro, faction = group.faction,
             count = group.count, distance = group.distance, spread = group.spread,
-            x = group.x, y = group.y,
+            x = group.x, y = group.y, ox = group.ox, oy = group.oy, oz = group.oz,
             behaviour = group.behaviour, hostile = group.hostile,
             holdFire = group.holdFire, stripDefenceUnits = group.stripDefenceUnits,
             repairGuard = group.repairGuard,
-            yaw = group.yaw, role = group.role, loadout = group.loadout,
+            yaw = group.yaw, pitch = group.pitch, roll = group.roll,
+            preserveOrientation = group.preserveOrientation,
+            role = group.role, loadout = group.loadout,
             geometryRole = group.geometryRole,
+            geometryCase = group.geometryCase,
             expectedWeapons = group.expectedWeapons,
             expectedTurrets = group.expectedTurrets,
             expectedBeam = group.expectedBeam,
             expectedPlasma = group.expectedPlasma,
+            geometryWeaponMacro = group.geometryWeaponMacro,
+            expectedGeometryWeapons = group.expectedGeometryWeapons,
             expectedMissileTurrets = group.expectedMissileTurrets,
             expectedGuided = group.expectedGuided,
             expectedDumbfire = group.expectedDumbfire,
@@ -828,8 +904,8 @@ local function onScenarioReady(_, param)
         remoteGeometryPending = specHasPendingGeometry()
         if remoteGeometryPending then
             scenarioActionStatus = "PENDING: remote ship census verified; surface geometry is NOT qualified; teleport to "
-                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it scans the settled Xenon K candidates "
-                .. "and qualifies only when both selected plasma turrets pass against the same operational surface element"
+                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it independently scans the two settled "
+                .. "Argon targets for the authored arc-split and positive-control Beam surfaces"
             log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
                 spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
                 operational_surfaces = surfaces, turrets = turrets,
@@ -891,57 +967,73 @@ end
 -- MD sends the exact qualifying component as a component-valued event before
 -- the packed terminal census. Keeping the component typed avoids parsing the
 -- engine's platform-dependent UniverseID string form.
+-- MD first sends a correlated string token, then the component-valued target.
+-- Keep the component typed and accept it only once for the exact pending token;
+-- stale target events cannot otherwise be correlated by their opaque ID.
+local function onGeometryQualifiedTargetToken(_, token)
+    if not pendingQualify or tostring(token or "") ~= pendingQualify.requestId then return end
+    pendingQualify.targetTokenAuthorized = true
+end
+
 local function onGeometryQualifiedTarget(_, component)
-    if not pendingQualify or component == nil then return end
+    if not pendingQualify or not pendingQualify.targetTokenAuthorized or component == nil then return end
+    pendingQualify.targetTokenAuthorized = nil
     pendingQualify.designatedComponent = component
 end
 
--- Phase-two acknowledgement for the #67 direct ship-surface masking
--- discriminator. Qualify only when both selected plasma turrets reproduce,
--- against the SAME operational surface: origin and hittable aim in arc, in
--- range, externally clear, self-inclusive blocked, and legally attackable.
--- Test Lab marks that transported surface in Gunnery, but the owner performs
--- the Direct-control, target-ship, and exact-surface clicks being tested.
+-- Phase-two acknowledgement for the #67 direct ship-surface sky-survey
+-- discriminator. Qualify only when the exact Plasma census and both authored
+-- Argon L Beam roles independently reproduce: one upper-limit arc split and
+-- one fully inside positive control, each separated, in range, and legally
+-- attackable. LOS is telemetry, not a candidate gate. Test Lab marks the arc
+-- split surface
+-- in Gunnery, but the owner performs the Direct-control, target-ship, and
+-- exact-surface clicks being tested.
 local function onGeometryQualified(_, param)
     local token, qualified, targetCount, surfaceCount, measured, surfacePairs,
-        originCandidates, aimCandidates, clearCandidates, maskingMembers =
-        tostring(param or ""):match("^x4gcq7:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        originOutsidePairs, aimInsidePairs, arcSplitPairs, arcCandidatePairs,
+        selectedSurfaceMembers, positiveControlMembers =
+        tostring(param or ""):match("^x4gcq9:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
+    request.targetTokenAuthorized = nil
     qualified, targetCount, surfaceCount = tonumber(qualified), tonumber(targetCount), tonumber(surfaceCount)
     measured, surfacePairs = tonumber(measured), tonumber(surfacePairs)
-    originCandidates, aimCandidates = tonumber(originCandidates), tonumber(aimCandidates)
-    clearCandidates = tonumber(clearCandidates)
-    maskingMembers = tonumber(maskingMembers)
-    if qualified == 1 and targetCount == 4 and surfaceCount > 0
-            and measured == 2 and maskingMembers == 2
+    originOutsidePairs, aimInsidePairs = tonumber(originOutsidePairs), tonumber(aimInsidePairs)
+    arcSplitPairs, arcCandidatePairs = tonumber(arcSplitPairs), tonumber(arcCandidatePairs)
+    selectedSurfaceMembers = tonumber(selectedSurfaceMembers)
+    positiveControlMembers = tonumber(positiveControlMembers)
+    if qualified == 1 and targetCount == 2 and surfaceCount > 0
+            and request.expectedGeometryWeapons == 1 and measured == 1
+            and measured == request.expectedGeometryWeapons and arcCandidatePairs >= 1
+            and selectedSurfaceMembers == 1 and positiveControlMembers == 1
             and request.designatedComponent ~= nil then
         applyExactGroup(request.selection)
-        X4GunneryState.setDirectMode(request.selection.session, "autoassist")
         local bridge = api()
         local marked = bridge and bridge.suggestTestEngagement
             and bridge.suggestTestEngagement(request.designatedComponent, function(selected)
                 if not selected then return end
-                scenarioActionStatus = "RUNNING: owner manually designated exact qualified Xenon K surface "
+                scenarioActionStatus = "RUNNING: owner manually designated exact qualified Argon L Beam surface "
                     .. tostring(request.designatedComponent) .. "; observation armed"
                 log("geometry_qualify", { action = "operator_designated",
                     request_id = request.requestId,
                     designated_target = "ship_surface",
                     designated_component = request.designatedComponent,
-                    direct_mode = "autoassist", ship_id = request.selection.shipID,
+                    direct_mode = "manual", ship_id = request.selection.shipID,
                     group = request.selection.rawGroup,
                     member_ids = request.selection.memberIDs,
                     member_macros = request.selection.memberMacros })
                 setObserving(true)
             end)
         if not marked then
-            scenarioActionStatus = "FAILED: exact Xenon K surface qualified but could not be marked for manual selection; diagnostic not started"
+            scenarioActionStatus = "FAILED: exact Argon L Beam surface qualified but could not be marked for manual selection; diagnostic not started"
             log("geometry_qualify", { action = "failed", request_id = request.requestId,
                 reason = "manual_component_mark_failed",
                 designated_target = "ship_surface",
                 designated_component = request.designatedComponent,
-                masking_members = maskingMembers })
+                arc_candidate_pairs = arcCandidatePairs,
+                selected_surface_members = selectedSurfaceMembers })
             menu.display()
             return
         end
@@ -950,32 +1042,36 @@ local function onGeometryQualified(_, param)
         scenarioActionStatus = "QUALIFIED GEOMETRY: use Direct control and manually click the [TEST TARGET] ship, then its [TEST TARGET] surface"
         log("geometry_qualify", { action = "qualified", request_id = request.requestId,
             targets = targetCount, surfaces = surfaceCount,
-            surface_origin_candidates = originCandidates,
-            surface_aim_candidates = aimCandidates,
-            surface_clear_candidates = clearCandidates,
-            masking_members = maskingMembers,
             measured = measured, surface_pairs = surfacePairs,
+            origin_outside_pairs = originOutsidePairs,
+            aim_inside_pairs = aimInsidePairs,
+            arc_split_pairs = arcSplitPairs,
+            arc_candidate_pairs = arcCandidatePairs,
+            selected_surface_members = selectedSurfaceMembers,
+            positive_control_members = positiveControlMembers,
             designated_target = "ship_surface",
             designated_component = request.designatedComponent,
             designation = "manual_pending",
-            direct_mode = "autoassist", ship_id = request.selection.shipID,
+            direct_mode = "manual_pending", ship_id = request.selection.shipID,
             group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
             member_macros = request.selection.memberMacros })
         returnToGunnery("geometry_qualified")
     else
-        scenarioActionStatus = "FAILED: settled Xenon K surface scan found "
-            .. maskingMembers .. "/2 masking plasma members on one component across "
+        scenarioActionStatus = "FAILED: settled Argon sky-survey scan did not independently qualify both exact Beam roles across "
             .. targetCount .. " targets and " .. surfaceCount .. " operational surfaces"
-            .. " (origin/aim/clear candidates=" .. originCandidates .. "/"
-            .. aimCandidates .. "/" .. clearCandidates .. ", " .. surfacePairs
-            .. " surface pairs); diagnostic not started"
+            .. " (origin-outside/aim-inside/arc-split/arc-candidate pairs="
+            .. originOutsidePairs .. "/" .. aimInsidePairs .. "/" .. arcSplitPairs .. "/"
+            .. arcCandidatePairs .. ", " .. surfacePairs .. " surface pairs, "
+            .. selectedSurfaceMembers .. " selected members); diagnostic not started"
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
             targets = targetCount, surfaces = surfaceCount,
-            surface_origin_candidates = originCandidates,
-            surface_aim_candidates = aimCandidates,
-            surface_clear_candidates = clearCandidates,
-            masking_members = maskingMembers,
             measured = measured, surface_pairs = surfacePairs,
+            origin_outside_pairs = originOutsidePairs,
+            aim_inside_pairs = aimInsidePairs,
+            arc_split_pairs = arcSplitPairs,
+            arc_candidate_pairs = arcCandidatePairs,
+            selected_surface_members = selectedSurfaceMembers,
+            positive_control_members = positiveControlMembers,
             designated_target = "ship_surface",
             designated_component = request.designatedComponent or "none" })
         menu.display()
@@ -1098,16 +1194,17 @@ function menu.onShowMenu()
         local selection, reason = resolveExactGroup()
         if selection then
             if remoteGeometryPending then
-                -- Phase two: the exact plasma group is verified, so scan the
-                -- settled Xenon K surfaces in system. Do NOT arm or return until
-                -- one exact surface qualifies for both guns.
+                -- Phase two: the exact Plasma group is verified, so scan the
+                -- two settled Argon Beam surfaces in system. Do NOT arm or return
+                -- until both authored sky-survey roles qualify independently.
                 scenarioRequestSerial = scenarioRequestSerial + 1
                 local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
                 pendingQualify = { requestId = token, selection = selection,
+                    expectedGeometryWeapons = scenarioSpec.groups[1].expectedGeometryWeapons,
                     deadline = getElapsedTime() + 30 }
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })
-                scenarioActionStatus = "QUALIFYING: scanning settled Xenon K surfaces for direct own-hull masking with "
+                scenarioActionStatus = "QUALIFYING: scanning the two settled Argon Beam surfaces for arc-split and positive-control roles with "
                     .. selection.label .. " (" .. selection.memberIDs .. ")"
                 log("geometry_qualify", { action = "requested", request_id = token,
                     ship_id = selection.shipID, group = selection.rawGroup,
@@ -1316,6 +1413,7 @@ local function init()
     end
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
+    RegisterEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", onGeometryQualifiedTargetToken)
     RegisterEvent("X4GunneryTestLab.GeometryQualifiedTarget", onGeometryQualifiedTarget)
     RegisterEvent("X4GunneryTestLab.GeometryQualified", onGeometryQualified)
     if api() then
