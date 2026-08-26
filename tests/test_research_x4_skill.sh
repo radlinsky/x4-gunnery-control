@@ -35,9 +35,9 @@ scenario_skill=.agents/skills/spawn-gunnery-scenario/SKILL.md
 grep -Fq 'Never pass the station root.' "$scenario_skill"
 grep -Fq "apply_loadout object=\"\$Module\"" "$scenario_skill"
 grep -Fq 'same-action-list censuses' "$scenario_skill"
-grep -Fq 'A geometry qualifier must qualify the exact component that the timed test will' "$scenario_skill"
-grep -Fq 'Never qualify a station-root test because the root' "$scenario_skill"
-grep -Fq 'CANNOT BEAR and LINE OF FIRE BLOCKED must be isolated.' "$scenario_skill"
+grep -Fq 'Qualify each role against the same exact component the owner will click;' "$scenario_skill"
+grep -Fq 'Different root/module supplies each predicate' "$scenario_skill"
+grep -Fq 'CANNOT BEAR and LINE OF FIRE BLOCKED cannot be' "$scenario_skill"
 if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill"; then
   echo 'scenario skill still applies a station loadout to the station root' >&2
   exit 1

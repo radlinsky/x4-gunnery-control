@@ -474,7 +474,7 @@ for key, expected in derived.items():
         f"derived={expected[3]:.6f}, error={error:.6f}"
     )
     for observed, want, name in zip(
-        (distance, x, y, authored_pitch, authored_roll), expected[:3] + expected[4:], 
+        (distance, x, y, authored_pitch, authored_roll), expected[:3] + expected[4:],
         ("distance", "x", "y", "pitch", "roll"),
     ):
         tolerance = 0.001 if name in ("pitch", "roll") else 0.002

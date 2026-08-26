@@ -108,52 +108,32 @@ multiset, and put both ordinary and missile turrets in HOLD FIRE until the
 post-teleport group activation. A member count alone cannot distinguish two
 copies of the wrong macro.
 
-Mount turrets with GROUP-TARGETED `<turrets macro="..." group="..." exact="N"/>`
-entries under `<groups>`, never with singular `<turret macro="..." path="..."/>`
-entries under `<macros>`. Singular per-slot `<turret>` entries are live-proven
-UNRELIABLE on the Behemoth E (`ship_arg_l_destroyer_02_a_macro`): both the MD
-`<create_loadout>` route AND the static named `<loadout ref>` route returned a
-completely empty ship (zero engines/shields/turrets, `loadout_failures=1`) with
-a singular `<turret>` entry, while the exact same hull equips cleanly when the
-turret is mounted via `<turrets group= exact=>` — this is how every shipped
-`scenario_combat_arg_destroyer`-style loadout mounts turrets. Singular `<...
-path>` under `<macros>` is fine for engines, large shields, and main `<weapon>`
-guns; it is turrets specifically that fail. This is the exact regression that
-sent Issue #67 in circles: do not reintroduce a singular `<turret>` entry to
-"isolate one slot."
+### Deterministic turret equipment and operator identity
 
-Because a group-targeted entry arms the WHOLE group with one macro, you cannot
-put different macros in individual slots of the same group on this hull, and a
-group with two slots gives you two turrets, not one. If the test needs exactly
-one turret's behaviour, mount the whole group and isolate the turret of interest
-by PER-TURRET hit/fire attribution (the observe module attributes each hit to
-its firing weapon component), not by trying to mount a single slot. Resolve the
-hull's exact group ids and slot counts from current extracted assets before
-authoring, and verify more than macro existence: compare the hull connection
-tags with the equipment component's connection tags — an alias may reference a
-component with different slot compatibility than its canonical macro. Keep the
-live operational macro census (expected turret count AND exact member-macro
-multiset) as the fail-closed proof that the mount took. Never derive a group or
-connection name from visible order, a previous hull, or an assumed zero-padded
-sequence; record the exact shipped component source beside the fixture evidence
-before the first live run.
+Mount turrets with group-targeted
+`<turrets macro="..." group="..." exact="N"/>` entries under `<groups>`.
+Never isolate a turret with singular `<turret path="..."/>`: on the Behemoth E,
+both tested loadout routes produced an empty ship, while group-targeted entries
+equipped it correctly (evidence: research `md-ai.md`, singular-turret record).
+Singular paths remain valid for engines, large shields, and main guns.
 
-An internal connection/group id is NOT an operator-facing surface label. Before
-a live run, enumerate the exact labels the owner will actually see in Gunnery's
-surface browser. A default faction loadout can install several identical macros
-and therefore several indistinguishable rows (live example: a xenon-owned Argon
-L destroyer exposed repeated `XEN L Graviton Turret Mk1` labels). In that state
-the fixture is not operator-safe even when one internal connection is
-mathematically exact: withhold QUALIFIED and never tell the owner to infer the
-right row from `con_*`, `group_*`, visible order, or hull position.
+A group-targeted entry equips the whole group. Resolve its exact slot count and
+connection/equipment tags from current X4 sources; if it has multiple slots,
+isolate behavior through per-turret FIRED/HIT attribution rather than an
+unsupported per-slot loadout. READY must verify the exact operational count and
+macro multiset, not merely that some turret exists.
 
-Make every manually selected exact surface uniquely identifiable. Prefer a
-proven static group-targeted loadout on a one-slot group for the authored
-surface, with every other same-size/same-label group either omitted or equipped
-with a different player-visible macro. Verify the resulting live label and
-exact macro/component census before arming observation. If distinct labels are
-not possible, the fixture must visibly mark the exact row and prove that marker
-survives the handoff; otherwise redesign or split the fixture.
+Internal `con_*` and `group_*` ids are not player-visible labels. Before a live
+run, enumerate the actual Gunnery surface rows. Every manually selected surface
+must have either:
+
+- one unique player-visible macro/label, preferably from a sparse loadout on a
+  one-slot group; or
+- a proven exact `[TEST TARGET]` marker that survives the handoff.
+
+Duplicate rows (for example, two `XEN L Graviton Turret Mk1` entries) or a
+failed marker invalidate the fixture. Never ask the owner to infer the row from
+internal ids, list order, or hull position.
 
 Verify every macro against the installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
@@ -203,100 +183,56 @@ Keep the immediate, delayed, and final operational census when timing itself is
 under test, but READY must always depend on the final exact census rather than
 on creation success, module count, or an assumed timing rule.
 
-Remote stations must be created with the resolved remote `sector` and an exact
-sector-space `position`; `player.zone` still belongs to the safe launcher at
-Create time. When the test depends on mesh-selected aim geometry, decide where
-the discriminating measurement can actually run:
+### Surface-geometry fixture contract
 
-- If the classification split resolves at Create time, prefer a small bounded
-  automatic position search. Keep only a candidate that satisfies the required
-  per-weapon split, and withhold READY if none does.
-- If the split can only resolve once the player is in the fixture's system (a
-  hittable-aim-target measurement that does not resolve out of system), do NOT
-  run an out-of-system search or destroy candidates: preserve exactly one
-  deterministic candidate at its authored position, verify its census, and
-  report a distinct geometry-PENDING state rather than READY. Re-measure that
-  same preserved object against the same exact weapons on the single
-  post-teleport Test Lab open, and qualify only on the required split; no split
-  fails closed.
+For a remote fixture, create in the resolved remote sector; `player.zone` still
+belongs to the safe launcher. Tight angular geometry must not rely on absolute
+coordinates: after teleport, resolve the exact selected weapon position P*,
+place or reposition preserved targets at `P* + stored offset`, preserve their
+authored rotation, and fail closed on every reposition/post-warp mismatch.
 
-For a position search around a large station, reject candidates whose station-
-root bounding box overlaps or nearly touches the shooter; a geometrically useful
-module is not a safe fixture when the hull volumes intersect. When module layout
-orientation matters, set and log a deterministic station rotation for every
-trial rather than inheriting an implicit creation orientation. Keep position,
-rotation, separation, range, bearing, and external line of fire as independent
-fields.
+Build and accept a surface experiment in this order:
 
-Never ask the owner to retry guessed coordinates in either case.
+1. Verify the exact shooter weapon macro/count and target loadouts.
+2. Resolve live P* and apply deterministic P*-relative target transforms.
+3. Qualify each role against the same exact component the owner will click;
+   never combine a root predicate with a different module/surface.
+4. Check range, firing arc, attackability, and experiment-specific line-of-fire
+   predicates independently so CANNOT BEAR and LINE OF FIRE BLOCKED cannot be
+   confused.
+5. Give every role its own exact component id, predicates, unique label/marker,
+   and designation/observation correlation.
+6. Test Lab may select the weapon group and mark aids, but must not call
+   `SetSofttarget` or perform the Direct-control root/surface click.
+7. Arm observation only after Gunnery accepts the owner's exact manual click.
+8. Accept behavior only from correlated per-weapon FIRED and exact-component HIT
+   records; an uncorrelated no-fire interval proves nothing.
 
-A coordinate that qualified one generated station instance is not yet a
-deterministic fixture coordinate. Preserve the bounded automatic search until
-the same coordinate and exact component predicates reproduce on a fresh
-instance; if a later instance fails, record that bounded negative and restore
-the search instead of weakening the gates or asking the owner to retry the
-coordinate manually.
+A qualifier-time line-of-sight result immediately after a warp may be transient.
+In the Issue #67 r32 run, both exact surfaces read `0/0` during qualification but
+read `1/1` about three seconds later and were then hit. Keep such immediate reads
+as telemetry unless the experiment specifically establishes a settled LOS gate;
+this does not justify weakening production line-of-fire policy.
 
-If moving one preserved modular station makes every component's previously
-distinguishable external ray uniformly blocked, stop repositioning it once an
-already-settled no-warp control and a deliberately delayed post-warp control
-agree. Record that result as experimental for the tested instance; do not infer
-a universal station-warp rule or keep increasing the delay. Replace the next
-fixture with independently pre-positioned candidates, preferably stationary
-capital ships whose operational surface elements can be enumerated and whose
-defence units are removed before hostility.
+Use a bounded search only when its predicates resolve in the current attention
+state. Otherwise preserve the deterministic candidate, report geometry-PENDING,
+and measure it once in system. Never ask the owner to retry guessed coordinates.
+A generated coordinate is not deterministic until its exact predicates
+reproduce on a fresh instance.
 
-A geometry qualifier must qualify the exact component that the timed test will
-designate. For an origin-vs-hittable-aim arc discriminator, require that SAME
-component's origin be outside the generated arc and its hittable aim point be
-inside, while range and the intended external/self-inclusive line-of-fire gates
-are independently satisfied. Never qualify a station-root test because the root
-is outside while some different module has both origin and aim inside. If the
-question is whether a root designation becomes a module engagement, make that a
-separate test: designate the root and instrument exact firing/hit components.
+| Failed pattern | Required correction |
+|---|---|
+| Different root/module supplies each predicate | Qualify and designate one exact component. |
+| Absolute remote coordinates drift from the weapon | Store P*-relative offsets and reapply after teleport. |
+| Moving modular target changes every ray | Stop moving it; use independently placed stationary ships. |
+| Singular turret loadout empties the ship | Use group-targeted turret entries and exact census. |
+| Duplicate visible surface labels | Use a sparse unique loadout or proven marker. |
+| Automated surface write fails | Exercise normal manual root→surface selection. |
+| Immediate post-warp LOS blocks all candidates | Treat as telemetry until a settled LOS contract is proved. |
+| One role qualifies, control does not | Qualify and correlate every role independently. |
 
-Qualify every manual test role independently. Finding and returning the first
-arc-split component does not qualify or identify a separate positive-control
-surface, even when both ships were authored from the same connection. Each role
-needs its own exact component id, expected predicates, marker/unique visible
-label, operator-designation record, and result correlation. If the bridge can
-carry only one suggested surface at a time, split the roles into separate runs
-or implement explicit role-by-role sequencing; never ask the owner to select an
-unmarked counterpart by analogy.
-
-For a test of the Direct-control interaction, Test Lab must never call the
-Gunnery `SetSofttarget`/engagement bridge at all. Geometry automation may
-transport the exact component ID, select the exact weapon group, set the test's
-required Direct-control policy, and visibly mark the matching root and surface
-rows. The owner must still click **Direct control**, the marked target ship, and
-the marked surface. Arm timed observation only after Gunnery accepts that exact
-manual surface click, and log geometry qualification separately from operator
-designation. X4 9.00 refused the r11 Xenon K surface write both while Test Lab
-owned the external menu and after two post-return attempts; those failures do
-not establish that the surface is ineligible, because the automated path did
-not reproduce the normal root-then-surface interaction. A later failed
-`suggestTestEngagement`/marker handoff on the r31 xenon-owned Argon target is a
-hard fixture failure: preserve the log, withhold observation, and redesign the
-label/marker flow. Do not convert that failure into an instruction to guess
-between duplicate surface rows.
-
-Likewise, a self-excluding-clear/self-inclusive-blocked ray pair proves only
-that the firing ship masks the mod's direct ray. It does not establish what
-X4's shoot controller will do. To answer that engine-behavior question, directly
-designate the exact in-arc, in-range component producing the pair and observe
-per-turret firing plus attributed hits. Do not combine that discriminator with
-a below-arc target; CANNOT BEAR and LINE OF FIRE BLOCKED must be isolated.
-
-Do not use the equipped defence station as a clean per-turret arc fixture: it
-launches defence drones and clusters many surfaces at nearly the same bearing.
-Use it for pagination/performance and broad surface-browser tests. For exact
-fire attribution, prefer one stationary capital ship with carried defence
-units removed before hostility, all weapons held fire, and an isolated surface
-candidate.
-
-`hostile = true` is a requirement, not proof. A temporary object relation boost
-did not make a Terran-owned Osaka attackable by the player in the live 9.00
-test. Prefer a naturally hostile owner such as Xenon and withhold READY unless
+Prefer stationary capital targets with defence units removed and weapons held
+fire. `hostile = true` is not proof of authorization: withhold READY unless
 `player.ship.mayattack.{$Target}` is true for every requested hostile fixture.
 
 ### 3. Author the complete spec
