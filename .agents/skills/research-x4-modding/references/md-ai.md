@@ -1480,13 +1480,16 @@ whole-object, engine, shield, turret, and station-module surface tests.
 ### Issue #69 under-reports on the LINE-OF-FIRE ray, not the arc; the look_at_bbox arc change does not fix it
 - X4: 9.00
 - Status: live-tested
-- Source: Test Lab `debug.log` on 2026-08-27, fixture `issue-69-engine-straddle-r1`,
-  qualify `request_id=176418827_q2`; shooter ship `1550647`, weapon `0x17a945`
-  `turret_par_l_plasma_01_mk1_macro`, band {-5,+80} (+80deg = 1.39626 rad);
-  target `ISSUE ENGINE STRADDLE ARGON 1` engine surface `0x17a970` (pinned id
-  `1550704`). Production predicate `md/x4_gunnery_control.xml:211-277`.
-- Live test: yes — one instrumented autoassist run, straddle engine designed and
-  confirmed (aim_pitch 86.4deg outside band, bbox_pitch 77.1deg inside band).
+- Source: Test Lab `debug.log` on 2026-08-27, fixture `issue-69-engine-straddle-r1`.
+  Firing run: qualify `request_id=176418827_q2`, shooter ship `1550647`, weapon
+  `0x17a945` `turret_par_l_plasma_01_mk1_macro`, target engine `0x17a970` (pinned
+  id `1550704`). Bounding-box-corner probe run: qualify
+  `request_id=137722953_q2`, shooter weapon `0x17bb89`, target engine `0x17bbb4`.
+  Authored band {-5,+80} (+80deg = 1.39626 rad). Production predicate
+  `md/x4_gunnery_control.xml:211-277`.
+- Live test: yes — one instrumented autoassist firing run plus one fresh
+  eight-corner clearance-probe run. Both independently reproduced the straddle
+  (aim pitch 86.4deg outside band, bbox pitch 77.1deg inside band).
 - Finding: the engine qualified as a straddle (`debug.log:734`: `origin_pitch=1.52187`
   =87.2deg, `aim_pitch=1.50768`=86.4deg OUTSIDE +80, `bbox_pitch=1.34524`=77.1deg
   INSIDE, `aim_outside=1 bbox_inside=1 straddle=1 inrange=1 mayattack=1`). The
@@ -1509,14 +1512,18 @@ whole-object, engine, shield, turret, and station-module surface tests.
   `tgtsize=75.5781`. `muzzle_los_ex=0` is the discriminator: with `excludeself=true`
   the SHOOTER is removed from the ray, so the block is the TARGET's own hull masking
   its own engine at the `useaimtarget` point — not shooter self-masking. The engine
-  surface element is large (`tgtsize≈75.6 m`), so its aim points span ~63→87deg;
-  `useaimtarget` returns a high, hull-masked one while X4 fires at a clear one.
+  surface element is large (`tgtsize≈75.6 m`); `useaimtarget` returns a
+  hull-masked point while X4 demonstrably finds a clear hittable point. The
+  available logs do not quantify the mesh aim points' weapon-local pitch span.
 - SHARPER BUG: the production predicate evaluates ARC and LINE-OF-FIRE at DIFFERENT
   points — arc on the `look_at_bbox` direction (77deg, `x4_gunnery_control.xml:213`)
-  but LOS on the `useaimtarget` point (86deg, `:234`). The bbox point is in-arc; the
-  useaimtarget point is the one that is hull-masked. Whether the bbox (or a
-  near/low) point has clear LOS is the next probe — if yes, making the LOS ray
-  consistent with the arc point is the fix.
+  but LOS on the `useaimtarget` point (86deg, `:234`). The second run tested all
+  eight target-local AABB corners from the barrel with both `excludeself=false`
+  and `true`. Only corners 5 and 7 were in arc (`pitch=1.34251`=76.9deg and
+  `1.37995`=79.1deg); both returned `los_self=0 los_ex=0`, as did the other six
+  corners (`debug.log:734-748`: `inarc_corners=2`, both clear counts zero). Thus
+  neither the bbox corners nor excluding the shooter supplies the missing clear
+  line of fire on this reproduced case.
 - CAUTION on frames: the FIRED `bullet_pitch` (`event.param.rotation.pitch`,
   observe.xml:384) is SECTOR/world frame; qualify `aim_pitch` is WEAPON-LOCAL. They
   are not directly comparable — an earlier draft's "~20deg lower / near-edge point"
@@ -1528,15 +1535,17 @@ whole-object, engine, shield, turret, and station-module surface tests.
   turret geometrically hit this surface now" (searched engage/canhit/fir/track/
   aimat/bear/solution/attackable). The turret's own firing solution is engine-side
   and unexposed, which is why engageability is reimplemented at all.
-- Fix direction: it is target multiplicity, so `excludeself` does not help (both
-  variants block). The predicate must run the line-of-fire ray to an IN-ARC point,
-  not the `useaimtarget` point. Cheapest candidate: reuse the `look_at_bbox`
-  direction the arc already uses (make arc and LOS consistent); if that point is
-  also masked, fall back to a bounded near/low box-point probe with early exit. MD
-  cannot enumerate mesh aim points
-  ([[useaimtarget-collapses-aim-points-issue-69]]), so exactness is impossible; the
-  bounded probe is the practical route. Confirm the bbox/near point's LOS on
-  `issue-69-engine-straddle-r1` before changing the predicate.
+- Fix boundary after the corner run: `excludeself` does not help, and the
+  eight-corner bounded probe is rejected for this case. AABB-corner clearance
+  would not be exact even if a corner were clear: an abstract box corner is not
+  necessarily a hittable mesh point, and `check_line_of_sight targetoffset=` does
+  not report which component (if any) the ray intersects. MD cannot enumerate
+  the engine's mesh aim points
+  ([[useaimtarget-collapses-aim-points-issue-69]]) or query the turret's firing
+  solution. Therefore no source-backed exact existence algorithm is currently
+  available in MD. Any denser face/edge sampling would remain an approximation,
+  add raycasts, and risk false positives at empty box points; do not promote it
+  without an independently validated false-positive policy.
 
 ### `find_object_surface` cannot return a surface element's own mesh point; `component=` returns the parent hull
 - X4: 9.00
