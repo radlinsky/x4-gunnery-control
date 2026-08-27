@@ -20,18 +20,15 @@ instruction references only those labels.
 - Ships: spec `label` becomes `<label> <index>` through `set_object_name`
   (`testlab/.../md/x4_gunnery_control_testlab_scenario.xml:543`). Labels state
   the test role, not `enemy` or `target`.
-- Surface rows: a row shows the component's own name, so it is unique only if
-  its macro is unique on that hull. Use a sparse loadout that leaves one slot of
-  that kind, or the proven `[TEST TARGET]` prefix, which Test Lab requests for
-  the qualified component (`testlab/.../ui/testlab.lua:1015`) and Gunnery renders
-  on the matching root and surface rows (`ui/gunnery_control.lua:2676`, `:2570`).
-- Duplicate rows (two `XEN L Graviton Turret Mk1` entries, three identical
-  engines) mean no row is selectable by name until one is uniquely labeled.
-  Require a unique player-facing label — a sparse loadout leaving one slot of
-  that kind, or the proven `[TEST TARGET]` marker. Correlating a duplicate row
-  from `event=surface_browser action=row` is a documented last resort only when
-  a label is genuinely impossible; say so explicitly. Never let the owner infer
-  a row from internal ids, list order, or hull position.
+- Surface rows show the component's native name. Make the requested row unique
+  with a sparse loadout or the proven `[TEST TARGET]` prefix
+  (`testlab/.../ui/testlab.lua:1015`; `ui/gunnery_control.lua:2570`).
+- `[TEST TARGET]` is only a prefix; it does **not** change component type. The
+  handoff and acceptance evidence must include the marked row's native name,
+  kind, and macro. Never describe a marked turret as an engine.
+- Duplicate rows are not operator-selectable until one is uniquely marked.
+  Never ask the owner to infer a row from internal ids, list order, hull
+  position, engageability, or logs.
 
 Verify every macro against installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
@@ -191,17 +188,25 @@ in the #67 r32 run both exact surfaces read `0/0` during qualification, then
 `1/1` about three seconds later, and were hit. Keep such reads as telemetry
 unless the experiment establishes a settled LOS gate.
 
-Issue #69's live A/B (one sampled aim point vs the whole component box) needs no
-new spawn role: the r32 sky-survey fixture already carries the discriminator —
-the straddling engine plus the two beam surfaces. The three engines share one
-macro, and changing that loadout would change the very geometry the A/B compares
-against the recorded pre-fix run, so the loadout stays as-is and the scenario MD
-does the labeling: `GeometryQualifyMeasure` independently finds the single engine
-whose sampled aim pitch exceeds +80deg while its `look_at_bbox` pitch is within
-{-5deg,+80deg} (in range and attackable) and, when exactly one matches,
-designates it so Gunnery renders `[TEST TARGET] Engine`. The owner clicks that
-labeled row. On zero or multiple straddlers the marker is withheld and the run
-stops closed — never select a duplicate engine by engageability or row log.
+#### Single marked-objective invariant
+
+For a Direct-control fixture, define one `$ObjectiveComponent` and enforce this
+entire chain mechanically:
+
+1. Controls qualify independently and are never designation candidates.
+2. `QUALIFIED` requires exactly one objective candidate plus its expected
+   component kind/macro and every production-equivalent gate under test.
+3. Emit exactly one token/component pair: `$ObjectiveComponent`. Never emit a
+   control first or add an optional second target to an existing bridge.
+4. The suggested component, marked row, `operator_designated` component, observer
+   target, FIRED `aimed`, and HIT `hitcomp` must correlate to that same component.
+5. Zero, multiple, wrong-type, or missing candidates return `FAILED` before the
+   menu returns to Gunnery.
+
+Do not retrofit a new marked objective into a qualifier built for another test.
+Add an independent named role/pose when the existing controls do not reproduce
+that objective on the current run. A prior run's component id or geometry is
+seed evidence, never proof that a fresh instance still contains the discriminator.
 
 Use a bounded search only when its predicates resolve in the current attention
 state. Otherwise preserve the deterministic candidate, report geometry-PENDING,
@@ -211,6 +216,9 @@ exact predicates reproduce on a fresh instance.
 | Failed pattern | Required correction |
 |---|---|
 | Different root/module supplies each predicate | Qualify and designate one exact component. |
+| Control qualifies but objective is absent | Make the objective mandatory; fail on zero/multiple candidates. |
+| More than one component crosses the marker bridge | Emit one pair for the objective only. |
+| Marker text contradicts native row type | Treat native kind/macro as authoritative and fail qualification. |
 | Absolute remote coordinates drift from the weapon | Store P*-relative offsets and reapply after teleport. |
 | Moving modular target changes every ray | Stop moving it; use independently placed stationary ships. |
 | Singular turret loadout empties the ship | Use group-targeted turret entries and exact census. |
@@ -370,10 +378,13 @@ A geometry-PENDING remote fixture instead logs `action=remote_geometry_pending`
 at Create, and the single post-teleport open logs `event=geometry_qualify
 action=requested` followed by exactly one of `action=qualified` (aids ready;
 observation still off until the owner's exact click) or `action=failed|timeout`
-(stop closed). Require a separate operator-designation record before any timed
-firing observation. When a qualifier compares root and module geometry, preserve
-its independent root/module origin and aim, range, and external line-of-fire
-fields; `qualified` is not a claim about which point the engine actually uses.
+(stop closed). Require exactly one transported objective and a separate
+`operator_designated` record before timed observation. Verify that the qualified
+native kind/macro and component id match the marked row, designation, observer,
+FIRED `aimed`, and HIT `hitcomp`; a generic `qualified` record is insufficient.
+When a qualifier compares root and module geometry, preserve its independent
+root/module origin and aim, range, and external line-of-fire fields; `qualified`
+is not a claim about which point the engine actually uses.
 
 MD logs `[X4GC TEST SCENARIO]` creation details and the final spawned count.
 Inspect logs yourself; do not ask the owner to interpret them, and keep owner
