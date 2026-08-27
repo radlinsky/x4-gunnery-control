@@ -60,10 +60,21 @@ grep -Fq "name=\"\$Target\" exact=\"@\$Missile.target\"" "$md" \
 grep -Fq "' shipdist_500ms='" "$md" \
   || fail "missile-flight observer does not log delayed distance from the firing ship"
 
-# The candidate mechanical-arc bearing uses the target's weapon-consistent aim
-# point in the turret mount's local frame; keep it diagnostic until live proof.
-aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")
-[[ "$aimlocal" -eq 2 ]] || fail "expected local aim orientation in both weapon snapshot loops, found $aimlocal"
+# The candidate mechanical-arc bearing uses the target's weapon-consistent
+# aim point in the turret mount's local frame, plus the component bounding-box
+# aim added for issue #69; both remain diagnostic until live proof. Count the
+# exact orientation structures per snapshot loop, each with its weapon-local
+# position child, not generic position children.
+aimlocal_weapons=$(xmllint --xpath "count(//do_for_each[@in='player.ship.weapons.operational.list']//create_orientation[@name='\$AimLocal'][@orientation='look_at'][@useaimtarget='true'][position[@object='\$Weapon'][@space='\$Weapon']])" "$md")
+[[ "$aimlocal_weapons" -eq 1 ]] || fail "expected one AimLocal aim orientation with the weapon-local position child in the weapons snapshot loop, found $aimlocal_weapons"
+aimlocal_missiles=$(xmllint --xpath "count(//do_for_each[@in='player.ship.missileturrets.operational.list']//create_orientation[@name='\$AimLocal'][@orientation='look_at'][@useaimtarget='true'][position[@object='\$Weapon'][@space='\$Weapon']])" "$md")
+[[ "$aimlocal_missiles" -eq 1 ]] || fail "expected one AimLocal aim orientation with the weapon-local position child in the missile-turret snapshot loop, found $aimlocal_missiles"
+bboxlocal_weapons=$(xmllint --xpath "count(//do_for_each[@in='player.ship.weapons.operational.list']//create_orientation[@name='\$BboxLocal'][@orientation='look_at_bbox'][not(@useaimtarget)][position[@object='\$Weapon'][@space='\$Weapon']])" "$md")
+[[ "$bboxlocal_weapons" -eq 1 ]] || fail "expected one BboxLocal bounding-box orientation with the weapon-local position child in the weapons snapshot loop, found $bboxlocal_weapons"
+bboxlocal_missiles=$(xmllint --xpath "count(//do_for_each[@in='player.ship.missileturrets.operational.list']//create_orientation[@name='\$BboxLocal'][@orientation='look_at_bbox'][not(@useaimtarget)][position[@object='\$Weapon'][@space='\$Weapon']])" "$md")
+[[ "$bboxlocal_missiles" -eq 1 ]] || fail "expected one BboxLocal bounding-box orientation with the weapon-local position child in the missile-turret snapshot loop, found $bboxlocal_missiles"
+bboxpitch=$(grep -Fc "+ ' bbox_pitch=' + \$BboxLocal.pitch" "$md")
+[[ "$bboxpitch" -eq 2 ]] || fail "expected bbox_pitch diagnostic in both snapshot loops, found $bboxpitch"
 
 # A selected surface component is a valid aim target. The hit event carries
 # both the victim object and the struck component; istgt must accept either

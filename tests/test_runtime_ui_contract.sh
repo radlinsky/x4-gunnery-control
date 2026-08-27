@@ -77,10 +77,15 @@ assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.Engageabi
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityBatchComplete'\"])" "engageability batch-complete event count"
 grep -Fq "'x4gce3:' + \$nonce + ':' + EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
 grep -Fq "'x4gce2c:' + \$nonce + ':' + EngageabilityService.\$targets.count + ':' + \$completed" "$md"
-# Issue #67 r32 live A/B: X4 fired/hit an exact surface whose component origin
-# was outside +80 degrees while its hittable aim point was inside. Production
-# must evaluate the weapon-local, useaimtarget bearing—not the component origin.
-assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//do_if[contains(@value, 'EngageabilityService.\$arcknown')]/create_orientation[@name='\$aimorientation'][@orientation='look_at'][@refobject='\$target'][@useaimtarget='true']/position[@object='\$weapon'][@space='\$weapon'])" "weapon-local hittable-aim orientation count"
+# Bearing-reference lineage: #55 origin vs hittable surface; #67 (commit
+# 4e21cd0) origin bearing vs hittable aim point; #69 single sampled aim point
+# vs the whole component box — useaimtarget samples ONE of the victim's many
+# hittable points while X4 may fire at a different in-arc point of the same
+# mesh, so production must aim the arc test at the component bounding box and
+# never restore the single-aim-point useaimtarget sample or the component-
+# origin bearing.
+assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//do_if[contains(@value, 'EngageabilityService.\$arcknown.{\$weaponindex} == 1')]/create_orientation[@name='\$aimorientation'][@orientation='look_at_bbox'][@refobject='\$target'][not(@useaimtarget)]/position[@object='\$weapon'][@space='\$weapon'])" "weapon-local bounding-box orientation count"
+assert_md_xpath "0" "count(//create_orientation[@name='\$aimorientation'][@orientation='look_at'][@useaimtarget='true'])" "pre-#69 single-aim-point sample reintroduced"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//set_value[@name='\$aimpitch'][@exact='\$aimorientation.pitch'])" "hittable-aim pitch assignment count"
 if grep -Fq "\$target.relativeposition.{\$weapon}.rotation.pitch" "$md"; then
   echo "production MD reintroduced component-origin firing-arc bearing" >&2

@@ -198,16 +198,20 @@
                 <do_for_each name="$weapon" in="EngageabilityService.$weapons" counter="$weaponindex">
                   <!-- rotation_x restrictions in shipped turret components are
                        pitch limits in this fixed mount-local reference frame.
-                       Issue #67 r32 live-proved that X4 fires when a selected
-                       component's origin is outside the stop but its hittable
-                       aim point is inside, so evaluate the weapon-local
-                       useaimtarget bearing rather than the component origin.
+                       Bearing-reference lineage: issue #55 checked the origin
+                       against the hittable surface; issue #67 (commit 4e21cd0)
+                       live-proved origin bearing vs hittable aim point; issue
+                       #69 is single sampled aim point vs the whole component
+                       box — useaimtarget samples ONE of the victim's many
+                       hittable points, while X4 may fire at a different in-arc
+                       point of the same mesh, hence the engine's bbox-aware
+                       aim (look_at_bbox, common.xsd:2616).
                        Unknown/modded macros remain UNKNOWN rather than being
                        falsely promoted by range + line of fire alone. -->
                   <do_if value="EngageabilityService.$arcknown.{$weaponindex} == 1">
                     <set_value name="$known" operation="add"/>
-                    <create_orientation name="$aimorientation" orientation="look_at"
-                                        refobject="$target" useaimtarget="true">
+                    <create_orientation name="$aimorientation" orientation="look_at_bbox"
+                                        refobject="$target">
                       <position object="$weapon" space="$weapon"/>
                     </create_orientation>
                     <set_value name="$aimpitch" exact="$aimorientation.pitch"/>

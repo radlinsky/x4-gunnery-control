@@ -215,6 +215,9 @@
                   <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
                     <position object="$Weapon" space="$Weapon"/>
                   </create_orientation>
+                  <create_orientation name="$BboxLocal" orientation="look_at_bbox" refobject="$Target">
+                    <position object="$Weapon" space="$Weapon"/>
+                  </create_orientation>
                   <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
                     + ' t=' + player.age
                     + ' weapon=' + $Weapon
@@ -232,6 +235,7 @@
                     + ' rel_pitch=' + $Relative.rotation.pitch
                     + ' aim_yaw=' + $AimLocal.yaw
                     + ' aim_pitch=' + $AimLocal.pitch
+                    + ' bbox_pitch=' + $BboxLocal.pitch
                     + ' mount_yaw=' + $Weapon.rotation.yaw
                     + ' mount_pitch=' + $Weapon.rotation.pitch
                     + ' mount_roll=' + $Weapon.rotation.roll
@@ -253,6 +257,9 @@
                   <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
                     <position object="$Weapon" space="$Weapon"/>
                   </create_orientation>
+                  <create_orientation name="$BboxLocal" orientation="look_at_bbox" refobject="$Target">
+                    <position object="$Weapon" space="$Weapon"/>
+                  </create_orientation>
                   <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
                     + ' t=' + player.age
                     + ' weapon=' + $Weapon
@@ -270,6 +277,7 @@
                     + ' rel_pitch=' + $Relative.rotation.pitch
                     + ' aim_yaw=' + $AimLocal.yaw
                     + ' aim_pitch=' + $AimLocal.pitch
+                    + ' bbox_pitch=' + $BboxLocal.pitch
                     + ' mount_yaw=' + $Weapon.rotation.yaw
                     + ' mount_pitch=' + $Weapon.rotation.pitch
                     + ' mount_roll=' + $Weapon.rotation.roll

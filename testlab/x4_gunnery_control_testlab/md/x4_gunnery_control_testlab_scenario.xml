@@ -1329,6 +1329,9 @@
             <set_value name="$ArcSplitSurfaceMembers" exact="0"/>
             <set_value name="$PositiveControlSurface" exact="null"/>
             <set_value name="$PositiveControlSurfaceMembers" exact="0"/>
+            <set_value name="$EngineStraddleSurface" exact="null"/>
+            <set_value name="$EngineStraddleSurfaceMembers" exact="0"/>
+            <set_value name="$EngineStraddlePairs" exact="0"/>
             <set_value name="$PostWarpLocationFailures" exact="0"/>
             <set_value name="$MeasurePStar" exact="null"/>
             <do_if value="ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
@@ -1396,6 +1399,7 @@
                       <do_for_each name="$Surface" in="$Surfaces">
                         <set_value name="$SurfaceArcCandidateMembers" exact="0"/>
                         <set_value name="$SurfacePositiveCandidateMembers" exact="0"/>
+                        <set_value name="$EngineStraddleCandidateMembers" exact="0"/>
                         <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
                           <do_if value="$Surface.macro == macro.turret_arg_l_beam_01_mk1_macro and $GeometryWeaponMacro and $GeometryWeapon.macro == $GeometryWeaponMacro">
                             <set_value name="$SurfacePairs" operation="add"/>
@@ -1456,6 +1460,26 @@
                             </do_if>
                             <debug_text text="'[X4GC TEST QUALIFY SURFACE] request_id=' + $RequestId + ' label=' + $Record.$label + ' case=' + $GeometryCase + ' target=' + $Target + ' target_id=' + $Target.idcode + ' surface=' + $Surface + ' surface_id=' + $Surface.idcode + ' surface_macro=' + $Surface.macro + ' weapon=' + $GeometryWeapon + ' weapon_macro=' + $GeometryWeapon.macro + ' origin_pitch=' + $SurfaceRelative.rotation.pitch + ' aim_pitch=' + $SurfaceAimLocal.pitch + ' separated=' + $Separated + ' inrange=' + $SurfaceInRange + ' range=' + $SurfaceRange + ' centre_range=' + $SurfaceCentreRange + ' surface_sector_pos=' + $SurfaceSectorPos + ' maxrange=' + $GeometryWeapon.maxfirerange + ' muzzle_los_ex=' + $SurfaceMuzzleLosEx + ' muzzle_los_self=' + $SurfaceMuzzleLosSelf + ' mayattack=' + $SurfaceMayAttack + ' origin_outside=' + $SurfaceOriginOutside + ' aim_inside=' + $SurfaceAimInside + ' arc_split=' + $SurfaceArcSplit + ' positive_control=' + $SurfacePositiveControl + ' arc_candidate=' + $SurfaceArcCandidate + ' positive_candidate=' + $SurfacePositiveCandidate"/>
                           </do_if>
+                          <do_if value="$Surface.macro == macro.engine_arg_l_allround_01_mk1_macro and $GeometryWeaponMacro and $GeometryWeapon.macro == $GeometryWeaponMacro">
+                            <set_value name="$EngineSurfaceRelative" exact="$Surface.relativeposition.{$GeometryWeapon}"/>
+                            <create_orientation name="$EngineAimLocal" orientation="look_at" refobject="$Surface" useaimtarget="true">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <create_orientation name="$EngineBboxLocal" orientation="look_at_bbox" refobject="$Surface">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$EngineRange" exact="$GeometryWeapon.bboxdistanceto.{$Surface}"/>
+                            <set_value name="$EngineInRange" exact="$EngineRange le $GeometryWeapon.maxfirerange"/>
+                            <set_value name="$EngineMayAttack" exact="@$Shooter.mayattack.{$Surface}"/>
+                            <set_value name="$EngineAimOutside" exact="$EngineAimLocal.pitch gt 80deg"/>
+                            <set_value name="$EngineBboxInside" exact="$EngineBboxLocal.pitch ge -5deg and $EngineBboxLocal.pitch le 80deg"/>
+                            <set_value name="$EngineStraddle" exact="$EngineAimOutside and $EngineBboxInside and $EngineInRange and $EngineMayAttack"/>
+                            <do_if value="$EngineStraddle">
+                              <set_value name="$EngineStraddleCandidateMembers" operation="add"/>
+                              <set_value name="$EngineStraddlePairs" operation="add"/>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINE] request_id=' + $RequestId + ' label=' + $Record.$label + ' case=' + $GeometryCase + ' target=' + $Target + ' target_id=' + $Target.idcode + ' surface=' + $Surface + ' surface_id=' + $Surface.idcode + ' surface_macro=' + $Surface.macro + ' weapon=' + $GeometryWeapon + ' weapon_macro=' + $GeometryWeapon.macro + ' origin_pitch=' + $EngineSurfaceRelative.rotation.pitch + ' aim_pitch=' + $EngineAimLocal.pitch + ' bbox_pitch=' + $EngineBboxLocal.pitch + ' range=' + $EngineRange + ' inrange=' + $EngineInRange + ' mayattack=' + $EngineMayAttack + ' aim_outside=' + $EngineAimOutside + ' bbox_inside=' + $EngineBboxInside + ' straddle=' + $EngineStraddle"/>
+                          </do_if>
                         </do_for_each>
                         <do_if value="$ArcSplitSurface == null and $Measured == $ExpectedGeometryWeapons and $SurfaceArcCandidateMembers ge 1">
                           <set_value name="$ArcSplitSurface" exact="$Surface"/>
@@ -1464,6 +1488,12 @@
                         <do_if value="$PositiveControlSurface == null and $Measured == $ExpectedGeometryWeapons and $SurfacePositiveCandidateMembers ge 1">
                           <set_value name="$PositiveControlSurface" exact="$Surface"/>
                           <set_value name="$PositiveControlSurfaceMembers" exact="$SurfacePositiveCandidateMembers"/>
+                        </do_if>
+                        <do_if value="$EngineStraddleCandidateMembers ge 1">
+                          <do_if value="$EngineStraddleSurface == null">
+                            <set_value name="$EngineStraddleSurface" exact="$Surface"/>
+                          </do_if>
+                          <set_value name="$EngineStraddleSurfaceMembers" operation="add" exact="$EngineStraddleCandidateMembers"/>
                         </do_if>
                       </do_for_each>
                       <debug_text text="'[X4GC TEST QUALIFY TARGET] request_id=' + $RequestId + ' target=' + $Target + ' target_id=' + $Target.idcode + ' operational_surfaces=' + $Surfaces.count + ' actual_yaw=' + $Target.rotation.yaw + ' actual_pitch=' + $Target.rotation.pitch + ' actual_roll=' + $Target.rotation.roll"/>
@@ -1493,6 +1523,10 @@
             <do_if value="$Qualified">
               <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
               <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$ArcSplitSurface"/>
+              <do_if value="$EngineStraddleSurface != null and $EngineStraddleSurfaceMembers == 1">
+                <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
+                <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$EngineStraddleSurface"/>
+              </do_if>
             </do_if>
             <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
                              param="'x4gcq9:' + $RequestId + ':' + (if $Qualified then 1 else 0) + ':' + $TargetCount + ':' + $SurfaceCount + ':' + $Measured + ':' + $SurfacePairs + ':' + $SurfaceOriginOutsidePairs + ':' + $SurfaceAimInsidePairs + ':' + $SurfaceArcSplitPairs + ':' + $SurfaceArcCandidatePairs + ':' + $ArcSplitSurfaceMembers + ':' + $PositiveControlSurfaceMembers"/>
