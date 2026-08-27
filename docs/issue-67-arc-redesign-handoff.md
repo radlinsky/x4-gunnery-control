@@ -133,7 +133,7 @@ Keep vs. scrap:
 - Fixture spec: `testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua`
 - Qualifier MD: `testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml` (cue `GeometryQualifyMeasure`)
 - Arc math + gate check: `tests/test_issue67_arc_ring.sh`
-- Live telemetry tags: `[X4GC TEST QUALIFY SURFACE]` (per weapon×element: origin_pitch, aim_pitch, muzzle_los_ex/self, arc_split); `[X4GC TEST SOLUTION]` (mount_yaw/pitch/roll, barrel_x/y/z, rel_pitch, aim_pitch)
+- Live telemetry tags: `[X4GC TEST QUALIFY SURFACE]` (per weapon×element: origin_pitch, aim_pitch, muzzle_los_ex/self, arc_split); mount/barrel data comes from the `[X4GC TEST PREFLIGHT]` row (mount-independent barrel_x/y/z, rel/aim pitch, per-weapon LOS)
 - Spawn skill: `.agents/skills/spawn-gunnery-scenario/SKILL.md`
 - KB: `.agents/skills/research-x4-modding/references/md-ai.md`
 - Platform constraint: **Colossus E only** (`ship_arg_xl_carrier_02_a_macro`);
