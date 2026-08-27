@@ -1502,17 +1502,21 @@ whole-object, engine, shield, turret, and station-module surface tests.
   Consequence (solid): the committed `look_at_bbox` arc change (commit `5411bc0`)
   does NOT fix #69 — it corrected the arc predicate, but the arc is not the failing
   gate; the line-of-fire raycast is.
-- UNRESOLVED — which line-of-fire failure: two candidates remain, not yet
-  discriminated. (a) Own-hull self-masking: the `excludeself=false` ray from
-  `barrelposition` is blocked by the SHOOTER's own hull, while the real muzzle
-  clears it (the observe module already flags root-origin `excludeself=false` as
-  blocked 7252/7252). (b) Target-side aim-point multiplicity: the single
-  `useaimtarget` point is externally occluded while X4 hits a different point. The
-  discriminator is the pair `MuzzleLosEx` (excludeself=true) vs `MuzzleLosSelf`
-  (excludeself=false) to the engine: Ex=1/Self=0 ⇒ own-hull self-masking (a);
-  both=0 ⇒ target multiplicity (b). NOT captured this run — the engine qualify
-  branch logs no muzzle LOS and the observe snapshot was not fired. Do NOT record a
-  cause until an instrumented run resolves this.
+- RESOLVED — target-side aim-point multiplicity, not own-hull self-masking. The
+  observe auto-snapshot fired on designation (`debug.log:838,842`, target `1550704`
+  = the engine): `muzzle_los_ex=0 muzzle_los_self=0 los_ex=0`, `aim_pitch=1.50768`
+  (86.4deg), `bbox_pitch=1.34524` (77.1deg), `tgtname=ARG L All-round Engine Mk1`,
+  `tgtsize=75.5781`. `muzzle_los_ex=0` is the discriminator: with `excludeself=true`
+  the SHOOTER is removed from the ray, so the block is the TARGET's own hull masking
+  its own engine at the `useaimtarget` point — not shooter self-masking. The engine
+  surface element is large (`tgtsize≈75.6 m`), so its aim points span ~63→87deg;
+  `useaimtarget` returns a high, hull-masked one while X4 fires at a clear one.
+- SHARPER BUG: the production predicate evaluates ARC and LINE-OF-FIRE at DIFFERENT
+  points — arc on the `look_at_bbox` direction (77deg, `x4_gunnery_control.xml:213`)
+  but LOS on the `useaimtarget` point (86deg, `:234`). The bbox point is in-arc; the
+  useaimtarget point is the one that is hull-masked. Whether the bbox (or a
+  near/low) point has clear LOS is the next probe — if yes, making the LOS ray
+  consistent with the arc point is the fix.
 - CAUTION on frames: the FIRED `bullet_pitch` (`event.param.rotation.pitch`,
   observe.xml:384) is SECTOR/world frame; qualify `aim_pitch` is WEAPON-LOCAL. They
   are not directly comparable — an earlier draft's "~20deg lower / near-edge point"
@@ -1524,13 +1528,15 @@ whole-object, engine, shield, turret, and station-module surface tests.
   turret geometrically hit this surface now" (searched engage/canhit/fir/track/
   aimat/bear/solution/attackable). The turret's own firing solution is engine-side
   and unexposed, which is why engageability is reimplemented at all.
-- Fix direction (blocked on the unresolved discriminator above): if own-hull
-  self-masking (a), the fix is to exclude self (or clear the barrel origin) on
-  conventional turrets' line-of-fire ray, as already done for missile turrets. If
-  target multiplicity (b), MD cannot enumerate mesh aim points
-  ([[useaimtarget-collapses-aim-points-issue-69]] / the useaimtarget record above),
-  so exactness is impossible and a bounded representative-point probe with early
-  exit is the practical route. Pick only after the Ex/Self run.
+- Fix direction: it is target multiplicity, so `excludeself` does not help (both
+  variants block). The predicate must run the line-of-fire ray to an IN-ARC point,
+  not the `useaimtarget` point. Cheapest candidate: reuse the `look_at_bbox`
+  direction the arc already uses (make arc and LOS consistent); if that point is
+  also masked, fall back to a bounded near/low box-point probe with early exit. MD
+  cannot enumerate mesh aim points
+  ([[useaimtarget-collapses-aim-points-issue-69]]), so exactness is impossible; the
+  bounded probe is the practical route. Confirm the bbox/near point's LOS on
+  `issue-69-engine-straddle-r1` before changing the predicate.
 
 ### `find_object_surface` cannot return a surface element's own mesh point; `component=` returns the parent hull
 - X4: 9.00
