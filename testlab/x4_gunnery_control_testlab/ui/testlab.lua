@@ -1,5 +1,26 @@
 -- Developer-only current-ship turret sweep. The production extension owns all
 -- turret discovery and mutations; this companion only drives its narrow API.
+local ffi = require("ffi")
+local C = ffi.C
+
+-- X4 9.00 HUD/target-system telemetry for the issue #69 discriminator. Other
+-- loaded UI scripts may already have declared these canonical FFI types and
+-- functions, so add only the declarations missing from the shared LuaJIT state.
+if ffi.typeof then
+    if not pcall(ffi.typeof, "PosRot") then
+        ffi.cdef[[typedef struct { float x; float y; float z; float yaw; float pitch; float roll; } PosRot;]]
+    end
+    if not pcall(ffi.typeof, "CrosshairMessage") then
+        ffi.cdef[[typedef struct { uint32_t messageID; bool obstructed; } CrosshairMessage;]]
+    end
+    if not pcall(function() return C.GetRelativeAimOffset end) then
+        ffi.cdef[[PosRot GetRelativeAimOffset(uint64_t componentid);]]
+    end
+    if not pcall(function() return C.GetCurrentCrosshairMessage end) then
+        ffi.cdef[[CrosshairMessage GetCurrentCrosshairMessage(void);]]
+    end
+end
+
 local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
 local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
@@ -37,13 +58,36 @@ local observing = false
 local lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled
 local suppressedObservedAimTarget
 
+-- GetRelativeAimOffset is shipped Lua FFI but its frame and relationship to an
+-- arbitrary turret's chosen hit point are undocumented. Log it as experimental
+-- target-system telemetry only; the live run decides whether it is useful.
+local function logAimSystemProbe(target)
+    local ok, result = pcall(function()
+        local offset = C.GetRelativeAimOffset(ConvertStringTo64Bit(tostring(target)))
+        local crosshair = C.GetCurrentCrosshairMessage()
+        return {
+            x = offset.x, y = offset.y, z = offset.z,
+            yaw = offset.yaw, pitch = offset.pitch, roll = offset.roll,
+            crosshair_message = crosshair.messageID,
+            crosshair_obstructed = crosshair.obstructed and 1 or 0,
+        }
+    end)
+    if ok then
+        result.action, result.target = "aim_system_probe", target
+        log("observe", result)
+    else
+        log("observe", { action = "aim_system_probe_failed", target = target,
+            reason = tostring(result) })
+    end
+end
+
 -- The engine SOFT target and the session's aimTargetID are the whole reason
 -- any Lua runs here: MD has player.target but no soft-target equivalent
 -- (scriptproperties.xml has no player.softtarget at all), and the mod session is
 -- Lua-side state. Both come from the main mod's already-public test API
--- (ui/gunnery_control.lua:1121 getSession, :1169 getTestSofttarget), so the
--- shipped mod is untouched and nothing here needs ffi -- this file deliberately
--- contains no require("ffi") and no C. calls, and that stays true.
+-- (ui/gunnery_control.lua:1121 getSession, :1169 getTestSofttarget). The only
+-- direct FFI use here is the explicitly experimental issue #69 target-system
+-- probe above; it does not mutate the production extension.
 local function pushObserveState()
     if not observing then return end
     local bridge = api()
@@ -75,6 +119,9 @@ local function pushObserveState()
     -- automatically request the same one-shot engageability snapshot the button
     -- would have produced. String comparison normalises ffi cdata/number forms.
     local now = getElapsedTime()
+    if aimTarget and aimTarget ~= suppressedObservedAimTarget then
+        logAimSystemProbe(aimTarget)
+    end
     if aimTarget and aimTarget ~= suppressedObservedAimTarget
             and aimTarget ~= lastObservedAimTarget then
         lastObservedAimTarget = aimTarget
@@ -119,7 +166,7 @@ local function validateSpec(raw)
     if raw.enabled ~= true and raw.enabled ~= false then return nil, "spec.enabled must be true or false" end
     if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
     local groups = {}
-    local geometryCases = { arc_split = 0, positive_control = 0 }
+    local geometryCases = { arc_split = 0, positive_control = 0, engine_straddle = 0 }
     for index, group in ipairs(raw.groups) do
         local where = "groups[" .. index .. "]"
         if type(group) ~= "table" then return nil, where .. " is not a table" end
@@ -145,8 +192,9 @@ local function validateSpec(raw)
             return nil, where .. ".geometryRole must be empty, clear_arc, below_arc, or surface_mask"
         end
         if geometryRole == "surface_mask" then
-            if geometryCase ~= "arc_split" and geometryCase ~= "positive_control" then
-                return nil, where .. ".geometryCase must be arc_split or positive_control for surface_mask"
+            if geometryCase ~= "arc_split" and geometryCase ~= "positive_control"
+                    and geometryCase ~= "engine_straddle" then
+                return nil, where .. ".geometryCase must be arc_split, positive_control, or engine_straddle for surface_mask"
             end
             geometryCases[geometryCase] = geometryCases[geometryCase] + 1
         elseif geometryCase ~= "" then
@@ -275,7 +323,11 @@ local function validateSpec(raw)
             expectedAmmo = expectedAmmo,
         }
     end
-    if geometryCases.arc_split + geometryCases.positive_control > 0
+    if geometryCases.engine_straddle > 0 then
+        if geometryCases.engine_straddle ~= 1 or geometryCases.arc_split ~= 0 or geometryCases.positive_control ~= 0 then
+            return nil, "surface_mask engine_straddle mode requires exactly one engine_straddle and no arc_split or positive_control geometryCase"
+        end
+    elseif geometryCases.arc_split + geometryCases.positive_control > 0
             and (geometryCases.arc_split ~= 1 or geometryCases.positive_control ~= 1) then
         return nil, "surface_mask requires exactly one arc_split and one positive_control geometryCase"
     end
@@ -992,8 +1044,8 @@ end
 local function onGeometryQualified(_, param)
     local token, qualified, targetCount, surfaceCount, measured, surfacePairs,
         originOutsidePairs, aimInsidePairs, arcSplitPairs, arcCandidatePairs,
-        selectedSurfaceMembers, positiveControlMembers =
-        tostring(param or ""):match("^x4gcq9:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+        selectedSurfaceMembers, positiveControlMembers, engineStraddleMembers =
+        tostring(param or ""):match("^x4gcq9:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
     if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
     local request = pendingQualify
     pendingQualify = nil
@@ -1004,17 +1056,29 @@ local function onGeometryQualified(_, param)
     arcSplitPairs, arcCandidatePairs = tonumber(arcSplitPairs), tonumber(arcCandidatePairs)
     selectedSurfaceMembers = tonumber(selectedSurfaceMembers)
     positiveControlMembers = tonumber(positiveControlMembers)
-    if qualified == 1 and targetCount == 2 and surfaceCount > 0
+    engineStraddleMembers = tonumber(engineStraddleMembers)
+    local gatePass
+    if request.geometryObjective == "engine_straddle" then
+        gatePass = qualified == 1 and surfaceCount > 0
+            and measured == request.expectedGeometryWeapons
+            and engineStraddleMembers == 1
+            and request.designatedComponent ~= nil
+    else
+        gatePass = qualified == 1 and targetCount == 2 and surfaceCount > 0
             and request.expectedGeometryWeapons == 1 and measured == 1
             and measured == request.expectedGeometryWeapons and arcCandidatePairs >= 1
             and selectedSurfaceMembers == 1 and positiveControlMembers == 1
-            and request.designatedComponent ~= nil then
+            and request.designatedComponent ~= nil
+    end
+    if gatePass then
         applyExactGroup(request.selection)
         local bridge = api()
+        local componentDesc = request.geometryObjective == "engine_straddle"
+            and "exact qualified straddle component" or "exact qualified Argon L Beam surface"
         local marked = bridge and bridge.suggestTestEngagement
             and bridge.suggestTestEngagement(request.designatedComponent, function(selected)
                 if not selected then return end
-                scenarioActionStatus = "RUNNING: owner manually designated exact qualified Argon L Beam surface "
+                scenarioActionStatus = "RUNNING: owner manually designated " .. componentDesc .. " "
                     .. tostring(request.designatedComponent) .. "; observation armed"
                 log("geometry_qualify", { action = "operator_designated",
                     request_id = request.requestId,
@@ -1027,7 +1091,7 @@ local function onGeometryQualified(_, param)
                 setObserving(true)
             end)
         if not marked then
-            scenarioActionStatus = "FAILED: exact Argon L Beam surface qualified but could not be marked for manual selection; diagnostic not started"
+            scenarioActionStatus = "FAILED: " .. componentDesc .. " qualified but could not be marked for manual selection; diagnostic not started"
             log("geometry_qualify", { action = "failed", request_id = request.requestId,
                 reason = "manual_component_mark_failed",
                 designated_target = "ship_surface",
@@ -1049,6 +1113,7 @@ local function onGeometryQualified(_, param)
             arc_candidate_pairs = arcCandidatePairs,
             selected_surface_members = selectedSurfaceMembers,
             positive_control_members = positiveControlMembers,
+            engine_straddle_members = engineStraddleMembers,
             designated_target = "ship_surface",
             designated_component = request.designatedComponent,
             designation = "manual_pending",
@@ -1057,12 +1122,21 @@ local function onGeometryQualified(_, param)
             member_macros = request.selection.memberMacros })
         returnToGunnery("geometry_qualified")
     else
-        scenarioActionStatus = "FAILED: settled Argon sky-survey scan did not independently qualify both exact Beam roles across "
-            .. targetCount .. " targets and " .. surfaceCount .. " operational surfaces"
-            .. " (origin-outside/aim-inside/arc-split/arc-candidate pairs="
-            .. originOutsidePairs .. "/" .. aimInsidePairs .. "/" .. arcSplitPairs .. "/"
-            .. arcCandidatePairs .. ", " .. surfacePairs .. " surface pairs, "
-            .. selectedSurfaceMembers .. " selected members); diagnostic not started"
+        local failDesc
+        if request.geometryObjective == "engine_straddle" then
+            failDesc = "FAILED: engine-straddle scan did not qualify exactly one straddle engine across "
+                .. targetCount .. " targets and " .. surfaceCount .. " operational surfaces"
+                .. " (engine_straddle_members=" .. tostring(engineStraddleMembers)
+                .. ", measured=" .. tostring(measured) .. "); diagnostic not started"
+        else
+            failDesc = "FAILED: settled Argon sky-survey scan did not independently qualify both exact Beam roles across "
+                .. targetCount .. " targets and " .. surfaceCount .. " operational surfaces"
+                .. " (origin-outside/aim-inside/arc-split/arc-candidate pairs="
+                .. originOutsidePairs .. "/" .. aimInsidePairs .. "/" .. arcSplitPairs .. "/"
+                .. arcCandidatePairs .. ", " .. surfacePairs .. " surface pairs, "
+                .. selectedSurfaceMembers .. " selected members); diagnostic not started"
+        end
+        scenarioActionStatus = failDesc
         log("geometry_qualify", { action = "failed", request_id = request.requestId,
             targets = targetCount, surfaces = surfaceCount,
             measured = measured, surface_pairs = surfacePairs,
@@ -1072,6 +1146,7 @@ local function onGeometryQualified(_, param)
             arc_candidate_pairs = arcCandidatePairs,
             selected_surface_members = selectedSurfaceMembers,
             positive_control_members = positiveControlMembers,
+            engine_straddle_members = engineStraddleMembers,
             designated_target = "ship_surface",
             designated_component = request.designatedComponent or "none" })
         menu.display()
@@ -1199,8 +1274,16 @@ function menu.onShowMenu()
                 -- until both authored sky-survey roles qualify independently.
                 scenarioRequestSerial = scenarioRequestSerial + 1
                 local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
+                local geometryObjective = "beam"
+                for _, g in ipairs(scenarioSpec.groups) do
+                    if g.geometryRole == "surface_mask" and g.geometryCase == "engine_straddle" then
+                        geometryObjective = "engine_straddle"
+                        break
+                    end
+                end
                 pendingQualify = { requestId = token, selection = selection,
                     expectedGeometryWeapons = scenarioSpec.groups[1].expectedGeometryWeapons,
+                    geometryObjective = geometryObjective,
                     deadline = getElapsedTime() + 30 }
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })

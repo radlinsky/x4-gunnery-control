@@ -436,78 +436,10 @@ for index, entry in enumerate(targets):
     )
 print(f"min pairwise root distance: {min_pair:.1f} m")
 
-# ------------------------------------------------- spec cross-validation -----
-spec_path = Path("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
-text = spec_path.read_text(encoding="utf-8")
-number = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
-pattern = re.compile(
-    rf'{{ label = "SKY SURVEY A (\d{{3}})",.*?'
-    rf'count = 1, distance = ({number}), x = ({number}), y = ({number}), spread = 0,\s*'
-    rf'ox = ({number}), oy = ({number}), oz = ({number}),\s*'
-    rf'yaw = ({number}), pitch = ({number}), roll = ({number}),\s*'
-    rf'preserveOrientation = true,',
-    re.S,
-)
-actual = {
-    int(angle): tuple(float(value) for value in values)
-    for angle, *values in pattern.findall(text)
-}
-assert sorted(actual) == sorted(derived), (
-    f"expected source-derived survey keys {sorted(derived)}, found {sorted(actual)}"
-)
-
-assert 'id      = "issue-67-argon-sky-survey-r32"' in text
-assert text.count('geometryCase = "arc_split"') == 1
-assert text.count('geometryCase = "positive_control"') == 1
-assert "positiveControl" not in text
-assert "enabled = false" in text, "repository survey fixture must remain disabled"
-assert 'shipMacro       = "ship_par_l_destroyer_01_a_macro"' in text
-assert 'turretGroup     = "group_front_up_mid2"' in text
-assert 'expectedTurrets = 1' in text
-assert '"turret_par_l_plasma_01_mk1_macro"' in text
-
-for key, expected in derived.items():
-    distance, x, y, ox, oy, oz, authored_yaw, authored_pitch, authored_roll = actual[key]
-    error = abs((authored_yaw - expected[3] + 180.0) % 360.0 - 180.0)
-    assert error <= 0.001, (
-        f"survey {key:03d} yaw is guessed/drifted: spec={authored_yaw:.6f}, "
-        f"derived={expected[3]:.6f}, error={error:.6f}"
-    )
-    for observed, want, name in zip(
-        (distance, x, y, authored_pitch, authored_roll), expected[:3] + expected[4:],
-        ("distance", "x", "y", "pitch", "roll"),
-    ):
-        tolerance = 0.001 if name in ("pitch", "roll") else 0.002
-        assert abs(observed - want) <= tolerance, (
-            f"survey {key:03d} {name} is guessed/drifted: spec={observed:.6f}, "
-            f"derived={want:.6f}"
-        )
-    # P*-relative surface_mask offsets: independently locked coordinate frame.
-    for observed, want, name in zip(
-        (ox, oy, oz), expected[6:], ("ox", "oy", "oz")
-    ):
-        assert abs(observed - want) <= 0.002, (
-            f"survey {key:03d} {name} is guessed/drifted: spec={observed:.6f}, "
-            f"derived={want:.6f}"
-        )
-
-    # Re-evaluate rounded authored values through every fixture gate.
-    authored_q = x4_spawn_quaternion(authored_yaw, authored_pitch, authored_roll)
-    authored_root = (x, y, distance - 1.0)
-    origin = add(authored_root, qrot(authored_q, surface_pos))
-    aim = add(authored_root, qrot(authored_q, aim_local))
-    kind = "straddle" if key < 100 else ("positive" if key == 100 else "negative")
-    origin_p = pitch(qrot(sector_to_weapon_q, sub(origin, weapon_pos)))
-    aim_p = pitch(qrot(sector_to_weapon_q, sub(aim, weapon_pos)))
-    if kind == "straddle":
-        assert origin_p - upper_limit >= min_margin_out
-        assert upper_limit - aim_p >= min_margin_in
-    elif kind == "positive":
-        assert lower_limit + math.radians(10.0) <= aim_p <= upper_limit - math.radians(10.0)
-    else:
-        assert origin_p >= upper_limit + math.radians(3.0)
-        assert aim_p >= upper_limit + math.radians(3.0)
-    assert length(sub(aim, weapon_pos)) < plasma_max_range * 0.95
+# The r32 spec cross-validation was removed when the active shipped spec
+# advanced to issue-69-engine-straddle-r1. The r32 ring geometry derivation
+# above remains as an offline proof; the authored transforms are now in git
+# history only.
 
 print(
     "issue 67 Paranid sky-survey math passed "

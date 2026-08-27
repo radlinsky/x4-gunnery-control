@@ -715,13 +715,13 @@ local function shippedTwoPhaseToQualify()
     harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 5, "shipped Create must stream begin + shooter + two targets + commit")
+    assert(#events == 4, "shipped Create must stream begin + shooter + one target + commit")
     assert(events[2].params.geometryWeaponMacro == plasmaSurvey
             and events[2].params.expectedGeometryWeapons == 1,
         "Paranid L shooter transport must carry its exact geometry macro/count")
     local requestId = events[1].params.requestId
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-67-argon-sky-survey-r32:3:0:0:0:0:0:0:2:20:0:0:2:2:1:0:0:0:0:0:0:1:1:0:1:0:0")
+        "x4gct8:" .. requestId .. ":issue-69-engine-straddle-r1:2:0:0:0:0:0:0:1:20:0:0:1:1:1:0:0:0:0:0:0:1:1:0:1:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending"),
         "OOS Paranid L survey must verify census and report geometry PENDING")
@@ -747,7 +747,7 @@ do
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", token)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":1:2:35:1:35:4:20:1:1:1:1")
+        "x4gcq9:" .. token .. ":1:1:35:1:35:4:20:1:1:0:0:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2
             and harness.fix.logContains("measured=1") and harness.fix.logContains(plasmaSurvey),
         "only the exact one-Plasma census may qualify")
@@ -776,7 +776,7 @@ do
     local harness, token = shippedTwoPhaseToQualify()
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":1:2:35:1:35:4:20:1:1:1:1")
+        "x4gcq9:" .. token .. ":1:1:35:1:35:4:20:1:1:0:0:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=failed"),
         "an uncorrelated typed target must fail closed even with qualified q8")
@@ -787,7 +787,7 @@ do
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", "old_q0")
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualifiedTarget", 31337)
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":1:2:35:1:35:4:20:1:1:1:1")
+        "x4gcq9:" .. token .. ":1:1:35:1:35:4:20:1:1:0:0:1")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=failed"),
         "a stale token plus typed target must fail closed")
@@ -796,7 +796,7 @@ end
 do
     local harness, token = shippedTwoPhaseToQualify()
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":1:2:35:3:70:8:44:3:1:1:1")
+        "x4gcq9:" .. token .. ":1:1:35:3:70:8:44:3:1:1:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=failed"),
         "a mismatched measured Plasma count must fail closed")
@@ -806,12 +806,12 @@ end
 do
     local harness, token = shippedTwoPhaseToQualify()
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:wrong_q0:1:2:35:1:35:4:20:1:1:1:1")
+        "x4gcq9:wrong_q0:1:1:35:1:35:4:20:1:1:0:0:1")
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":0:2:35:1:35:4:20:1:1")
+        "x4gcq9:" .. token .. ":0:1:35:1:35:4:20:1:1")
     assert(not harness.fix.logContains("action=failed"), "uncorrelated/malformed q8 must be ignored")
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":0:2:35:1:35:4:20:0:0:0:0")
+        "x4gcq9:" .. token .. ":0:1:35:1:35:4:20:0:0:0:0:0")
     assert(harness.fix.logContains("action=failed"), "correlated failed q8 must be consumed fail-closed")
 end
 
@@ -1139,40 +1139,37 @@ for _, case in ipairs(malformed) do
 end
 
 -- The shipped spec file must itself stay loadable and inert, so that an
--- unrelated Reload UI never spawns whatever the last test left behind. These
--- two authored r32 survey transforms are shared by the integrity and
--- flat-transport checks; the independent geometry derivation is locked by
--- tests/test_issue67_sky_ring.sh.
-local expectedRing = {
-    { label = "SKY SURVEY A 000", x = -39.429, y = 699.533, distance = 263.535, yaw = 218.0993, pitch = 78.6164, roll = 171.2717, ox = -39.429, oy = 601.324, oz = 25.352 },
-    { label = "SKY SURVEY A 100", x = -223.612, y = 1886.521, distance = 74.485, yaw = 214.0265, pitch = 68.9246, roll = -166.8782, ox = -223.612, oy = 1788.313, oz = -163.698 },
+-- unrelated Reload UI never spawns whatever the last test left behind.
+-- The engine-straddle target transform is locked by the validated offline
+-- geometry (issue #69 r1).
+local expectedStraddleTarget = {
+    label = "ISSUE ENGINE STRADDLE ARGON", x = -40, y = 670, distance = 260,
+    yaw = 213, pitch = 81, roll = 132, ox = -40.345, oy = 670.435, oz = -45.015,
 }
 do
     local shipped = dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
     assert(type(shipped) == "table" and shipped.enabled == false, "the repository fixture must load and remain disabled")
-    assert(shipped.id == "issue-67-argon-sky-survey-r32" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
+    assert(shipped.id == "issue-69-engine-straddle-r1" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
             and shipped.setup.turretGroup == "group_front_up_mid2" and shipped.setup.turretLabel == "Front Upper Mid Plasma"
-            and shipped.setup.expectedTurrets == 1, "the shipped r32 fixture must retain its exact Paranid L setup")
+            and shipped.setup.expectedTurrets == 1, "the shipped r1 fixture must retain its exact Paranid L setup")
     assert(#shipped.setup.expectedMemberMacros == 1
             and shipped.setup.expectedMemberMacros[1] == "turret_par_l_plasma_01_mk1_macro",
-        "r32 must isolate its one Plasma member")
-    assert(#shipped.groups == 3 and #shipped.stations == 0, "r32 must contain one shooter and two independently spawned Argon survey destroyers")
+        "r1 must isolate its one Plasma member")
+    assert(#shipped.groups == 2 and #shipped.stations == 0, "r1 must contain one shooter and one engine-straddle Argon target")
     local shooter = shipped.groups[1]
     assert(shooter.label == "ISSUE SKY-SURVEY PARANID DESTROYER" and shooter.loadout == "issue67_paranid_sky_survey"
             and shooter.expectedWeapons == 1 and shooter.expectedTurrets == 1 and shooter.expectedBeam == 0 and shooter.expectedPlasma == 1
             and shooter.geometryWeaponMacro == "turret_par_l_plasma_01_mk1_macro" and shooter.expectedGeometryWeapons == 1,
         "Paranid L shooter must retain its exact one-Plasma qualifier contract")
-    for index = 2, 3 do
-        local target, expected = shipped.groups[index], expectedRing[index - 1]
-        assert(target.label == expected.label and target.macro == "ship_arg_l_destroyer_02_a_macro" and target.geometryRole == "surface_mask"
-                and target.hostile == true and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true
-                and target.loadout == "issue67_argon_sky_target"
-                and target.geometryCase == (index == 2 and "arc_split" or "positive_control")
-                and target.distance == expected.distance and target.x == expected.x and target.y == expected.y
-                and target.ox == expected.ox and target.oy == expected.oy and target.oz == expected.oz
-                and target.yaw == expected.yaw and target.pitch == expected.pitch and target.roll == expected.roll and target.preserveOrientation == true,
-            "every r32 survey target must retain its authored transform, case, loadout, and safety fields")
-    end
+    local target = shipped.groups[2]
+    local e = expectedStraddleTarget
+    assert(target.label == e.label and target.macro == "ship_arg_l_destroyer_02_a_macro" and target.geometryRole == "surface_mask"
+            and target.hostile == true and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true
+            and target.loadout == "issue67_argon_sky_target" and target.geometryCase == "engine_straddle"
+            and target.distance == e.distance and target.x == e.x and target.y == e.y
+            and target.ox == e.ox and target.oy == e.oy and target.oz == e.oz
+            and target.yaw == e.yaw and target.pitch == e.pitch and target.roll == e.roll and target.preserveOrientation == true,
+        "the r1 engine-straddle target must retain its authored transform, case, loadout, and safety fields")
 end
 
 do
@@ -1180,20 +1177,17 @@ do
     harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 5, "shipped Create must stream begin + shooter + two targets + commit")
+    assert(#events == 4, "shipped Create must stream begin + shooter + one target + commit")
     assert(events[2].params.geometryWeaponMacro == "turret_par_l_plasma_01_mk1_macro" and events[2].params.expectedGeometryWeapons == 1,
         "flat shooter transport must include exact qualifier macro/count")
-    for index = 3, 4 do
-        local target, expected = events[index].params, expectedRing[index - 2]
-        assert(target.label == expected.label and target.count == 1 and target.spread == 0 and target.distance == expected.distance
-                and target.x == expected.x and target.y == expected.y and target.ox == expected.ox and target.oy == expected.oy and target.oz == expected.oz
-                and target.yaw == expected.yaw and target.pitch == expected.pitch
-                and target.roll == expected.roll and target.preserveOrientation == true and target.behaviour == "wait" and target.hostile == true
-                and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true and target.geometryRole == "surface_mask"
-                and target.geometryCase == (index == 3 and "arc_split" or "positive_control")
-                and target.loadout == "issue67_argon_sky_target",
-            "each r32 survey target must carry its complete flat authored transform and case")
-    end
+    local target, e = events[3].params, expectedStraddleTarget
+    assert(target.label == e.label and target.count == 1 and target.spread == 0 and target.distance == e.distance
+            and target.x == e.x and target.y == e.y and target.ox == e.ox and target.oy == e.oy and target.oz == e.oz
+            and target.yaw == e.yaw and target.pitch == e.pitch
+            and target.roll == e.roll and target.preserveOrientation == true and target.behaviour == "wait" and target.hostile == true
+            and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true and target.geometryRole == "surface_mask"
+            and target.geometryCase == "engine_straddle" and target.loadout == "issue67_argon_sky_target",
+        "the r1 engine-straddle target must carry its complete flat authored transform and case")
 end
 
 -- The shipped spec must be ACCEPTED by validateSpec/loadSpec, not merely well
@@ -1215,7 +1209,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-67-argon-sky-survey-r32", 1, true),
+    assert(specLabelText:find("issue-69-engine-straddle-r1", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)

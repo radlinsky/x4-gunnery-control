@@ -100,24 +100,19 @@
 --     searchAttempts/searchStepY
 --                        Bounded deterministic vertical position search.
 --
--- Issue #67 r32 is the Argon half of the Paranid L-destroyer sky-cap arc
--- survey. The r15 Colossus E ring could not answer goal 1 (own-hull
--- occlusion at the {-10,+90} lower limit); r16..r32 mount the plasma survey
--- on the Paranid destroyer top deck so out-of-arc directions face open sky.
--- Two independently spawned Argon L destroyers (xenon-owned, the r16
--- hostility mechanism) carry the same sky parameters, so the A/B isolates the
--- target hull. r32 splits the two survey roles explicitly through geometryCase:
--- A000 is the straddling arc_split surface (origin above the +80 arc stop,
--- hittable aim inside it) and A100 is the positive_control that is fully inside
--- the arc and must fire. They retain authored transforms while the owner
--- manually selects the qualified root and surface; Test Lab never automates
--- Direct control.
+-- Issue #69 r1 reproduces the aim-point multiplicity symptom on an ENGINE:
+-- one Argon L destroyer placed so exactly ONE of its all-round engines
+-- (con_engine_01) straddles the Paranid plasma +80° arc limit — useaimtarget
+-- pitch ≈83° (old predicate: non-engageable) while look_at_bbox pitch ≈55°
+-- (new predicate: engageable). The straddle engine is the single marked
+-- Direct-control objective. Geometry solved and validated offline; placement
+-- values must not be re-derived.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-argon-sky-survey-r32",
+    id      = "issue-69-engine-straddle-r1",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro",
@@ -142,28 +137,16 @@ X4GunneryTestLabScenarioSpec = {
           expectedGeometryWeapons = 1,
           expectedWeapons = 1, expectedTurrets = 1, expectedPlasma = 1, expectedBeam = 0,
           expectedMissileTurrets = 0, expectedGuided = 0, expectedDumbfire = 0, expectedAmmo = 0 },
-        { label = "SKY SURVEY A 000",
+        { label = "ISSUE ENGINE STRADDLE ARGON",
           macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
-          -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
-          count = 1, distance = 263.535, x = -39.429, y = 699.533, spread = 0,
-          ox = -39.429, oy = 601.324, oz = 25.352,
-          yaw = 218.0993, pitch = 78.6164, roll = 171.2717,
+          count = 1, distance = 260, x = -40, y = 670, spread = 0,
+          ox = -40.345, oy = 670.435, oz = -45.015,
+          yaw = 213, pitch = 81, roll = 132,
           preserveOrientation = true,
           behaviour = "wait", hostile = true, holdFire = true,
           stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
           loadout = "issue67_argon_sky_target",
-          geometryCase = "arc_split" },
-        { label = "SKY SURVEY A 100",
-          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
-          -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
-          count = 1, distance = 74.485, x = -223.612, y = 1886.521, spread = 0,
-          ox = -223.612, oy = 1788.313, oz = -163.698,
-          yaw = 214.0265, pitch = 68.9246, roll = -166.8782,
-          preserveOrientation = true,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
-          loadout = "issue67_argon_sky_target",
-          geometryCase = "positive_control" },
+          geometryCase = "engine_straddle" },
     },
     stations = {},
 }

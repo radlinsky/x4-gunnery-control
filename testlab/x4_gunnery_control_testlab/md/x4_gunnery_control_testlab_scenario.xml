@@ -253,6 +253,7 @@
             <create_group groupname="ScenarioRoot.$PlayerShooters"/>
             <create_group groupname="ScenarioRoot.$SurfaceMaskTargets"/>
             <set_value name="ScenarioRoot.$SurfaceMaskPlacements" exact="[]"/>
+            <set_value name="ScenarioRoot.$EngineObjectiveMode" exact="false"/>
             <set_value name="$StationModules" exact="0"/>
             <set_value name="$StationTurrets" exact="0"/>
             <set_value name="$StationMissileTurrets" exact="0"/>
@@ -551,13 +552,16 @@
                 <do_elseif value="$Def.$geometryrole == 'surface_mask'">
                   <add_to_group groupname="ScenarioRoot.$SurfaceMaskTargets" object="$Ship"/>
                   <append_to_list name="ScenarioRoot.$SurfaceMaskPlacements" exact="table[$target = $Ship, $label = $Def.$label, $case = $Def.$geometrycase, $ox = $Def.$ox, $oy = $Def.$oy, $oz = $Def.$oz]"/>
+                  <do_if value="$Def.$geometrycase == 'engine_straddle'">
+                    <set_value name="ScenarioRoot.$EngineObjectiveMode" exact="true"/>
+                  </do_if>
                   <set_value name="$TargetBeamCount" exact="0"/>
                   <do_for_each name="$TargetWeapon" in="$Ship.turrets.operational.list">
                     <do_if value="$TargetWeapon.macro == macro.turret_arg_l_beam_01_mk1_macro">
                       <set_value name="$TargetBeamCount" operation="add"/>
                     </do_if>
                   </do_for_each>
-                  <do_if value="$Def.$loadout != 'issue67_argon_sky_target' or ($Def.$geometrycase != 'arc_split' and $Def.$geometrycase != 'positive_control') or $Ship.turrets.operational.count != 1 or $Ship.weapons.operational.count != 1 or $Ship.missileturrets.operational.count != 0 or $TargetBeamCount != 1">
+                  <do_if value="$Def.$loadout != 'issue67_argon_sky_target' or ($Def.$geometrycase != 'arc_split' and $Def.$geometrycase != 'positive_control' and $Def.$geometrycase != 'engine_straddle') or $Ship.turrets.operational.count != 1 or $Ship.weapons.operational.count != 1 or $Ship.missileturrets.operational.count != 0 or $TargetBeamCount != 1">
                     <set_value name="$LoadoutFailures" operation="add"/>
                     <debug_text text="'[X4GC TEST SCENARIO] target_loadout_failed label=' + $Def.$label + ' case=' + $Def.$geometrycase + ' loadout=' + $Def.$loadout + ' turrets=' + $Ship.turrets.operational.count + ' weapons=' + $Ship.weapons.operational.count + ' missile_turrets=' + $Ship.missileturrets.operational.count + ' exact_beam=' + $TargetBeamCount"/>
                   </do_if>
@@ -1244,7 +1248,7 @@
             <do_if value="ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
                           and ScenarioRoot.$GeometryShooter.exists
                           and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2">
+                          and ScenarioRoot.$SurfaceMaskPlacements.count ge 1">
               <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
               <set_value name="$QualifySector" exact="$Shooter.sector"/>
               <do_if value="not $QualifySector">
@@ -1295,7 +1299,7 @@
             <do_if value="not (ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
                           and ScenarioRoot.$GeometryShooter.exists
                           and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2)">
+                          and ScenarioRoot.$SurfaceMaskPlacements.count ge 1)">
               <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
               <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=placement_records_missing placement_records=' + (if ScenarioRoot.$SurfaceMaskPlacements? then ScenarioRoot.$SurfaceMaskPlacements.count else 0) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
             </do_if>
@@ -1337,7 +1341,7 @@
             <do_if value="ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
                           and ScenarioRoot.$GeometryShooter.exists
                           and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2">
+                          and ScenarioRoot.$SurfaceMaskPlacements.count ge 1">
               <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
               <set_value name="$QualifySector" exact="$Shooter.sector"/>
               <do_if value="not $QualifySector">
@@ -1478,6 +1482,163 @@
                               <set_value name="$EngineStraddleCandidateMembers" operation="add"/>
                               <set_value name="$EngineStraddlePairs" operation="add"/>
                             </do_if>
+                            <!-- TELEMETRY PROBE: bounding-box-corner ray clearance (issue #69 prototype).
+                                 Run only for the single qualified straddle engine: this keeps the
+                                 one-shot probe bounded to 16 rays (8 corners x excludeself pair).
+                                 A clear ray to an abstract AABB corner does NOT prove that corner is
+                                 a hittable mesh point; do not promote this telemetry directly. -->
+                            <do_if value="$EngineStraddle">
+                              <set_value name="$BoxCx" exact="$Surface.macro.boundingbox.center.x"/>
+                            <set_value name="$BoxCy" exact="$Surface.macro.boundingbox.center.y"/>
+                            <set_value name="$BoxCz" exact="$Surface.macro.boundingbox.center.z"/>
+                            <set_value name="$BoxSx" exact="$Surface.macro.boundingbox.max.x - $BoxCx"/>
+                            <set_value name="$BoxSy" exact="$Surface.macro.boundingbox.max.y - $BoxCy"/>
+                            <set_value name="$BoxSz" exact="$Surface.macro.boundingbox.max.z - $BoxCz"/>
+                            <set_value name="$BoxInArcCount"         exact="0"/>
+                            <set_value name="$BoxInArcClearSelfCount" exact="0"/>
+                            <set_value name="$BoxInArcClearExCount"  exact="0"/>
+                            <set_value name="$BoxMinArcPitch" exact="999deg"/>
+                            <set_value name="$BoxMaxArcPitch" exact="-999deg"/>
+                            <!-- Corner 0: (+x, +y, +z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx + $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz + $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx + $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz + $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=0 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 1: (+x, +y, -z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx + $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz - $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx + $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz - $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=1 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 2: (+x, -y, +z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx + $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz + $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx + $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz + $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=2 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 3: (+x, -y, -z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx + $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz - $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx + $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz - $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=3 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 4: (-x, +y, +z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx - $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz + $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx - $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz + $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=4 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 5: (-x, +y, -z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx - $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz - $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx - $BoxSx" y="$BoxCy + $BoxSy" z="$BoxCz - $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=5 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 6: (-x, -y, +z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx - $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz + $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx - $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz + $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=6 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Corner 7: (-x, -y, -z) -->
+                            <create_position name="$BoxCornerWeaponLocal" object="$Surface" x="$BoxCx - $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz - $BoxSz" space="$GeometryWeapon"/>
+                            <create_orientation name="$BoxCornerBearing" orientation="look_at" refposition="$BoxCornerWeaponLocal">
+                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
+                            </create_orientation>
+                            <set_value name="$BoxCornerInArc" exact="$BoxCornerBearing.pitch ge -5deg and $BoxCornerBearing.pitch le 80deg"/>
+                            <create_position name="$BoxCornerSurfLocal" x="$BoxCx - $BoxSx" y="$BoxCy - $BoxSy" z="$BoxCz - $BoxSz"/>
+                            <check_line_of_sight name="$BoxCornerLosSelf" object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="false" useaimtarget="false"/>
+                            <check_line_of_sight name="$BoxCornerLosEx"   object="$GeometryWeapon" objectoffset="$GeometryWeapon.barrelposition" target="$Surface" targetoffset="$BoxCornerSurfLocal" excludeself="true"  useaimtarget="false"/>
+                            <do_if value="$BoxCornerInArc">
+                              <set_value name="$BoxInArcCount" operation="add"/>
+                              <do_if value="$BoxCornerLosSelf"><set_value name="$BoxInArcClearSelfCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerLosEx"><set_value name="$BoxInArcClearExCount" operation="add"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch lt $BoxMinArcPitch"><set_value name="$BoxMinArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                              <do_if value="$BoxCornerBearing.pitch gt $BoxMaxArcPitch"><set_value name="$BoxMaxArcPitch" exact="$BoxCornerBearing.pitch"/></do_if>
+                            </do_if>
+                            <debug_text text="'[X4GC TEST QUALIFY ENGINECORNER] request_id=' + $RequestId + ' corner_index=7 pitch=' + $BoxCornerBearing.pitch + ' in_arc=' + $BoxCornerInArc + ' los_self=' + $BoxCornerLosSelf + ' los_ex=' + $BoxCornerLosEx"/>
+                            <!-- Summary log -->
+                              <debug_text text="'[X4GC TEST QUALIFY ENGINEBOX] request_id=' + $RequestId + ' label=' + $Record.$label + ' surface=' + $Surface + ' surface_id=' + $Surface.idcode + ' surface_macro=' + $Surface.macro + ' box_center=' + $Surface.macro.boundingbox.center + ' box_max=' + $Surface.macro.boundingbox.max + ' inarc_corners=' + $BoxInArcCount + ' inarc_corner_rayclear_self=' + $BoxInArcClearSelfCount + ' inarc_corner_rayclear_ex=' + $BoxInArcClearExCount + ' min_arc_pitch=' + $BoxMinArcPitch + ' max_arc_pitch=' + $BoxMaxArcPitch"/>
+                            </do_if>
+                            <!-- END TELEMETRY PROBE -->
                             <debug_text text="'[X4GC TEST QUALIFY ENGINE] request_id=' + $RequestId + ' label=' + $Record.$label + ' case=' + $GeometryCase + ' target=' + $Target + ' target_id=' + $Target.idcode + ' surface=' + $Surface + ' surface_id=' + $Surface.idcode + ' surface_macro=' + $Surface.macro + ' weapon=' + $GeometryWeapon + ' weapon_macro=' + $GeometryWeapon.macro + ' origin_pitch=' + $EngineSurfaceRelative.rotation.pitch + ' aim_pitch=' + $EngineAimLocal.pitch + ' bbox_pitch=' + $EngineBboxLocal.pitch + ' range=' + $EngineRange + ' inrange=' + $EngineInRange + ' mayattack=' + $EngineMayAttack + ' aim_outside=' + $EngineAimOutside + ' bbox_inside=' + $EngineBboxInside + ' straddle=' + $EngineStraddle"/>
                           </do_if>
                         </do_for_each>
@@ -1509,27 +1670,37 @@
             <do_if value="not (ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
                           and ScenarioRoot.$GeometryShooter.exists
                           and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2)">
+                          and ScenarioRoot.$SurfaceMaskPlacements.count ge 1)">
               <debug_text text="'[X4GC TEST QUALIFY] FAILED request_id=' + $RequestId + ' reason=preserved_object_missing shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null) + ' placement_records=' + (if ScenarioRoot.$SurfaceMaskPlacements? then ScenarioRoot.$SurfaceMaskPlacements.count else 0) + ' surface_targets=' + (if ScenarioRoot.$SurfaceMaskTargets? then ScenarioRoot.$SurfaceMaskTargets.count else 0)"/>
             </do_if>
             <set_value name="$Qualified"
-                       exact="$TargetCount == 2 and $SurfaceCount gt 0 and $ExpectedGeometryWeapons gt 0
-                              and $Measured == $ExpectedGeometryWeapons and $ArcSplitSurface != null and $ArcSplitSurfaceMembers == 1
-                              and $PositiveControlSurface != null and $PositiveControlSurfaceMembers == 1
-                              and ScenarioRoot.$GeometryQualifyRepositioned == 2
+                       exact="$SurfaceCount gt 0 and $ExpectedGeometryWeapons gt 0
+                              and $Measured == $ExpectedGeometryWeapons
+                              and $TargetCount == ScenarioRoot.$SurfaceMaskPlacements.count
+                              and ScenarioRoot.$GeometryQualifyRepositioned == ScenarioRoot.$SurfaceMaskPlacements.count
                               and ScenarioRoot.$GeometryQualifyRepositionFailures == 0
-                              and $PostWarpLocationFailures == 0"/>
-            <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' action=' + (if $Qualified then 'qualified' else 'failed') + ' targets=' + $TargetCount + ' surfaces=' + $SurfaceCount + ' measured=' + $Measured + ' expected_geometry_weapons=' + (if ScenarioRoot.$ExpectedGeometryWeapons? then ScenarioRoot.$ExpectedGeometryWeapons else 0) + ' geometry_weapon_macro=' + (if ScenarioRoot.$GeometryWeaponMacroName? then ScenarioRoot.$GeometryWeaponMacroName else '') + ' surface_pairs=' + $SurfacePairs + ' origin_outside_pairs=' + $SurfaceOriginOutsidePairs + ' aim_inside_pairs=' + $SurfaceAimInsidePairs + ' arc_split_pairs=' + $SurfaceArcSplitPairs + ' arc_candidate_pairs=' + $SurfaceArcCandidatePairs + ' arc_split_surface=' + $ArcSplitSurface + ' arc_split_macro=' + (if $ArcSplitSurface then $ArcSplitSurface.macro else null) + ' arc_split_surface_members=' + $ArcSplitSurfaceMembers + ' positive_control_surface=' + $PositiveControlSurface + ' positive_control_macro=' + (if $PositiveControlSurface then $PositiveControlSurface.macro else null) + ' positive_control_surface_members=' + $PositiveControlSurfaceMembers + ' repositioned=' + ScenarioRoot.$GeometryQualifyRepositioned + ' reposition_failures=' + ScenarioRoot.$GeometryQualifyRepositionFailures + ' post_warp_location_failures=' + $PostWarpLocationFailures"/>
+                              and $PostWarpLocationFailures == 0
+                              and (
+                                   (ScenarioRoot.$EngineObjectiveMode and $EngineStraddleSurface != null and $EngineStraddleSurfaceMembers == 1)
+                                or (not ScenarioRoot.$EngineObjectiveMode and $ArcSplitSurface != null and $ArcSplitSurfaceMembers == 1 and $PositiveControlSurface != null and $PositiveControlSurfaceMembers == 1)
+                              )"/>
+            <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' action=' + (if $Qualified then 'qualified' else 'failed') + ' targets=' + $TargetCount + ' surfaces=' + $SurfaceCount + ' measured=' + $Measured + ' expected_geometry_weapons=' + (if ScenarioRoot.$ExpectedGeometryWeapons? then ScenarioRoot.$ExpectedGeometryWeapons else 0) + ' geometry_weapon_macro=' + (if ScenarioRoot.$GeometryWeaponMacroName? then ScenarioRoot.$GeometryWeaponMacroName else '') + ' surface_pairs=' + $SurfacePairs + ' origin_outside_pairs=' + $SurfaceOriginOutsidePairs + ' aim_inside_pairs=' + $SurfaceAimInsidePairs + ' arc_split_pairs=' + $SurfaceArcSplitPairs + ' arc_candidate_pairs=' + $SurfaceArcCandidatePairs + ' arc_split_surface=' + $ArcSplitSurface + ' arc_split_macro=' + (if $ArcSplitSurface then $ArcSplitSurface.macro else null) + ' arc_split_surface_members=' + $ArcSplitSurfaceMembers + ' positive_control_surface=' + $PositiveControlSurface + ' positive_control_macro=' + (if $PositiveControlSurface then $PositiveControlSurface.macro else null) + ' positive_control_surface_members=' + $PositiveControlSurfaceMembers + ' engine_straddle_surface=' + $EngineStraddleSurface + ' engine_straddle_surface_members=' + $EngineStraddleSurfaceMembers + ' engine_objective_mode=' + ScenarioRoot.$EngineObjectiveMode + ' repositioned=' + ScenarioRoot.$GeometryQualifyRepositioned + ' reposition_failures=' + ScenarioRoot.$GeometryQualifyRepositionFailures + ' post_warp_location_failures=' + $PostWarpLocationFailures"/>
             <do_if value="$Qualified">
-              <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
-              <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$ArcSplitSurface"/>
-              <do_if value="$EngineStraddleSurface != null and $EngineStraddleSurfaceMembers == 1">
+              <do_if value="ScenarioRoot.$EngineObjectiveMode">
                 <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
                 <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$EngineStraddleSurface"/>
               </do_if>
+              <do_else>
+                <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
+                <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$ArcSplitSurface"/>
+                <do_if value="$EngineStraddleSurface != null and $EngineStraddleSurfaceMembers == 1">
+                  <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
+                  <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$EngineStraddleSurface"/>
+                </do_if>
+              </do_else>
             </do_if>
             <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
-                             param="'x4gcq9:' + $RequestId + ':' + (if $Qualified then 1 else 0) + ':' + $TargetCount + ':' + $SurfaceCount + ':' + $Measured + ':' + $SurfacePairs + ':' + $SurfaceOriginOutsidePairs + ':' + $SurfaceAimInsidePairs + ':' + $SurfaceArcSplitPairs + ':' + $SurfaceArcCandidatePairs + ':' + $ArcSplitSurfaceMembers + ':' + $PositiveControlSurfaceMembers"/>
+                             param="'x4gcq9:' + $RequestId + ':' + (if $Qualified then 1 else 0) + ':' + $TargetCount + ':' + $SurfaceCount + ':' + $Measured + ':' + $SurfacePairs + ':' + $SurfaceOriginOutsidePairs + ':' + $SurfaceAimInsidePairs + ':' + $SurfaceArcSplitPairs + ':' + $SurfaceArcCandidatePairs + ':' + $ArcSplitSurfaceMembers + ':' + $PositiveControlSurfaceMembers + ':' + $EngineStraddleSurfaceMembers"/>
             <remove_value name="ScenarioRoot.$GeometryQualifyRequestId"/>
             <remove_value name="ScenarioRoot.$GeometryQualifyRepositioned"/>
             <remove_value name="ScenarioRoot.$GeometryQualifyRepositionFailures"/>

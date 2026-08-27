@@ -76,6 +76,42 @@ bboxlocal_missiles=$(xmllint --xpath "count(//do_for_each[@in='player.ship.missi
 bboxpitch=$(grep -Fc "+ ' bbox_pitch=' + \$BboxLocal.pitch" "$md")
 [[ "$bboxpitch" -eq 2 ]] || fail "expected bbox_pitch diagnostic in both snapshot loops, found $bboxpitch"
 
+# Issue #69 target-system FFI telemetry is experimental and must remain guarded:
+# one failed undocumented call may log a failure, but must not break Test Lab.
+grep -Fq 'C.GetRelativeAimOffset(ConvertStringTo64Bit(tostring(target)))' "$testlab_ui" \
+  || fail "issue 69 probe does not sample the exact designated component"
+grep -Fq 'C.GetCurrentCrosshairMessage()' "$testlab_ui" \
+  || fail "issue 69 probe lost its crosshair-obstruction control"
+grep -Fq 'local ok, result = pcall(function()' "$testlab_ui" \
+  || fail "issue 69 undocumented FFI probe is not failure-contained"
+grep -Fq 'result.action, result.target = "aim_system_probe", target' "$testlab_ui" \
+  || fail "issue 69 FFI telemetry is not correlated to the designated target"
+grep -Fq 'action = "aim_system_probe_failed"' "$testlab_ui" \
+  || fail "issue 69 FFI failure path is not observable"
+
+# Issue #69's one-shot fixture probe must remain bounded to the single qualified
+# straddle engine and cover each of the eight AABB corners exactly once. These
+# rays measure clearance to abstract box corners only; they are not proof that a
+# corner is a hittable mesh point.
+corner_probe=$(xmllint --xpath "count(//do_if[@value='\$EngineStraddle'][descendant::debug_text[contains(@text, '[X4GC TEST QUALIFY ENGINEBOX]')]])" "$scenario")
+[[ "$corner_probe" -eq 1 ]] || fail "expected one engine-straddle-scoped bounding-box corner probe, found $corner_probe"
+corner_points=$(grep -Fc "name=\"\$BoxCornerSurfLocal\"" "$scenario")
+[[ "$corner_points" -eq 8 ]] || fail "expected eight target-local bounding-box corner positions, found $corner_points"
+corner_bearings=$(grep -Fc "name=\"\$BoxCornerWeaponLocal\" object=\"\$Surface\"" "$scenario")
+[[ "$corner_bearings" -eq 8 ]] || fail "expected eight surface-local corners transformed to weapon space, found $corner_bearings"
+corner_self_rays=$(grep -Fc "name=\"\$BoxCornerLosSelf\"" "$scenario")
+corner_ex_rays=$(grep -Fc "name=\"\$BoxCornerLosEx\"" "$scenario")
+[[ "$corner_self_rays" -eq 8 && "$corner_ex_rays" -eq 8 ]] \
+  || fail "expected eight self-inclusive and eight self-excluded corner rays, found $corner_self_rays/$corner_ex_rays"
+[[ $(grep -Fc "target=\"\$Surface\" targetoffset=\"\$BoxCornerSurfLocal\" excludeself=\"false\" useaimtarget=\"false\"" "$scenario") -eq 8 ]] \
+  || fail "self-inclusive corner rays lost target-local offset semantics"
+[[ $(grep -Fc "target=\"\$Surface\" targetoffset=\"\$BoxCornerSurfLocal\" excludeself=\"true\"  useaimtarget=\"false\"" "$scenario") -eq 8 ]] \
+  || fail "self-excluded corner rays lost target-local offset semantics"
+for corner in 0 1 2 3 4 5 6 7; do
+  [[ $(grep -Fc "corner_index=$corner " "$scenario") -eq 1 ]] \
+    || fail "bounding-box corner index $corner is missing or duplicated"
+done
+
 # A selected surface component is a valid aim target. The hit event carries
 # both the victim object and the struck component; istgt must accept either
 # representation rather than comparing only the victim root.
@@ -347,8 +383,8 @@ grep -Fq "reposition_failures=' + ScenarioRoot.\$GeometryQualifyRepositionFailur
   || fail "QUALIFY summary omits the reposition failure counter"
 grep -Fq "post_warp_location_failures=' + \$PostWarpLocationFailures" "$scenario" \
   || fail "QUALIFY summary omits the post-warp failure counter"
-grep -Fq "ScenarioRoot.\$GeometryQualifyRepositioned == 2" "$scenario" \
-  || fail "final qualification no longer requires two successful repositions"
+grep -Fq "ScenarioRoot.\$GeometryQualifyRepositioned == ScenarioRoot.\$SurfaceMaskPlacements.count" "$scenario" \
+  || fail "final qualification no longer requires all placements to be repositioned"
 grep -Fq "ScenarioRoot.\$GeometryQualifyRepositionFailures == 0" "$scenario" \
   || fail "final qualification no longer requires zero reposition failures"
 grep -Fq "\$PostWarpLocationFailures == 0" "$scenario" \
