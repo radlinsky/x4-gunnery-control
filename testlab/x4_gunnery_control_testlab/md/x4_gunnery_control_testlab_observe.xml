@@ -428,6 +428,54 @@
                     + ' aim_uat_pitch=' + $RayAimUAT.pitch + ' aim_bbox_pitch=' + $RayAimBbox.pitch
                     + ' org_tl=' + $RayOrgTL + ' fwd_tl=' + $RayFwdTL
                     + ' bbox_center=' + $Aimed.macro.boundingbox.center + ' bbox_max=' + $Aimed.macro.boundingbox.max"/>
+                  <!-- Issue #69 LOS-endpoint discriminator (research only). Question: can
+                       check_line_of_sight report the ALREADY-PROVEN fired path clear when handed
+                       an explicit reachable endpoint on that ray, instead of the forced
+                       useaimtarget (~86 deg) reference that currently yields the false 0/1?
+                       Build three engine-macro-local endpoints on the reconstructed fired bore
+                       ($RayOrgTL -> $RayFwdTL) bracketing its ray-vs-AABB entry, and LOS-probe
+                       each with excludeself both ways, plus the useaimtarget baseline. The bore
+                       forward point is +10000 m in bullet-local, so |dir|=10000 m and along-ray
+                       parameter t maps to metres as t*10000; epsilon = 0.5 m -> dt = 5e-5.
+                       AABB (engine-macro-local): hi = boundingbox.max, lo = 2*center - max.
+                       Slab entry t = max over axes of the near-plane t. All three bore-direction
+                       components are non-zero for this fixture; an axis-aligned bore would need a
+                       divide guard. Endpoints lie on the fired ray, so barrel->endpoint is the
+                       real reachable bore up to the target. -->
+                  <set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>
+                  <set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>
+                  <set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>
+                  <set_value name="$LosHiX" exact="$Aimed.macro.boundingbox.max.x"/>
+                  <set_value name="$LosHiY" exact="$Aimed.macro.boundingbox.max.y"/>
+                  <set_value name="$LosHiZ" exact="$Aimed.macro.boundingbox.max.z"/>
+                  <set_value name="$LosLoX" exact="2 * $Aimed.macro.boundingbox.center.x - $LosHiX"/>
+                  <set_value name="$LosLoY" exact="2 * $Aimed.macro.boundingbox.center.y - $LosHiY"/>
+                  <set_value name="$LosLoZ" exact="2 * $Aimed.macro.boundingbox.center.z - $LosHiZ"/>
+                  <set_value name="$LosNearX" exact="[($LosLoX - $RayOrgTL.x) / $LosDirX, ($LosHiX - $RayOrgTL.x) / $LosDirX].min"/>
+                  <set_value name="$LosNearY" exact="[($LosLoY - $RayOrgTL.y) / $LosDirY, ($LosHiY - $RayOrgTL.y) / $LosDirY].min"/>
+                  <set_value name="$LosNearZ" exact="[($LosLoZ - $RayOrgTL.z) / $LosDirZ, ($LosHiZ - $RayOrgTL.z) / $LosDirZ].min"/>
+                  <set_value name="$LosEntryT" exact="[[$LosNearX, $LosNearY].max, $LosNearZ].max"/>
+                  <set_value name="$LosTs" exact="[$LosEntryT - 0.00005, $LosEntryT, $LosEntryT + 0.00005]"/>
+                  <set_value name="$LosLabels" exact="['before', 'entry', 'inside']"/>
+                  <do_for_each name="$LosT" in="$LosTs" counter="$LosI">
+                    <create_position name="$LosEndpoint"
+                                     x="$RayOrgTL.x + $LosT * $LosDirX"
+                                     y="$RayOrgTL.y + $LosT * $LosDirY"
+                                     z="$RayOrgTL.z + $LosT * $LosDirZ"/>
+                    <check_line_of_sight name="$LosSelfIncl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
+                    <check_line_of_sight name="$LosSelfExcl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
+                    <debug_text text="'[X4GC TEST LOSPROBE] label=' + $LosLabels.{$LosI}
+                      + ' weapon=' + event.object + ' engine=' + $Aimed
+                      + ' t=' + $LosT + ' dist_from_bullet_m=' + ($LosT * 10000)
+                      + ' endpoint=' + $LosEndpoint
+                      + ' los_selfincl=' + $LosSelfIncl + ' los_selfexcl=' + $LosSelfExcl"/>
+                  </do_for_each>
+                  <check_line_of_sight name="$LosUatIncl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" useaimtarget="true" excludeself="false"/>
+                  <check_line_of_sight name="$LosUatExcl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" useaimtarget="true" excludeself="true"/>
+                  <debug_text text="'[X4GC TEST LOSPROBE] label=useaimtarget'
+                    + ' weapon=' + event.object + ' engine=' + $Aimed
+                    + ' aim_uat_pitch=' + $RayAimUAT.pitch
+                    + ' los_selfincl=' + $LosUatIncl + ' los_selfexcl=' + $LosUatExcl"/>
                 </do_if>
               </actions>
             </cue>
