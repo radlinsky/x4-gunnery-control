@@ -387,6 +387,41 @@
                   + ' aim_error_yaw=' + (if $TargetBearing then $TargetBearing.rotation.yaw else 'none')
                   + ' aim_error_pitch=' + (if $TargetBearing then $TargetBearing.rotation.pitch else 'none')
                   + ' aim_distance=' + (if $TargetBearing then $TargetBearing.length else 'none')"/>
+                <!-- Issue #69 fired-ray reconstruction (dependency-free research telemetry).
+                     Captures the actual projectile bore as raw points in three frames so an
+                     offline ray-vs-AABB test can find where the real shot crosses the aimed
+                     component bbox, and compares it against the useaimtarget/look_at_bbox
+                     pitches in the SAME weapon mount-local frame the predicate uses. Local +z
+                     is the bore axis (barrel_z dominant in QUALIFY WEAPONPOSE); the zone-frame
+                     org/fwd let the offline check confirm that convention against
+                     event.param.rotation. Guarded to a live attackable aimed component that
+                     exposes a macro bounding box. -->
+                <do_if value="$Aimed and $Aimed.exists and $Aimed.macro? and $Aimed.macro.boundingbox?">
+                  <create_position name="$RayOrgWL"   object="event.param" x="0m" y="0m" z="0m"     space="event.object"/>
+                  <create_position name="$RayFwdWL"   object="event.param" x="0m" y="0m" z="10000m" space="event.object"/>
+                  <create_position name="$RayOrgTL"   object="event.param" x="0m" y="0m" z="0m"     space="$Aimed"/>
+                  <create_position name="$RayFwdTL"   object="event.param" x="0m" y="0m" z="10000m" space="$Aimed"/>
+                  <create_position name="$RayOrgZone" object="event.param" x="0m" y="0m" z="0m"/>
+                  <create_position name="$RayFwdZone" object="event.param" x="0m" y="0m" z="10000m"/>
+                  <create_orientation name="$RayBearingWL" orientation="look_at" refposition="$RayFwdWL">
+                    <position object="event.object" space="event.object"/>
+                  </create_orientation>
+                  <create_orientation name="$RayAimUAT" orientation="look_at" refobject="$Aimed" useaimtarget="true">
+                    <position object="event.object" space="event.object"/>
+                  </create_orientation>
+                  <create_orientation name="$RayAimBbox" orientation="look_at_bbox" refobject="$Aimed">
+                    <position object="event.object" space="event.object"/>
+                  </create_orientation>
+                  <debug_text text="'[X4GC TEST FIREDRAY] t=' + player.age
+                    + ' weapon=' + event.object + ' weapon_macro=' + event.object.macro
+                    + ' bullet=' + event.param + ' aimed=' + $Aimed + ' aimed_macro=' + $Aimed.macro
+                    + ' ray_wl_pitch=' + $RayBearingWL.pitch + ' ray_wl_yaw=' + $RayBearingWL.yaw
+                    + ' aim_uat_pitch=' + $RayAimUAT.pitch + ' aim_bbox_pitch=' + $RayAimBbox.pitch
+                    + ' org_wl=' + $RayOrgWL + ' fwd_wl=' + $RayFwdWL
+                    + ' org_tl=' + $RayOrgTL + ' fwd_tl=' + $RayFwdTL
+                    + ' org_zone=' + $RayOrgZone + ' fwd_zone=' + $RayFwdZone
+                    + ' bbox_center=' + $Aimed.macro.boundingbox.center + ' bbox_max=' + $Aimed.macro.boundingbox.max"/>
+                </do_if>
               </actions>
             </cue>
 
