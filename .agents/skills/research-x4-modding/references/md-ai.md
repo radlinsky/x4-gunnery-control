@@ -1495,28 +1495,42 @@ whole-object, engine, shield, turret, and station-module surface tests.
   hit that exact engine under autoassist (`:994-996`: `aimed=0x17a970` →
   `HIT hitcomp=0x17a970 istgt=1`, hull 100%→18%). Because `bbox_pitch=77.1<80`,
   the production ARC gate passes; by elimination the gate that zeroed engageable is
-  the `check_line_of_sight objectoffset=barrelposition target useaimtarget=true`
-  LINE-OF-FIRE ray (`md/x4_gunnery_control.xml:234`) — the single `useaimtarget`
-  ray to the high aim point is blocked. The FIRED lines are the proof of aim-point
-  multiplicity: `bullet_pitch≈1.108–1.172`=**63–67deg**, i.e. X4's turret elevated
-  to a LOW near-edge point (well inside the arc, clear LOS) and hit, ~20deg below
-  both MD samples (useaimtarget 86deg, look_at_bbox 77deg). The engine mesh presents
-  hittable points across ~63→87deg; X4 uses a low one, the predicate samples a high
-  one. Consequences: (1) the committed `look_at_bbox` arc change (commit `5411bc0`)
+  the `check_line_of_sight objectoffset=barrelposition target useaimtarget=true
+  excludeself=false` LINE-OF-FIRE ray (`md/x4_gunnery_control.xml:234`, excludeself
+  is false for a conventional plasma turret) — it reports blocked while the real
+  projectile reached the engine and hit it, so the path was actually clear.
+  Consequence (solid): the committed `look_at_bbox` arc change (commit `5411bc0`)
   does NOT fix #69 — it corrected the arc predicate, but the arc is not the failing
-  gate; the line-of-fire raycast is. (2) The issue's "single-vs-multiple aim points"
-  hypothesis is correct in mechanism but bites the LOS ray, not the pitch band.
+  gate; the line-of-fire raycast is.
+- UNRESOLVED — which line-of-fire failure: two candidates remain, not yet
+  discriminated. (a) Own-hull self-masking: the `excludeself=false` ray from
+  `barrelposition` is blocked by the SHOOTER's own hull, while the real muzzle
+  clears it (the observe module already flags root-origin `excludeself=false` as
+  blocked 7252/7252). (b) Target-side aim-point multiplicity: the single
+  `useaimtarget` point is externally occluded while X4 hits a different point. The
+  discriminator is the pair `MuzzleLosEx` (excludeself=true) vs `MuzzleLosSelf`
+  (excludeself=false) to the engine: Ex=1/Self=0 ⇒ own-hull self-masking (a);
+  both=0 ⇒ target multiplicity (b). NOT captured this run — the engine qualify
+  branch logs no muzzle LOS and the observe snapshot was not fired. Do NOT record a
+  cause until an instrumented run resolves this.
+- CAUTION on frames: the FIRED `bullet_pitch` (`event.param.rotation.pitch`,
+  observe.xml:384) is SECTOR/world frame; qualify `aim_pitch` is WEAPON-LOCAL. They
+  are not directly comparable — an earlier draft's "~20deg lower / near-edge point"
+  read conflated the two and is retracted. `aim_error_pitch`≈0.1–0.2 rad with
+  `aim_distance`≈181 m instead shows the turret aimed AT the engine, consistent with
+  own-hull masking (a) rather than a distant alternate point.
 - No vanilla shortcut: `scriptproperties.xml` exposes `isreadytofire`,
   `maxfirerange`, and relation-only `mayattack`, but NO property answering "can this
   turret geometrically hit this surface now" (searched engage/canhit/fir/track/
   aimat/bear/solution/attackable). The turret's own firing solution is engine-side
   and unexposed, which is why engageability is reimplemented at all.
-- Fix direction (untested): probe the near/low edge of the target box that X4
-  actually fires at (~63deg here), not the useaimtarget/bbox-centre point — see the
-  bounded existence-probe scope in the issue. MD cannot enumerate mesh aim points
+- Fix direction (blocked on the unresolved discriminator above): if own-hull
+  self-masking (a), the fix is to exclude self (or clear the barrel origin) on
+  conventional turrets' line-of-fire ray, as already done for missile turrets. If
+  target multiplicity (b), MD cannot enumerate mesh aim points
   ([[useaimtarget-collapses-aim-points-issue-69]] / the useaimtarget record above),
-  so exactness is impossible; a bounded representative-point probe with early exit
-  is the practical route.
+  so exactness is impossible and a bounded representative-point probe with early
+  exit is the practical route. Pick only after the Ex/Self run.
 
 ### `find_object_surface` cannot return a surface element's own mesh point; `component=` returns the parent hull
 - X4: 9.00
