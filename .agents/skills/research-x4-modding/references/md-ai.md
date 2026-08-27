@@ -1476,3 +1476,58 @@ whole-object, engine, shield, turret, and station-module surface tests.
   separately: engine `0x179141` read `0 / 1` at 249125.03 (pinned,
   `hull_percent=18`) yet was hit at 249125.11 and 249129.11 with
   `aimed=0x179141 istgt=1` under `mode=autoassist`.
+
+### `find_object_surface` cannot return a surface element's own mesh point; `component=` returns the parent hull
+- X4: 9.00
+- Status: shipped-source
+- Source: XSD `schemas-9.00/libraries/common.xsd:24904-24972`
+  (`find_object_surface`); the only shipped `component=` usage,
+  `vanilla-900/aiscripts/fight.attack.object.station.xml:259-261`; grep of all
+  vanilla `md/` and `aiscripts/` for `find_object_surface` (no file uses
+  `<match macro=>` or `<match excluded=>`); Test Lab `debug.log` runs on
+  2026-08-27
+- Live test: yes — two negative runs. Standalone `object="$Surface"` returned
+  null for 6/6 physics-ready engines; parent-root `object="$Target"
+  component="$Surface"` with `<match macro= excluded=>` returned
+  `result_exists=0` for 3/3 physics-ready engines (`debug.log:873-881`).
+- Finding: `find_object_surface` returns a position on the surface of `object=`
+  only (XSD `:24907`). `component=` merely "aim[s] the raycast at" a subcomponent
+  (`:24950`); it does not constrain which surface is returned — `<match>` filters
+  the actually-hit component (`:24933`). The single shipped `component=` call
+  casts from an attacker toward a bombed module and returns a point on the
+  **station hull** near it (its own debug text measures a nonzero
+  "distance between component and bomb position"), never the child's surface,
+  and uses **no** `<match>`. Adding `<match macro="engine..." excluded="siblings">`
+  therefore demands that the hull hit be an engine element — structurally
+  impossible — so it nulls every time. There is no shipped precedent for
+  passing a surface element as `object=` either, and it also returned null.
+  Conclusion: MD has no shipped path to obtain a surface element's (engine or
+  turret) own real-mesh point via `find_object_surface`. Corrects the earlier
+  claim that vanilla station combat uses parent-root + component + macro match +
+  sibling exclusion — that idiom exists in no shipped file.
+
+### `useaimtarget` collapses a victim's multiple aim points to one reference point; MD cannot enumerate them (issue #69)
+- X4: 9.00
+- Status: shipped-source
+- Source: XSD `schemas-9.00/libraries/common.xsd:21715-21721`
+  (`check_line_of_sight useaimtarget`) and `:24127-24133`
+  (`create_orientation useaimtarget`); `vanilla-900/scriptproperties.xml`
+  (no property enumerates aim/hit points)
+- Live test: no — semantics from XSD; the decisive discriminator below is unrun
+- Finding: both actions document `useaimtarget` as using "an object's aim targets
+  (or the bounding box center if there are none)" as **the** raycast target /
+  reference point (singular) "consistent with weapon aiming." `create_orientation`
+  returns exactly one orientation, so the predicate's single `$aimpitch` is one
+  representative point, not the set X4's fire-control iterates. No scriptproperty
+  lists the individual aim points, so MD cannot compute a per-point pitch to test
+  "is any hittable point in-band." `look_at_bbox` is merely a different single
+  point (in one run bbox_pitch 0.75 rad vs aim_pitch 1.24 rad for the same
+  engine, `debug.log:873`), so swapping it in does not capture the multiplicity.
+- Consequence for #69: the single-sample arc-band predicate cannot reproduce
+  X4's multi-point choice by construction. Open discriminator, needs one
+  controlled run: does `check_line_of_sight object=weapon
+  objectoffset=barrelposition target=<component> useaimtarget="true"` return true
+  exactly when X4 actually hits the component? If yes, LOS-useaimtarget (not a
+  pitch sample) is the fix; if X4 hits while it reads false, MD has no primitive
+  that reproduces engine-side aim-point selection and #69 can only be
+  approximated. Keep this in the issue/log until that run completes.
