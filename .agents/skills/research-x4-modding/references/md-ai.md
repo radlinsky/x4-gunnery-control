@@ -1477,6 +1477,47 @@ whole-object, engine, shield, turret, and station-module surface tests.
   `hull_percent=18`) yet was hit at 249125.11 and 249129.11 with
   `aimed=0x179141 istgt=1` under `mode=autoassist`.
 
+### Issue #69 under-reports on the LINE-OF-FIRE ray, not the arc; the look_at_bbox arc change does not fix it
+- X4: 9.00
+- Status: live-tested
+- Source: Test Lab `debug.log` on 2026-08-27, fixture `issue-69-engine-straddle-r1`,
+  qualify `request_id=176418827_q2`; shooter ship `1550647`, weapon `0x17a945`
+  `turret_par_l_plasma_01_mk1_macro`, band {-5,+80} (+80deg = 1.39626 rad);
+  target `ISSUE ENGINE STRADDLE ARGON 1` engine surface `0x17a970` (pinned id
+  `1550704`). Production predicate `md/x4_gunnery_control.xml:211-277`.
+- Live test: yes — one instrumented autoassist run, straddle engine designed and
+  confirmed (aim_pitch 86.4deg outside band, bbox_pitch 77.1deg inside band).
+- Finding: the engine qualified as a straddle (`debug.log:734`: `origin_pitch=1.52187`
+  =87.2deg, `aim_pitch=1.50768`=86.4deg OUTSIDE +80, `bbox_pitch=1.34524`=77.1deg
+  INSIDE, `aim_outside=1 bbox_inside=1 straddle=1 inrange=1 mayattack=1`). The
+  pinned production readout held `engageability_engageable=0 known=1 total=1`
+  across every refresh (`:943,952,964,973,982,992,1004…`) YET the turret fired and
+  hit that exact engine under autoassist (`:994-996`: `aimed=0x17a970` →
+  `HIT hitcomp=0x17a970 istgt=1`, hull 100%→18%). Because `bbox_pitch=77.1<80`,
+  the production ARC gate passes; by elimination the gate that zeroed engageable is
+  the `check_line_of_sight objectoffset=barrelposition target useaimtarget=true`
+  LINE-OF-FIRE ray (`md/x4_gunnery_control.xml:234`) — the single `useaimtarget`
+  ray to the high aim point is blocked. The FIRED lines are the proof of aim-point
+  multiplicity: `bullet_pitch≈1.108–1.172`=**63–67deg**, i.e. X4's turret elevated
+  to a LOW near-edge point (well inside the arc, clear LOS) and hit, ~20deg below
+  both MD samples (useaimtarget 86deg, look_at_bbox 77deg). The engine mesh presents
+  hittable points across ~63→87deg; X4 uses a low one, the predicate samples a high
+  one. Consequences: (1) the committed `look_at_bbox` arc change (commit `5411bc0`)
+  does NOT fix #69 — it corrected the arc predicate, but the arc is not the failing
+  gate; the line-of-fire raycast is. (2) The issue's "single-vs-multiple aim points"
+  hypothesis is correct in mechanism but bites the LOS ray, not the pitch band.
+- No vanilla shortcut: `scriptproperties.xml` exposes `isreadytofire`,
+  `maxfirerange`, and relation-only `mayattack`, but NO property answering "can this
+  turret geometrically hit this surface now" (searched engage/canhit/fir/track/
+  aimat/bear/solution/attackable). The turret's own firing solution is engine-side
+  and unexposed, which is why engageability is reimplemented at all.
+- Fix direction (untested): probe the near/low edge of the target box that X4
+  actually fires at (~63deg here), not the useaimtarget/bbox-centre point — see the
+  bounded existence-probe scope in the issue. MD cannot enumerate mesh aim points
+  ([[useaimtarget-collapses-aim-points-issue-69]] / the useaimtarget record above),
+  so exactness is impossible; a bounded representative-point probe with early exit
+  is the practical route.
+
 ### `find_object_surface` cannot return a surface element's own mesh point; `component=` returns the parent hull
 - X4: 9.00
 - Status: shipped-source
