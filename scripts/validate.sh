@@ -23,7 +23,7 @@ fi
 git diff --cached --check
 git diff --check
 
-xmllint --noout content.xml ui.xml t/*.xml md/*.xml testlab/x4_gunnery_control_testlab/content.xml testlab/x4_gunnery_control_testlab/ui.xml testlab/x4_gunnery_control_testlab/t/*.xml testlab/x4_gunnery_control_testlab/md/*.xml
+xmllint --noout content.xml ui.xml t/*.xml md/*.xml testlab/x4_gunnery_control_testlab/content.xml testlab/x4_gunnery_control_testlab/ui.xml testlab/x4_gunnery_control_testlab/t/*.xml testlab/x4_gunnery_control_testlab/md/*.xml testlab/x4_gunnery_control_testlab/libraries/*.xml
 if command -v luac5.1 >/dev/null; then
   for file in ui/*.lua testlab/x4_gunnery_control_testlab/ui/*.lua tests/*.lua; do luac5.1 -p "$file"; done
 elif command -v luac >/dev/null; then
@@ -42,7 +42,15 @@ if command -v shellcheck >/dev/null; then
 else
   echo "warning: shellcheck unavailable; skipped shell validation" >&2
 fi
-printf '%s\n' tests/*.sh | xargs -P"$(nproc)" -I{} bash {}
+# Several shell contracts intentionally exercise repository-facing hooks and
+# packaging paths.  Running them concurrently lets one test observe another's
+# temporary file state, so keep this phase serial.  Bound every process so an
+# environmental child-process failure is reported instead of hanging CI or an
+# operator session indefinitely.
+for shell_test in tests/*.sh; do
+  echo "running $shell_test"
+  timeout 120s bash "$shell_test"
+done
 # Line 19 runs the test scripts directly, so a .sh committed as 100644 fails
 # validation on a fresh clone (it only worked where a local chmod +x was left).
 if git ls-files -s '*.sh' | grep -v '^100755'; then

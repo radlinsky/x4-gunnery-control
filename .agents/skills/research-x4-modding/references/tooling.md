@@ -16,8 +16,10 @@
 - Limitations: this repository's wrapper accepts only existing `.cat` inputs,
   a new directory output, and include/exclude filters. It forbids `-append`,
   `-diff`, catalog output, X4 installation output, and execution of unverified
-  tool archives. Do not run an untrusted Windows executable without separate
-  review.
+  tool archives. It probes `wslpath` before converting arguments because some
+  restricted WSL environments expose the command but deny Windows interop; in
+  that case it retains POSIX paths for native test doubles. Do not run an
+  untrusted Windows executable without separate review.
 
 ### WSL ZIP extraction may omit the executable bit
 - X4: tool workflow; independent of game version

@@ -95,17 +95,27 @@ do
         end
         return unpack(vals)
     end
+    C.GetContextByClass = function(component)
+        return tonumber(tostring(component)) == 704 and 900 or component
+    end
+    local suggestedClick58 = false
+    assert(API.suggestTestEngagement(704, function() suggestedClick58 = true end),
+        "58: Test Lab must be able to mark an exact surface without selecting it")
     gcMenu.display()
     local renderedSurfaces58 = {}
+    local markedSurface58
     for _, entry in ipairs(fix.getCreatedTexts()) do
         if entry.column == 4 and tonumber(tostring(entry.row)) then
             renderedSurfaces58[tostring(entry.row)] = entry.text
         end
+        if tostring(entry.row) == "704" and entry.column == 1 then markedSurface58 = entry.text end
     end
     assert(renderedSurfaces58["701"] == "2 / 2  " .. ReadText(20991, 89),
         "58: complete surface solution must render the aggregate ENGAGEABLE label")
     assert(renderedSurfaces58["702"] == "0 / 2" and renderedSurfaces58["703"] == "1 / 2",
         "58: incomplete surface solutions must render their exact binary counts")
+    assert(markedSurface58 == "[TEST TARGET] Gamma" and not suggestedClick58,
+        "58: the exact qualified surface must be visibly marked without being designated")
     local surfaceButton58
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 60) then surfaceButton58 = button; break end
@@ -116,24 +126,27 @@ do
     sess58.phase, sess58.controlMode = "target_select", nil
     C.GetSofttarget2 = function() return { softtargetID = 801, softtargetConnectionName = "" } end
     GetPlayerContextByClass = function() return 1 end
-    GetContainedShips = function() return { 801, 802 } end
+    GetContainedShips = function() return { 801, 802, 900 } end
     GetContainedStations = function() return {} end
     C.GetContextByClass = function(component) return component end
     C.GetDistanceBetween = function() return 1000 end
     gcMenu.display()
-    local targetOrder58, targetSolutions58 = {}, {}
+    local targetOrder58, targetSolutions58, markedRoot58 = {}, {}, nil
     for _, entry in ipairs(fix.getCreatedTexts()) do
         local row = tostring(entry.row)
         if (row == "801" or row == "802") and entry.column == 8 then
             targetOrder58[#targetOrder58 + 1] = row
             targetSolutions58[row] = entry.text
         end
+        if row == "900" and entry.column == 1 then markedRoot58 = entry.text end
     end
     assert(table.concat(targetOrder58, ",") == "801,802",
         "58: an all-on-engageability target must sort before an incomplete target")
     assert(targetSolutions58["801"] == "2 / 2  " .. ReadText(20991, 89)
             and targetSolutions58["802"] == "0 / 2",
         "58: target rows must bind the exact aggregate solution text to column 8")
+    assert(markedRoot58 == "[TEST TARGET] Target" and not suggestedClick58,
+        "58: the qualified surface's root must be visibly marked for the owner's first click")
     local log58 = table.concat(fix.getCapturedLog(), "\n")
     assert(log58:find('event=surface_browser action=row target=900 component=701 name="Alpha"', 1, true)
             and log58:find('macro="" position=1 engageability_state=complete engageability_engageable=2 engageability_known=2 engageability_total=2 engageability_text="2 / 2  text:20991:89"', 1, true),

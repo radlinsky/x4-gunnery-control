@@ -34,7 +34,7 @@ local startupCount = 0
 for _, line in ipairs(fix.getCapturedLog()) do
     if string.find(line, "[X4GC] UI initialized", 1, true) then
         startupCount = startupCount + 1
-        assert(line == "[X4GC] UI initialized; build=2026-08-18-auto-next-async-1",
+        assert(line == "[X4GC] UI initialized; build=2026-08-24-testlab-manual-designation-1",
             "startup line must carry the current build label; got: " .. line)
     end
 end

@@ -28,6 +28,20 @@ fi
 grep -Fq 'mayattack' "$skill/references/md-ai.md"
 grep -Fq 'before object-event registration' "$skill/references/md-ai.md"
 grep -Fq 'Rename a cue when moving it across the hierarchy' "$skill/references/md-ai.md"
+grep -Fq 'A remote operational station can receive exact turret and shield equipment synchronously' "$skill/references/md-ai.md"
+grep -Fq 'documented as either a ship or a station module' "$skill/references/md-ai.md"
+grep -Fq 'md/setup.xml:85-99' "$skill/references/md-ai.md"
+scenario_skill=.agents/skills/spawn-gunnery-scenario/SKILL.md
+grep -Fq 'Never pass the station root.' "$scenario_skill"
+grep -Fq "apply_loadout object=\"\$Module\"" "$scenario_skill"
+grep -Fq 'same-action-list censuses' "$scenario_skill"
+grep -Fq 'Qualify each role against the same exact component the owner will click;' "$scenario_skill"
+grep -Fq 'Different root/module supplies each predicate' "$scenario_skill"
+grep -Fq 'CANNOT BEAR and LINE OF FIRE BLOCKED cannot be' "$scenario_skill"
+if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill"; then
+  echo 'scenario skill still applies a station loadout to the station root' >&2
+  exit 1
+fi
 grep -Fq 'XTools_1.11.zip!Readme.txt' "$skill/references/tooling.md"
 grep -Fq 'documented-public' "$skill/references/tooling.md"
 grep -Fq 'English X4 Scripts and Modding' "$skill/references/source-registry.md"

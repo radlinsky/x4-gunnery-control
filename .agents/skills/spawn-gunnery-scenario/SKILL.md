@@ -22,10 +22,24 @@ For a `setup.remote = true` fixture, use this distinct workflow:
 
 1. Sit at any safe launcher's gunnery console and click **Create test scenario**
    exactly once.
-2. Wait for `READY: remote fixture verified`; teleport to the exact named
-   spawned player ship.
-3. Open that ship's gunnery console and open **Test Lab exactly once**. Test Lab
-   auto-arms the exact group and immediately returns to Gunnery Control.
+2. Wait for the acknowledgement, then teleport to the exact named spawned player
+   ship. Two acknowledgements are possible:
+   - `READY: remote fixture verified` — the fixture is fully qualified.
+   - `PENDING: ... geometry is NOT qualified` — the census passed but a geometry
+     discriminator must still run in system (a fixture whose classification
+     split only resolves once the player shares the fixture's system).
+3. Open that ship's gunnery console and open **Test Lab exactly once**:
+   - a READY fixture auto-selects the exact group and immediately returns to
+     Gunnery Control;
+   - a PENDING fixture runs its in-system qualification on that single open. It
+     may automatically move the same preserved object through a bounded logged
+     position search, with a nonzero delay before measuring each position. It
+     selects the exact group and returns to Gunnery Control ONLY on `QUALIFIED`.
+     For a Direct-control interaction test it also visibly marks the qualified
+     target and surface, but the owner performs the Direct-control, target, and
+     surface clicks. On `FAILED` (or a timeout) it stops closed: leave X4 open,
+     preserve the evidence, and report the displayed text. Do not press Create,
+     Reload UI, or Despawn, and do not retry coordinates manually.
 4. Continue the gameplay checklist. Never press Create after teleport.
 
 Create is destructive replacement. In a live 2026-08-23 failure, a second
@@ -86,28 +100,139 @@ Prefer `behaviour = "wait"`, `spread = 0`, and targets outside weapon range when
 the test only concerns menus. Use multiple roles only when each distinguishes a
 specific predicate. Never depend on the owner flying targets into position.
 
+For an isolated conventional-turret shooter, the deterministic loadout must
+omit pilot-operated main guns and every turret outside the selected group.
+Before READY, census `weapons.operational`, `turrets.operational`, and
+`missileturrets.operational` separately, verify the exact required turret-macro
+multiset, and put both ordinary and missile turrets in HOLD FIRE until the
+post-teleport group activation. A member count alone cannot distinguish two
+copies of the wrong macro.
+
+### Deterministic turret equipment and operator identity
+
+Mount turrets with group-targeted
+`<turrets macro="..." group="..." exact="N"/>` entries under `<groups>`.
+Never isolate a turret with singular `<turret path="..."/>`: on the Behemoth E,
+both tested loadout routes produced an empty ship, while group-targeted entries
+equipped it correctly (evidence: research `md-ai.md`, singular-turret record).
+Singular paths remain valid for engines, large shields, and main guns.
+
+A group-targeted entry equips the whole group. Resolve its exact slot count and
+connection/equipment tags from current X4 sources; if it has multiple slots,
+isolate behavior through per-turret FIRED/HIT attribution rather than an
+unsupported per-slot loadout. READY must verify the exact operational count and
+macro multiset, not merely that some turret exists.
+
+Internal `con_*` and `group_*` ids are not player-visible labels. Before a live
+run, enumerate the actual Gunnery surface rows. Every manually selected surface
+must have either:
+
+- one unique player-visible macro/label, preferably from a sparse loadout on a
+  one-slot group; or
+- a proven exact `[TEST TARGET]` marker that survives the handoff.
+
+Duplicate rows (for example, two `XEN L Graviton Turret Mk1` entries) or a
+failed marker invalidate the fixture. Never ask the owner to infer the row from
+internal ids, list order, or hull position.
+
 Verify every macro against the installed/current X4 sources through
 `research-x4-modding`; do not trust memory for an untested macro.
 
 The proven Test Lab transport creates equipped ships. For stations, a
 `create_station` result, construction-plan module count, or visible shell is
-not evidence of an equipped surface-targeting fixture. Generate a faction
-loadout for each operational module, apply it, then withhold READY until the
-correlated live census confirms the expected modules and minimum operational
-turrets, missile turrets, shields, and engines. This path is reproduced for X4
-9.00's `xen_defence` plan: five modules, 120 turrets, 60 shields, and 185 total
-module/surface entries on the live fixture tested 2026-08-13.
+NOT evidence of an equipped surface-targeting fixture: withhold READY until the
+correlated live census confirms the expected modules and the minimum
+operational turrets, missile turrets, shields, and engines.
 
-Do not use the equipped defence station as a clean per-turret arc fixture: it
-launches defence drones and clusters many surfaces at nearly the same bearing.
-Use it for pagination/performance and broad surface-browser tests. For exact
-fire attribution, prefer one stationary capital ship with carried defence
-units removed before hostility, all weapons held fire, and an isolated surface
-candidate.
+Remote station creation and equipment are live-tested in X4 9.00. Scenarios
+`issue-67-arc-barrel-two-phase-r6` and r9 independently created a remote
+operational `xen_defence` station, selected one real operational defence module,
+and applied an exact loadout to that module. Their same-action-list censuses
+already showed 5 modules, 2 standard M lasers, and 4 M shields; the 1 ms remote
+and post-teleport in-system censuses were identical. Do not switch to local
+creation or add a delay to solve an empty census. See research `md-ai.md` "A
+remote operational station can receive exact turret and shield equipment
+synchronously" for the bounded evidence and rejected control.
 
-`hostile = true` is a requirement, not proof. A temporary object relation boost
-did not make a Terran-owned Osaka attackable by the player in the live 9.00
-test. Prefer a naturally hostile owner such as Xenon and withhold READY unless
+The object target is critical: X4 documents `apply_loadout object=` as either a
+ship or a **station module**. Never pass the station root. After
+`create_station`, choose the intended object from
+`$Station.modules.operational.list`, verify its exact macro, and apply to that
+module:
+
+- For an EXACT safe set, build a `create_loadout` with group-targeted
+  `<turrets .../>` and `<shields .../>`, then
+  `apply_loadout object="$Module"`. Verify the equipment macro's component tags
+  and integrated/path semantics against the module's connection tags before the
+  run. The r6 control used non-integrated
+  `turret_xen_m_laser_02_mk1_macro` in `group01` and succeeded immediately.
+  The preceding r5 request used integrated
+  `turret_xen_m_gatling_01_mk1_macro` as a group entry and silently installed
+  zero turrets while its shields succeeded; shipped loadouts use that gatling
+  through singular path-targeted entries. Macro existence alone is insufficient.
+- For a full faction loadout on already-operational modules, follow the earlier
+  proven Test Lab shape: iterate the module list, `generate_loadout` with the
+  station macro plus the exact module macro and faction equipment pool, then
+  `apply_loadout object="$Module"`. Vanilla also supports sequence/index
+  generation and application while finalising a construction sequence.
+  `md.$EquipmentTable` is a vanilla global populated in `md/setup.xml`, including
+  Xenon; do not mistake the absence of a repository assignment for an absent
+  game-global table.
+
+Keep the immediate, delayed, and final operational census when timing itself is
+under test, but READY must always depend on the final exact census rather than
+on creation success, module count, or an assumed timing rule.
+
+### Surface-geometry fixture contract
+
+For a remote fixture, create in the resolved remote sector; `player.zone` still
+belongs to the safe launcher. Tight angular geometry must not rely on absolute
+coordinates: after teleport, resolve the exact selected weapon position P*,
+place or reposition preserved targets at `P* + stored offset`, preserve their
+authored rotation, and fail closed on every reposition/post-warp mismatch.
+
+Build and accept a surface experiment in this order:
+
+1. Verify the exact shooter weapon macro/count and target loadouts.
+2. Resolve live P* and apply deterministic P*-relative target transforms.
+3. Qualify each role against the same exact component the owner will click;
+   never combine a root predicate with a different module/surface.
+4. Check range, firing arc, attackability, and experiment-specific line-of-fire
+   predicates independently so CANNOT BEAR and LINE OF FIRE BLOCKED cannot be
+   confused.
+5. Give every role its own exact component id, predicates, unique label/marker,
+   and designation/observation correlation.
+6. Test Lab may select the weapon group and mark aids, but must not call
+   `SetSofttarget` or perform the Direct-control root/surface click.
+7. Arm observation only after Gunnery accepts the owner's exact manual click.
+8. Accept behavior only from correlated per-weapon FIRED and exact-component HIT
+   records; an uncorrelated no-fire interval proves nothing.
+
+A qualifier-time line-of-sight result immediately after a warp may be transient.
+In the Issue #67 r32 run, both exact surfaces read `0/0` during qualification but
+read `1/1` about three seconds later and were then hit. Keep such immediate reads
+as telemetry unless the experiment specifically establishes a settled LOS gate;
+this does not justify weakening production line-of-fire policy.
+
+Use a bounded search only when its predicates resolve in the current attention
+state. Otherwise preserve the deterministic candidate, report geometry-PENDING,
+and measure it once in system. Never ask the owner to retry guessed coordinates.
+A generated coordinate is not deterministic until its exact predicates
+reproduce on a fresh instance.
+
+| Failed pattern | Required correction |
+|---|---|
+| Different root/module supplies each predicate | Qualify and designate one exact component. |
+| Absolute remote coordinates drift from the weapon | Store P*-relative offsets and reapply after teleport. |
+| Moving modular target changes every ray | Stop moving it; use independently placed stationary ships. |
+| Singular turret loadout empties the ship | Use group-targeted turret entries and exact census. |
+| Duplicate visible surface labels | Use a sparse unique loadout or proven marker. |
+| Automated surface write fails | Exercise normal manual root→surface selection. |
+| Immediate post-warp LOS blocks all candidates | Treat as telemetry until a settled LOS contract is proved. |
+| One role qualifies, control does not | Qualify and correlate every role independently. |
+
+Prefer stationary capital targets with defence units removed and weapons held
+fire. `hostile = true` is not proof of authorization: withhold READY unless
 `player.ship.mayattack.{$Target}` is true for every requested hostile fixture.
 
 ### 3. Author the complete spec
@@ -238,9 +363,14 @@ The final instruction before the live run must contain all of these, in order:
 3. Exact menu path.
 4. Exact displayed scenario id.
 5. Exactly one setup action: **Create test scenario**. For a remote fixture,
-   explicitly add the teleport and the single post-teleport Test Lab opening;
-   state that this opening auto-arms and that Create must not be pressed again.
-6. What success does automatically, including the selected turret group.
+   explicitly add the teleport and the single post-teleport Test Lab opening.
+   State whether that opening selects the exact group directly (a READY fixture)
+   or first runs an in-system qualification that marks the manual targets only
+   on `QUALIFIED` and stops closed on `FAILED` (a geometry-PENDING fixture), and
+   that Create must not be pressed again either way.
+6. What success does automatically, including the selected turret group and any
+   marked manual target/surface rows. Explicitly distinguish those aids from the
+   owner clicks the test is intended to exercise.
 7. Exact spawned names and expected distances/roles.
 8. Every test action in click order.
 9. Exact expected visible result for each action.
@@ -260,6 +390,21 @@ The one-click path logs `[X4GC TEST] event=scenario_create`:
 - `action=requested`: exact request token, spec, expected count, group, turret ids;
 - `action=ready`: the same request token, acknowledged count, selected group;
 - `action=rejected|failed|timeout`: do not continue the gameplay checklist.
+
+For a geometry-PENDING remote fixture, Create instead logs
+`action=remote_geometry_pending`, and the single post-teleport Test Lab open
+logs `event=geometry_qualify action=requested` followed by exactly one of
+`action=qualified` (a measured fixture-specific geometry candidate passed and
+the exact group/target aids are ready; for an interaction test, observation is
+still off until the owner's exact surface click) or
+`action=failed|timeout` (stop closed). Treat those as the qualification's
+distinct evidence records. Require a separate operator-designation record before
+starting any timed firing observation whose action is the subject of the test.
+When a qualifier compares root and module geometry, inspect and preserve its
+independent root-origin/root-aim, module-origin/module-aim, range, and external
+line-of-fire fields. Do not collapse `qualified` into a claim about which target
+point the engine actually uses; only the subsequent timed test can establish
+that behavior.
 
 MD logs `[X4GC TEST SCENARIO]` creation details and the final spawned count.
 After the owner reports completion, inspect logs yourself. Do not ask the owner

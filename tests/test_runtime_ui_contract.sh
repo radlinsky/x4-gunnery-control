@@ -75,8 +75,17 @@ assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffs
 assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='\$weapon.class == class.missileturret'][@useaimtarget='true'][@target='\$module'])" "engageability service module-fallback muzzle-origin line-of-fire check count"
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityResult'\"])" "engageability result event count"
 assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityBatchComplete'\"])" "engageability batch-complete event count"
-grep -Fq "EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
-grep -Fq "\$target.relativeposition.{\$weapon}.rotation.pitch" "$md"
+grep -Fq "'x4gce3:' + \$nonce + ':' + EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
+grep -Fq "'x4gce2c:' + \$nonce + ':' + EngageabilityService.\$targets.count + ':' + \$completed" "$md"
+# Issue #67 r32 live A/B: X4 fired/hit an exact surface whose component origin
+# was outside +80 degrees while its hittable aim point was inside. Production
+# must evaluate the weapon-local, useaimtarget bearing—not the component origin.
+assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//do_if[contains(@value, 'EngageabilityService.\$arcknown')]/create_orientation[@name='\$aimorientation'][@orientation='look_at'][@refobject='\$target'][@useaimtarget='true']/position[@object='\$weapon'][@space='\$weapon'])" "weapon-local hittable-aim orientation count"
+assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//set_value[@name='\$aimpitch'][@exact='\$aimorientation.pitch'])" "hittable-aim pitch assignment count"
+if grep -Fq "\$target.relativeposition.{\$weapon}.rotation.pitch" "$md"; then
+  echo "production MD reintroduced component-origin firing-arc bearing" >&2
+  exit 1
+fi
 grep -Fq "EngageabilityService.\$arcmins.{\$weaponindex} * 1deg" "$md"
 grep -Fq "EngageabilityService.\$arcmaxs.{\$weaponindex} * 1deg" "$md"
 # Issue #54 Task 2: the firing-range gate mirrors shipped combat-AI

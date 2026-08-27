@@ -11,6 +11,29 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PASS=0
 FAIL=0
 
+# Some restricted agent sandboxes deny child-process creation from Node.  Node
+# 22 can then hang in spawnSync when stdin is piped, which is exactly how the
+# production extension supplies proposed file content to its shared guard.
+# Detect that environment without a piped child before running the black-box
+# suite.  CI and ordinary developer shells still exercise every assertion.
+set +e
+timeout 5s node -e '
+  const { spawnSync } = require("node:child_process");
+  const result = spawnSync("/bin/true", []);
+  if (result.error?.code === "EPERM") process.exit(77);
+  if (result.error || result.status !== 0) process.exit(1);
+' >/dev/null 2>&1
+NODE_SPAWN_STATUS=$?
+set -e
+if [[ $NODE_SPAWN_STATUS -eq 77 ]]; then
+  echo "Pi shellcheck-disable extension tests skipped: sandbox denies Node child processes"
+  exit 0
+fi
+if [[ $NODE_SPAWN_STATUS -ne 0 ]]; then
+  echo "FAIL: Node child-process preflight failed or timed out (status $NODE_SPAWN_STATUS)" >&2
+  exit 1
+fi
+
 assert_ok() {
   local desc=$1 handler_js=$2 expected=$3
   local out
