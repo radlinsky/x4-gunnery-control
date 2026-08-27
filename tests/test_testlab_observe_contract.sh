@@ -504,4 +504,71 @@ printf '%s\n' "$hit_cue" | grep -Fq "+ ' aimed=' + (if \$Aimed then \$Aimed else
 printf '%s\n' "$hit_cue" | grep -Fq "+ ' istgt=' + (\$Aimed? and (event.param == \$Aimed or @event.param3.{1} == \$Aimed))" \
   || fail "r12 HIT istgt is not component-aware"
 
+# Issue #69 LOS-endpoint discriminator (research only) structural contract.
+# This is a structural MD/XML contract only; it does not fake engine LOS behavior.
+# The probe must independently measure: (1) the exact fired ray using the observed
+# projectile origin $RayOrgWL, and (2) a barrel-origin diagnostic using
+# event.object.barrelposition, for each of the three before/entry/inside endpoints
+# with useaimtarget=false and excludeself both false and true.
+# Extract the Fired cue and endpoint loop so endpoint assertions cannot pass on
+# matching queries elsewhere in the cue.
+los_cue=$(awk '/<cue name="ObserveFired" instantiate="true">/{inside=1} inside{print} /<\/cue>/{if (inside) exit}' "$md")
+endpoint_probe=$(printf '%s\n' "$los_cue" | awk '/<do_for_each name="\$LosT" in="\$LosTs" counter="\$LosI">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
+printf '%s\n' "$los_cue" | grep -Fq "<set_value name=\"\$LosTs\" exact=\"[\$LosEntryT - 0.00005, \$LosEntryT, \$LosEntryT + 0.00005]\"/>" \
+  || fail "issue 69 LOS probe no longer defines the before/entry/inside endpoint parameters"
+printf '%s\n' "$los_cue" | grep -Fq "<set_value name=\"\$LosLabels\" exact=\"['before', 'entry', 'inside']\"/>" \
+  || fail "issue 69 LOS probe no longer labels all three endpoints"
+
+# The exact fired-ray probe must use $RayOrgWL as the object offset, not the
+# barrel position.
+printf '%s\n' "$endpoint_probe" | grep -Fq "objectoffset=\"\$RayOrgWL\"" \
+  || fail "issue 69 LOS probe does not use the exact projectile origin \$RayOrgWL for the fired ray"
+
+# The barrel-origin diagnostic must use event.object.barrelposition as the object
+# offset, separately labelled.
+printf '%s\n' "$endpoint_probe" | grep -Fq 'objectoffset="event.object.barrelposition"' \
+  || fail "issue 69 LOS probe does not carry the barrel-origin diagnostic using event.object.barrelposition"
+
+# Exact-ray probes: for each endpoint, two excludeself values with useaimtarget=false.
+exact_selfincl=$(printf '%s\n' "$endpoint_probe" | grep -Fc "name=\"\$LosExactSelfIncl\" object=\"event.object\" objectoffset=\"\$RayOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"false\"")
+exact_selfexcl=$(printf '%s\n' "$endpoint_probe" | grep -Fc "name=\"\$LosExactSelfExcl\" object=\"event.object\" objectoffset=\"\$RayOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"true\"")
+[[ "$exact_selfincl" -eq 1 ]] || fail "expected one exact-ray self-inclusive LOS probe (looped per endpoint), found $exact_selfincl"
+[[ "$exact_selfexcl" -eq 1 ]] || fail "expected one exact-ray self-exclusive LOS probe (looped per endpoint), found $exact_selfexcl"
+
+# Barrel-origin diagnostic: for each endpoint, two excludeself values with useaimtarget=false.
+barrel_selfincl=$(printf '%s\n' "$endpoint_probe" | grep -Fc "name=\"\$LosBarrelSelfIncl\" object=\"event.object\" objectoffset=\"event.object.barrelposition\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"false\"")
+barrel_selfexcl=$(printf '%s\n' "$endpoint_probe" | grep -Fc "name=\"\$LosBarrelSelfExcl\" object=\"event.object\" objectoffset=\"event.object.barrelposition\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"true\"")
+[[ "$barrel_selfincl" -eq 1 ]] || fail "expected one barrel-origin self-inclusive LOS probe (looped per endpoint), found $barrel_selfincl"
+[[ "$barrel_selfexcl" -eq 1 ]] || fail "expected one barrel-origin self-exclusive LOS probe (looped per endpoint), found $barrel_selfexcl"
+
+# Endpoint probes must use useaimtarget=false, never reuse the aim-target sample.
+if printf '%s\n' "$endpoint_probe" | grep -F "objectoffset=\"\$RayOrgWL\"" | grep -Fq 'useaimtarget="true"'; then
+  fail "exact-ray endpoint probes must not reuse useaimtarget=true"
+fi
+if printf '%s\n' "$endpoint_probe" | grep -F "targetoffset=\"\$LosEndpoint\"" | grep -Fq 'useaimtarget="true"'; then
+  fail "barrel-origin endpoint diagnostic probes must not reuse useaimtarget=true"
+fi
+
+# The surviving useaimtarget=true baseline must remain for both excludeself values.
+printf '%s\n' "$los_cue" | grep -Fq "name=\"\$LosUatIncl\" object=\"event.object\" objectoffset=\"event.object.barrelposition\" target=\"\$Aimed\" useaimtarget=\"true\" excludeself=\"false\"" \
+  || fail "useaimtarget=true self-inclusive baseline is missing"
+printf '%s\n' "$los_cue" | grep -Fq "name=\"\$LosUatExcl\" object=\"event.object\" objectoffset=\"event.object.barrelposition\" target=\"\$Aimed\" useaimtarget=\"true\" excludeself=\"true\"" \
+  || fail "useaimtarget=true self-exclusive baseline is missing"
+
+# Both discriminators must report unambiguous log fields on each endpoint record.
+printf '%s\n' "$endpoint_probe" | grep -Fq "' exact_selfincl=' + \$LosExactSelfIncl + ' exact_selfexcl=' + \$LosExactSelfExcl" \
+  || fail "endpoint probe log lacks unambiguous exact-ray fields"
+printf '%s\n' "$endpoint_probe" | grep -Fq "' barrel_selfincl=' + \$LosBarrelSelfIncl + ' barrel_selfexcl=' + \$LosBarrelSelfExcl" \
+  || fail "endpoint probe log lacks unambiguous barrel-origin fields"
+
+# Origin telemetry must log both $RayOrgWL and event.object.barrelposition on the
+# probe record so the origin mismatch is inspectable.
+printf '%s\n' "$endpoint_probe" | grep -Fq "' origin_wl=' + \$RayOrgWL + ' origin_barrel=' + event.object.barrelposition" \
+  || fail "endpoint probe log does not record both origin values for direct comparison"
+
+# The comment must not claim barrel->endpoint is the exact fired ray.
+if printf '%s\n' "$los_cue" | grep -F 'barrel->endpoint'; then
+  fail "issue 69 comment still claims barrel->endpoint is the exact fired ray"
+fi
+
 echo "testlab observability contract tests passed"

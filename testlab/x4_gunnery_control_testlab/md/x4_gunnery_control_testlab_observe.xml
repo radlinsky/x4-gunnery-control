@@ -440,8 +440,14 @@
                        AABB (engine-macro-local): hi = boundingbox.max, lo = 2*center - max.
                        Slab entry t = max over axes of the near-plane t. All three bore-direction
                        components are non-zero for this fixture; an axis-aligned bore would need a
-                       divide guard. Endpoints lie on the fired ray, so barrel->endpoint is the
-                       real reachable bore up to the target. -->
+                       divide guard. Endpoints lie on the fired ray. Two discriminators probe each
+                       endpoint: (1) the exact fired ray, seeded from the observed projectile
+                       origin $RayOrgWL (projectile origin in the weapon-local frame), which is
+                       the origin that actually fired; and (2) the predictive pre-fire barrel
+                       origin event.object.barrelposition, logged as a separate diagnostic to test
+                       whether that earlier origin reconstructs the same path. The barrel origin
+                       is NOT guaranteed to equal $RayOrgWL, so a blocked barrel-origin LOS is an
+                       origin-mismatch signal, not per se an MD LOS API wall. -->
                   <set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>
                   <set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>
                   <set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>
@@ -462,13 +468,17 @@
                                      x="$RayOrgTL.x + $LosT * $LosDirX"
                                      y="$RayOrgTL.y + $LosT * $LosDirY"
                                      z="$RayOrgTL.z + $LosT * $LosDirZ"/>
-                    <check_line_of_sight name="$LosSelfIncl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
-                    <check_line_of_sight name="$LosSelfExcl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
+                    <check_line_of_sight name="$LosExactSelfIncl" object="event.object" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
+                    <check_line_of_sight name="$LosExactSelfExcl" object="event.object" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
+                    <check_line_of_sight name="$LosBarrelSelfIncl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
+                    <check_line_of_sight name="$LosBarrelSelfExcl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
                     <debug_text text="'[X4GC TEST LOSPROBE] label=' + $LosLabels.{$LosI}
                       + ' weapon=' + event.object + ' engine=' + $Aimed
                       + ' t=' + $LosT + ' dist_from_bullet_m=' + ($LosT * 10000)
                       + ' endpoint=' + $LosEndpoint
-                      + ' los_selfincl=' + $LosSelfIncl + ' los_selfexcl=' + $LosSelfExcl"/>
+                      + ' origin_wl=' + $RayOrgWL + ' origin_barrel=' + event.object.barrelposition
+                      + ' exact_selfincl=' + $LosExactSelfIncl + ' exact_selfexcl=' + $LosExactSelfExcl
+                      + ' barrel_selfincl=' + $LosBarrelSelfIncl + ' barrel_selfexcl=' + $LosBarrelSelfExcl"/>
                   </do_for_each>
                   <check_line_of_sight name="$LosUatIncl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" useaimtarget="true" excludeself="false"/>
                   <check_line_of_sight name="$LosUatExcl" object="event.object" objectoffset="event.object.barrelposition" target="$Aimed" useaimtarget="true" excludeself="true"/>
