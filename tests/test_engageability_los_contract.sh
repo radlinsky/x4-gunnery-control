@@ -72,16 +72,77 @@ has "target=\"\$module\"" \
 #    module count: shipped move.attack.object.capital's 10-module cap is an NPC
 #    nearest-first performance heuristic, not a correctness guarantee, so a
 #    shootable module later in the list must not be ignored. That leaves exactly
-#    one break in the cue (the first-visible-module break); a reintroduced index
-#    cap adds a second and fails here.
-breaks=$(printf '%s\n' "$block" | grep -Fc "<break/>")
+#    one break inside the module scan (the first-visible-module break); a
+#    reintroduced index cap adds a second inside that loop and fails here. Scope
+#    the count to the module do_for_each so the separate surface-element sample
+#    break (checked at 8f) is not miscounted as a module cap.
+module_scan=$(printf '%s\n' "$block" | awk '
+  /<do_for_each name="\$module" in="\$modules">/ { grab = 1 }
+  grab { print }
+  grab && /<\/do_for_each>/ { exit }
+')
+[ -n "$module_scan" ] || note "module fallback do_for_each not found"
+breaks=$(printf '%s\n' "$module_scan" | grep -Fc "<break/>")
 [ "$breaks" -eq 1 ] \
-  || note "module fallback must break only on the first visible in-range module (found $breaks breaks; an arbitrary module cap is not shipped-source-supported)"
+  || note "module fallback must break only on the first visible in-range module (found $breaks breaks in the module scan; an arbitrary module cap is not shipped-source-supported)"
 
 # 6. Per-module range still reuses the #54 bbox predicate (no size term / no
 #    reintroduction of the pre-#54 component-distance predicate for modules).
 has "\$weapon.bboxdistanceto.{\$module} le \$weapon.maxfirerange" \
   || note "module range gate must reuse bboxdistanceto le maxfirerange (#54)"
+
+# 8. Issue #69 bounded surface-element bbox LOS fallback. The production
+#    useaimtarget=true root ray remains the FIRST query (asserted above at 2).
+#    When it is blocked and the target is a child surface element (not its own
+#    defensible root) on a conventional (non-missileturret) weapon, probe a fixed
+#    set of six interior bbox points and accept on the first clear one.
+#
+# 8a. The fallback is gated on a blocked root ray, a conventional (non-missile)
+#     weapon, and a surface element (target is NOT its own defensible root). This
+#     is the complement of the modular-root fallback ($target == $target.defensible).
+has "not \$lineoffireclear" \
+  || note "surface-element fallback must be gated on a blocked root ray (not \$lineoffireclear)"
+has "\$target != \$target.defensible" \
+  || note "surface-element fallback must be gated on \$target != \$target.defensible (child surface element only)"
+has "\$weapon.class != class.missileturret" \
+  || note "surface-element fallback must exclude missile turrets (\$weapon.class != class.missileturret)"
+
+# 8b. bbox min per axis uses the repo idiom min = 2*center - max, on
+#     $target.macro.boundingbox.
+for axis in x y z; do
+  has "2 * \$target.macro.boundingbox.center.$axis - \$target.macro.boundingbox.max.$axis" \
+    || note "surface-element fallback must derive bbox min.$axis as 2*center - max"
+done
+
+# 8c. Exactly six normalized interior samples with the specified fractions,
+#     carried as parallel fraction lists (the established .{counter} idiom).
+has "[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]" \
+  || note "surface-element fallback x-fraction list must be [0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"
+has "[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]" \
+  || note "surface-element fallback y-fraction list must be [0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"
+has "[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]" \
+  || note "surface-element fallback z-fraction list must be [0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"
+
+# 8d. Each sample is a target-local position built from the indexed fractions.
+has "object=\"\$target\" space=\"\$target\"" \
+  || note "surface-element fallback samples must be target-local positions (object=\$target space=\$target)"
+
+# 8e. Every fallback LOS uses the muzzle origin, an explicit interior targetoffset,
+#     useaimtarget=false, and excludeself=false (production conventional policy).
+has "targetoffset=\"\$surfacesample\" useaimtarget=\"false\" excludeself=\"false\"" \
+  || note "surface-element fallback LOS must use the interior sample offset with useaimtarget=false excludeself=false"
+
+# 8f. The scan stops on the first clear sample. That adds exactly one more break
+#     to the cue (module fallback break + surface-sample break = 2 total).
+surfacebreaks=$(printf '%s\n' "$block" | grep -Fc "<break/>")
+[ "$surfacebreaks" -eq 2 ] \
+  || note "expected exactly two breaks after the surface-element fallback (module + first-clear-sample), found $surfacebreaks"
+
+# 8g. The x4gce3 per-target and x4gce2c batch result protocol is unchanged.
+has "'x4gce3:' + \$nonce + ':' + EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" \
+  || note "x4gce3 per-target result protocol changed"
+has "'x4gce2c:' + \$nonce + ':' + EngageabilityService.\$targets.count + ':' + \$completed" \
+  || note "x4gce2c batch-complete protocol changed"
 
 # 7. Issue diagnostics must not ship in the production service.
 for diagnostic in diag_engage "\$diaglos" "\$diaglosnoaim" "\$diaglosnoself"; do

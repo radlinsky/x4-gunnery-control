@@ -100,7 +100,7 @@ if grep -Eq "\\\$weapon\.distanceto\.\{\\\$target\}[[:space:]]*\+[[:space:]]*\(?
   echo "production MD reintroduced the point-distance (distanceto + target.size/2) firing-range predicate" >&2
   exit 1
 fi
-assert_md_xpath "1" "count(//check_line_of_sight[@target='\$target'][ancestor::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
+assert_md_xpath "1" "count(//check_line_of_sight[@target='\$target'][@useaimtarget='true'][ancestor::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityMember']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'weapons.count lt')][contains(@value, 'not EngageabilityService.\$weapons.indexof')])" "member nonce/count/duplicate guards"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityTarget']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'targets.count lt')][contains(@value, 'not EngageabilityService.\$targets.indexof')])" "target nonce/count/duplicate guards"
 grep -Fq "[@event.param3.\$targets, 20].min" "$md"
