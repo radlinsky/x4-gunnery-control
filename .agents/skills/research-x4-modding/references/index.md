@@ -8,7 +8,8 @@ before relying on any claim.
 | Source hierarchy and classification | [source-policy.md](source-policy.md) | Rules and claim record shape |
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
-| MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
+| Issue #69 current evidence boundary | [issue-69-current.md](issue-69-current.md) | Current correction: MD LOS can disagree with an exact-component projectile hit; old aim-point-multiplicity/root-hull explanations are not established |
+| MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings; for Issue #69, apply the focused current correction above before older historical records |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
 | Live tests and observations | [testing-experiments.md](testing-experiments.md) | Promotion rules and regression matrix |
