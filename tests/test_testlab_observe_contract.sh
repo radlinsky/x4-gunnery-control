@@ -654,8 +654,10 @@ for coordinate in \
   'z="$RayOrgTL.z + $LosT * $LosDirZ"'; do
   printf '%s\n' "$delayed_loop" | grep -Fq "$coordinate" || fail "delayed LOS endpoint formula changed: $coordinate"
 done
-[[ $(printf '%s\n' "$delayed_loop" | grep -Fc '<check_line_of_sight ') -eq 4 ]] \
-  || fail "delayed LOS endpoint loop must contain exactly four LOS calls"
+# Four child probes (exact/barrel x self-incl/self-excl) plus one root probe —
+# the root query lives inside a do_if so the total check_line_of_sight count is 5.
+[[ $(printf '%s\n' "$delayed_loop" | grep -Fc '<check_line_of_sight ') -eq 5 ]] \
+  || fail "delayed LOS endpoint loop must contain exactly five LOS calls (four child + one root)"
 for query in \
   'name="$LosExactSelfIncl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"' \
   'name="$LosExactSelfExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"' \
@@ -666,13 +668,31 @@ done
 if printf '%s\n' "$delayed_cue" | grep -Fq 'useaimtarget="true"'; then
   fail "delayed LOS observer must not add a useaimtarget baseline"
 fi
+
+# Child-vs-root discriminator: $Aimed.ship accessor, existence guard, root-local
+# endpoint, and exactly one $LosRootExcl query matching $LosExactSelfExcl except
+# target identity. The do_else must emit aimed_ship=none root_excl=skipped so the
+# unavailable case is observable rather than silently zeroed.
+printf '%s\n' "$delayed_loop" | grep -Fq '@$Aimed.ship and $Aimed.ship.exists' \
+  || fail "delayed root discriminator does not guard $Aimed.ship before the root LOS query"
+printf '%s\n' "$delayed_loop" | grep -Fq '<create_position name="$LosEndpointRoot" object="$Aimed.ship" space="$Aimed.ship" value="$LosEndpoint"/>' \
+  || fail "delayed root discriminator does not re-express endpoint in root-ship space"
+root_excl_count=$(printf '%s\n' "$delayed_loop" | grep -Fc 'name="$LosRootExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed.ship" targetoffset="$LosEndpointRoot" useaimtarget="false" excludeself="true"')
+[[ "$root_excl_count" -eq 1 ]] \
+  || fail "expected exactly one \$LosRootExcl root LOS query per delayed endpoint, found $root_excl_count"
+printf '%s\n' "$delayed_loop" | grep -Fq "' aimed_ship=' + @\$Aimed.ship + ' root_excl=' + \$LosRootExcl" \
+  || fail "delayed LOSPROBE_DELAYED log does not include aimed_ship and root_excl fields"
+printf '%s\n' "$delayed_loop" | grep -Fq "name=\"\$LosRootExcl\" exact=\"'skipped'\"" \
+  || fail "delayed root unavailable branch does not set \$LosRootExcl to 'skipped'"
+
 for field in '[X4GC TEST LOSPROBE_DELAYED]' "fire_t=' + \$FireTime" "delayed_t=' + player.age" \
   "projectile_id=' + \$ProjectileID" "projectile_exists=' + @\$Projectile.exists" \
   "weapon_id=' + \$WeaponID" "weapon=' + \$Weapon" "aimed_id=' + \$AimedID" "aimed=' + \$Aimed" \
   "label=' + \$LosLabels.{\$LosI}" "t=' + \$LosT" "endpoint=' + \$LosEndpoint" \
   "origin_wl=' + \$RayOrgWL" "origin_barrel=' + \$BarrelOrgWL" \
   "exact_selfincl=' + \$LosExactSelfIncl" "exact_selfexcl=' + \$LosExactSelfExcl" \
-  "barrel_selfincl=' + \$LosBarrelSelfIncl" "barrel_selfexcl=' + \$LosBarrelSelfExcl"; do
+  "barrel_selfincl=' + \$LosBarrelSelfIncl" "barrel_selfexcl=' + \$LosBarrelSelfExcl" \
+  "aimed_ship=' + @\$Aimed.ship" "root_excl=' + \$LosRootExcl"; do
   printf '%s\n' "$delayed_cue" | grep -Fq "$field" || fail "delayed LOS correlation/log field missing: $field"
 done
 

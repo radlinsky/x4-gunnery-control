@@ -537,6 +537,18 @@
                                      x="$RayOrgTL.x + $LosT * $LosDirX"
                                      y="$RayOrgTL.y + $LosT * $LosDirY"
                                      z="$RayOrgTL.z + $LosT * $LosDirZ"/>
+                    <!-- Child-vs-root discriminator: re-express the same endpoint in
+                         root-ship space and run one companion ray to $Aimed.ship.
+                         This isolates whether a blocked child LOS clears at the
+                         root hull, distinguishing intra-ship obstruction from open
+                         space. -->
+                    <do_if value="@$Aimed.ship and $Aimed.ship.exists">
+                      <create_position name="$LosEndpointRoot" object="$Aimed.ship" space="$Aimed.ship" value="$LosEndpoint"/>
+                      <check_line_of_sight name="$LosRootExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed.ship" targetoffset="$LosEndpointRoot" useaimtarget="false" excludeself="true"/>
+                    </do_if>
+                    <do_else>
+                      <set_value name="$LosRootExcl" exact="'skipped'"/>
+                    </do_else>
                     <check_line_of_sight name="$LosExactSelfIncl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
                     <check_line_of_sight name="$LosExactSelfExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
                     <check_line_of_sight name="$LosBarrelSelfIncl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
@@ -549,7 +561,8 @@
                       + ' endpoint=' + $LosEndpoint
                       + ' origin_wl=' + $RayOrgWL + ' origin_barrel=' + $BarrelOrgWL
                       + ' exact_selfincl=' + $LosExactSelfIncl + ' exact_selfexcl=' + $LosExactSelfExcl
-                      + ' barrel_selfincl=' + $LosBarrelSelfIncl + ' barrel_selfexcl=' + $LosBarrelSelfExcl"/>
+                      + ' barrel_selfincl=' + $LosBarrelSelfIncl + ' barrel_selfexcl=' + $LosBarrelSelfExcl
+                      + ' aimed_ship=' + @$Aimed.ship + ' root_excl=' + $LosRootExcl"/>
                   </do_for_each>
                 </do_if>
                 <do_else>
