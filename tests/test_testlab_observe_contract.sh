@@ -586,9 +586,21 @@ signal_line=$(printf '%s\n' "$los_cue" | grep -F '<signal_cue_instantly cue="Obs
 [[ -n "$signal_line" ]] || fail "ObserveFired does not signal the delayed LOS observer with a named table payload"
 for key in projectile projectileid weapon weaponid aimed aimedid firetime \
   rayorgwlx rayorgwly rayorgwlz barrelx barrely barrelz \
-  rayorgtlx rayorgtly rayorgtlz rayfwdtlx rayfwdtly rayfwdtlz losentryt; do
+  rayorgtlx rayorgtly rayorgtlz rayfwdtlx rayfwdtly rayfwdtlz losentryt losexitt; do
   printf '%s\n' "$los_cue" | grep -Fq "\$$key =" || fail "delayed LOS payload is missing scalar/ref field \$$key"
 done
+
+# Issue #69 whole-AABB segment sweep. The FIRED cue must compute the slab exit T
+# as the min over axes of the per-axis far intersections, and preserve it into
+# the delayed payload alongside the existing entry T.
+printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosFarX" exact="[($LosLoX - $RayOrgTL.x) / $LosDirX, ($LosHiX - $RayOrgTL.x) / $LosDirX].max"/>' \
+  || fail "FIRED cue does not compute the X far-plane slab intersection"
+printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosFarY" exact="[($LosLoY - $RayOrgTL.y) / $LosDirY, ($LosHiY - $RayOrgTL.y) / $LosDirY].max"/>' \
+  || fail "FIRED cue does not compute the Y far-plane slab intersection"
+printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosFarZ" exact="[($LosLoZ - $RayOrgTL.z) / $LosDirZ, ($LosHiZ - $RayOrgTL.z) / $LosDirZ].max"/>' \
+  || fail "FIRED cue does not compute the Z far-plane slab intersection"
+printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosExitT" exact="[[$LosFarX, $LosFarY].min, $LosFarZ].min"/>' \
+  || fail "FIRED cue exit T is not the min over axes of the per-axis far intersections"
 for payload_assignment in \
   "\$projectileid = '' + event.param" \
   "\$weaponid = '' + event.object" \
@@ -598,7 +610,7 @@ for payload_assignment in \
   '$barrelx = event.object.barrelposition.x' '$barrely = event.object.barrelposition.y' '$barrelz = event.object.barrelposition.z' \
   '$rayorgtlx = $RayOrgTL.x' '$rayorgtly = $RayOrgTL.y' '$rayorgtlz = $RayOrgTL.z' \
   '$rayfwdtlx = $RayFwdTL.x' '$rayfwdtly = $RayFwdTL.y' '$rayfwdtlz = $RayFwdTL.z' \
-  '$losentryt = $LosEntryT'; do
+  '$losentryt = $LosEntryT' '$losexitt = $LosExitT'; do
   printf '%s\n' "$los_cue" | grep -Fq "$payload_assignment" || fail "delayed LOS payload lost exact fire-time assignment: $payload_assignment"
 done
 
@@ -623,6 +635,7 @@ for reconstruction in \
   '<create_position name="$RayFwdTL" object="$Aimed" space="$Aimed"' \
   'x="$Payload.$rayfwdtlx" y="$Payload.$rayfwdtly" z="$Payload.$rayfwdtlz"/>' \
   '<set_value name="$LosEntryT" exact="$Payload.$losentryt"/>' \
+  '<set_value name="$LosExitT" exact="$Payload.$losexitt"/>' \
   '<set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>' \
   '<set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>' \
   '<set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>'; do
@@ -694,6 +707,43 @@ for field in '[X4GC TEST LOSPROBE_DELAYED]' "fire_t=' + \$FireTime" "delayed_t='
   "barrel_selfincl=' + \$LosBarrelSelfIncl" "barrel_selfexcl=' + \$LosBarrelSelfExcl" \
   "aimed_ship=' + @\$Aimed.ship" "root_excl=' + \$LosRootExcl"; do
   printf '%s\n' "$delayed_cue" | grep -Fq "$field" || fail "delayed LOS correlation/log field missing: $field"
+done
+
+# Issue #69 whole-AABB child sweep is a SEPARATE loop in the delayed cue, distinct
+# from the before/entry/inside probes. It samples the entry->exit segment at 21
+# fixed fractions spanning 0.00..1.00 and runs one child (target=$Aimed) excludeself
+# ray per sample, tagged [X4GC TEST LOSPROBE_SEGMENT].
+segment_loop=$(printf '%s\n' "$delayed_cue" | awk '/<do_for_each name="\$LosSegFrac" in="\$LosSegFracs" counter="\$LosSegI">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
+[[ -n "$segment_loop" ]] || fail "delayed cue lacks the separate whole-AABB segment sweep loop"
+# The before/entry/inside loop and root probe must remain unchanged (asserted above);
+# the segment sweep must not be folded into that loop.
+if printf '%s\n' "$delayed_loop" | grep -Fq 'LosSegFrac'; then
+  fail "segment sweep must be a separate loop, not folded into the before/entry/inside loop"
+fi
+seg_fracs_decl='<set_value name="$LosSegFracs" exact="[0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]"/>'
+printf '%s\n' "$delayed_cue" | grep -Fq "$seg_fracs_decl" \
+  || fail "segment sweep does not define the 21 fractions spanning 0.00..1.00"
+seg_frac_count=$(printf '%s\n' "$seg_fracs_decl" | grep -oE '\b(0\.[0-9][0-9]|1\.00)\b' | wc -l | tr -d ' ')
+[[ "$seg_frac_count" -eq 21 ]] || fail "expected 21 segment fractions, found $seg_frac_count"
+printf '%s\n' "$segment_loop" | grep -Fq '<set_value name="$LosSegT" exact="$LosEntryT + $LosSegFrac * ($LosExitT - $LosEntryT)"/>' \
+  || fail "segment sample T is not entryT + frac*(exitT - entryT)"
+printf '%s\n' "$segment_loop" | grep -Fq '<create_position name="$LosSegEndpoint" object="$Aimed" space="$Aimed"' \
+  || fail "segment endpoint is not anchored to the saved aimed component"
+for coordinate in \
+  'x="$RayOrgTL.x + $LosSegT * $LosDirX"' \
+  'y="$RayOrgTL.y + $LosSegT * $LosDirY"' \
+  'z="$RayOrgTL.z + $LosSegT * $LosDirZ"'; do
+  printf '%s\n' "$segment_loop" | grep -Fq "$coordinate" || fail "segment endpoint formula changed: $coordinate"
+done
+[[ $(printf '%s\n' "$segment_loop" | grep -Fc '<check_line_of_sight ') -eq 1 ]] \
+  || fail "segment sweep loop must contain exactly one LOS call per sample"
+printf '%s\n' "$segment_loop" | grep -Fq 'name="$LosSegExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosSegEndpoint" useaimtarget="false" excludeself="true"' \
+  || fail "segment sweep query lost its required child-target attributes"
+for field in '[X4GC TEST LOSPROBE_SEGMENT]' "fire_t=' + \$FireTime" "delayed_t=' + player.age" \
+  "projectile_id=' + \$ProjectileID" "projectile_exists=' + @\$Projectile.exists" \
+  "aimed_id=' + \$AimedID" "sample=' + \$LosSegI" "frac=' + \$LosSegFrac" "t=' + \$LosSegT" \
+  "endpoint=' + \$LosSegEndpoint" "child_excl=' + \$LosSegExcl"; do
+  printf '%s\n' "$segment_loop" | grep -Fq "$field" || fail "segment sweep log field missing: $field"
 done
 
 echo "testlab observability contract tests passed"

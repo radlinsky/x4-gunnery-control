@@ -461,6 +461,14 @@
                   <set_value name="$LosNearY" exact="[($LosLoY - $RayOrgTL.y) / $LosDirY, ($LosHiY - $RayOrgTL.y) / $LosDirY].min"/>
                   <set_value name="$LosNearZ" exact="[($LosLoZ - $RayOrgTL.z) / $LosDirZ, ($LosHiZ - $RayOrgTL.z) / $LosDirZ].min"/>
                   <set_value name="$LosEntryT" exact="[[$LosNearX, $LosNearY].max, $LosNearZ].max"/>
+                  <!-- Slab exit: far-plane t is the per-axis max, and the segment
+                       leaves the AABB at the nearest far plane, so exit t = min over
+                       axes. Preserved to the delayed cue so the whole entry->exit
+                       segment can be swept, not just the entry epsilon. -->
+                  <set_value name="$LosFarX" exact="[($LosLoX - $RayOrgTL.x) / $LosDirX, ($LosHiX - $RayOrgTL.x) / $LosDirX].max"/>
+                  <set_value name="$LosFarY" exact="[($LosLoY - $RayOrgTL.y) / $LosDirY, ($LosHiY - $RayOrgTL.y) / $LosDirY].max"/>
+                  <set_value name="$LosFarZ" exact="[($LosLoZ - $RayOrgTL.z) / $LosDirZ, ($LosHiZ - $RayOrgTL.z) / $LosDirZ].max"/>
+                  <set_value name="$LosExitT" exact="[[$LosFarX, $LosFarY].min, $LosFarZ].min"/>
                   <set_value name="$LosTs" exact="[$LosEntryT - 0.00005, $LosEntryT, $LosEntryT + 0.00005]"/>
                   <set_value name="$LosLabels" exact="['before', 'entry', 'inside']"/>
                   <do_for_each name="$LosT" in="$LosTs" counter="$LosI">
@@ -494,7 +502,7 @@
                     $barrelx = event.object.barrelposition.x, $barrely = event.object.barrelposition.y, $barrelz = event.object.barrelposition.z,
                     $rayorgtlx = $RayOrgTL.x, $rayorgtly = $RayOrgTL.y, $rayorgtlz = $RayOrgTL.z,
                     $rayfwdtlx = $RayFwdTL.x, $rayfwdtly = $RayFwdTL.y, $rayfwdtlz = $RayFwdTL.z,
-                    $losentryt = $LosEntryT
+                    $losentryt = $LosEntryT, $losexitt = $LosExitT
                   ]"/>
                 </do_if>
               </actions>
@@ -527,6 +535,7 @@
                   <create_position name="$RayFwdTL" object="$Aimed" space="$Aimed"
                                    x="$Payload.$rayfwdtlx" y="$Payload.$rayfwdtly" z="$Payload.$rayfwdtlz"/>
                   <set_value name="$LosEntryT" exact="$Payload.$losentryt"/>
+                  <set_value name="$LosExitT" exact="$Payload.$losexitt"/>
                   <set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>
                   <set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>
                   <set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>
@@ -563,6 +572,28 @@
                       + ' exact_selfincl=' + $LosExactSelfIncl + ' exact_selfexcl=' + $LosExactSelfExcl
                       + ' barrel_selfincl=' + $LosBarrelSelfIncl + ' barrel_selfexcl=' + $LosBarrelSelfExcl
                       + ' aimed_ship=' + @$Aimed.ship + ' root_excl=' + $LosRootExcl"/>
+                  </do_for_each>
+                  <!-- Whole-AABB child sweep. The before/entry/inside probes only
+                       cover +/-0.5 m of the slab entry, but the projectile may hit
+                       engine collision geometry deeper inside the box. Sweep the
+                       full entry->exit segment at 21 fixed fractions and run one
+                       child (target=$Aimed) excludeself ray per sample. Any
+                       child_excl=1 is positive evidence that child LOS accepts the
+                       fired ray somewhere the shallow probes missed. -->
+                  <set_value name="$LosSegFracs" exact="[0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]"/>
+                  <do_for_each name="$LosSegFrac" in="$LosSegFracs" counter="$LosSegI">
+                    <set_value name="$LosSegT" exact="$LosEntryT + $LosSegFrac * ($LosExitT - $LosEntryT)"/>
+                    <create_position name="$LosSegEndpoint" object="$Aimed" space="$Aimed"
+                                     x="$RayOrgTL.x + $LosSegT * $LosDirX"
+                                     y="$RayOrgTL.y + $LosSegT * $LosDirY"
+                                     z="$RayOrgTL.z + $LosSegT * $LosDirZ"/>
+                    <check_line_of_sight name="$LosSegExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosSegEndpoint" useaimtarget="false" excludeself="true"/>
+                    <debug_text text="'[X4GC TEST LOSPROBE_SEGMENT] fire_t=' + $FireTime + ' delayed_t=' + player.age
+                      + ' projectile_id=' + $ProjectileID + ' projectile_exists=' + @$Projectile.exists
+                      + ' aimed_id=' + $AimedID
+                      + ' sample=' + $LosSegI + ' frac=' + $LosSegFrac + ' t=' + $LosSegT
+                      + ' endpoint=' + $LosSegEndpoint
+                      + ' child_excl=' + $LosSegExcl"/>
                   </do_for_each>
                 </do_if>
                 <do_else>
