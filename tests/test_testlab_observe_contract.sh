@@ -548,13 +548,22 @@ printf '%s\n' "$mark_weapons_loop" | grep -Fq '<set_value name="$GridLoX" exact=
   || fail "grid min.x does not use the 2*center - max idiom"
 printf '%s\n' "$mark_weapons_loop" | grep -Fq '<set_value name="$GridLoY" exact="2 * $Target.macro.boundingbox.center.y - $Target.macro.boundingbox.max.y"/>' \
   || fail "grid min.y does not use the 2*center - max idiom"
-# LOSGRID logs label/weapon/target/sample/xfrac/yfrac/endpoint/los.
+# LOSGRID logs label/weapon/target/sample/xfrac/yfrac/endpoint/point_wl/los.
 for field in '[X4GC TEST LOSGRID]' "label=' + \$Label" "weapon=' + \$Weapon" "target=' + \$Target" \
   "sample=' + \$GridI" "xfrac=' + \$GridXFrac" "yfrac=' + \$GridYFrac" \
-  "endpoint=' + \$GridPoint" "los=' + \$GridLos"; do
+  "endpoint=' + \$GridPoint" "point_wl=' + \$GridPointWL" "los=' + \$GridLos"; do
   printf '%s\n' "$mark_weapons_loop" | grep -Fq "$field" \
     || fail "LOSGRID log field missing: $field"
 done
+# Issue #69 weapon-local grid-point telemetry: exactly one cross-frame transform
+# per grid loop, re-expressing the exact same $GridPoint in weapon-local space via
+# the proven object/space/value create_position idiom. No new LOS query.
+grid_wl_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<create_position name="$GridPointWL" object="$Weapon" space="$Weapon" value="$GridPoint"/>')
+[[ "$grid_wl_count" -eq 1 ]] \
+  || fail "expected exactly one weapon-local \$GridPointWL transform in the grid loop, found $grid_wl_count"
+# The weapon-local telemetry must not add a second LOS query to the grid loop.
+[[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<check_line_of_sight name="$GridLos"') -eq 1 ]] \
+  || fail "weapon-local grid telemetry changed the grid LOS query count"
 # The grid must not appear in the missileturret loop.
 if printf '%s\n' "$mark_missiles_loop" | grep -Fq 'LOSGRID'; then
   fail "issue 69 bbox-midplane grid must not appear in the missileturret loop"

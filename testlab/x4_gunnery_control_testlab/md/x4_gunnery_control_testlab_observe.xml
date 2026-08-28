@@ -285,6 +285,11 @@
                                        x="$GridLoX + $GridXFrac * $GridSpanX"
                                        y="$GridLoY + $GridYFrac * $GridSpanY"
                                        z="$Target.macro.boundingbox.center.z"/>
+                      <!-- Re-express the exact same physical grid point in
+                           weapon-local coordinates so pitch relative to the mount
+                           can be derived offline. Same cross-frame create_position
+                           idiom as $LosEndpointRoot; no new LOS query, no MD pitch. -->
+                      <create_position name="$GridPointWL" object="$Weapon" space="$Weapon" value="$GridPoint"/>
                       <check_line_of_sight name="$GridLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$GridPoint" useaimtarget="false" excludeself="false"/>
                       <debug_text text="'[X4GC TEST LOSGRID] label=' + $Label
                         + ' weapon=' + $Weapon
@@ -293,6 +298,7 @@
                         + ' xfrac=' + $GridXFrac
                         + ' yfrac=' + $GridYFrac
                         + ' endpoint=' + $GridPoint
+                        + ' point_wl=' + $GridPointWL
                         + ' los=' + $GridLos"/>
                     </do_for_each>
                   </do_for_each>
