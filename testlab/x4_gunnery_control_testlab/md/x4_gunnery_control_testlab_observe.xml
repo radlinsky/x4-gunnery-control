@@ -285,11 +285,16 @@
                                        x="$GridLoX + $GridXFrac * $GridSpanX"
                                        y="$GridLoY + $GridYFrac * $GridSpanY"
                                        z="$Target.macro.boundingbox.center.z"/>
-                      <!-- Re-express the exact same physical grid point in
-                           weapon-local coordinates so pitch relative to the mount
-                           can be derived offline. Same cross-frame create_position
-                           idiom as $LosEndpointRoot; no new LOS query, no MD pitch. -->
-                      <create_position name="$GridPointWL" object="$Weapon" space="$Weapon" value="$GridPoint"/>
+                      <!-- Re-express the target-anchored grid point into weapon
+                           space for offline pitch/arc analysis. $GridPoint is
+                           authored in $Target space, so the anchor object must be
+                           $Target (its true frame) while space is $Weapon; anchoring
+                           on $Weapon returned the same numbers (identity). No new LOS
+                           query, no MD pitch. -->
+                      <create_position name="$GridPointWL"
+                                       object="$Target"
+                                       space="$Weapon"
+                                       value="$GridPoint"/>
                       <check_line_of_sight name="$GridLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$GridPoint" useaimtarget="false" excludeself="false"/>
                       <debug_text text="'[X4GC TEST LOSGRID] label=' + $Label
                         + ' weapon=' + $Weapon

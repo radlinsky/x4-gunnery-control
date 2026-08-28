@@ -556,11 +556,20 @@ for field in '[X4GC TEST LOSGRID]' "label=' + \$Label" "weapon=' + \$Weapon" "ta
     || fail "LOSGRID log field missing: $field"
 done
 # Issue #69 weapon-local grid-point telemetry: exactly one cross-frame transform
-# per grid loop, re-expressing the exact same $GridPoint in weapon-local space via
-# the proven object/space/value create_position idiom. No new LOS query.
-grid_wl_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<create_position name="$GridPointWL" object="$Weapon" space="$Weapon" value="$GridPoint"/>')
+# per grid loop. $GridPoint is authored in $Target space, so the conversion must
+# anchor object="$Target" while space="$Weapon" to actually reach weapon space;
+# anchoring object="$Weapon" returned identity. No new LOS query.
+grid_wl_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<create_position name="$GridPointWL"')
 [[ "$grid_wl_count" -eq 1 ]] \
   || fail "expected exactly one weapon-local \$GridPointWL transform in the grid loop, found $grid_wl_count"
+for attr in 'object="$Target"' 'space="$Weapon"' 'value="$GridPoint"/>'; do
+  printf '%s\n' "$mark_weapons_loop" | grep -Fq "$attr" \
+    || fail "\$GridPointWL conversion lost required attribute: $attr"
+done
+# The old identity form (object=$Weapon space=$Weapon) must be gone.
+if printf '%s\n' "$mark_weapons_loop" | grep -Fq '<create_position name="$GridPointWL" object="$Weapon" space="$Weapon" value="$GridPoint"/>'; then
+  fail "\$GridPointWL still uses the identity object=\$Weapon space=\$Weapon form"
+fi
 # The weapon-local telemetry must not add a second LOS query to the grid loop.
 [[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<check_line_of_sight name="$GridLos"') -eq 1 ]] \
   || fail "weapon-local grid telemetry changed the grid LOS query count"
