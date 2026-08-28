@@ -571,4 +571,109 @@ if printf '%s\n' "$los_cue" | grep -F 'barrel->endpoint'; then
   fail "issue 69 comment still claims barrel->endpoint is the exact fired ray"
 fi
 
+# Issue #69 delayed LOS discriminator. Fire-time geometry must cross the cue
+# boundary as scalar fields so projectile expiry cannot invalidate the delayed
+# query, and the delayed instance must guard only the two query objects.
+delayed_cue=$(awk '/<cue name="ObserveFiredLosDelayed" instantiate="true">/{inside=1} inside{print} /<\/cue>/{if (inside) exit}' "$md")
+[[ $(xmllint --xpath "count(//cue[@name='ObserveArm']/cues/cue[@name='ObserveFiredLosDelayed'][@instantiate='true']/conditions/event_cue_signalled)" "$md") == "1" ]] \
+  || fail "delayed LOS observer must be an instantiated cue-signalled sibling"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveFiredLosDelayed']/delay[@exact='1s'])" "$md") == "1" ]] \
+  || fail "delayed LOS observer must have one cue-level exact 1 s delay"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveFiredLosDelayed']/actions/delay)" "$md") == "0" ]] \
+  || fail "delayed LOS observer delay must not be inside actions"
+
+signal_line=$(printf '%s\n' "$los_cue" | grep -F '<signal_cue_instantly cue="ObserveFiredLosDelayed" param="table[' || true)
+[[ -n "$signal_line" ]] || fail "ObserveFired does not signal the delayed LOS observer with a named table payload"
+for key in projectile projectileid weapon weaponid aimed aimedid firetime \
+  rayorgwlx rayorgwly rayorgwlz barrelx barrely barrelz \
+  rayorgtlx rayorgtly rayorgtlz rayfwdtlx rayfwdtly rayfwdtlz losentryt; do
+  printf '%s\n' "$los_cue" | grep -Fq "\$$key =" || fail "delayed LOS payload is missing scalar/ref field \$$key"
+done
+for payload_assignment in \
+  "\$projectileid = '' + event.param" \
+  "\$weaponid = '' + event.object" \
+  "\$aimedid = '' + \$Aimed" \
+  '$firetime = player.age' \
+  '$rayorgwlx = $RayOrgWL.x' '$rayorgwly = $RayOrgWL.y' '$rayorgwlz = $RayOrgWL.z' \
+  '$barrelx = event.object.barrelposition.x' '$barrely = event.object.barrelposition.y' '$barrelz = event.object.barrelposition.z' \
+  '$rayorgtlx = $RayOrgTL.x' '$rayorgtly = $RayOrgTL.y' '$rayorgtlz = $RayOrgTL.z' \
+  '$rayfwdtlx = $RayFwdTL.x' '$rayfwdtly = $RayFwdTL.y' '$rayfwdtlz = $RayFwdTL.z' \
+  '$losentryt = $LosEntryT'; do
+  printf '%s\n' "$los_cue" | grep -Fq "$payload_assignment" || fail "delayed LOS payload lost exact fire-time assignment: $payload_assignment"
+done
+
+for binding in \
+  '<set_value name="$Payload" exact="event.param"/>' \
+  '<set_value name="$Projectile" exact="$Payload.$projectile"/>' \
+  '<set_value name="$ProjectileID" exact="$Payload.$projectileid"/>' \
+  '<set_value name="$Weapon" exact="$Payload.$weapon"/>' \
+  '<set_value name="$WeaponID" exact="$Payload.$weaponid"/>' \
+  '<set_value name="$Aimed" exact="$Payload.$aimed"/>' \
+  '<set_value name="$AimedID" exact="$Payload.$aimedid"/>' \
+  '<set_value name="$FireTime" exact="$Payload.$firetime"/>'; do
+  printf '%s\n' "$delayed_cue" | grep -Fq "$binding" || fail "delayed LOS payload extraction lost: $binding"
+done
+for reconstruction in \
+  '<create_position name="$RayOrgWL" object="$Weapon" space="$Weapon"' \
+  'x="$Payload.$rayorgwlx" y="$Payload.$rayorgwly" z="$Payload.$rayorgwlz"/>' \
+  '<create_position name="$BarrelOrgWL" object="$Weapon" space="$Weapon"' \
+  'x="$Payload.$barrelx" y="$Payload.$barrely" z="$Payload.$barrelz"/>' \
+  '<create_position name="$RayOrgTL" object="$Aimed" space="$Aimed"' \
+  'x="$Payload.$rayorgtlx" y="$Payload.$rayorgtly" z="$Payload.$rayorgtlz"/>' \
+  '<create_position name="$RayFwdTL" object="$Aimed" space="$Aimed"' \
+  'x="$Payload.$rayfwdtlx" y="$Payload.$rayfwdtly" z="$Payload.$rayfwdtlz"/>' \
+  '<set_value name="$LosEntryT" exact="$Payload.$losentryt"/>' \
+  '<set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>' \
+  '<set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>' \
+  '<set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>'; do
+  printf '%s\n' "$delayed_cue" | grep -Fq "$reconstruction" || fail "delayed LOS scalar reconstruction lost: $reconstruction"
+done
+printf '%s\n' "$delayed_cue" | grep -Fq '<do_if value="$Weapon? and $Weapon.exists and $Aimed? and $Aimed.exists">' \
+  || fail "delayed LOS evaluation is not gated on weapon and aimed existence"
+if printf '%s\n' "$delayed_cue" | grep -F '<do_if value=' | grep -Fq '$Projectile.exists'; then
+  fail "delayed LOS evaluation must never be gated on projectile existence"
+fi
+printf '%s\n' "$delayed_cue" | grep -Fq 'status=skipped reason=invalid_query_object' \
+  || fail "delayed LOS observer lacks the invalid-query-object skipped record"
+for field in "weapon_exists=' + @\$Weapon.exists" "aimed_exists=' + @\$Aimed.exists" "projectile_exists=' + @\$Projectile.exists"; do
+  printf '%s\n' "$delayed_cue" | grep -Fq "$field" || fail "delayed skipped telemetry lacks safe field: $field"
+done
+
+# Reconstruct the same three anchored target-local endpoints from saved scalar
+# geometry, then run exactly four explicit-offset variants per loop iteration.
+printf '%s\n' "$delayed_cue" | grep -Fq '<set_value name="$LosTs" exact="[$LosEntryT - 0.00005, $LosEntryT, $LosEntryT + 0.00005]"/>' \
+  || fail "delayed LOS probe lost the exact before/entry/inside parameters"
+printf '%s\n' "$delayed_cue" | grep -Fq '<set_value name="$LosLabels" exact="['"'"'before'"'"', '"'"'entry'"'"', '"'"'inside'"'"']"/>' \
+  || fail "delayed LOS probe lost the endpoint labels"
+delayed_loop=$(printf '%s\n' "$delayed_cue" | awk '/<do_for_each name="\$LosT" in="\$LosTs" counter="\$LosI">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
+printf '%s\n' "$delayed_loop" | grep -Fq '<create_position name="$LosEndpoint" object="$Aimed" space="$Aimed"' \
+  || fail "delayed LOS endpoint is not anchored to the saved aimed component"
+for coordinate in \
+  'x="$RayOrgTL.x + $LosT * $LosDirX"' \
+  'y="$RayOrgTL.y + $LosT * $LosDirY"' \
+  'z="$RayOrgTL.z + $LosT * $LosDirZ"'; do
+  printf '%s\n' "$delayed_loop" | grep -Fq "$coordinate" || fail "delayed LOS endpoint formula changed: $coordinate"
+done
+[[ $(printf '%s\n' "$delayed_loop" | grep -Fc '<check_line_of_sight ') -eq 4 ]] \
+  || fail "delayed LOS endpoint loop must contain exactly four LOS calls"
+for query in \
+  'name="$LosExactSelfIncl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"' \
+  'name="$LosExactSelfExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"' \
+  'name="$LosBarrelSelfIncl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"' \
+  'name="$LosBarrelSelfExcl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"'; do
+  printf '%s\n' "$delayed_loop" | grep -Fq "$query" || fail "delayed LOS loop lost required query: $query"
+done
+if printf '%s\n' "$delayed_cue" | grep -Fq 'useaimtarget="true"'; then
+  fail "delayed LOS observer must not add a useaimtarget baseline"
+fi
+for field in '[X4GC TEST LOSPROBE_DELAYED]' "fire_t=' + \$FireTime" "delayed_t=' + player.age" \
+  "projectile_id=' + \$ProjectileID" "projectile_exists=' + @\$Projectile.exists" \
+  "weapon_id=' + \$WeaponID" "weapon=' + \$Weapon" "aimed_id=' + \$AimedID" "aimed=' + \$Aimed" \
+  "label=' + \$LosLabels.{\$LosI}" "t=' + \$LosT" "endpoint=' + \$LosEndpoint" \
+  "origin_wl=' + \$RayOrgWL" "origin_barrel=' + \$BarrelOrgWL" \
+  "exact_selfincl=' + \$LosExactSelfIncl" "exact_selfexcl=' + \$LosExactSelfExcl" \
+  "barrel_selfincl=' + \$LosBarrelSelfIncl" "barrel_selfexcl=' + \$LosBarrelSelfExcl"; do
+  printf '%s\n' "$delayed_cue" | grep -Fq "$field" || fail "delayed LOS correlation/log field missing: $field"
+done
+
 echo "testlab observability contract tests passed"

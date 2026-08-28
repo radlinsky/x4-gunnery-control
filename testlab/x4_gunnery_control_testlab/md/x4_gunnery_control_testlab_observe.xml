@@ -486,7 +486,79 @@
                     + ' weapon=' + event.object + ' engine=' + $Aimed
                     + ' aim_uat_pitch=' + $RayAimUAT.pitch
                     + ' los_selfincl=' + $LosUatIncl + ' los_selfexcl=' + $LosUatExcl"/>
+                  <signal_cue_instantly cue="ObserveFiredLosDelayed" param="table[
+                    $projectile = event.param, $projectileid = '' + event.param,
+                    $weapon = event.object, $weaponid = '' + event.object,
+                    $aimed = $Aimed, $aimedid = '' + $Aimed, $firetime = player.age,
+                    $rayorgwlx = $RayOrgWL.x, $rayorgwly = $RayOrgWL.y, $rayorgwlz = $RayOrgWL.z,
+                    $barrelx = event.object.barrelposition.x, $barrely = event.object.barrelposition.y, $barrelz = event.object.barrelposition.z,
+                    $rayorgtlx = $RayOrgTL.x, $rayorgtly = $RayOrgTL.y, $rayorgtlz = $RayOrgTL.z,
+                    $rayfwdtlx = $RayFwdTL.x, $rayfwdtly = $RayFwdTL.y, $rayfwdtlz = $RayFwdTL.z,
+                    $losentryt = $LosEntryT
+                  ]"/>
                 </do_if>
+              </actions>
+            </cue>
+
+            <!-- Repeat only the explicit-endpoint discriminator after one
+                 second. Geometry is transported as scalars so an expired
+                 projectile cannot invalidate reconstruction or the LOS query. -->
+            <cue name="ObserveFiredLosDelayed" instantiate="true">
+              <conditions>
+                <event_cue_signalled/>
+              </conditions>
+              <delay exact="1s"/>
+              <actions>
+                <set_value name="$Payload" exact="event.param"/>
+                <set_value name="$Projectile" exact="$Payload.$projectile"/>
+                <set_value name="$ProjectileID" exact="$Payload.$projectileid"/>
+                <set_value name="$Weapon" exact="$Payload.$weapon"/>
+                <set_value name="$WeaponID" exact="$Payload.$weaponid"/>
+                <set_value name="$Aimed" exact="$Payload.$aimed"/>
+                <set_value name="$AimedID" exact="$Payload.$aimedid"/>
+                <set_value name="$FireTime" exact="$Payload.$firetime"/>
+                <do_if value="$Weapon? and $Weapon.exists and $Aimed? and $Aimed.exists">
+                  <create_position name="$RayOrgWL" object="$Weapon" space="$Weapon"
+                                   x="$Payload.$rayorgwlx" y="$Payload.$rayorgwly" z="$Payload.$rayorgwlz"/>
+                  <create_position name="$BarrelOrgWL" object="$Weapon" space="$Weapon"
+                                   x="$Payload.$barrelx" y="$Payload.$barrely" z="$Payload.$barrelz"/>
+                  <create_position name="$RayOrgTL" object="$Aimed" space="$Aimed"
+                                   x="$Payload.$rayorgtlx" y="$Payload.$rayorgtly" z="$Payload.$rayorgtlz"/>
+                  <create_position name="$RayFwdTL" object="$Aimed" space="$Aimed"
+                                   x="$Payload.$rayfwdtlx" y="$Payload.$rayfwdtly" z="$Payload.$rayfwdtlz"/>
+                  <set_value name="$LosEntryT" exact="$Payload.$losentryt"/>
+                  <set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>
+                  <set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>
+                  <set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>
+                  <set_value name="$LosTs" exact="[$LosEntryT - 0.00005, $LosEntryT, $LosEntryT + 0.00005]"/>
+                  <set_value name="$LosLabels" exact="['before', 'entry', 'inside']"/>
+                  <do_for_each name="$LosT" in="$LosTs" counter="$LosI">
+                    <create_position name="$LosEndpoint" object="$Aimed" space="$Aimed"
+                                     x="$RayOrgTL.x + $LosT * $LosDirX"
+                                     y="$RayOrgTL.y + $LosT * $LosDirY"
+                                     z="$RayOrgTL.z + $LosT * $LosDirZ"/>
+                    <check_line_of_sight name="$LosExactSelfIncl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
+                    <check_line_of_sight name="$LosExactSelfExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
+                    <check_line_of_sight name="$LosBarrelSelfIncl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"/>
+                    <check_line_of_sight name="$LosBarrelSelfExcl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"/>
+                    <debug_text text="'[X4GC TEST LOSPROBE_DELAYED] fire_t=' + $FireTime + ' delayed_t=' + player.age
+                      + ' projectile_id=' + $ProjectileID + ' projectile_exists=' + @$Projectile.exists
+                      + ' weapon_id=' + $WeaponID + ' weapon=' + $Weapon
+                      + ' aimed_id=' + $AimedID + ' aimed=' + $Aimed
+                      + ' label=' + $LosLabels.{$LosI} + ' t=' + $LosT
+                      + ' endpoint=' + $LosEndpoint
+                      + ' origin_wl=' + $RayOrgWL + ' origin_barrel=' + $BarrelOrgWL
+                      + ' exact_selfincl=' + $LosExactSelfIncl + ' exact_selfexcl=' + $LosExactSelfExcl
+                      + ' barrel_selfincl=' + $LosBarrelSelfIncl + ' barrel_selfexcl=' + $LosBarrelSelfExcl"/>
+                  </do_for_each>
+                </do_if>
+                <do_else>
+                  <debug_text text="'[X4GC TEST LOSPROBE_DELAYED] status=skipped reason=invalid_query_object'
+                    + ' fire_t=' + $FireTime + ' delayed_t=' + player.age
+                    + ' projectile_id=' + $ProjectileID + ' projectile_exists=' + @$Projectile.exists
+                    + ' weapon_id=' + $WeaponID + ' weapon=' + $Weapon + ' weapon_exists=' + @$Weapon.exists
+                    + ' aimed_id=' + $AimedID + ' aimed=' + $Aimed + ' aimed_exists=' + @$Aimed.exists"/>
+                </do_else>
               </actions>
             </cue>
 
