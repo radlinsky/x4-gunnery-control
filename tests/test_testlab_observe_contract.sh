@@ -476,6 +476,47 @@ done
 [[ $(printf '%s\n' "$mark_cue" | grep -Fc "' inrange=' + (\$Weapon.bboxdistanceto.{\$Target} le \$Weapon.maxfirerange)") -eq 2 ]] \
   || fail "r12 ObserveMark must log the raw inrange/bbox solution in both snapshot loops"
 
+# Issue #69 explicit bbox-center LOS probe. It belongs ONLY to the CONVENTIONAL
+# weapons loop (player.ship.weapons...), production conventional-turret predicate:
+# barrel origin, excludeself=false, but an explicit bbox-center targetoffset in
+# place of useaimtarget. It must not touch the missileturret loop or existing
+# los_ex/muzzle_los fields.
+mark_weapons_loop=$(printf '%s\n' "$mark_cue" | awk '/<do_for_each name="\$Weapon" in="player.ship.weapons.operational.list">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
+mark_missiles_loop=$(printf '%s\n' "$mark_cue" | awk '/<do_for_each name="\$Weapon" in="player.ship.missileturrets.operational.list">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
+[[ -n "$mark_weapons_loop" && -n "$mark_missiles_loop" ]] \
+  || fail "ObserveMark conventional/missileturret loops not both found"
+# Existing shared fields must remain in both loops (unchanged).
+for field in "' los_ex=' + \$LosEx" "' muzzle_los_ex=' + \$MuzzleLosEx" "' muzzle_los_self=' + \$MuzzleLosSelf"; do
+  printf '%s\n' "$mark_weapons_loop" | grep -Fq "$field" \
+    || fail "conventional loop lost existing field: $field"
+  printf '%s\n' "$mark_missiles_loop" | grep -Fq "$field" \
+    || fail "missileturret loop lost existing field: $field"
+done
+# The explicit target-local bbox-center position: object=$Target space=$Target,
+# macro.boundingbox.center x/y/z.
+printf '%s\n' "$mark_weapons_loop" | grep -Fq '<create_position name="$BboxCenter" object="$Target" space="$Target"' \
+  || fail "issue 69 bbox-center probe is not a target-local position"
+for coord in \
+  'x="$Target.macro.boundingbox.center.x"' \
+  'y="$Target.macro.boundingbox.center.y"' \
+  'z="$Target.macro.boundingbox.center.z"'; do
+  printf '%s\n' "$mark_weapons_loop" | grep -Fq "$coord" \
+    || fail "issue 69 bbox-center position lost the macro bbox-center coordinate: $coord"
+done
+# The companion LOS: production-aligned attributes except targetoffset/useaimtarget.
+bboxcenter_query_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc 'name="$BboxCenterLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$BboxCenter" useaimtarget="false" excludeself="false"')
+[[ "$bboxcenter_query_count" -eq 1 ]] \
+  || fail "expected exactly one production-aligned bbox-center LOS query in the conventional loop, found $bboxcenter_query_count"
+# New telemetry fields appear in the conventional SOLUTION line.
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "' bboxcenter_los=' + \$BboxCenterLos" \
+  || fail "conventional SOLUTION line lost bboxcenter_los telemetry"
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "' bboxcenter=' + \$BboxCenter" \
+  || fail "conventional SOLUTION line lost bboxcenter telemetry"
+# The missileturret loop must NOT gain the bbox-center probe.
+if printf '%s\n' "$mark_missiles_loop" | grep -Fq 'BboxCenter'; then
+  fail "issue 69 bbox-center probe must not appear in the missileturret loop"
+fi
+
 # MD ObserveFired: listens on the armed firing-weapon group and logs the exact
 # emitter (event.object), the aimed target, and the exact aim error.
 printf '%s\n' "$fired_cue" | grep -Fq "<event_weapon_fired group=\"\$FiringWeapons\"/>" \
