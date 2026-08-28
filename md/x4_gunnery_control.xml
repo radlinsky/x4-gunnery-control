@@ -272,22 +272,24 @@
                         </do_for_each>
                         <remove_value name="$modules"/>
                       </do_if>
-                      <!-- Bounded surface-element line-of-fire fallback (#69). The
-                           root useaimtarget ray above samples a SINGLE hittable
-                           aim point of the victim mesh; live proof on the selected
-                           Argon L engine shows that point (and the bbox centre)
-                           self-block while X4 fires at and hits a different in-arc
-                           point of the same component. When the target is a child
-                           surface element (its .defensible resolves to the parent
-                           ship/station, i.e. $target != $target.defensible, which
-                           is the complement of the whole-root module fallback
-                           above) on a conventional turret, probe a fixed handful of
-                           interior bounding-box points and accept on the first one
-                           with a clear muzzle ray. bbox min per axis = 2*center -
-                           max (repo idiom). Six face-interior samples only: two per
-                           axis at 0.25/0.75 with the others centred; this is a
-                           bounded diagnostic-derived witness set, not a
-                           reproduction of native fire-control sampling. -->
+                      <!-- Bounded surface-element line-of-fire fallback (#69).
+                           The root useaimtarget query above can report blocked for
+                           an exact child component even when X4 subsequently fires
+                           at and hits that same component. In the controlled Argon
+                           L engine fixture, the explicit bbox centre also reports
+                           blocked while multiple off-centre target-local samples
+                           report clear. The native controller target/collision
+                           point is not exposed, so this bounded sample set is a
+                           diagnostic-derived visibility approximation, not a claim
+                           about X4's internal firing-point selection. When the
+                           target is a child surface element (its .defensible
+                           resolves to the parent ship/station, i.e.
+                           $target != $target.defensible, the complement of the
+                           whole-root module fallback above) on a conventional
+                           turret, probe a fixed handful of interior bbox points and
+                           accept on the first clear muzzle ray. bbox min per axis =
+                           2*center - max (repo idiom). Six face-interior samples
+                           only: two per axis at 0.25/0.75 with the others centred. -->
                       <do_if value="not $lineoffireclear
                                     and $weapon.class != class.missileturret
                                     and $target != $target.defensible">
