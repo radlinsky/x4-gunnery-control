@@ -116,7 +116,7 @@
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-69-combined-three-role-r1",
+    id      = "issue-69-combined-three-role-r2",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro",

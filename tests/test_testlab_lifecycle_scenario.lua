@@ -734,7 +734,7 @@ local function shippedTwoPhaseToQualify()
         "Paranid L shooter transport must carry its exact geometry macro/count")
     local requestId = events[1].params.requestId
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-69-combined-three-role-r1:5:0:0:0:0:0:0:4:20:0:0:3:4:1:0:0:0:0:0:0:2:2:1:1:0:0")
+        "x4gct8:" .. requestId .. ":issue-69-combined-three-role-r2:5:0:0:0:0:0:0:4:20:0:0:3:4:1:0:0:0:0:0:0:2:2:1:1:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending"),
         "OOS Paranid L survey must verify census and report geometry PENDING")
@@ -1191,7 +1191,7 @@ local expectedStraddleTarget = {
 do
     local shipped = dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
     assert(type(shipped) == "table" and shipped.enabled == false, "the repository fixture must load and remain disabled")
-    assert(shipped.id == "issue-69-combined-three-role-r1" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
+    assert(shipped.id == "issue-69-combined-three-role-r2" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
             and shipped.setup.turretGroup == "group_front_up_mid2" and shipped.setup.turretLabel == "Front Upper Mid Plasma"
             and shipped.setup.expectedTurrets == 1 and shipped.setup.selectAll == false,
         "the combined fixture must retain its exact Plasma-only initial setup")
@@ -1272,7 +1272,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-69-combined-three-role-r1", 1, true),
+    assert(specLabelText:find("issue-69-combined-three-role-r2", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)
