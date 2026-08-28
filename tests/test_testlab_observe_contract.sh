@@ -496,17 +496,17 @@ for field in "' los_ex=' + \$LosEx" "' muzzle_los_ex=' + \$MuzzleLosEx" "' muzzl
 done
 # The explicit target-local bbox-center position: object=$Target space=$Target,
 # macro.boundingbox.center x/y/z.
-printf '%s\n' "$mark_weapons_loop" | grep -Fq '<create_position name="$BboxCenter" object="$Target" space="$Target"' \
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "<create_position name=\"\$BboxCenter\" object=\"\$Target\" space=\"\$Target\"" \
   || fail "issue 69 bbox-center probe is not a target-local position"
 for coord in \
-  'x="$Target.macro.boundingbox.center.x"' \
-  'y="$Target.macro.boundingbox.center.y"' \
-  'z="$Target.macro.boundingbox.center.z"'; do
+  "x=\"\$Target.macro.boundingbox.center.x\"" \
+  "y=\"\$Target.macro.boundingbox.center.y\"" \
+  "z=\"\$Target.macro.boundingbox.center.z\""; do
   printf '%s\n' "$mark_weapons_loop" | grep -Fq "$coord" \
     || fail "issue 69 bbox-center position lost the macro bbox-center coordinate: $coord"
 done
 # The companion LOS: production-aligned attributes except targetoffset/useaimtarget.
-bboxcenter_query_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc 'name="$BboxCenterLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$BboxCenter" useaimtarget="false" excludeself="false"')
+bboxcenter_query_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc "name=\"\$BboxCenterLos\" object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Target\" targetoffset=\"\$BboxCenter\" useaimtarget=\"false\" excludeself=\"false\"")
 [[ "$bboxcenter_query_count" -eq 1 ]] \
   || fail "expected exactly one production-aligned bbox-center LOS query in the conventional loop, found $bboxcenter_query_count"
 # New telemetry fields appear in the conventional SOLUTION line.
@@ -523,30 +523,30 @@ fi
 # weapons loop, samples the z-centre midplane at x/y fractions {0.25,0.50,0.75}, and
 # runs exactly nine production-aligned LOS queries. bbox-center and existing probes
 # must remain unchanged.
-grid_los_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc 'name="$GridLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$GridPoint" useaimtarget="false" excludeself="false"')
+grid_los_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc "name=\"\$GridLos\" object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Target\" targetoffset=\"\$GridPoint\" useaimtarget=\"false\" excludeself=\"false\"")
 [[ "$grid_los_count" -eq 1 ]] \
   || fail "expected one production-aligned grid LOS query text (looped 3x3), found $grid_los_count"
 # The nested fraction loops must run 3x3 = 9 samples: both iterate {0.25,0.50,0.75}.
-[[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<set_value name="$GridFracs" exact="[0.25, 0.50, 0.75]"/>') -eq 1 ]] \
+[[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc "<set_value name=\"\$GridFracs\" exact=\"[0.25, 0.50, 0.75]\"/>") -eq 1 ]] \
   || fail "grid x/y fraction list is not exactly 0.25/0.50/0.75"
-printf '%s\n' "$mark_weapons_loop" | grep -Fq '<do_for_each name="$GridXFrac" in="$GridFracs">' \
-  || fail "grid does not iterate x fractions over $GridFracs"
-printf '%s\n' "$mark_weapons_loop" | grep -Fq '<do_for_each name="$GridYFrac" in="$GridFracs">' \
-  || fail "grid does not iterate y fractions over $GridFracs"
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "<do_for_each name=\"\$GridXFrac\" in=\"\$GridFracs\">" \
+  || fail "grid does not iterate x fractions over \$GridFracs"
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "<do_for_each name=\"\$GridYFrac\" in=\"\$GridFracs\">" \
+  || fail "grid does not iterate y fractions over \$GridFracs"
 # Every grid endpoint is target-local, on the z-centre midplane.
-printf '%s\n' "$mark_weapons_loop" | grep -Fq '<create_position name="$GridPoint" object="$Target" space="$Target"' \
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "<create_position name=\"\$GridPoint\" object=\"\$Target\" space=\"\$Target\"" \
   || fail "grid endpoint is not a target-local position"
 for coord in \
-  'x="$GridLoX + $GridXFrac * $GridSpanX"' \
-  'y="$GridLoY + $GridYFrac * $GridSpanY"' \
-  'z="$Target.macro.boundingbox.center.z"'; do
+  "x=\"\$GridLoX + \$GridXFrac * \$GridSpanX\"" \
+  "y=\"\$GridLoY + \$GridYFrac * \$GridSpanY\"" \
+  "z=\"\$Target.macro.boundingbox.center.z\""; do
   printf '%s\n' "$mark_weapons_loop" | grep -Fq "$coord" \
     || fail "grid endpoint formula changed: $coord"
 done
 # min.axis = 2*center - max idiom, reused from the delayed slab math.
-printf '%s\n' "$mark_weapons_loop" | grep -Fq '<set_value name="$GridLoX" exact="2 * $Target.macro.boundingbox.center.x - $Target.macro.boundingbox.max.x"/>' \
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "<set_value name=\"\$GridLoX\" exact=\"2 * \$Target.macro.boundingbox.center.x - \$Target.macro.boundingbox.max.x\"/>" \
   || fail "grid min.x does not use the 2*center - max idiom"
-printf '%s\n' "$mark_weapons_loop" | grep -Fq '<set_value name="$GridLoY" exact="2 * $Target.macro.boundingbox.center.y - $Target.macro.boundingbox.max.y"/>' \
+printf '%s\n' "$mark_weapons_loop" | grep -Fq "<set_value name=\"\$GridLoY\" exact=\"2 * \$Target.macro.boundingbox.center.y - \$Target.macro.boundingbox.max.y\"/>" \
   || fail "grid min.y does not use the 2*center - max idiom"
 # LOSGRID logs label/weapon/target/sample/xfrac/yfrac/endpoint/point_wl/los.
 for field in '[X4GC TEST LOSGRID]' "label=' + \$Label" "weapon=' + \$Weapon" "target=' + \$Target" \
@@ -559,19 +559,19 @@ done
 # per grid loop. $GridPoint is authored in $Target space, so the conversion must
 # anchor object="$Target" while space="$Weapon" to actually reach weapon space;
 # anchoring object="$Weapon" returned identity. No new LOS query.
-grid_wl_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<create_position name="$GridPointWL"')
+grid_wl_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc "<create_position name=\"\$GridPointWL\"")
 [[ "$grid_wl_count" -eq 1 ]] \
   || fail "expected exactly one weapon-local \$GridPointWL transform in the grid loop, found $grid_wl_count"
-for attr in 'object="$Target"' 'space="$Weapon"' 'value="$GridPoint"/>'; do
+for attr in "object=\"\$Target\"" "space=\"\$Weapon\"" "value=\"\$GridPoint\"/>"; do
   printf '%s\n' "$mark_weapons_loop" | grep -Fq "$attr" \
     || fail "\$GridPointWL conversion lost required attribute: $attr"
 done
 # The old identity form (object=$Weapon space=$Weapon) must be gone.
-if printf '%s\n' "$mark_weapons_loop" | grep -Fq '<create_position name="$GridPointWL" object="$Weapon" space="$Weapon" value="$GridPoint"/>'; then
+if printf '%s\n' "$mark_weapons_loop" | grep -Fq "<create_position name=\"\$GridPointWL\" object=\"\$Weapon\" space=\"\$Weapon\" value=\"\$GridPoint\"/>"; then
   fail "\$GridPointWL still uses the identity object=\$Weapon space=\$Weapon form"
 fi
 # The weapon-local telemetry must not add a second LOS query to the grid loop.
-[[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<check_line_of_sight name="$GridLos"') -eq 1 ]] \
+[[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc "<check_line_of_sight name=\"\$GridLos\"") -eq 1 ]] \
   || fail "weapon-local grid telemetry changed the grid LOS query count"
 # The grid must not appear in the missileturret loop.
 if printf '%s\n' "$mark_missiles_loop" | grep -Fq 'LOSGRID'; then
@@ -698,57 +698,57 @@ done
 # Issue #69 whole-AABB segment sweep. The FIRED cue must compute the slab exit T
 # as the min over axes of the per-axis far intersections, and preserve it into
 # the delayed payload alongside the existing entry T.
-printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosFarX" exact="[($LosLoX - $RayOrgTL.x) / $LosDirX, ($LosHiX - $RayOrgTL.x) / $LosDirX].max"/>' \
+printf '%s\n' "$los_cue" | grep -Fq "<set_value name=\"\$LosFarX\" exact=\"[(\$LosLoX - \$RayOrgTL.x) / \$LosDirX, (\$LosHiX - \$RayOrgTL.x) / \$LosDirX].max\"/>" \
   || fail "FIRED cue does not compute the X far-plane slab intersection"
-printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosFarY" exact="[($LosLoY - $RayOrgTL.y) / $LosDirY, ($LosHiY - $RayOrgTL.y) / $LosDirY].max"/>' \
+printf '%s\n' "$los_cue" | grep -Fq "<set_value name=\"\$LosFarY\" exact=\"[(\$LosLoY - \$RayOrgTL.y) / \$LosDirY, (\$LosHiY - \$RayOrgTL.y) / \$LosDirY].max\"/>" \
   || fail "FIRED cue does not compute the Y far-plane slab intersection"
-printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosFarZ" exact="[($LosLoZ - $RayOrgTL.z) / $LosDirZ, ($LosHiZ - $RayOrgTL.z) / $LosDirZ].max"/>' \
+printf '%s\n' "$los_cue" | grep -Fq "<set_value name=\"\$LosFarZ\" exact=\"[(\$LosLoZ - \$RayOrgTL.z) / \$LosDirZ, (\$LosHiZ - \$RayOrgTL.z) / \$LosDirZ].max\"/>" \
   || fail "FIRED cue does not compute the Z far-plane slab intersection"
-printf '%s\n' "$los_cue" | grep -Fq '<set_value name="$LosExitT" exact="[[$LosFarX, $LosFarY].min, $LosFarZ].min"/>' \
+printf '%s\n' "$los_cue" | grep -Fq "<set_value name=\"\$LosExitT\" exact=\"[[\$LosFarX, \$LosFarY].min, \$LosFarZ].min\"/>" \
   || fail "FIRED cue exit T is not the min over axes of the per-axis far intersections"
 for payload_assignment in \
   "\$projectileid = '' + event.param" \
   "\$weaponid = '' + event.object" \
   "\$aimedid = '' + \$Aimed" \
-  '$firetime = player.age' \
-  '$rayorgwlx = $RayOrgWL.x' '$rayorgwly = $RayOrgWL.y' '$rayorgwlz = $RayOrgWL.z' \
-  '$barrelx = event.object.barrelposition.x' '$barrely = event.object.barrelposition.y' '$barrelz = event.object.barrelposition.z' \
-  '$rayorgtlx = $RayOrgTL.x' '$rayorgtly = $RayOrgTL.y' '$rayorgtlz = $RayOrgTL.z' \
-  '$rayfwdtlx = $RayFwdTL.x' '$rayfwdtly = $RayFwdTL.y' '$rayfwdtlz = $RayFwdTL.z' \
-  '$losentryt = $LosEntryT' '$losexitt = $LosExitT'; do
+  "\$firetime = player.age" \
+  "\$rayorgwlx = \$RayOrgWL.x" "\$rayorgwly = \$RayOrgWL.y" "\$rayorgwlz = \$RayOrgWL.z" \
+  "\$barrelx = event.object.barrelposition.x" "\$barrely = event.object.barrelposition.y" "\$barrelz = event.object.barrelposition.z" \
+  "\$rayorgtlx = \$RayOrgTL.x" "\$rayorgtly = \$RayOrgTL.y" "\$rayorgtlz = \$RayOrgTL.z" \
+  "\$rayfwdtlx = \$RayFwdTL.x" "\$rayfwdtly = \$RayFwdTL.y" "\$rayfwdtlz = \$RayFwdTL.z" \
+  "\$losentryt = \$LosEntryT" "\$losexitt = \$LosExitT"; do
   printf '%s\n' "$los_cue" | grep -Fq "$payload_assignment" || fail "delayed LOS payload lost exact fire-time assignment: $payload_assignment"
 done
 
 for binding in \
-  '<set_value name="$Payload" exact="event.param"/>' \
-  '<set_value name="$Projectile" exact="$Payload.$projectile"/>' \
-  '<set_value name="$ProjectileID" exact="$Payload.$projectileid"/>' \
-  '<set_value name="$Weapon" exact="$Payload.$weapon"/>' \
-  '<set_value name="$WeaponID" exact="$Payload.$weaponid"/>' \
-  '<set_value name="$Aimed" exact="$Payload.$aimed"/>' \
-  '<set_value name="$AimedID" exact="$Payload.$aimedid"/>' \
-  '<set_value name="$FireTime" exact="$Payload.$firetime"/>'; do
+  "<set_value name=\"\$Payload\" exact=\"event.param\"/>" \
+  "<set_value name=\"\$Projectile\" exact=\"\$Payload.\$projectile\"/>" \
+  "<set_value name=\"\$ProjectileID\" exact=\"\$Payload.\$projectileid\"/>" \
+  "<set_value name=\"\$Weapon\" exact=\"\$Payload.\$weapon\"/>" \
+  "<set_value name=\"\$WeaponID\" exact=\"\$Payload.\$weaponid\"/>" \
+  "<set_value name=\"\$Aimed\" exact=\"\$Payload.\$aimed\"/>" \
+  "<set_value name=\"\$AimedID\" exact=\"\$Payload.\$aimedid\"/>" \
+  "<set_value name=\"\$FireTime\" exact=\"\$Payload.\$firetime\"/>"; do
   printf '%s\n' "$delayed_cue" | grep -Fq "$binding" || fail "delayed LOS payload extraction lost: $binding"
 done
 for reconstruction in \
-  '<create_position name="$RayOrgWL" object="$Weapon" space="$Weapon"' \
-  'x="$Payload.$rayorgwlx" y="$Payload.$rayorgwly" z="$Payload.$rayorgwlz"/>' \
-  '<create_position name="$BarrelOrgWL" object="$Weapon" space="$Weapon"' \
-  'x="$Payload.$barrelx" y="$Payload.$barrely" z="$Payload.$barrelz"/>' \
-  '<create_position name="$RayOrgTL" object="$Aimed" space="$Aimed"' \
-  'x="$Payload.$rayorgtlx" y="$Payload.$rayorgtly" z="$Payload.$rayorgtlz"/>' \
-  '<create_position name="$RayFwdTL" object="$Aimed" space="$Aimed"' \
-  'x="$Payload.$rayfwdtlx" y="$Payload.$rayfwdtly" z="$Payload.$rayfwdtlz"/>' \
-  '<set_value name="$LosEntryT" exact="$Payload.$losentryt"/>' \
-  '<set_value name="$LosExitT" exact="$Payload.$losexitt"/>' \
-  '<set_value name="$LosDirX" exact="$RayFwdTL.x - $RayOrgTL.x"/>' \
-  '<set_value name="$LosDirY" exact="$RayFwdTL.y - $RayOrgTL.y"/>' \
-  '<set_value name="$LosDirZ" exact="$RayFwdTL.z - $RayOrgTL.z"/>'; do
+  "<create_position name=\"\$RayOrgWL\" object=\"\$Weapon\" space=\"\$Weapon\"" \
+  "x=\"\$Payload.\$rayorgwlx\" y=\"\$Payload.\$rayorgwly\" z=\"\$Payload.\$rayorgwlz\"/>" \
+  "<create_position name=\"\$BarrelOrgWL\" object=\"\$Weapon\" space=\"\$Weapon\"" \
+  "x=\"\$Payload.\$barrelx\" y=\"\$Payload.\$barrely\" z=\"\$Payload.\$barrelz\"/>" \
+  "<create_position name=\"\$RayOrgTL\" object=\"\$Aimed\" space=\"\$Aimed\"" \
+  "x=\"\$Payload.\$rayorgtlx\" y=\"\$Payload.\$rayorgtly\" z=\"\$Payload.\$rayorgtlz\"/>" \
+  "<create_position name=\"\$RayFwdTL\" object=\"\$Aimed\" space=\"\$Aimed\"" \
+  "x=\"\$Payload.\$rayfwdtlx\" y=\"\$Payload.\$rayfwdtly\" z=\"\$Payload.\$rayfwdtlz\"/>" \
+  "<set_value name=\"\$LosEntryT\" exact=\"\$Payload.\$losentryt\"/>" \
+  "<set_value name=\"\$LosExitT\" exact=\"\$Payload.\$losexitt\"/>" \
+  "<set_value name=\"\$LosDirX\" exact=\"\$RayFwdTL.x - \$RayOrgTL.x\"/>" \
+  "<set_value name=\"\$LosDirY\" exact=\"\$RayFwdTL.y - \$RayOrgTL.y\"/>" \
+  "<set_value name=\"\$LosDirZ\" exact=\"\$RayFwdTL.z - \$RayOrgTL.z\"/>"; do
   printf '%s\n' "$delayed_cue" | grep -Fq "$reconstruction" || fail "delayed LOS scalar reconstruction lost: $reconstruction"
 done
-printf '%s\n' "$delayed_cue" | grep -Fq '<do_if value="$Weapon? and $Weapon.exists and $Aimed? and $Aimed.exists">' \
+printf '%s\n' "$delayed_cue" | grep -Fq "<do_if value=\"\$Weapon? and \$Weapon.exists and \$Aimed? and \$Aimed.exists\">" \
   || fail "delayed LOS evaluation is not gated on weapon and aimed existence"
-if printf '%s\n' "$delayed_cue" | grep -F '<do_if value=' | grep -Fq '$Projectile.exists'; then
+if printf '%s\n' "$delayed_cue" | grep -F '<do_if value=' | grep -Fq "\$Projectile.exists"; then
   fail "delayed LOS evaluation must never be gated on projectile existence"
 fi
 printf '%s\n' "$delayed_cue" | grep -Fq 'status=skipped reason=invalid_query_object' \
@@ -759,17 +759,17 @@ done
 
 # Reconstruct the same three anchored target-local endpoints from saved scalar
 # geometry, then run exactly four explicit-offset variants per loop iteration.
-printf '%s\n' "$delayed_cue" | grep -Fq '<set_value name="$LosTs" exact="[$LosEntryT - 0.00005, $LosEntryT, $LosEntryT + 0.00005]"/>' \
+printf '%s\n' "$delayed_cue" | grep -Fq "<set_value name=\"\$LosTs\" exact=\"[\$LosEntryT - 0.00005, \$LosEntryT, \$LosEntryT + 0.00005]\"/>" \
   || fail "delayed LOS probe lost the exact before/entry/inside parameters"
-printf '%s\n' "$delayed_cue" | grep -Fq '<set_value name="$LosLabels" exact="['"'"'before'"'"', '"'"'entry'"'"', '"'"'inside'"'"']"/>' \
+printf '%s\n' "$delayed_cue" | grep -Fq "<set_value name=\"\$LosLabels\" exact=\"['before', 'entry', 'inside']\"/>" \
   || fail "delayed LOS probe lost the endpoint labels"
 delayed_loop=$(printf '%s\n' "$delayed_cue" | awk '/<do_for_each name="\$LosT" in="\$LosTs" counter="\$LosI">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
-printf '%s\n' "$delayed_loop" | grep -Fq '<create_position name="$LosEndpoint" object="$Aimed" space="$Aimed"' \
+printf '%s\n' "$delayed_loop" | grep -Fq "<create_position name=\"\$LosEndpoint\" object=\"\$Aimed\" space=\"\$Aimed\"" \
   || fail "delayed LOS endpoint is not anchored to the saved aimed component"
 for coordinate in \
-  'x="$RayOrgTL.x + $LosT * $LosDirX"' \
-  'y="$RayOrgTL.y + $LosT * $LosDirY"' \
-  'z="$RayOrgTL.z + $LosT * $LosDirZ"'; do
+  "x=\"\$RayOrgTL.x + \$LosT * \$LosDirX\"" \
+  "y=\"\$RayOrgTL.y + \$LosT * \$LosDirY\"" \
+  "z=\"\$RayOrgTL.z + \$LosT * \$LosDirZ\""; do
   printf '%s\n' "$delayed_loop" | grep -Fq "$coordinate" || fail "delayed LOS endpoint formula changed: $coordinate"
 done
 # Four child probes (exact/barrel x self-incl/self-excl) plus one root probe —
@@ -777,13 +777,13 @@ done
 [[ $(printf '%s\n' "$delayed_loop" | grep -Fc '<check_line_of_sight ') -eq 5 ]] \
   || fail "delayed LOS endpoint loop must contain exactly five LOS calls (four child + one root)"
 for query in \
-  'name="$LosExactSelfIncl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"' \
-  'name="$LosExactSelfExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"' \
-  'name="$LosBarrelSelfIncl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="false"' \
-  'name="$LosBarrelSelfExcl" object="$Weapon" objectoffset="$BarrelOrgWL" target="$Aimed" targetoffset="$LosEndpoint" useaimtarget="false" excludeself="true"'; do
+  "name=\"\$LosExactSelfIncl\" object=\"\$Weapon\" objectoffset=\"\$RayOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"false\"" \
+  "name=\"\$LosExactSelfExcl\" object=\"\$Weapon\" objectoffset=\"\$RayOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"true\"" \
+  "name=\"\$LosBarrelSelfIncl\" object=\"\$Weapon\" objectoffset=\"\$BarrelOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"false\"" \
+  "name=\"\$LosBarrelSelfExcl\" object=\"\$Weapon\" objectoffset=\"\$BarrelOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosEndpoint\" useaimtarget=\"false\" excludeself=\"true\""; do
   printf '%s\n' "$delayed_loop" | grep -Fq "$query" || fail "delayed LOS loop lost required query: $query"
 done
-if printf '%s\n' "$delayed_cue" | grep -Fq 'useaimtarget="true"'; then
+if printf '%s\n' "$delayed_cue" | grep -Fq "useaimtarget=\"true\""; then
   fail "delayed LOS observer must not add a useaimtarget baseline"
 fi
 
@@ -791,11 +791,11 @@ fi
 # endpoint, and exactly one $LosRootExcl query matching $LosExactSelfExcl except
 # target identity. The do_else must emit aimed_ship=none root_excl=skipped so the
 # unavailable case is observable rather than silently zeroed.
-printf '%s\n' "$delayed_loop" | grep -Fq '@$Aimed.ship and $Aimed.ship.exists' \
-  || fail "delayed root discriminator does not guard $Aimed.ship before the root LOS query"
-printf '%s\n' "$delayed_loop" | grep -Fq '<create_position name="$LosEndpointRoot" object="$Aimed.ship" space="$Aimed.ship" value="$LosEndpoint"/>' \
+printf '%s\n' "$delayed_loop" | grep -Fq "@\$Aimed.ship and \$Aimed.ship.exists" \
+  || fail "delayed root discriminator does not guard \$Aimed.ship before the root LOS query"
+printf '%s\n' "$delayed_loop" | grep -Fq "<create_position name=\"\$LosEndpointRoot\" object=\"\$Aimed.ship\" space=\"\$Aimed.ship\" value=\"\$LosEndpoint\"/>" \
   || fail "delayed root discriminator does not re-express endpoint in root-ship space"
-root_excl_count=$(printf '%s\n' "$delayed_loop" | grep -Fc 'name="$LosRootExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed.ship" targetoffset="$LosEndpointRoot" useaimtarget="false" excludeself="true"')
+root_excl_count=$(printf '%s\n' "$delayed_loop" | grep -Fc "name=\"\$LosRootExcl\" object=\"\$Weapon\" objectoffset=\"\$RayOrgWL\" target=\"\$Aimed.ship\" targetoffset=\"\$LosEndpointRoot\" useaimtarget=\"false\" excludeself=\"true\"")
 [[ "$root_excl_count" -eq 1 ]] \
   || fail "expected exactly one \$LosRootExcl root LOS query per delayed endpoint, found $root_excl_count"
 printf '%s\n' "$delayed_loop" | grep -Fq "' aimed_ship=' + @\$Aimed.ship + ' root_excl=' + \$LosRootExcl" \
@@ -822,27 +822,27 @@ segment_loop=$(printf '%s\n' "$delayed_cue" | awk '/<do_for_each name="\$LosSegF
 [[ -n "$segment_loop" ]] || fail "delayed cue lacks the separate whole-AABB segment sweep loop"
 # The before/entry/inside loop and root probe must remain unchanged (asserted above);
 # the segment sweep must not be folded into that loop.
-if printf '%s\n' "$delayed_loop" | grep -Fq 'LosSegFrac'; then
+if printf '%s\n' "$delayed_loop" | grep -Fq "LosSegFrac"; then
   fail "segment sweep must be a separate loop, not folded into the before/entry/inside loop"
 fi
-seg_fracs_decl='<set_value name="$LosSegFracs" exact="[0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]"/>'
+seg_fracs_decl="<set_value name=\"\$LosSegFracs\" exact=\"[0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]\"/>"
 printf '%s\n' "$delayed_cue" | grep -Fq "$seg_fracs_decl" \
   || fail "segment sweep does not define the 21 fractions spanning 0.00..1.00"
 seg_frac_count=$(printf '%s\n' "$seg_fracs_decl" | grep -oE '\b(0\.[0-9][0-9]|1\.00)\b' | wc -l | tr -d ' ')
 [[ "$seg_frac_count" -eq 21 ]] || fail "expected 21 segment fractions, found $seg_frac_count"
-printf '%s\n' "$segment_loop" | grep -Fq '<set_value name="$LosSegT" exact="$LosEntryT + $LosSegFrac * ($LosExitT - $LosEntryT)"/>' \
+printf '%s\n' "$segment_loop" | grep -Fq "<set_value name=\"\$LosSegT\" exact=\"\$LosEntryT + \$LosSegFrac * (\$LosExitT - \$LosEntryT)\"/>" \
   || fail "segment sample T is not entryT + frac*(exitT - entryT)"
-printf '%s\n' "$segment_loop" | grep -Fq '<create_position name="$LosSegEndpoint" object="$Aimed" space="$Aimed"' \
+printf '%s\n' "$segment_loop" | grep -Fq "<create_position name=\"\$LosSegEndpoint\" object=\"\$Aimed\" space=\"\$Aimed\"" \
   || fail "segment endpoint is not anchored to the saved aimed component"
 for coordinate in \
-  'x="$RayOrgTL.x + $LosSegT * $LosDirX"' \
-  'y="$RayOrgTL.y + $LosSegT * $LosDirY"' \
-  'z="$RayOrgTL.z + $LosSegT * $LosDirZ"'; do
+  "x=\"\$RayOrgTL.x + \$LosSegT * \$LosDirX\"" \
+  "y=\"\$RayOrgTL.y + \$LosSegT * \$LosDirY\"" \
+  "z=\"\$RayOrgTL.z + \$LosSegT * \$LosDirZ\""; do
   printf '%s\n' "$segment_loop" | grep -Fq "$coordinate" || fail "segment endpoint formula changed: $coordinate"
 done
 [[ $(printf '%s\n' "$segment_loop" | grep -Fc '<check_line_of_sight ') -eq 1 ]] \
   || fail "segment sweep loop must contain exactly one LOS call per sample"
-printf '%s\n' "$segment_loop" | grep -Fq 'name="$LosSegExcl" object="$Weapon" objectoffset="$RayOrgWL" target="$Aimed" targetoffset="$LosSegEndpoint" useaimtarget="false" excludeself="true"' \
+printf '%s\n' "$segment_loop" | grep -Fq "name=\"\$LosSegExcl\" object=\"\$Weapon\" objectoffset=\"\$RayOrgWL\" target=\"\$Aimed\" targetoffset=\"\$LosSegEndpoint\" useaimtarget=\"false\" excludeself=\"true\"" \
   || fail "segment sweep query lost its required child-target attributes"
 for field in '[X4GC TEST LOSPROBE_SEGMENT]' "fire_t=' + \$FireTime" "delayed_t=' + player.age" \
   "projectile_id=' + \$ProjectileID" "projectile_exists=' + @\$Projectile.exists" \
