@@ -464,7 +464,7 @@
                   <set_value name="$LosTs" exact="[$LosEntryT - 0.00005, $LosEntryT, $LosEntryT + 0.00005]"/>
                   <set_value name="$LosLabels" exact="['before', 'entry', 'inside']"/>
                   <do_for_each name="$LosT" in="$LosTs" counter="$LosI">
-                    <create_position name="$LosEndpoint"
+                    <create_position name="$LosEndpoint" object="$Aimed" space="$Aimed"
                                      x="$RayOrgTL.x + $LosT * $LosDirX"
                                      y="$RayOrgTL.y + $LosT * $LosDirY"
                                      z="$RayOrgTL.z + $LosT * $LosDirZ"/>
