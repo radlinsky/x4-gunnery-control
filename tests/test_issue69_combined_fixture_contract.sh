@@ -68,6 +68,8 @@ assert(mid.ox == -40.345 and mid.oy == 670.435 and mid.oz == -45.015)
 assert(mid.yaw == 213 and mid.pitch == 81 and mid.roll == 132 and mid.preserveOrientation == true)
 assert(mid.geometryRole == 'surface_mask' and mid.geometryCase == 'engine_straddle')
 assert(s.groups[3].loadout == 'issue67_argon_sky_target' and s.groups[4].loadout == 'issue67_argon_sky_target')
+assert(s.groups[3].fixtureRole == 'near_blocked' and s.groups[4].fixtureRole == 'far_clear'
+    and s.groups[3].geometryRole == nil and s.groups[4].geometryRole == nil)
 assert(s.groups[5].hostile == false and s.groups[5].repairGuard == true)
 LUA
 
@@ -79,7 +81,10 @@ switch=$(awk '/local function selectFarTestGroup\(\)/{f=1} f{print} /local funct
 
 grep -Fq "\$fixturerole = if @event.param3.\$fixtureRole" "$scenario" || fail "fixtureRole is not transported"
 sparse_remote=$(awk "/<do_elseif value=\"\\\$Def.\\\$loadout == 'issue67_argon_sky_target'.*near_blocked/{f=1} f{print} f && /<\\/do_elseif>/{exit}" "$scenario")
-[[ "$sparse_remote" == *"ScenarioRoot.\$PendingAnchorZ + \$Def.\$distance"* && "$sparse_remote" != *"\$PStar.z + \$Def.\$oz"* ]] || fail "NEAR/FAR remote spawn must use their anchor positions before live qualification"
+[[ "$sparse_remote" == *"if \$Def.\$geometryrole == 'surface_mask' then \$PStar.x + \$Def.\$ox else ScenarioRoot.\$PendingAnchorX + \$Def.\$x"* \
+   && "$sparse_remote" == *"if \$Def.\$geometryrole == 'surface_mask' then \$PStar.y + \$Def.\$oy else ScenarioRoot.\$PendingAnchorY + \$Def.\$y"* \
+   && "$sparse_remote" == *"if \$Def.\$geometryrole == 'surface_mask' then \$PStar.z + \$Def.\$oz else ScenarioRoot.\$PendingAnchorZ + \$Def.\$distance"* ]] \
+  || fail "remote surface_mask spawn must restore its historical PStar+ox/oy/oz while NEAR/FAR keep anchor positions"
 grep -Fq "near_formula=plasma_local_z_450 far_formula=beam_local_z_0.70_maxrange blocker_formula=plasma_local_z_180" "$scenario" || fail "role placement formulas missing"
 settle=$(awk '/<cue name="GeometryQualifySettle"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
 measure=$(awk '/<cue name="GeometryQualifyMeasure"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")

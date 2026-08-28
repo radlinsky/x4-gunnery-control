@@ -489,7 +489,12 @@
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
                       <loadout ref="x4gc_testlab_issue67_argon_sky_target"/>
-                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x" y="ScenarioRoot.$PendingAnchorY + $Def.$y" z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+                      <!-- Historical MID placement: surface_mask stays at
+                           PStar + ox/oy/oz; NEAR/FAR fixture roles keep their
+                           anchor positions until live qualification. -->
+                      <position x="if $Def.$geometryrole == 'surface_mask' then $PStar.x + $Def.$ox else ScenarioRoot.$PendingAnchorX + $Def.$x"
+                                y="if $Def.$geometryrole == 'surface_mask' then $PStar.y + $Def.$oy else ScenarioRoot.$PendingAnchorY + $Def.$y"
+                                z="if $Def.$geometryrole == 'surface_mask' then $PStar.z + $Def.$oz else ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_elseif>
