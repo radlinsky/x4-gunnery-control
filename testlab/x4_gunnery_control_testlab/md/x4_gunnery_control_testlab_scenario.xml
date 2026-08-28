@@ -217,6 +217,7 @@
               $loadout   = if @event.param3.$loadout   then event.param3.$loadout   else '',
               $geometryrole = if @event.param3.$geometryRole then event.param3.$geometryRole else '',
               $geometrycase = if @event.param3.$geometryCase then event.param3.$geometryCase else '',
+              $fixturerole = if @event.param3.$fixtureRole then event.param3.$fixtureRole else '',
               $expectedweapons = if @event.param3.$expectedWeapons then event.param3.$expectedWeapons else 0,
               $expectedturrets = if @event.param3.$expectedTurrets then event.param3.$expectedTurrets else 0,
               $expectedbeam = if @event.param3.$expectedBeam then event.param3.$expectedBeam else 0,
@@ -254,6 +255,10 @@
             <create_group groupname="ScenarioRoot.$SurfaceMaskTargets"/>
             <set_value name="ScenarioRoot.$SurfaceMaskPlacements" exact="[]"/>
             <set_value name="ScenarioRoot.$EngineObjectiveMode" exact="false"/>
+            <set_value name="ScenarioRoot.$Issue69CombinedRequested" exact="false"/>
+            <set_value name="ScenarioRoot.$NearTarget" exact="null"/>
+            <set_value name="ScenarioRoot.$FarTarget" exact="null"/>
+            <set_value name="ScenarioRoot.$NearBlocker" exact="null"/>
             <set_value name="$StationModules" exact="0"/>
             <set_value name="$StationTurrets" exact="0"/>
             <set_value name="$StationMissileTurrets" exact="0"/>
@@ -452,6 +457,18 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
+                  <do_elseif value="$Def.$loadout == 'issue69_paranid_dual_family'">
+                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                                 sector="$ScenarioSector" macro="macro.{$Def.$macro}">
+                      <owner exact="$Owner"/>
+                      <loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>
+                      <pilot><select faction="$Owner" tags="tag.pilot"/></pilot>
+                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
+                                y="ScenarioRoot.$PendingAnchorY + $Def.$y"
+                                z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
+                    </create_ship>
+                  </do_elseif>
                   <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
@@ -467,12 +484,12 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_elseif>
-                  <do_elseif value="$Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask'">
+                  <do_elseif value="$Def.$loadout == 'issue67_argon_sky_target' and ($Def.$geometryrole == 'surface_mask' or $Def.$fixturerole == 'near_blocked' or $Def.$fixturerole == 'far_clear')">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
                       <loadout ref="x4gc_testlab_issue67_argon_sky_target"/>
-                      <position x="$PStar.x + $Def.$ox" y="$PStar.y + $Def.$oy" z="$PStar.z + $Def.$oz"/>
+                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x" y="ScenarioRoot.$PendingAnchorY + $Def.$y" z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_elseif>
@@ -498,6 +515,15 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
+                  <do_elseif value="$Def.$loadout == 'issue69_paranid_dual_family'">
+                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                                 zone="player.zone" macro="macro.{$Def.$macro}">
+                      <owner exact="$Owner"/>
+                      <loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>
+                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
+                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
+                    </create_ship>
+                  </do_elseif>
                   <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  zone="player.zone" macro="macro.{$Def.$macro}">
@@ -507,7 +533,7 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_elseif>
-                  <do_elseif value="$Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask'">
+                  <do_elseif value="$Def.$loadout == 'issue67_argon_sky_target' and ($Def.$geometryrole == 'surface_mask' or $Def.$fixturerole == 'near_blocked' or $Def.$fixturerole == 'far_clear')">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  zone="player.zone" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
@@ -530,11 +556,11 @@
                 <do_if value="$Def.$loadout == 'issue65_odysseus_mixed_missiles'">
                   <apply_loadout object="$Ship" loadout="$Issue65OdysseusLoadout"/>
                 </do_if>
-                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and not ($Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask')">
+                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and $Def.$loadout != 'issue69_paranid_dual_family' and not ($Def.$loadout == 'issue67_argon_sky_target' and ($Def.$geometryrole == 'surface_mask' or $Def.$fixturerole == 'near_blocked' or $Def.$fixturerole == 'far_clear'))">
                   <set_value name="$LoadoutFailures" operation="add"/>
                   <debug_text text="'[X4GC TEST SCENARIO] unknown deterministic loadout=' + $Def.$loadout + ' ship=' + $Ship"/>
                 </do_elseif>
-                <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel' or $Def.$loadout == 'issue67_paranid_sky_survey'">
+                <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel' or $Def.$loadout == 'issue67_paranid_sky_survey' or $Def.$loadout == 'issue69_paranid_dual_family'">
                   <debug_text text="'[X4GC TEST SCENARIO] issue67 loadout_transport=static_ref geometry_weapon_macro=' + $Def.$geometryweaponmacro + ' expected_geometry_weapons=' + $Def.$expectedgeometryweapons + ' ship=' + $Ship"/>
                 </do_if>
 
@@ -565,6 +591,35 @@
                     <set_value name="$LoadoutFailures" operation="add"/>
                     <debug_text text="'[X4GC TEST SCENARIO] target_loadout_failed label=' + $Def.$label + ' case=' + $Def.$geometrycase + ' loadout=' + $Def.$loadout + ' turrets=' + $Ship.turrets.operational.count + ' weapons=' + $Ship.weapons.operational.count + ' missile_turrets=' + $Ship.missileturrets.operational.count + ' exact_beam=' + $TargetBeamCount"/>
                   </do_if>
+                </do_elseif>
+                <!-- Issue #69 combined roles are deliberately separate from
+                     SurfaceMaskPlacements: only MID may cross the marked-objective bridge. -->
+                <do_if value="$Def.$fixturerole == 'mid_engine' or $Def.$fixturerole == 'near_blocked' or $Def.$fixturerole == 'far_clear' or $Def.$fixturerole == 'near_blocker'">
+                  <set_value name="ScenarioRoot.$Issue69CombinedRequested" exact="true"/>
+                </do_if>
+                <do_if value="$Def.$fixturerole == 'near_blocked' or $Def.$fixturerole == 'far_clear'">
+                  <set_value name="$RoleBeamCount" exact="0"/>
+                  <do_for_each name="$RoleWeapon" in="$Ship.turrets.operational.list">
+                    <do_if value="$RoleWeapon.macro == macro.turret_arg_l_beam_01_mk1_macro">
+                      <set_value name="$RoleBeamCount" operation="add"/>
+                    </do_if>
+                  </do_for_each>
+                  <do_if value="$Def.$loadout != 'issue67_argon_sky_target' or $Ship.turrets.operational.count != 1 or $Ship.weapons.operational.count != 1 or $Ship.missileturrets.operational.count != 0 or $RoleBeamCount != 1">
+                    <set_value name="$LoadoutFailures" operation="add"/>
+                    <debug_text text="'[X4GC TEST SCENARIO] issue69_role_loadout_failed role=' + $Def.$fixturerole + ' label=' + $Def.$label + ' turrets=' + $Ship.turrets.operational.count + ' weapons=' + $Ship.weapons.operational.count + ' missile_turrets=' + $Ship.missileturrets.operational.count + ' exact_surface_beam=' + $RoleBeamCount"/>
+                  </do_if>
+                  <do_if value="$Def.$fixturerole == 'near_blocked'">
+                    <do_if value="ScenarioRoot.$NearTarget"><set_value name="$LoadoutFailures" operation="add"/></do_if>
+                    <set_value name="ScenarioRoot.$NearTarget" exact="$Ship"/>
+                  </do_if>
+                  <do_else>
+                    <do_if value="ScenarioRoot.$FarTarget"><set_value name="$LoadoutFailures" operation="add"/></do_if>
+                    <set_value name="ScenarioRoot.$FarTarget" exact="$Ship"/>
+                  </do_else>
+                </do_if>
+                <do_elseif value="$Def.$fixturerole == 'near_blocker'">
+                  <do_if value="ScenarioRoot.$NearBlocker"><set_value name="$LoadoutFailures" operation="add"/></do_if>
+                  <set_value name="ScenarioRoot.$NearBlocker" exact="$Ship"/>
                 </do_elseif>
 
                 <!-- A remotely created ship receives a dynamic zone at the
@@ -612,7 +667,7 @@
                   <set_value name="$LocalBeam" exact="0"/>
                   <set_value name="$LocalPlasma" exact="0"/>
                   <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
-                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro">
+                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro or $Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
                       <set_value name="$LocalBeam" operation="add"/>
                     </do_if>
                     <do_elseif value="$Weapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
@@ -1137,6 +1192,11 @@
             <do_if value="ScenarioRoot.$GeometryQualifyRepositionFailures?">
               <remove_value name="ScenarioRoot.$GeometryQualifyRepositionFailures"/>
             </do_if>
+            <remove_value name="ScenarioRoot.$Issue69RoleRepositionFailures"/>
+            <remove_value name="ScenarioRoot.$Issue69CombinedRequested"/>
+            <remove_value name="ScenarioRoot.$NearTarget"/>
+            <remove_value name="ScenarioRoot.$FarTarget"/>
+            <remove_value name="ScenarioRoot.$NearBlocker"/>
             <do_if value="ScenarioRoot.$GeometryStation?">
               <remove_value name="ScenarioRoot.$GeometryStation"/>
             </do_if>
@@ -1244,6 +1304,7 @@
           <actions>
             <set_value name="ScenarioRoot.$GeometryQualifyRepositioned" exact="0"/>
             <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" exact="0"/>
+            <set_value name="ScenarioRoot.$Issue69RoleRepositionFailures" exact="0"/>
             <set_value name="$RequestId" exact="ScenarioRoot.$GeometryQualifyRequestId"/>
             <do_if value="ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
                           and ScenarioRoot.$GeometryShooter.exists
@@ -1264,10 +1325,16 @@
                 </do_if>
                 <do_if value="$GeometryWeaponMacro">
                   <set_value name="$CurrentPStar" exact="null"/>
+                  <set_value name="$PlasmaWeapon" exact="null"/>
+                  <set_value name="$BeamWeapon" exact="null"/>
                   <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
                     <do_if value="$GeometryWeapon.macro == $GeometryWeaponMacro and $CurrentPStar == null">
+                      <set_value name="$PlasmaWeapon" exact="$GeometryWeapon"/>
                       <create_position name="$CurrentPStar" object="$GeometryWeapon" space="$QualifySector"/>
                     </do_if>
+                    <do_elseif value="$GeometryWeapon.macro == macro.turret_par_l_beam_01_mk1_macro and $BeamWeapon == null">
+                      <set_value name="$BeamWeapon" exact="$GeometryWeapon"/>
+                    </do_elseif>
                   </do_for_each>
                   <do_if value="not $CurrentPStar">
                     <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
@@ -1292,6 +1359,48 @@
                         <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=reposition_missing detail=target_missing target=' + $Target"/>
                       </do_if>
                     </do_for_each>
+                    <!-- Combined #69 role placement. NEAR/FAR are translated by
+                         their exact sparse surface delta; they never enter the MID
+                         placement list or marked-objective transport. -->
+                    <do_if value="ScenarioRoot.$NearTarget and ScenarioRoot.$NearTarget.exists and ScenarioRoot.$FarTarget and ScenarioRoot.$FarTarget.exists and ScenarioRoot.$NearBlocker and ScenarioRoot.$NearBlocker.exists and $PlasmaWeapon and $BeamWeapon">
+                      <set_value name="$NearSurfaces" exact="ScenarioRoot.$NearTarget.turrets.operational.list"/>
+                      <set_value name="$FarSurfaces" exact="ScenarioRoot.$FarTarget.turrets.operational.list"/>
+                      <do_if value="$NearSurfaces.count == 1 and $FarSurfaces.count == 1 and $NearSurfaces.{1}.macro == macro.turret_arg_l_beam_01_mk1_macro and $FarSurfaces.{1}.macro == macro.turret_arg_l_beam_01_mk1_macro">
+                        <set_value name="$NearSurface" exact="$NearSurfaces.{1}"/>
+                        <set_value name="$FarSurface" exact="$FarSurfaces.{1}"/>
+                        <create_position name="$NearRootSector" object="ScenarioRoot.$NearTarget" space="$QualifySector"/>
+                        <create_position name="$NearSurfaceSector" object="$NearSurface" space="$QualifySector"/>
+                        <create_position name="$NearDesiredSurface" object="$PlasmaWeapon" space="$QualifySector" x="0" y="0" z="450"/>
+                        <set_value name="$NearRotation" exact="ScenarioRoot.$NearTarget.rotation"/>
+                        <warp object="ScenarioRoot.$NearTarget" sector="$QualifySector">
+                          <position x="$NearDesiredSurface.x + $NearRootSector.x - $NearSurfaceSector.x" y="$NearDesiredSurface.y + $NearRootSector.y - $NearSurfaceSector.y" z="$NearDesiredSurface.z + $NearRootSector.z - $NearSurfaceSector.z"/>
+                          <rotation value="$NearRotation"/>
+                        </warp>
+                        <create_position name="$FarRootSector" object="ScenarioRoot.$FarTarget" space="$QualifySector"/>
+                        <create_position name="$FarSurfaceSector" object="$FarSurface" space="$QualifySector"/>
+                        <create_position name="$FarDesiredSurface" object="$BeamWeapon" space="$QualifySector" x="0" y="0" z="$BeamWeapon.maxfirerange * 0.70"/>
+                        <set_value name="$FarRotation" exact="ScenarioRoot.$FarTarget.rotation"/>
+                        <warp object="ScenarioRoot.$FarTarget" sector="$QualifySector">
+                          <position x="$FarDesiredSurface.x + $FarRootSector.x - $FarSurfaceSector.x" y="$FarDesiredSurface.y + $FarRootSector.y - $FarSurfaceSector.y" z="$FarDesiredSurface.z + $FarRootSector.z - $FarSurfaceSector.z"/>
+                          <rotation value="$FarRotation"/>
+                        </warp>
+                        <create_position name="$BlockerDesiredRoot" object="$PlasmaWeapon" space="$QualifySector" x="0" y="0" z="180"/>
+                        <set_value name="$BlockerRotation" exact="ScenarioRoot.$NearBlocker.rotation"/>
+                        <warp object="ScenarioRoot.$NearBlocker" sector="$QualifySector">
+                          <position x="$BlockerDesiredRoot.x" y="$BlockerDesiredRoot.y" z="$BlockerDesiredRoot.z"/>
+                          <rotation value="$BlockerRotation"/>
+                        </warp>
+                        <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] request_id=' + $RequestId + ' near_formula=plasma_local_z_450 far_formula=beam_local_z_0.70_maxrange blocker_formula=plasma_local_z_180 plasma=' + $PlasmaWeapon + ' beam=' + $BeamWeapon + ' beam_maxrange=' + $BeamWeapon.maxfirerange + ' near_desired=' + $NearDesiredSurface + ' far_desired=' + $FarDesiredSurface + ' blocker_desired=' + $BlockerDesiredRoot"/>
+                      </do_if>
+                      <do_else>
+                        <set_value name="ScenarioRoot.$Issue69RoleRepositionFailures" operation="add"/>
+                        <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] FAILED request_id=' + $RequestId + ' reason=nonunique_sparse_surface near_surfaces=' + $NearSurfaces.count + ' far_surfaces=' + $FarSurfaces.count"/>
+                      </do_else>
+                    </do_if>
+                    <do_else>
+                      <set_value name="ScenarioRoot.$Issue69RoleRepositionFailures" operation="add"/>
+                      <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] FAILED request_id=' + $RequestId + ' reason=role_or_weapon_missing near=' + ScenarioRoot.$NearTarget + ' far=' + ScenarioRoot.$FarTarget + ' blocker=' + ScenarioRoot.$NearBlocker + ' plasma=' + $PlasmaWeapon + ' beam=' + $BeamWeapon"/>
+                    </do_else>
                   </do_if>
                 </do_if>
               </do_if>
@@ -1673,6 +1782,100 @@
                           and ScenarioRoot.$SurfaceMaskPlacements.count ge 1)">
               <debug_text text="'[X4GC TEST QUALIFY] FAILED request_id=' + $RequestId + ' reason=preserved_object_missing shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null) + ' placement_records=' + (if ScenarioRoot.$SurfaceMaskPlacements? then ScenarioRoot.$SurfaceMaskPlacements.count else 0) + ' surface_targets=' + (if ScenarioRoot.$SurfaceMaskTargets? then ScenarioRoot.$SurfaceMaskTargets.count else 0)"/>
             </do_if>
+            <!-- Combined Issue #69 controls. These roles are explicitly unmarked;
+                 only EngineStraddleSurface is transported to Lua. -->
+            <set_value name="$Issue69Combined" exact="ScenarioRoot.$Issue69CombinedRequested? and ScenarioRoot.$Issue69CombinedRequested"/>
+            <set_value name="$Issue69RoleObjectsReady" exact="ScenarioRoot.$NearTarget and ScenarioRoot.$NearTarget.exists and ScenarioRoot.$FarTarget and ScenarioRoot.$FarTarget.exists and ScenarioRoot.$NearBlocker and ScenarioRoot.$NearBlocker.exists"/>
+            <set_value name="$NearQualified" exact="not $Issue69Combined"/>
+            <set_value name="$FarQualified" exact="not $Issue69Combined"/>
+            <do_if value="$Issue69Combined and $Issue69RoleObjectsReady">
+              <set_value name="$Issue69Plasma" exact="null"/>
+              <set_value name="$Issue69Beam" exact="null"/>
+              <set_value name="$Issue69PlasmaCount" exact="0"/>
+              <set_value name="$Issue69BeamCount" exact="0"/>
+              <do_for_each name="$Issue69Weapon" in="ScenarioRoot.$GeometryShooter.turrets.operational.list">
+                <do_if value="$Issue69Weapon.macro == macro.turret_par_l_plasma_01_mk1_macro">
+                  <set_value name="$Issue69Plasma" exact="$Issue69Weapon"/>
+                  <set_value name="$Issue69PlasmaCount" operation="add"/>
+                </do_if>
+                <do_elseif value="$Issue69Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
+                  <set_value name="$Issue69Beam" exact="$Issue69Weapon"/>
+                  <set_value name="$Issue69BeamCount" operation="add"/>
+                </do_elseif>
+              </do_for_each>
+              <set_value name="$NearRoleSurfaces" exact="ScenarioRoot.$NearTarget.turrets.operational.list"/>
+              <set_value name="$FarRoleSurfaces" exact="ScenarioRoot.$FarTarget.turrets.operational.list"/>
+              <do_if value="$EngineStraddleSurface != null and $Issue69PlasmaCount == 1 and $Issue69BeamCount == 1 and ScenarioRoot.$GeometryShooter.turrets.operational.count == 2 and ScenarioRoot.$GeometryShooter.weapons.operational.count == 2 and ScenarioRoot.$GeometryShooter.missileturrets.operational.count == 0 and $NearRoleSurfaces.count == 1 and $FarRoleSurfaces.count == 1 and $NearRoleSurfaces.{1}.macro == macro.turret_arg_l_beam_01_mk1_macro and $FarRoleSurfaces.{1}.macro == macro.turret_arg_l_beam_01_mk1_macro">
+                <set_value name="$NearRoleSurface" exact="$NearRoleSurfaces.{1}"/>
+                <set_value name="$FarRoleSurface" exact="$FarRoleSurfaces.{1}"/>
+                <set_value name="$NearRange" exact="$Issue69Plasma.bboxdistanceto.{$NearRoleSurface}"/>
+                <set_value name="$MidRange" exact="$Issue69Plasma.bboxdistanceto.{$EngineStraddleSurface}"/>
+                <create_orientation name="$NearBboxLocal" orientation="look_at_bbox" refobject="$NearRoleSurface">
+                  <position object="$Issue69Plasma" space="$Issue69Plasma"/>
+                </create_orientation>
+                <set_value name="$NearArcPass" exact="$NearBboxLocal.pitch ge -5deg and $NearBboxLocal.pitch le 80deg"/>
+                <set_value name="$NearInRange" exact="$NearRange le $Issue69Plasma.maxfirerange"/>
+                <set_value name="$NearMayAttack" exact="@ScenarioRoot.$GeometryShooter.mayattack.{$NearRoleSurface}"/>
+                <check_line_of_sight name="$NearFastLosSelf" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" useaimtarget="true" excludeself="false"/>
+                <check_line_of_sight name="$NearFastLosEx" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" useaimtarget="true" excludeself="true"/>
+                <set_value name="$NearMinX" exact="2 * $NearRoleSurface.macro.boundingbox.center.x - $NearRoleSurface.macro.boundingbox.max.x"/>
+                <set_value name="$NearMinY" exact="2 * $NearRoleSurface.macro.boundingbox.center.y - $NearRoleSurface.macro.boundingbox.max.y"/>
+                <set_value name="$NearMinZ" exact="2 * $NearRoleSurface.macro.boundingbox.center.z - $NearRoleSurface.macro.boundingbox.max.z"/>
+                <set_value name="$NearSpanX" exact="$NearRoleSurface.macro.boundingbox.max.x - $NearMinX"/>
+                <set_value name="$NearSpanY" exact="$NearRoleSurface.macro.boundingbox.max.y - $NearMinY"/>
+                <set_value name="$NearSpanZ" exact="$NearRoleSurface.macro.boundingbox.max.z - $NearMinZ"/>
+                <set_value name="$Issue69XFracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
+                <set_value name="$Issue69YFracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
+                <set_value name="$Issue69ZFracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
+                <set_value name="$NearSampleClearSelf" exact="0"/>
+                <set_value name="$NearSampleClearEx" exact="0"/>
+                <do_for_each name="$NearFrac" in="$Issue69XFracs" counter="$NearI">
+                  <create_position name="$NearSample" object="$NearRoleSurface" space="$NearRoleSurface" x="$NearMinX + $Issue69XFracs.{$NearI} * $NearSpanX" y="$NearMinY + $Issue69YFracs.{$NearI} * $NearSpanY" z="$NearMinZ + $Issue69ZFracs.{$NearI} * $NearSpanZ"/>
+                  <check_line_of_sight name="$NearSampleLosSelf" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" targetoffset="$NearSample" useaimtarget="false" excludeself="false"/>
+                  <check_line_of_sight name="$NearSampleLosEx" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" targetoffset="$NearSample" useaimtarget="false" excludeself="true"/>
+                  <do_if value="$NearSampleLosSelf"><set_value name="$NearSampleClearSelf" operation="add"/></do_if>
+                  <do_if value="$NearSampleLosEx"><set_value name="$NearSampleClearEx" operation="add"/></do_if>
+                  <debug_text text="'[X4GC TEST QUALIFY NEAR SAMPLE] request_id=' + $RequestId + ' sample=' + $NearI + ' los_self=' + $NearSampleLosSelf + ' los_ex=' + $NearSampleLosEx + ' offset=' + $NearSample"/>
+                </do_for_each>
+                <set_value name="$NearRootClearance" exact="ScenarioRoot.$NearTarget.bboxdistanceto.{ScenarioRoot.$GeometryShooter} gt 0m"/>
+                <set_value name="$BlockerClearance" exact="ScenarioRoot.$NearBlocker.bboxdistanceto.{ScenarioRoot.$GeometryShooter} gt 0m and ScenarioRoot.$NearBlocker.bboxdistanceto.{ScenarioRoot.$NearTarget} gt 0m"/>
+                <set_value name="$NearQualified" exact="$NearMayAttack and $NearInRange and $NearArcPass and $NearRange le $MidRange * 0.75 and not $NearFastLosSelf and not $NearFastLosEx and $NearSampleClearSelf == 0 and $NearSampleClearEx == 0 and $NearRootClearance and $BlockerClearance and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
+                <set_value name="$FarRange" exact="$Issue69Beam.bboxdistanceto.{$FarRoleSurface}"/>
+                <set_value name="$FarRangeRatio" exact="$FarRange / $Issue69Beam.maxfirerange"/>
+                <create_orientation name="$FarBboxLocal" orientation="look_at_bbox" refobject="$FarRoleSurface">
+                  <position object="$Issue69Beam" space="$Issue69Beam"/>
+                </create_orientation>
+                <set_value name="$FarArcPass" exact="$FarBboxLocal.pitch ge -5deg and $FarBboxLocal.pitch le 80deg"/>
+                <set_value name="$FarInRange" exact="$FarRange le $Issue69Beam.maxfirerange"/>
+                <set_value name="$FarMayAttack" exact="@ScenarioRoot.$GeometryShooter.mayattack.{$FarRoleSurface}"/>
+                <check_line_of_sight name="$FarFastLosSelf" object="$Issue69Beam" objectoffset="$Issue69Beam.barrelposition" target="$FarRoleSurface" useaimtarget="true" excludeself="false"/>
+                <check_line_of_sight name="$FarFastLosEx" object="$Issue69Beam" objectoffset="$Issue69Beam.barrelposition" target="$FarRoleSurface" useaimtarget="true" excludeself="true"/>
+                <set_value name="$FarSampleClearSelf" exact="0"/>
+                <set_value name="$FarSampleClearEx" exact="0"/>
+                <set_value name="$FarMinX" exact="2 * $FarRoleSurface.macro.boundingbox.center.x - $FarRoleSurface.macro.boundingbox.max.x"/>
+                <set_value name="$FarMinY" exact="2 * $FarRoleSurface.macro.boundingbox.center.y - $FarRoleSurface.macro.boundingbox.max.y"/>
+                <set_value name="$FarMinZ" exact="2 * $FarRoleSurface.macro.boundingbox.center.z - $FarRoleSurface.macro.boundingbox.max.z"/>
+                <set_value name="$FarSpanX" exact="$FarRoleSurface.macro.boundingbox.max.x - $FarMinX"/>
+                <set_value name="$FarSpanY" exact="$FarRoleSurface.macro.boundingbox.max.y - $FarMinY"/>
+                <set_value name="$FarSpanZ" exact="$FarRoleSurface.macro.boundingbox.max.z - $FarMinZ"/>
+                <do_for_each name="$FarFrac" in="$Issue69XFracs" counter="$FarI">
+                  <create_position name="$FarSample" object="$FarRoleSurface" space="$FarRoleSurface" x="$FarMinX + $Issue69XFracs.{$FarI} * $FarSpanX" y="$FarMinY + $Issue69YFracs.{$FarI} * $FarSpanY" z="$FarMinZ + $Issue69ZFracs.{$FarI} * $FarSpanZ"/>
+                  <check_line_of_sight name="$FarSampleLosSelf" object="$Issue69Beam" objectoffset="$Issue69Beam.barrelposition" target="$FarRoleSurface" targetoffset="$FarSample" useaimtarget="false" excludeself="false"/>
+                  <check_line_of_sight name="$FarSampleLosEx" object="$Issue69Beam" objectoffset="$Issue69Beam.barrelposition" target="$FarRoleSurface" targetoffset="$FarSample" useaimtarget="false" excludeself="true"/>
+                  <do_if value="$FarSampleLosSelf"><set_value name="$FarSampleClearSelf" operation="add"/></do_if>
+                  <do_if value="$FarSampleLosEx"><set_value name="$FarSampleClearEx" operation="add"/></do_if>
+                </do_for_each>
+                <set_value name="$FarQualified" exact="$FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and ($FarFastLosSelf or $FarSampleClearSelf gt 0) and ($FarFastLosEx or $FarSampleClearEx gt 0) and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
+                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=NEAR_BLOCKED target=' + ScenarioRoot.$NearTarget + ' target_id=' + ScenarioRoot.$NearTarget.idcode + ' surface=' + $NearRoleSurface + ' surface_id=' + $NearRoleSurface.idcode + ' surface_macro=' + $NearRoleSurface.macro + ' weapon=' + $Issue69Plasma + ' weapon_macro=' + $Issue69Plasma.macro + ' mayattack=' + $NearMayAttack + ' range=' + $NearRange + ' mid_range=' + $MidRange + ' inrange=' + $NearInRange + ' bbox_pitch=' + $NearBboxLocal.pitch + ' arc_pass=' + $NearArcPass + ' fast_los_self=' + $NearFastLosSelf + ' fast_los_ex=' + $NearFastLosEx + ' six_clear_self=' + $NearSampleClearSelf + ' six_clear_ex=' + $NearSampleClearEx + ' blocker=' + ScenarioRoot.$NearBlocker + ' near_root_clearance=' + $NearRootClearance + ' blocker_clearance=' + $BlockerClearance + ' qualified=' + $NearQualified"/>
+                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=FAR_CLEAR_SECOND_FAMILY target=' + ScenarioRoot.$FarTarget + ' target_id=' + ScenarioRoot.$FarTarget.idcode + ' surface=' + $FarRoleSurface + ' surface_id=' + $FarRoleSurface.idcode + ' surface_macro=' + $FarRoleSurface.macro + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' maxrange=' + $Issue69Beam.maxfirerange + ' range=' + $FarRange + ' range_ratio=' + $FarRangeRatio + ' mayattack=' + $FarMayAttack + ' inrange=' + $FarInRange + ' bbox_pitch=' + $FarBboxLocal.pitch + ' arc_pass=' + $FarArcPass + ' fast_los_self=' + $FarFastLosSelf + ' fast_los_ex=' + $FarFastLosEx + ' six_clear_self=' + $FarSampleClearSelf + ' six_clear_ex=' + $FarSampleClearEx + ' qualified=' + $FarQualified"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC TEST QUALIFY ROLE] FAILED request_id=' + $RequestId + ' reason=exact_role_census plasma=' + $Issue69PlasmaCount + ' beam=' + $Issue69BeamCount + ' shooter_turrets=' + ScenarioRoot.$GeometryShooter.turrets.operational.count + ' shooter_weapons=' + ScenarioRoot.$GeometryShooter.weapons.operational.count + ' missile_turrets=' + ScenarioRoot.$GeometryShooter.missileturrets.operational.count + ' near_surfaces=' + $NearRoleSurfaces.count + ' far_surfaces=' + $FarRoleSurfaces.count"/>
+              </do_else>
+            </do_if>
+            <do_elseif value="$Issue69Combined">
+              <debug_text text="'[X4GC TEST QUALIFY ROLE] FAILED request_id=' + $RequestId + ' reason=role_objects_missing near=' + ScenarioRoot.$NearTarget + ' far=' + ScenarioRoot.$FarTarget + ' blocker=' + ScenarioRoot.$NearBlocker"/>
+            </do_elseif>
             <set_value name="$Qualified"
                        exact="$SurfaceCount gt 0 and $ExpectedGeometryWeapons gt 0
                               and $Measured == $ExpectedGeometryWeapons
@@ -1680,11 +1883,12 @@
                               and ScenarioRoot.$GeometryQualifyRepositioned == ScenarioRoot.$SurfaceMaskPlacements.count
                               and ScenarioRoot.$GeometryQualifyRepositionFailures == 0
                               and $PostWarpLocationFailures == 0
+                              and $NearQualified and $FarQualified
                               and (
                                    (ScenarioRoot.$EngineObjectiveMode and $EngineStraddleSurface != null and $EngineStraddleSurfaceMembers == 1)
                                 or (not ScenarioRoot.$EngineObjectiveMode and $ArcSplitSurface != null and $ArcSplitSurfaceMembers == 1 and $PositiveControlSurface != null and $PositiveControlSurfaceMembers == 1)
                               )"/>
-            <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' action=' + (if $Qualified then 'qualified' else 'failed') + ' targets=' + $TargetCount + ' surfaces=' + $SurfaceCount + ' measured=' + $Measured + ' expected_geometry_weapons=' + (if ScenarioRoot.$ExpectedGeometryWeapons? then ScenarioRoot.$ExpectedGeometryWeapons else 0) + ' geometry_weapon_macro=' + (if ScenarioRoot.$GeometryWeaponMacroName? then ScenarioRoot.$GeometryWeaponMacroName else '') + ' surface_pairs=' + $SurfacePairs + ' origin_outside_pairs=' + $SurfaceOriginOutsidePairs + ' aim_inside_pairs=' + $SurfaceAimInsidePairs + ' arc_split_pairs=' + $SurfaceArcSplitPairs + ' arc_candidate_pairs=' + $SurfaceArcCandidatePairs + ' arc_split_surface=' + $ArcSplitSurface + ' arc_split_macro=' + (if $ArcSplitSurface then $ArcSplitSurface.macro else null) + ' arc_split_surface_members=' + $ArcSplitSurfaceMembers + ' positive_control_surface=' + $PositiveControlSurface + ' positive_control_macro=' + (if $PositiveControlSurface then $PositiveControlSurface.macro else null) + ' positive_control_surface_members=' + $PositiveControlSurfaceMembers + ' engine_straddle_surface=' + $EngineStraddleSurface + ' engine_straddle_surface_members=' + $EngineStraddleSurfaceMembers + ' engine_objective_mode=' + ScenarioRoot.$EngineObjectiveMode + ' repositioned=' + ScenarioRoot.$GeometryQualifyRepositioned + ' reposition_failures=' + ScenarioRoot.$GeometryQualifyRepositionFailures + ' post_warp_location_failures=' + $PostWarpLocationFailures"/>
+            <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' action=' + (if $Qualified then 'qualified' else 'failed') + ' targets=' + $TargetCount + ' surfaces=' + $SurfaceCount + ' measured=' + $Measured + ' expected_geometry_weapons=' + (if ScenarioRoot.$ExpectedGeometryWeapons? then ScenarioRoot.$ExpectedGeometryWeapons else 0) + ' geometry_weapon_macro=' + (if ScenarioRoot.$GeometryWeaponMacroName? then ScenarioRoot.$GeometryWeaponMacroName else '') + ' surface_pairs=' + $SurfacePairs + ' origin_outside_pairs=' + $SurfaceOriginOutsidePairs + ' aim_inside_pairs=' + $SurfaceAimInsidePairs + ' arc_split_pairs=' + $SurfaceArcSplitPairs + ' arc_candidate_pairs=' + $SurfaceArcCandidatePairs + ' arc_split_surface=' + $ArcSplitSurface + ' arc_split_macro=' + (if $ArcSplitSurface then $ArcSplitSurface.macro else null) + ' arc_split_surface_members=' + $ArcSplitSurfaceMembers + ' positive_control_surface=' + $PositiveControlSurface + ' positive_control_macro=' + (if $PositiveControlSurface then $PositiveControlSurface.macro else null) + ' positive_control_surface_members=' + $PositiveControlSurfaceMembers + ' engine_straddle_surface=' + $EngineStraddleSurface + ' engine_straddle_surface_members=' + $EngineStraddleSurfaceMembers + ' engine_objective_mode=' + ScenarioRoot.$EngineObjectiveMode + ' repositioned=' + ScenarioRoot.$GeometryQualifyRepositioned + ' reposition_failures=' + ScenarioRoot.$GeometryQualifyRepositionFailures + ' post_warp_location_failures=' + $PostWarpLocationFailures + ' near_qualified=' + $NearQualified + ' far_qualified=' + $FarQualified"/>
             <do_if value="$Qualified">
               <do_if value="ScenarioRoot.$EngineObjectiveMode">
                 <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
@@ -1704,6 +1908,7 @@
             <remove_value name="ScenarioRoot.$GeometryQualifyRequestId"/>
             <remove_value name="ScenarioRoot.$GeometryQualifyRepositioned"/>
             <remove_value name="ScenarioRoot.$GeometryQualifyRepositionFailures"/>
+            <remove_value name="ScenarioRoot.$Issue69RoleRepositionFailures"/>
           </actions>
         </cue>
 

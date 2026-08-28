@@ -29,6 +29,7 @@ local scenarioActionStatus, scenarioRequestSerial, pendingScenario, remoteScenar
 -- fixture is geometry-PENDING; settled ship surfaces are measured in system
 -- once the owner teleports aboard the preserved Paranid destroyer.
 local pendingQualify, remoteGeometryPending = nil, false
+local combinedFixtureQualified = false
 local finishGroups, emitSummary, returnToGunnery
 
 local function text(id) return ReadText(20992, id) end
@@ -167,6 +168,7 @@ local function validateSpec(raw)
     if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
     local groups = {}
     local geometryCases = { arc_split = 0, positive_control = 0, engine_straddle = 0 }
+    local fixtureRoles = { mid_engine = 0, near_blocked = 0, far_clear = 0, near_blocker = 0 }
     for index, group in ipairs(raw.groups) do
         local where = "groups[" .. index .. "]"
         if type(group) ~= "table" then return nil, where .. " is not a table" end
@@ -187,6 +189,11 @@ local function validateSpec(raw)
         end
         local geometryRole = tostring(group.geometryRole or "")
         local geometryCase = tostring(group.geometryCase or "")
+        local fixtureRole = tostring(group.fixtureRole or "")
+        if fixtureRole ~= "" and fixtureRoles[fixtureRole] == nil then
+            return nil, where .. ".fixtureRole must be empty, mid_engine, near_blocked, far_clear, or near_blocker"
+        end
+        if fixtureRole ~= "" then fixtureRoles[fixtureRole] = fixtureRoles[fixtureRole] + 1 end
         if geometryRole ~= "" and geometryRole ~= "clear_arc" and geometryRole ~= "below_arc"
                 and geometryRole ~= "surface_mask" then
             return nil, where .. ".geometryRole must be empty, clear_arc, below_arc, or surface_mask"
@@ -254,7 +261,8 @@ local function validateSpec(raw)
         if role == "shooter" then
             if group.loadout ~= "issue65_odysseus_mixed_missiles"
                     and group.loadout ~= "issue67_colossus_arc_barrel"
-                    and group.loadout ~= "issue67_paranid_sky_survey" then
+                    and group.loadout ~= "issue67_paranid_sky_survey"
+                    and group.loadout ~= "issue69_paranid_dual_family" then
                 return nil, where .. ".loadout is not a supported shooter loadout"
             end
             local missileCensus = expectedMissileTurrets > 0
@@ -276,15 +284,29 @@ local function validateSpec(raw)
             local paranidSkyCensus = expectedWeapons == 1 and expectedTurrets == 1
                 and expectedBeam == 0 and expectedPlasma == 1
                 and expectedMissileTurrets == 0 and expectedAmmo == 0
+            local issue69DualCensus = expectedWeapons == 2 and expectedTurrets == 2
+                and expectedBeam == 1 and expectedPlasma == 1
+                and expectedMissileTurrets == 0 and expectedAmmo == 0
             if (group.loadout == "issue65_odysseus_mixed_missiles" and not missileCensus)
                     or (group.loadout == "issue67_colossus_arc_barrel" and not conventionalCensus)
-                    or (group.loadout == "issue67_paranid_sky_survey" and not paranidSkyCensus) then
+                    or (group.loadout == "issue67_paranid_sky_survey" and not paranidSkyCensus)
+                    or (group.loadout == "issue69_paranid_dual_family" and not issue69DualCensus) then
                 return nil, where .. " has an inconsistent shooter census"
             end
         elseif tostring(group.loadout or "") ~= "" then
-            if geometryRole ~= "surface_mask" or group.loadout ~= "issue67_argon_sky_target" then
+            local sparseRole = fixtureRole == "near_blocked" or fixtureRole == "far_clear"
+            if group.loadout ~= "issue67_argon_sky_target"
+                    or (geometryRole ~= "surface_mask" and not sparseRole) then
                 return nil, where .. ".loadout is unsupported for a non-shooter group"
             end
+        end
+        if fixtureRole == "mid_engine" and (geometryRole ~= "surface_mask" or geometryCase ~= "engine_straddle") then
+            return nil, where .. ".mid_engine must be the engine_straddle surface_mask objective"
+        elseif (fixtureRole == "near_blocked" or fixtureRole == "far_clear")
+                and (not group.hostile or group.loadout ~= "issue67_argon_sky_target") then
+            return nil, where .. "." .. fixtureRole .. " must be a hostile sparse Argon target"
+        elseif fixtureRole == "near_blocker" and group.hostile then
+            return nil, where .. ".near_blocker must be non-hostile infrastructure"
         end
         groups[#groups + 1] = {
             label = tostring(group.label or ("group" .. index)),
@@ -311,6 +333,7 @@ local function validateSpec(raw)
             loadout = tostring(group.loadout or ""),
             geometryRole = geometryRole,
             geometryCase = geometryCase,
+            fixtureRole = fixtureRole,
             expectedWeapons = expectedWeapons,
             expectedTurrets = expectedTurrets,
             expectedBeam = expectedBeam,
@@ -322,6 +345,12 @@ local function validateSpec(raw)
             expectedDumbfire = expectedDumbfire,
             expectedAmmo = expectedAmmo,
         }
+    end
+    local combinedRoles = fixtureRoles.mid_engine + fixtureRoles.near_blocked
+        + fixtureRoles.far_clear + fixtureRoles.near_blocker
+    if combinedRoles > 0 and (fixtureRoles.mid_engine ~= 1 or fixtureRoles.near_blocked ~= 1
+            or fixtureRoles.far_clear ~= 1 or fixtureRoles.near_blocker ~= 1) then
+        return nil, "combined Issue #69 fixture requires exactly one MID, NEAR, FAR, and blocker role"
     end
     if geometryCases.engine_straddle > 0 then
         if geometryCases.engine_straddle ~= 1 or geometryCases.arc_split ~= 0 or geometryCases.positive_control ~= 0 then
@@ -409,6 +438,42 @@ local function validateSpec(raw)
             end
             table.sort(expectedMacros)
         end
+        local secondary
+        if raw.setup.secondaryTurretGroup ~= nil or raw.setup.secondaryTurretLabel ~= nil
+                or raw.setup.secondaryExpectedTurrets ~= nil or raw.setup.secondaryExpectedMemberMacros ~= nil then
+            for _, field in ipairs({ "secondaryTurretGroup", "secondaryTurretLabel" }) do
+                if type(raw.setup[field]) ~= "string" or raw.setup[field] == "" then
+                    return nil, "spec.setup." .. field .. " must be a non-empty string"
+                end
+            end
+            if type(raw.setup.secondaryExpectedTurrets) ~= "number"
+                    or raw.setup.secondaryExpectedTurrets < 1 then
+                return nil, "spec.setup.secondaryExpectedTurrets must be a positive number"
+            end
+            local secondaryMacros = {}
+            if type(raw.setup.secondaryExpectedMemberMacros) ~= "table" then
+                return nil, "spec.setup.secondaryExpectedMemberMacros must be a list"
+            end
+            for index, macro in ipairs(raw.setup.secondaryExpectedMemberMacros) do
+                if type(macro) ~= "string" or macro == "" then
+                    return nil, "spec.setup.secondaryExpectedMemberMacros[" .. index .. "] must be a non-empty string"
+                end
+                secondaryMacros[#secondaryMacros + 1] = macro
+            end
+            if #secondaryMacros ~= math.floor(raw.setup.secondaryExpectedTurrets) then
+                return nil, "spec.setup.secondaryExpectedMemberMacros must match secondaryExpectedTurrets"
+            end
+            table.sort(secondaryMacros)
+            if raw.setup.secondaryTurretGroup == raw.setup.turretGroup then
+                return nil, "spec.setup secondary turret group must be distinct from the primary group"
+            end
+            secondary = {
+                turretGroup = raw.setup.secondaryTurretGroup,
+                turretLabel = raw.setup.secondaryTurretLabel,
+                expectedTurrets = math.floor(raw.setup.secondaryExpectedTurrets),
+                expectedMacros = secondaryMacros,
+            }
+        end
         setup = {
             remote = raw.setup.remote == true,
             shipMacro = raw.setup.shipMacro,
@@ -419,6 +484,7 @@ local function validateSpec(raw)
             expectedMacros = expectedMacros,
             expectedMemberMacros = expectedMacros,
             selectAll = raw.setup.selectAll == true,
+            secondary = secondary,
         }
     end
     local location
@@ -530,6 +596,7 @@ local function sendScenarioSpec(force, requestId)
             role = group.role, loadout = group.loadout,
             geometryRole = group.geometryRole,
             geometryCase = group.geometryCase,
+            fixtureRole = group.fixtureRole,
             expectedWeapons = group.expectedWeapons,
             expectedTurrets = group.expectedTurrets,
             expectedBeam = group.expectedBeam,
@@ -561,9 +628,11 @@ end
 
 -- Resolve the exact named ship, raw group, and operational members without
 -- mutating the parked Gunnery session.
-local function resolveExactGroup()
+local function resolveExactGroup(which)
     local setup, bridge = scenarioSpec and scenarioSpec.setup, api()
     if not setup then return nil, "spec has no exact setup block" end
+    local exact = which == "secondary" and setup.secondary or setup
+    if not exact then return nil, "spec has no " .. tostring(which) .. " exact setup block" end
     if not bridge or not bridge.getCurrentShipSweepReadOnly or not bridge.getSession then
         return nil, "scenario setup API unavailable"
     end
@@ -574,7 +643,7 @@ local function resolveExactGroup()
             .. tostring(ship.name) .. " [" .. tostring(ship.macro) .. "]"
     end
     local selected, selectedGroups = nil, {}
-    if setup.selectAll then
+    if exact.selectAll == true then
         for _, group in ipairs(ship.groups or {}) do
             if group.kind == "group" and group.mutable == true then
                 selectedGroups[#selectedGroups + 1] = group
@@ -583,11 +652,11 @@ local function resolveExactGroup()
         if #selectedGroups == 0 then return nil, "no mutable turret groups" end
     else
         for _, group in ipairs(ship.groups or {}) do
-            if trim(group.group) == setup.turretGroup then selected = group; break end
+            if trim(group.group) == exact.turretGroup then selected = group; break end
         end
-        if not selected then return nil, "missing raw group " .. setup.turretGroup end
+        if not selected then return nil, "missing raw group " .. exact.turretGroup end
         if selected.kind ~= "group" or selected.mutable ~= true then
-            return nil, setup.turretLabel .. " is not a mutable turret group"
+            return nil, exact.turretLabel .. " is not a mutable turret group"
         end
         selectedGroups[1] = selected
     end
@@ -602,28 +671,29 @@ local function resolveExactGroup()
             memberMacros[#memberMacros + 1] = tostring(member.macro or "")
         end
     end
-    if #memberIDs ~= setup.expectedTurrets then
-        return nil, setup.turretLabel .. " needs " .. setup.expectedTurrets
+    if #memberIDs ~= exact.expectedTurrets then
+        return nil, exact.turretLabel .. " needs " .. exact.expectedTurrets
             .. " operational turrets, found " .. #memberIDs
     end
     table.sort(memberMacros)
-    if #setup.expectedMacros > 0
-            and table.concat(memberMacros, ",") ~= table.concat(setup.expectedMacros, ",") then
-        return nil, setup.turretLabel .. " needs macros " .. table.concat(setup.expectedMacros, ",")
+    if #exact.expectedMacros > 0
+            and table.concat(memberMacros, ",") ~= table.concat(exact.expectedMacros, ",") then
+        return nil, exact.turretLabel .. " needs macros " .. table.concat(exact.expectedMacros, ",")
             .. ", found " .. table.concat(memberMacros, ",")
     end
     table.sort(memberIDs)
     table.sort(groupKeys)
     return {
-        label = setup.turretLabel,
-        rawGroup = setup.turretGroup,
+        label = exact.turretLabel,
+        rawGroup = exact.turretGroup,
         memberIDs = table.concat(memberIDs, ","),
         memberMacros = table.concat(memberMacros, ","),
+        memberCount = #memberIDs,
         shipID = tostring(ship.id),
         groupKey = table.concat(groupKeys, ","),
         exactGroupKey = selected and selected.key or nil,
         armed = selected ~= nil and selected.armed == true,
-        selectAll = setup.selectAll,
+        selectAll = exact.selectAll == true,
         session = session,
     }
 end
@@ -642,7 +712,48 @@ local function applyExactGroup(selection)
     end
 end
 
+local function selectFarTestGroup()
+    if not combinedFixtureQualified or not scenarioSpec or not scenarioSpec.setup
+            or not scenarioSpec.setup.secondary then
+        scenarioActionStatus = "FAILED: combined fixture is not qualified for the FAR group switch"
+        log("far_group_select", { action = "rejected", reason = "fixture_not_qualified" })
+        menu.display()
+        return
+    end
+    local primary, primaryReason = resolveExactGroup()
+    local secondary, secondaryReason = resolveExactGroup("secondary")
+    if not primary or not secondary or primary.shipID ~= secondary.shipID
+            or primary.groupKey == secondary.groupKey then
+        local reason = primaryReason or secondaryReason or "exact primary/secondary census mismatch"
+        scenarioActionStatus = "FAILED: " .. reason
+        log("far_group_select", { action = "failed", reason = reason })
+        menu.display()
+        return
+    end
+    applyExactGroup(secondary)
+    local checkedCount, onlySecondary = 0, true
+    for key in pairs(secondary.session.checkedGroupKeys or {}) do
+        checkedCount = checkedCount + 1
+        if key ~= secondary.exactGroupKey then onlySecondary = false end
+    end
+    if checkedCount ~= 1 or not onlySecondary
+            or not secondary.session.checkedGroupKeys[secondary.exactGroupKey] then
+        scenarioActionStatus = "FAILED: exact FAR group selection did not converge"
+        log("far_group_select", { action = "failed", reason = "checked_membership_mismatch",
+            checked = checkedCount })
+        menu.display()
+        return
+    end
+    scenarioActionStatus = "ARMED: only " .. secondary.label .. " selected for FAR"
+    log("far_group_select", { action = "ready", ship_id = secondary.shipID,
+        group = secondary.rawGroup, group_key = secondary.groupKey,
+        member_ids = secondary.memberIDs, member_macros = secondary.memberMacros,
+        member_count = secondary.memberCount })
+    returnToGunnery("far_group_selected")
+end
+
 local function createTestScenario()
+    combinedFixtureQualified = false
     if scenarioSpecError then
         scenarioActionStatus = "FAILED: " .. scenarioSpecError
         menu.display()
@@ -772,6 +883,7 @@ local function despawnTestScenario()
         return
     end
     remoteScenarioReady = false
+    combinedFixtureQualified = false
     AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
     log("scenario", { action = "despawn" })
     menu.display()
@@ -956,8 +1068,7 @@ local function onScenarioReady(_, param)
         remoteGeometryPending = specHasPendingGeometry()
         if remoteGeometryPending then
             scenarioActionStatus = "PENDING: remote ship census verified; surface geometry is NOT qualified; teleport to "
-                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it independently scans the two settled "
-                .. "Argon targets for the authored arc-split and positive-control Beam surfaces"
+                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it fail-closed qualifies every authored fixture role"
             log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
                 spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
                 operational_surfaces = surfaces, turrets = turrets,
@@ -1101,6 +1212,8 @@ local function onGeometryQualified(_, param)
             menu.display()
             return
         end
+        combinedFixtureQualified = scenarioSpec and scenarioSpec.setup
+            and scenarioSpec.setup.secondary ~= nil or false
         remoteScenarioReady = false
         remoteGeometryPending = false
         scenarioActionStatus = "QUALIFIED GEOMETRY: use Direct control and manually click the [TEST TARGET] ship, then its [TEST TARGET] surface"
@@ -1269,9 +1382,19 @@ function menu.onShowMenu()
         local selection, reason = resolveExactGroup()
         if selection then
             if remoteGeometryPending then
-                -- Phase two: the exact Plasma group is verified, so scan the
-                -- two settled Argon Beam surfaces in system. Do NOT arm or return
-                -- until both authored sky-survey roles qualify independently.
+                local secondarySelection, secondaryReason
+                if scenarioSpec.setup.secondary then
+                    secondarySelection, secondaryReason = resolveExactGroup("secondary")
+                    if not secondarySelection or secondarySelection.shipID ~= selection.shipID then
+                        scenarioActionStatus = "FAILED: " .. tostring(secondaryReason or "secondary exact group mismatch")
+                        log("geometry_qualify", { action = "failed", reason = secondaryReason or "secondary_group_mismatch" })
+                        menu.display()
+                        return
+                    end
+                end
+                -- Phase two: both exact shooter groups are verified, then MID,
+                -- NEAR, and FAR qualify together. Only MID is marked; do not arm
+                -- or return until every role passes independently.
                 scenarioRequestSerial = scenarioRequestSerial + 1
                 local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
                 local geometryObjective = "beam"
@@ -1282,12 +1405,13 @@ function menu.onShowMenu()
                     end
                 end
                 pendingQualify = { requestId = token, selection = selection,
+                    secondarySelection = secondarySelection,
                     expectedGeometryWeapons = scenarioSpec.groups[1].expectedGeometryWeapons,
                     geometryObjective = geometryObjective,
                     deadline = getElapsedTime() + 30 }
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })
-                scenarioActionStatus = "QUALIFYING: scanning the two settled Argon Beam surfaces for arc-split and positive-control roles with "
+                scenarioActionStatus = "QUALIFYING: checking MID, NEAR blocked, and FAR clear roles with "
                     .. selection.label .. " (" .. selection.memberIDs .. ")"
                 log("geometry_qualify", { action = "requested", request_id = token,
                     ship_id = selection.shipID, group = selection.rawGroup,
@@ -1369,6 +1493,11 @@ function menu.display()
     if scenarioActionStatus then
         local statusRow = tableView:addRow(false, {})
         statusRow[1]:setColSpan(4):createText(scenarioActionStatus)
+    end
+    if scenarioSpec and scenarioSpec.setup and scenarioSpec.setup.secondary then
+        local farRow = tableView:addRow("select_far_group", {})
+        farRow[1]:setColSpan(4):createButton({ active = combinedFixtureQualified }):setText("Select FAR test group")
+        farRow[1].handlers.onClick = selectFarTestGroup
     end
     -- Arms the ownership-change test. The Test Lab cannot be opened while
     -- engaged, so this cannot flip an owner on the spot; it arms MD to do it on

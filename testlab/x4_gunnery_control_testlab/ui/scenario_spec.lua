@@ -32,6 +32,10 @@
 --     expectedMemberMacros list Optional exact sorted member-macro multiset (expectedMacros is accepted for legacy specs).
 --     selectAll       boolean Select every mutable turret group and verify the
 --                             aggregate member count instead of one raw group.
+--     secondaryTurretGroup / secondaryTurretLabel / secondaryExpectedTurrets /
+--     secondaryExpectedMemberMacros
+--                             Optional second exact group used only by the
+--                             fixture's validated Select FAR test group action.
 --   groups    list     One entry per batch of identical ships.
 --     label     string   Spawned name prefix and log label.
 --     macro     string   Ship macro name, without the "macro." prefix.
@@ -77,6 +81,8 @@
 --                         "surface_mask" is the sky-survey pending
 --                         exact-ship-surface transport role used to qualify one
 --                         authored arc-split component for manual designation.
+--     fixtureRole string Optional combined #69 role: mid_engine, near_blocked,
+--                        far_clear, or near_blocker. Only mid_engine is marked.
 --     geometryWeaponMacro string Exact qualifier weapon macro for the shooter.
 --     expectedGeometryWeapons number Exact operational members of that macro.
 --     expectedWeapons / expectedTurrets / expectedBeam / expectedPlasma
@@ -100,19 +106,17 @@
 --     searchAttempts/searchStepY
 --                        Bounded deterministic vertical position search.
 --
--- Issue #69 r1 reproduces the aim-point multiplicity symptom on an ENGINE:
--- one Argon L destroyer placed so exactly ONE of its all-round engines
--- (con_engine_01) straddles the Paranid plasma +80° arc limit — useaimtarget
--- pitch ≈83° (old predicate: non-engageable) while look_at_bbox pitch ≈55°
--- (new predicate: engageable). The straddle engine is the single marked
--- Direct-control objective. Geometry solved and validated offline; placement
--- values must not be re-derived.
+-- Issue #69 combined fixture. MID_ENGINE preserves the accepted r1 engine
+-- regression literally and remains the single marked Direct-control objective.
+-- NEAR_BLOCKED and FAR_CLEAR_SECOND_FAMILY are explicit unmarked fixture roles
+-- qualified against their unique sparse turret surfaces. Geometry solved for
+-- MID must not be re-derived.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-69-engine-straddle-r1",
+    id      = "issue-69-combined-three-role-r1",
     enabled = false,
     location = {
         sectorMacro = "Cluster_29_Sector001_macro",
@@ -127,15 +131,19 @@ X4GunneryTestLabScenarioSpec = {
         selectAll       = false,
         expectedTurrets = 1,
         expectedMemberMacros = { "turret_par_l_plasma_01_mk1_macro" },
+        secondaryTurretGroup = "group_rear_down_mid",
+        secondaryTurretLabel = "Rear Lower Mid Beam",
+        secondaryExpectedTurrets = 1,
+        secondaryExpectedMemberMacros = { "turret_par_l_beam_01_mk1_macro" },
     },
     groups = {
         { label = "ISSUE SKY-SURVEY PARANID DESTROYER",
           macro = "ship_par_l_destroyer_01_a_macro", faction = "player",
           count = 1, distance = 1, x = 0, y = 0, spread = 0, behaviour = "wait",
-          role = "shooter", loadout = "issue67_paranid_sky_survey",
+          role = "shooter", loadout = "issue69_paranid_dual_family",
           geometryWeaponMacro = "turret_par_l_plasma_01_mk1_macro",
           expectedGeometryWeapons = 1,
-          expectedWeapons = 1, expectedTurrets = 1, expectedPlasma = 1, expectedBeam = 0,
+          expectedWeapons = 2, expectedTurrets = 2, expectedPlasma = 1, expectedBeam = 1,
           expectedMissileTurrets = 0, expectedGuided = 0, expectedDumbfire = 0, expectedAmmo = 0 },
         { label = "ISSUE ENGINE STRADDLE ARGON",
           macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
@@ -145,8 +153,30 @@ X4GunneryTestLabScenarioSpec = {
           preserveOrientation = true,
           behaviour = "wait", hostile = true, holdFire = true,
           stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
+          fixtureRole = "mid_engine",
           loadout = "issue67_argon_sky_target",
           geometryCase = "engine_straddle" },
+        { label = "ISSUE69 NEAR BLOCKED",
+          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+          count = 1, distance = 900, x = 0, y = 0, spread = 0,
+          yaw = 90, pitch = 0, roll = 0, preserveOrientation = true,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true,
+          fixtureRole = "near_blocked", loadout = "issue67_argon_sky_target" },
+        { label = "ISSUE69 FAR CLEAR",
+          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+          count = 1, distance = 10000, x = 0, y = 0, spread = 0,
+          yaw = 90, pitch = 0, roll = 0, preserveOrientation = true,
+          behaviour = "wait", hostile = true, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true,
+          fixtureRole = "far_clear", loadout = "issue67_argon_sky_target" },
+        { label = "ISSUE69 NEAR LOS BLOCKER",
+          macro = "ship_xen_l_terraformer_01_a_macro", faction = "player",
+          count = 1, distance = 450, x = 0, y = 0, spread = 0,
+          yaw = 90, pitch = 0, roll = 0, preserveOrientation = true,
+          behaviour = "wait", hostile = false, holdFire = true,
+          stripDefenceUnits = true, repairGuard = true,
+          fixtureRole = "near_blocker" },
     },
     stations = {},
 }

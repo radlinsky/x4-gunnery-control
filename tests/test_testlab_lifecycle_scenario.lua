@@ -408,8 +408,8 @@ do
     for _, line in ipairs(xml) do
         if line:find("<create_ship ", 1, true) then creates = creates + 1 end
     end
-    assert(creates == 8, "expected the eight create_ship branches (colossus + survey shooter + sparse target + generic, per context), found " .. creates)
-    assert(#spawnRotations == 8,
+    assert(creates == 10, "expected ten create_ship branches (including the Issue #69 dual-family shooter, per context), found " .. creates)
+    assert(#spawnRotations == 10,
         "one authored spawn rotation per create_ship branch")
     for _, line in ipairs(spawnRotations) do
         assert(line:find('<rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>', 1, true),
@@ -681,24 +681,36 @@ end
 -- spawned Argon survey destroyers remain geometry-PENDING until the
 -- post-teleport scan.
 local plasmaSurvey = "turret_par_l_plasma_01_mk1_macro"
+local beamSurvey = "turret_par_l_beam_01_mk1_macro"
 local function modelParanidPlasma(harness)
-    local groupBuffer = { [0] = { path = "p", group = "group_front_up_mid2", contextid = 5 } }
+    local groupBuffer = {
+        [0] = { path = "p", group = "group_front_up_mid2", contextid = 5 },
+        [1] = { path = "p", group = "group_rear_down_mid", contextid = 5 },
+    }
     harness.fix.ffiStub.new = function() return groupBuffer end
-    harness.fix.C.GetNumUpgradeGroups = function() return 1 end
-    harness.fix.C.GetUpgradeGroups2 = function() return 1 end
-    harness.fix.C.GetUpgradeGroupInfo2 = function()
+    harness.fix.C.GetNumUpgradeGroups = function() return 2 end
+    harness.fix.C.GetUpgradeGroups2 = function() return 2 end
+    harness.fix.C.GetUpgradeGroupInfo2 = function(_, _, _, _, group)
+        if group == "group_rear_down_mid" then
+            return { count = 1, currentcomponent = 28, currentmacro = beamSurvey,
+                slotsize = "large", total = 1, operational = 1 }
+        end
         return { count = 1, currentcomponent = 27, currentmacro = plasmaSurvey,
             slotsize = "large", total = 1, operational = 1 }
     end
-    harness.fix.C.GetNumUpgradeSlots = function() return 1 end
+    harness.fix.C.GetNumUpgradeSlots = function() return 2 end
     harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot)
-        return slot == 1 and 27 or nil
+        return slot == 1 and 27 or (slot == 2 and 28 or nil)
     end
-    harness.fix.C.GetUpgradeSlotGroup = function() return { path = "p", group = "group_front_up_mid2" } end
+    harness.fix.C.GetUpgradeSlotGroup = function(_, _, _, slot)
+        if slot == 2 then return { path = "p", group = "group_rear_down_mid" } end
+        return { path = "p", group = "group_front_up_mid2" }
+    end
     GetComponentData = function(component, field)
         if field == "macro" then
             local c = tonumber(component)
             if c == 27 then return plasmaSurvey end
+            if c == 28 then return beamSurvey end
             return "ship_par_l_destroyer_01_a_macro"
         end
         if field == "isplayerowned" then return true end
@@ -706,6 +718,7 @@ local function modelParanidPlasma(harness)
     harness.fix.C.GetComponentName = function(component)
         local c = tonumber(component)
         if c == 27 then return "Plasma 1" end
+        if c == 28 then return "Beam 1" end
         return "ISSUE SKY-SURVEY PARANID DESTROYER 1"
     end
 end
@@ -715,13 +728,13 @@ local function shippedTwoPhaseToQualify()
     harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 4, "shipped Create must stream begin + shooter + one target + commit")
+    assert(#events == 7, "shipped Create must stream begin + shooter + MID + NEAR + FAR + blocker + commit")
     assert(events[2].params.geometryWeaponMacro == plasmaSurvey
             and events[2].params.expectedGeometryWeapons == 1,
         "Paranid L shooter transport must carry its exact geometry macro/count")
     local requestId = events[1].params.requestId
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct8:" .. requestId .. ":issue-69-engine-straddle-r1:2:0:0:0:0:0:0:1:20:0:0:1:1:1:0:0:0:0:0:0:1:1:0:1:0:0")
+        "x4gct8:" .. requestId .. ":issue-69-combined-three-role-r1:5:0:0:0:0:0:0:4:20:0:0:3:4:1:0:0:0:0:0:0:2:2:1:1:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_geometry_pending"),
         "OOS Paranid L survey must verify census and report geometry PENDING")
@@ -768,6 +781,35 @@ do
     suggested[1].callback(true, "")
     assert(harness.fix.logContains("action=operator_designated"),
         "observation begins only after the owner performs the manual surface click")
+
+    -- Before FAR the fixture-only action revalidates both groups, clears every
+    -- prior check individually, and selects only the exact Beam group.
+    local toggleAllCalls = 0
+    local originalToggleAll = X4GunneryState.toggleAllGroups
+    X4GunneryState.toggleAllGroups = function(...)
+        toggleAllCalls = toggleAllCalls + 1
+        return originalToggleAll(...)
+    end
+    for _, group in ipairs(session.groups or {}) do
+        if group.kind == "group" then session.checkedGroupKeys[group.key] = true end
+    end
+    harness.testMenu.onShowMenu()
+    local farButton = harness.fix.buttonByText("Select FAR test group")
+    assert(farButton and farButton.active == true and farButton.handlers.onClick,
+        "qualified combined fixture must expose the exact FAR group action")
+    farButton.handlers.onClick()
+    local farChecked = 0
+    for key in pairs(session.checkedGroupKeys or {}) do
+        farChecked = farChecked + 1
+        assert(key:find("group_rear_down_mid", 1, true),
+            "FAR switch must leave only the Beam group checked; got " .. tostring(key))
+    end
+    assert(farChecked == 1 and toggleAllCalls == 0,
+        "FAR switch must select exactly one group without toggleAllGroups/selectAll")
+    assert(#suggested == 1 and harness.fix.logContains("event=far_group_select")
+            and harness.fix.logContains("group=group_rear_down_mid")
+            and harness.fix.logContains("member_macros=" .. beamSurvey),
+        "FAR switch must log the exact Beam macro/group and must not touch targets")
 end
 
 -- Typed target components are opaque and must be authorized by the current
@@ -1149,27 +1191,44 @@ local expectedStraddleTarget = {
 do
     local shipped = dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
     assert(type(shipped) == "table" and shipped.enabled == false, "the repository fixture must load and remain disabled")
-    assert(shipped.id == "issue-69-engine-straddle-r1" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
+    assert(shipped.id == "issue-69-combined-three-role-r1" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
             and shipped.setup.turretGroup == "group_front_up_mid2" and shipped.setup.turretLabel == "Front Upper Mid Plasma"
-            and shipped.setup.expectedTurrets == 1, "the shipped r1 fixture must retain its exact Paranid L setup")
+            and shipped.setup.expectedTurrets == 1 and shipped.setup.selectAll == false,
+        "the combined fixture must retain its exact Plasma-only initial setup")
     assert(#shipped.setup.expectedMemberMacros == 1
             and shipped.setup.expectedMemberMacros[1] == "turret_par_l_plasma_01_mk1_macro",
-        "r1 must isolate its one Plasma member")
-    assert(#shipped.groups == 2 and #shipped.stations == 0, "r1 must contain one shooter and one engine-straddle Argon target")
+        "the initial setup must isolate its one Plasma member")
+    assert(shipped.setup.secondaryTurretGroup == "group_rear_down_mid"
+            and shipped.setup.secondaryExpectedTurrets == 1
+            and #shipped.setup.secondaryExpectedMemberMacros == 1
+            and shipped.setup.secondaryExpectedMemberMacros[1] == "turret_par_l_beam_01_mk1_macro",
+        "the FAR setup must identify the distinct exact one-Beam group")
+    assert(#shipped.groups == 5 and #shipped.stations == 0,
+        "combined fixture must contain one shooter, three hostile targets, and one blocker")
     local shooter = shipped.groups[1]
-    assert(shooter.label == "ISSUE SKY-SURVEY PARANID DESTROYER" and shooter.loadout == "issue67_paranid_sky_survey"
-            and shooter.expectedWeapons == 1 and shooter.expectedTurrets == 1 and shooter.expectedBeam == 0 and shooter.expectedPlasma == 1
+    assert(shooter.label == "ISSUE SKY-SURVEY PARANID DESTROYER" and shooter.loadout == "issue69_paranid_dual_family"
+            and shooter.expectedWeapons == 2 and shooter.expectedTurrets == 2 and shooter.expectedBeam == 1 and shooter.expectedPlasma == 1
             and shooter.geometryWeaponMacro == "turret_par_l_plasma_01_mk1_macro" and shooter.expectedGeometryWeapons == 1,
-        "Paranid L shooter must retain its exact one-Plasma qualifier contract")
+        "Paranid L shooter must expose the exact dual-family census while retaining one Plasma qualifier")
     local target = shipped.groups[2]
     local e = expectedStraddleTarget
     assert(target.label == e.label and target.macro == "ship_arg_l_destroyer_02_a_macro" and target.geometryRole == "surface_mask"
             and target.hostile == true and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true
-            and target.loadout == "issue67_argon_sky_target" and target.geometryCase == "engine_straddle"
+            and target.loadout == "issue67_argon_sky_target" and target.geometryCase == "engine_straddle" and target.fixtureRole == "mid_engine"
             and target.distance == e.distance and target.x == e.x and target.y == e.y
             and target.ox == e.ox and target.oy == e.oy and target.oz == e.oz
             and target.yaw == e.yaw and target.pitch == e.pitch and target.roll == e.roll and target.preserveOrientation == true,
         "the r1 engine-straddle target must retain its authored transform, case, loadout, and safety fields")
+    local roles, hostileRoles, labels = {}, 0, {}
+    for _, group in ipairs(shipped.groups) do
+        assert(not labels[group.label], "all visible fixture root labels must be unique")
+        labels[group.label] = true
+        if group.fixtureRole then roles[group.fixtureRole] = (roles[group.fixtureRole] or 0) + 1 end
+        if group.hostile and group.fixtureRole then hostileRoles = hostileRoles + 1 end
+    end
+    assert(roles.mid_engine == 1 and roles.near_blocked == 1 and roles.far_clear == 1
+            and roles.near_blocker == 1 and hostileRoles == 3,
+        "fixture must define exactly MID/NEAR/FAR plus one non-hostile blocker")
 end
 
 do
@@ -1177,7 +1236,7 @@ do
     harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
-    assert(#events == 4, "shipped Create must stream begin + shooter + one target + commit")
+    assert(#events == 7, "shipped Create must stream begin + five ships + commit")
     assert(events[2].params.geometryWeaponMacro == "turret_par_l_plasma_01_mk1_macro" and events[2].params.expectedGeometryWeapons == 1,
         "flat shooter transport must include exact qualifier macro/count")
     local target, e = events[3].params, expectedStraddleTarget
@@ -1186,8 +1245,12 @@ do
             and target.yaw == e.yaw and target.pitch == e.pitch
             and target.roll == e.roll and target.preserveOrientation == true and target.behaviour == "wait" and target.hostile == true
             and target.holdFire == true and target.stripDefenceUnits == true and target.repairGuard == true and target.geometryRole == "surface_mask"
-            and target.geometryCase == "engine_straddle" and target.loadout == "issue67_argon_sky_target",
+            and target.geometryCase == "engine_straddle" and target.fixtureRole == "mid_engine" and target.loadout == "issue67_argon_sky_target",
         "the r1 engine-straddle target must carry its complete flat authored transform and case")
+    assert(events[4].params.fixtureRole == "near_blocked"
+            and events[5].params.fixtureRole == "far_clear"
+            and events[6].params.fixtureRole == "near_blocker",
+        "NEAR/FAR/blocker fixture roles must survive the flat Lua-to-MD transport")
 end
 
 -- The shipped spec must be ACCEPTED by validateSpec/loadSpec, not merely well
@@ -1209,7 +1272,7 @@ do
     assert(specLabelText, "Test Lab must render the shipped spec label row")
     assert(not specLabelText:find("invalid (", 1, true),
         "the shipped spec must be accepted by validateSpec; label was: " .. specLabelText)
-    assert(specLabelText:find("issue-69-engine-straddle-r1", 1, true),
+    assert(specLabelText:find("issue-69-combined-three-role-r1", 1, true),
         "the accepted shipped spec label must name the shipped id; label was: " .. specLabelText)
     for _, line in ipairs(harness.fix.getCapturedLog()) do
         assert(not (line:find("action=rejected", 1, true)
