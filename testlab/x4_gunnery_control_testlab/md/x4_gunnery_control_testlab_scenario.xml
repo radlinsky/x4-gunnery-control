@@ -1874,7 +1874,7 @@
                 </do_for_each>
                 <set_value name="$NearRootClearance" exact="ScenarioRoot.$NearTarget.bboxdistanceto.{ScenarioRoot.$GeometryShooter} gt 0m"/>
                 <set_value name="$BlockerClearance" exact="ScenarioRoot.$NearBlocker.bboxdistanceto.{ScenarioRoot.$GeometryShooter} gt 0m and ScenarioRoot.$NearBlocker.bboxdistanceto.{ScenarioRoot.$NearTarget} gt 0m"/>
-                <set_value name="$NearQualified" exact="$NearMayAttack and $NearInRange and $NearArcPass and $NearRange le $MidRange * 0.75 and not $NearFastLosSelf and not $NearFastLosEx and $NearSampleClearSelf == 0 and $NearSampleClearEx == 0 and $NearSettledPoseValid and $BlockerSettledPoseValid and $NearRootClearance and $BlockerClearance and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
+                <set_value name="$NearQualified" exact="$NearMayAttack and $NearInRange and $NearArcPass and not $NearFastLosSelf and not $NearFastLosEx and $NearSampleClearSelf == 0 and $NearSampleClearEx == 0 and $NearSettledPoseValid and $BlockerSettledPoseValid and $NearRootClearance and $BlockerClearance and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
                 <set_value name="$FarRange" exact="$Issue69Beam.bboxdistanceto.{$FarRoleSurface}"/>
                 <set_value name="$FarRangeRatio" exact="$FarRange / $Issue69Beam.maxfirerange"/>
                 <create_orientation name="$FarBboxLocal" orientation="look_at_bbox" refobject="$FarRoleSurface">

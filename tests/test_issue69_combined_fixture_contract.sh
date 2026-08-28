@@ -99,7 +99,7 @@ far_final_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$sce
 [[ "$delay_line" -lt "$release_line" && "$release_line" -lt "$near_los_line" && "$near_los_line" -lt "$near_final_line" && "$near_final_line" -lt "$far_final_line" ]] || fail "post-warp LOS/final role gates are not downstream of settling"
 [[ $(grep -c "name=\"\$NearQualified\"" "$scenario") -eq 2 && $(grep -c "name=\"\$FarQualified\"" "$scenario") -eq 2 ]] || fail "an immediate alternate NEAR/FAR qualification path exists"
 grep -Fq "z=\"\$BeamWeapon.maxfirerange * 0.70\"" "$scenario" || fail "FAR is not placed from live Beam max range"
-grep -Fq "and \$NearRange le \$MidRange * 0.75" "$scenario" || fail "NEAR is not required materially nearer than MID"
+if grep -Fq "and \$NearRange le \$MidRange * 0.75" "$scenario"; then fail "NEAR must not require a relative distance to MID"; fi
 grep -Fq "\$NearBboxLocal.pitch ge -5deg and \$NearBboxLocal.pitch le 80deg" "$scenario" || fail "NEAR bbox arc gate missing"
 grep -Fq "name=\"\$NearFastLosSelf\" object=\"\$Issue69Plasma\" objectoffset=\"\$Issue69Plasma.barrelposition\" target=\"\$NearRoleSurface\" useaimtarget=\"true\" excludeself=\"false\"" "$scenario" || fail "NEAR production fast LOS negative missing"
 grep -Fq "name=\"\$NearSampleLosSelf\" object=\"\$Issue69Plasma\" objectoffset=\"\$Issue69Plasma.barrelposition\" target=\"\$NearRoleSurface\" targetoffset=\"\$NearSample\" useaimtarget=\"false\" excludeself=\"false\"" "$scenario" || fail "NEAR production fallback samples missing"
