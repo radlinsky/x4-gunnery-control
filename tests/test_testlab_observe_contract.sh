@@ -481,7 +481,9 @@ done
 # barrel origin, excludeself=false, but an explicit bbox-center targetoffset in
 # place of useaimtarget. It must not touch the missileturret loop or existing
 # los_ex/muzzle_los fields.
-mark_weapons_loop=$(printf '%s\n' "$mark_cue" | awk '/<do_for_each name="\$Weapon" in="player.ship.weapons.operational.list">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
+# The conventional loop now nests the 3x3 grid loops, so bound it by the start of
+# the missileturret loop rather than the first (inner) </do_for_each>.
+mark_weapons_loop=$(printf '%s\n' "$mark_cue" | awk '/<do_for_each name="\$Weapon" in="player.ship.weapons.operational.list">/{inside=1} /<do_for_each name="\$Weapon" in="player.ship.missileturrets.operational.list">/{if (inside) exit} inside{print}')
 mark_missiles_loop=$(printf '%s\n' "$mark_cue" | awk '/<do_for_each name="\$Weapon" in="player.ship.missileturrets.operational.list">/{inside=1} inside{print} /<\/do_for_each>/{if (inside) exit}')
 [[ -n "$mark_weapons_loop" && -n "$mark_missiles_loop" ]] \
   || fail "ObserveMark conventional/missileturret loops not both found"
@@ -516,6 +518,50 @@ printf '%s\n' "$mark_weapons_loop" | grep -Fq "' bboxcenter=' + \$BboxCenter" \
 if printf '%s\n' "$mark_missiles_loop" | grep -Fq 'BboxCenter'; then
   fail "issue 69 bbox-center probe must not appear in the missileturret loop"
 fi
+
+# Issue #69 static 3x3 bbox-midplane witness grid. It lives ONLY in the CONVENTIONAL
+# weapons loop, samples the z-centre midplane at x/y fractions {0.25,0.50,0.75}, and
+# runs exactly nine production-aligned LOS queries. bbox-center and existing probes
+# must remain unchanged.
+grid_los_count=$(printf '%s\n' "$mark_weapons_loop" | grep -Fc 'name="$GridLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$GridPoint" useaimtarget="false" excludeself="false"')
+[[ "$grid_los_count" -eq 1 ]] \
+  || fail "expected one production-aligned grid LOS query text (looped 3x3), found $grid_los_count"
+# The nested fraction loops must run 3x3 = 9 samples: both iterate {0.25,0.50,0.75}.
+[[ $(printf '%s\n' "$mark_weapons_loop" | grep -Fc '<set_value name="$GridFracs" exact="[0.25, 0.50, 0.75]"/>') -eq 1 ]] \
+  || fail "grid x/y fraction list is not exactly 0.25/0.50/0.75"
+printf '%s\n' "$mark_weapons_loop" | grep -Fq '<do_for_each name="$GridXFrac" in="$GridFracs">' \
+  || fail "grid does not iterate x fractions over $GridFracs"
+printf '%s\n' "$mark_weapons_loop" | grep -Fq '<do_for_each name="$GridYFrac" in="$GridFracs">' \
+  || fail "grid does not iterate y fractions over $GridFracs"
+# Every grid endpoint is target-local, on the z-centre midplane.
+printf '%s\n' "$mark_weapons_loop" | grep -Fq '<create_position name="$GridPoint" object="$Target" space="$Target"' \
+  || fail "grid endpoint is not a target-local position"
+for coord in \
+  'x="$GridLoX + $GridXFrac * $GridSpanX"' \
+  'y="$GridLoY + $GridYFrac * $GridSpanY"' \
+  'z="$Target.macro.boundingbox.center.z"'; do
+  printf '%s\n' "$mark_weapons_loop" | grep -Fq "$coord" \
+    || fail "grid endpoint formula changed: $coord"
+done
+# min.axis = 2*center - max idiom, reused from the delayed slab math.
+printf '%s\n' "$mark_weapons_loop" | grep -Fq '<set_value name="$GridLoX" exact="2 * $Target.macro.boundingbox.center.x - $Target.macro.boundingbox.max.x"/>' \
+  || fail "grid min.x does not use the 2*center - max idiom"
+printf '%s\n' "$mark_weapons_loop" | grep -Fq '<set_value name="$GridLoY" exact="2 * $Target.macro.boundingbox.center.y - $Target.macro.boundingbox.max.y"/>' \
+  || fail "grid min.y does not use the 2*center - max idiom"
+# LOSGRID logs label/weapon/target/sample/xfrac/yfrac/endpoint/los.
+for field in '[X4GC TEST LOSGRID]' "label=' + \$Label" "weapon=' + \$Weapon" "target=' + \$Target" \
+  "sample=' + \$GridI" "xfrac=' + \$GridXFrac" "yfrac=' + \$GridYFrac" \
+  "endpoint=' + \$GridPoint" "los=' + \$GridLos"; do
+  printf '%s\n' "$mark_weapons_loop" | grep -Fq "$field" \
+    || fail "LOSGRID log field missing: $field"
+done
+# The grid must not appear in the missileturret loop.
+if printf '%s\n' "$mark_missiles_loop" | grep -Fq 'LOSGRID'; then
+  fail "issue 69 bbox-midplane grid must not appear in the missileturret loop"
+fi
+# The bbox-center probe stays a single non-grid query (unchanged).
+[[ "$bboxcenter_query_count" -eq 1 ]] \
+  || fail "issue 69 bbox-center probe count changed after adding the grid"
 
 # MD ObserveFired: listens on the armed firing-weapon group and logs the exact
 # emitter (event.object), the aimed target, and the exact aim error.

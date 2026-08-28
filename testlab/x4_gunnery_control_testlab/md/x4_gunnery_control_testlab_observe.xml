@@ -261,6 +261,41 @@
                     + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
+                  <!-- Issue #69 static bbox-midplane witness set. Live exact-hit
+                       rays clear child LOS ~60% through the AABB (first positives
+                       near normalized x~0.23, y~0.60, z~0.50), while both the
+                       production useaimtarget ray and the explicit bbox-centre ray
+                       read 0. Test whether a tiny static 3x3 grid on the z-centre
+                       midplane recovers a positive witness without projectile data.
+                       Reuse the target macro extents: min.axis = 2*center - max
+                       (same idiom as the delayed slab $LosLo* math). Barrel origin
+                       and excludeself=false keep the production conventional-turret
+                       origin/self policy; only the target point varies. Diagnostic
+                       only; no arc logic. -->
+                  <set_value name="$GridLoX" exact="2 * $Target.macro.boundingbox.center.x - $Target.macro.boundingbox.max.x"/>
+                  <set_value name="$GridLoY" exact="2 * $Target.macro.boundingbox.center.y - $Target.macro.boundingbox.max.y"/>
+                  <set_value name="$GridSpanX" exact="$Target.macro.boundingbox.max.x - $GridLoX"/>
+                  <set_value name="$GridSpanY" exact="$Target.macro.boundingbox.max.y - $GridLoY"/>
+                  <set_value name="$GridFracs" exact="[0.25, 0.50, 0.75]"/>
+                  <set_value name="$GridI" exact="0"/>
+                  <do_for_each name="$GridXFrac" in="$GridFracs">
+                    <do_for_each name="$GridYFrac" in="$GridFracs">
+                      <set_value name="$GridI" operation="add"/>
+                      <create_position name="$GridPoint" object="$Target" space="$Target"
+                                       x="$GridLoX + $GridXFrac * $GridSpanX"
+                                       y="$GridLoY + $GridYFrac * $GridSpanY"
+                                       z="$Target.macro.boundingbox.center.z"/>
+                      <check_line_of_sight name="$GridLos" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" targetoffset="$GridPoint" useaimtarget="false" excludeself="false"/>
+                      <debug_text text="'[X4GC TEST LOSGRID] label=' + $Label
+                        + ' weapon=' + $Weapon
+                        + ' target=' + $Target
+                        + ' sample=' + $GridI
+                        + ' xfrac=' + $GridXFrac
+                        + ' yfrac=' + $GridYFrac
+                        + ' endpoint=' + $GridPoint
+                        + ' los=' + $GridLos"/>
+                    </do_for_each>
+                  </do_for_each>
                 </do_for_each>
                 <do_for_each name="$Weapon" in="player.ship.missileturrets.operational.list">
                   <check_line_of_sight name="$LosEx" object="$Weapon" target="$Target" excludeself="true" useaimtarget="true"/>
