@@ -181,10 +181,12 @@
   negative for these macros, and `barrelposition` must not be assumed static.
   No speculative production line-of-fire change follows from a zero-barrel
   condition that was not observed.
-- Bound: the nonzero result is macro-specific. The changing Colossus values
-  were observed in one r9 session and are experimental as a claim about their
-  exact relationship to turret animation; reproduce that behavior before
-  generalizing it to other turrets or hulls.
+- Bound: the nonzero result is macro-specific. The r9 Colossus values alone did
+  not establish their exact relationship to turret animation; the separate
+  controlled Issue #69 FAR record below now reproduces substantial
+  `barrelposition` movement with articulation for one Paranid L Beam. Neither
+  result establishes a universal transform or prospective firing origin for
+  other turrets or hulls.
 
 ### A remote operational station can receive exact turret and shield equipment synchronously
 - X4: 9.00
@@ -371,26 +373,22 @@
   - Property semantics, `props-9.00/libraries/scriptproperties.xml`: `distanceto.{$component}` is "Distance to other component" (`:76`) — the point distance; `bboxdistanceto.{$component}` is "Distance from this component's bounding box to other component's bounding box" (`:80`); `size` is "Size (based on bounding box)" (`:66`). Shipped scripts treat `size/2` as an object's radius: `move.gate.xml:622` labels `$exitgate.size / 2.0` "gate radius", and `move.attack.object.capital.xml:586` subtracts `$target.size/2m` from `distanceto` to form a surface distance. **Inference** (anchored in those shipped usages, not stated in the property docs): the combat form measures the NEAR-surface gap between the two bounding boxes, while the mining form adds the target's radius to the center distance — i.e. the distance to the target's FAR edge, passing only if the asteroid's whole bounding extent fits inside `maxfirerange`. The two forms can differ by up to a full target size; the mining form is the stricter.
   - Egosoft's own caveat on the combat form (`move.attack.object.capital.xml:409`): "NB: accuracy of bboxdistanceto depends on which object is bigger"; their movement code therefore forms distances as `bboxdistanceto.[$sector,$position] - target.size/2m` (`:410`).
 - Vanilla does NOT perform any separate gimbal or traverse-arc test; LOS from the weapon component plus the applicable range test is the engine's own working definition of a firing solution. The vanilla loops answer only "does ANY weapon (combat) / ANY mining turret (mining) have a solution" — both break on the first hit — so an N-of-total count is strictly more expensive than anything shipped code does.
-- Scope of that claim, added 2026-08-10 so it is not over-read: this establishes what VANILLA computes, from shipped source. It has never been run by this project and says nothing about detecting the LINE OF FIRE BLOCKED condition — a turret trained on a target with the ship's OWN hull in the line of fire. Whether `check_line_of_sight` can answer that is UNRESOLVED and untested: the ray from a turret to its target begins inside the firing ship's own hull, so `excludeself` plausibly decides the result in both directions (true and it cannot see own-hull masking at all; false and it may report every shot blocked), but the exact `excludeself` semantics have not been verified against the engine. Not pursued, because LINE OF FIRE BLOCKED was confirmed live on 2026-08-09 to be unrecoverable regardless — the engine's preferred-target fallback never rolls off a LINE OF FIRE BLOCKED target, so knowing the condition would not let a mod act on it. Do not cite this entry as evidence either that the technique works for LINE OF FIRE BLOCKED or that it cannot.
-- RESOLVED 2026-08-11, the `excludeself` half only: `excludeself="false"` is useless
-  from a turret mounted on the firing ship. In a Test Lab capture that called both
-  variants back to back on the same turret/target pair every sample,
-  `excludeself="false"` returned blocked on **7252 of 7252** per-turret
-  measurements — zero exceptions, including turrets with an obviously clear
-  open-space shot. `excludeself="true"` over the identical samples discriminated:
-  5449 clear, 1803 blocked. The second branch predicted above ("false and it may
-  report every shot blocked") is what happens; the ray evidently starts inside the
-  firing ship's own collision hull and self-terminates. Only `excludeself="true"`
-  carries information. Evidence class: first-party live capture, n=1 ship
-  ("Ray", 14 turrets, ids `0x6c2bc`-`0x6c2cf`), n=1 session of ~10 minutes free
-  play, X4 9.00, logger
-  `testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml`
-  (call sites `:244-245`), captured to `debug.log`. Not shipped-source; not
-  reproduced on a second ship or a second session.
-- Still UNRESOLVED after that capture: everything above about LINE OF FIRE BLOCKED. The capture
-  did not stage a LINE OF FIRE BLOCKED condition, and it never established what
-  `excludeself="true"` blocked results actually correspond to. Do not read
-  "1803 blocked" as "1803 masked".
+- Live-test correction on `excludeself`: the 2026-08-11 passive Ray capture
+  returned blocked for all 7252 self-inclusive samples and was initially
+  over-generalized into “`excludeself=false` is useless.” That statement is
+  retracted. The capture staged no controlled own-hull obstruction and did not
+  settle the meaning of its blocked results. Controlled Issue #67 r11 later
+  produced two conventional plasma turrets whose self-excluding rays were clear,
+  self-inclusive rays were blocked, and X4 held fire for the entire marked
+  interval; self-inclusive LOS carried the correct own-hull-masking signal in
+  that fixture. The 2026-08-29 Issue #69 FAR run then showed a different bounded
+  case where the self-inclusive result changed from blocked to clear as the
+  current barrel origin articulated, while self-excluding LOS stayed clear.
+  Therefore neither self policy is a universal firing oracle: use
+  `excludeself=true` diagnostically to isolate firing-hull involvement, but do
+  not globally remove the firing hull from conventional line-of-fire checks.
+  These are `live-tested` corrections; they do not alter the shipped interface
+  facts above or document native collision/controller semantics.
 - WHY it behaves that way, added 2026-08-11 from shipped source (not live-tested):
   the schema contradicts itself about this attribute. `common.xsd:21722` declares
   `<xs:attribute name="excludeself" ... default="false" use="optional">`, while
@@ -661,17 +659,61 @@
   weapon's barrel (may be 0,0,0 for weapons with no collision)", type `position`);
   vanilla's only meaningful use at `md/cinematiccamera.xml:3224`, which reads
   `$Anchor.barrelposition` and immediately takes `.z` to frame a camera shot
-- Live test: experimental — Issue #67 Colossus E r9 on 2026-08-24 logged
-  materially different values for the same four turrets after they trained on
-  different targets; this dynamic behavior has not yet been reproduced
-- Finding: the property is real, but it is a POSITION, not a direction, and the
-  one shipped consumer uses its `.z` value for camera framing on fixed nose
-  guns. It is explicitly allowed to be `0,0,0`. The earlier inference that it
-  was static was wrong: r9 observed the values change as turrets trained. That
-  still does not make the property an aim direction or document its coordinate
-  frame. Do not build aim-direction logic on it, and do not classify a turret
-  as zero-barrel from an OOS or untrained sample without an in-system settled
-  measurement.
+- Live test: no — this paragraph records only the shipped interface; see the
+  separate controlled live record below for articulation behavior
+- Finding: the property is a POSITION, not a direction, and the one shipped
+  consumer uses its `.z` value for camera framing on fixed nose guns. It is
+  explicitly allowed to be `0,0,0`. Shipped source does not document its
+  coordinate frame, whether it changes with articulation, or any prospective
+  firing-origin semantics. Do not build aim-direction logic on it or classify a
+  turret as zero-barrel from an OOS/untrained sample.
+
+### Current-pose `barrelposition` changes with turret articulation and can transiently self-mask FAR LOS
+- X4: 9.00 (611726)
+- Status: live-tested
+- Source: correlated game `debug.log`, controlled Test Lab run 2026-08-29,
+  fixture `issue-69-combined-three-role-r2`; exact shooter Beam `0x178faf`
+  (`turret_par_l_beam_01_mk1_macro`), stationary FAR target `ISSUE69 FAR CLEAR
+  1`, exact selected turret surface `0x17901d`
+- Live test: yes — one before/after manual Direct-control designation run with a
+  fixed turret mount pose and stationary fixture, plus exact FIRED/HIT controls
+- Finding:
+  - Before designation, the Beam was in `holdfire`, mount yaw/pitch/roll was
+    `0/0/3.14159`, and `barrelposition` was approximately
+    `[-0.362, 5.427, 12.040]`. Fast and all six target-witness LOS rays were
+    blocked with the firing ship included (`0`, `0/6`) while the corresponding
+    self-excluding rays were clear (`1`, `6/6`).
+  - Normal manual surface designation put the same Beam/surface in `autoassist`
+    without changing the mount pose or fixture. `barrelposition` moved first to
+    about `[-12.014, 11.562, 37.892]`; the self-inclusive rays were still
+    blocked. About 0.503 s later it had moved to
+    `[-18.573, 11.546, 35.145]`, and fast plus all six self-inclusive rays were
+    clear (`1`, `6/6`). They stayed clear while the barrel continued moving.
+    Thus current-pose muzzle LOS is not a stable pre-engagement shootability
+    oracle for this controlled fixture.
+  - A settled shot at the exact turret surface produced
+    `FIRED aimed=0x17901d`, then `HIT hitcomp=0x17901d aimed=0x17901d istgt=1`;
+    its delayed exact-child projectile-ray sweep was 21/21 clear. A shot aimed
+    at engine `0x179020` instead hit sibling engine `0x17901e` (`istgt=0`), and
+    its selected-child sweep was 0/21 clear. These bounded controls show useful
+    discriminating signal from the reconstructed exact-child projectile ray.
+  - The engine-targeted sibling hit still had `useaimtarget=true` LOS clear in
+    both self policies. That query is therefore an aim/LOS witness, not a
+    guarantee that the fired projectile will hit the exact selected child.
+  - The exact-hit delayed sweep remained 21/21 clear with
+    `projectile_exists=1`. A still-existing projectile does not inherently force
+    exact-child LOS false in this setup.
+- Inference, bounded to this fixture: the immediate FAR under-report is best
+  explained by the current articulated muzzle origin being temporarily masked
+  by the firing ship's own hull. This does not establish undocumented native
+  controller, collision-mask, or first-hit semantics.
+- Design constraints: do not solve conventional LOS globally with
+  `excludeself=true`; the controlled Issue #67 r11 record below established
+  genuine conventional own-hull masking where self-inclusive blockage matched
+  X4 holding fire. The six-point surface fallback addresses the separate
+  destination/witness failure established by the Issue #69 engine-straddle
+  runs; changing target samples alone cannot cure this source-origin failure,
+  because all six were blocked until the barrel origin moved.
 
 ### No aiscript reads a turret's rotation
 - X4: 9.00
@@ -1477,75 +1519,41 @@ whole-object, engine, shield, turret, and station-module surface tests.
   `hull_percent=18`) yet was hit at 249125.11 and 249129.11 with
   `aimed=0x179141 istgt=1` under `mode=autoassist`.
 
-### Issue #69 under-reports on the LINE-OF-FIRE ray, not the arc; the look_at_bbox arc change does not fix it
-- X4: 9.00
+### Issue #69 has separate target-witness and current-origin LOS false negatives
+- X4: 9.00 (611726)
 - Status: live-tested
-- Source: Test Lab `debug.log` on 2026-08-27, fixture `issue-69-engine-straddle-r1`.
-  Firing run: qualify `request_id=176418827_q2`, shooter ship `1550647`, weapon
-  `0x17a945` `turret_par_l_plasma_01_mk1_macro`, target engine `0x17a970` (pinned
-  id `1550704`). Bounding-box-corner probe run: qualify
-  `request_id=137722953_q2`, shooter weapon `0x17bb89`, target engine `0x17bbb4`.
-  Authored band {-5,+80} (+80deg = 1.39626 rad). Production predicate
-  `md/x4_gunnery_control.xml:211-277`.
-- Live test: yes — one instrumented autoassist firing run plus one fresh
-  eight-corner clearance-probe run. Both independently reproduced the straddle
-  (aim pitch 86.4deg outside band, bbox pitch 77.1deg inside band).
-- Finding: the engine qualified as a straddle (`debug.log:734`: `origin_pitch=1.52187`
-  =87.2deg, `aim_pitch=1.50768`=86.4deg OUTSIDE +80, `bbox_pitch=1.34524`=77.1deg
-  INSIDE, `aim_outside=1 bbox_inside=1 straddle=1 inrange=1 mayattack=1`). The
-  pinned production readout held `engageability_engageable=0 known=1 total=1`
-  across every refresh (`:943,952,964,973,982,992,1004…`) YET the turret fired and
-  hit that exact engine under autoassist (`:994-996`: `aimed=0x17a970` →
-  `HIT hitcomp=0x17a970 istgt=1`, hull 100%→18%). Because `bbox_pitch=77.1<80`,
-  the production ARC gate passes; by elimination the gate that zeroed engageable is
-  the `check_line_of_sight objectoffset=barrelposition target useaimtarget=true
-  excludeself=false` LINE-OF-FIRE ray (`md/x4_gunnery_control.xml:234`, excludeself
-  is false for a conventional plasma turret) — it reports blocked while the real
-  projectile reached the engine and hit it, so the path was actually clear.
-  Consequence (solid): the committed `look_at_bbox` arc change (commit `5411bc0`)
-  does NOT fix #69 — it corrected the arc predicate, but the arc is not the failing
-  gate; the line-of-fire raycast is.
-- RESOLVED — target-side aim-point multiplicity, not own-hull self-masking. The
-  observe auto-snapshot fired on designation (`debug.log:838,842`, target `1550704`
-  = the engine): `muzzle_los_ex=0 muzzle_los_self=0 los_ex=0`, `aim_pitch=1.50768`
-  (86.4deg), `bbox_pitch=1.34524` (77.1deg), `tgtname=ARG L All-round Engine Mk1`,
-  `tgtsize=75.5781`. `muzzle_los_ex=0` is the discriminator: with `excludeself=true`
-  the SHOOTER is removed from the ray, so the block is the TARGET's own hull masking
-  its own engine at the `useaimtarget` point — not shooter self-masking. The engine
-  surface element is large (`tgtsize≈75.6 m`); `useaimtarget` returns a
-  hull-masked point while X4 demonstrably finds a clear hittable point. The
-  available logs do not quantify the mesh aim points' weapon-local pitch span.
-- SHARPER BUG: the production predicate evaluates ARC and LINE-OF-FIRE at DIFFERENT
-  points — arc on the `look_at_bbox` direction (77deg, `x4_gunnery_control.xml:213`)
-  but LOS on the `useaimtarget` point (86deg, `:234`). The second run tested all
-  eight target-local AABB corners from the barrel with both `excludeself=false`
-  and `true`. Only corners 5 and 7 were in arc (`pitch=1.34251`=76.9deg and
-  `1.37995`=79.1deg); both returned `los_self=0 los_ex=0`, as did the other six
-  corners (`debug.log:734-748`: `inarc_corners=2`, both clear counts zero). Thus
-  neither the bbox corners nor excluding the shooter supplies the missing clear
-  line of fire on this reproduced case.
-- CAUTION on frames: the FIRED `bullet_pitch` (`event.param.rotation.pitch`,
-  observe.xml:384) is SECTOR/world frame; qualify `aim_pitch` is WEAPON-LOCAL. They
-  are not directly comparable — an earlier draft's "~20deg lower / near-edge point"
-  read conflated the two and is retracted. `aim_error_pitch`≈0.1–0.2 rad with
-  `aim_distance`≈181 m instead shows the turret aimed AT the engine, consistent with
-  own-hull masking (a) rather than a distant alternate point.
-- No vanilla shortcut: `scriptproperties.xml` exposes `isreadytofire`,
-  `maxfirerange`, and relation-only `mayattack`, but NO property answering "can this
-  turret geometrically hit this surface now" (searched engage/canhit/fir/track/
-  aimat/bear/solution/attackable). The turret's own firing solution is engine-side
-  and unexposed, which is why engageability is reimplemented at all.
-- Fix boundary after the corner run: `excludeself` does not help, and the
-  eight-corner bounded probe is rejected for this case. AABB-corner clearance
-  would not be exact even if a corner were clear: an abstract box corner is not
-  necessarily a hittable mesh point, and `check_line_of_sight targetoffset=` does
-  not report which component (if any) the ray intersects. MD cannot enumerate
-  the engine's mesh aim points
-  ([[useaimtarget-collapses-aim-points-issue-69]]) or query the turret's firing
-  solution. Therefore no source-backed exact existence algorithm is currently
-  available in MD. Any denser face/edge sampling would remain an approximation,
-  add raycasts, and risk false positives at empty box points; do not promote it
-  without an independently validated false-positive policy.
+- Source: controlled Test Lab `debug.log` runs: 2026-08-27 fixture
+  `issue-69-engine-straddle-r1` (exact Paranid L Plasma/Argon L engine), and the
+  2026-08-29 correlated FAR Beam run recorded in the `barrelposition` live
+  record above
+- Live test: yes — exact per-weapon FIRED/HIT attribution and delayed
+  projectile-ray child sweeps; evidence is bounded to the named fixtures
+- Finding:
+  - In the engine-straddle fixture, the authored arc/range gates passed while a
+    single `useaimtarget=true` destination and explicit bbox centre remained
+    LOS-blocked; the same turret later fired at and hit the exact selected
+    engine (`hitcomp==aimed`, `istgt=1`). A preserved successful projectile ray
+    became exact-child clear deeper inside the child's AABB. This establishes a
+    destination/witness failure: one representative target point can
+    under-represent whether some hittable part of the exact child is reachable.
+    It does not establish multiple authored aim targets (the tested engine asset
+    has one), native target-point selection, collision masks, or first-hit rules.
+  - Six normalized interior target witnesses are a bounded response to that
+    destination/witness failure. They are not an exact native firing-solution
+    oracle: `targetoffset` does not report which component was intersected, and
+    abstract bbox points need not be hittable mesh points.
+  - The FAR Beam run established a distinct source-origin failure. Every one of
+    the same six target witnesses was clear with the firing ship excluded but
+    blocked with it included until articulation moved the current
+    `barrelposition`; changing destination samples alone therefore could not
+    clear that state. See the separate live record above for the exact
+    before/after values and behavioral controls.
+- Design boundary: retain the distinction between these two failure dimensions.
+  A target-witness fallback cannot by itself cure a temporarily self-masked
+  source origin, and globally setting `excludeself=true` would discard the
+  genuine conventional own-hull obstruction established by Issue #67 r11.
+  Prospective origin/controller semantics remain unknown; do not present a
+  bounded approximation as native X4 behavior.
 
 ### `find_object_surface` cannot return a surface element's own mesh point; `component=` returns the parent hull
 - X4: 9.00
@@ -1576,28 +1584,22 @@ whole-object, engine, shield, turret, and station-module surface tests.
   claim that vanilla station combat uses parent-root + component + macro match +
   sibling exclusion — that idiom exists in no shipped file.
 
-### `useaimtarget` collapses a victim's multiple aim points to one reference point; MD cannot enumerate them (issue #69)
+### `useaimtarget` selects a documented destination but does not expose exact-impact prediction
 - X4: 9.00
 - Status: shipped-source
 - Source: XSD `schemas-9.00/libraries/common.xsd:21715-21721`
   (`check_line_of_sight useaimtarget`) and `:24127-24133`
   (`create_orientation useaimtarget`); `vanilla-900/scriptproperties.xml`
   (no property enumerates aim/hit points)
-- Live test: no — semantics from XSD; the decisive discriminator below is unrun
-- Finding: both actions document `useaimtarget` as using "an object's aim targets
-  (or the bounding box center if there are none)" as **the** raycast target /
-  reference point (singular) "consistent with weapon aiming." `create_orientation`
-  returns exactly one orientation, so the predicate's single `$aimpitch` is one
-  representative point, not the set X4's fire-control iterates. No scriptproperty
-  lists the individual aim points, so MD cannot compute a per-point pitch to test
-  "is any hittable point in-band." `look_at_bbox` is merely a different single
-  point (in one run bbox_pitch 0.75 rad vs aim_pitch 1.24 rad for the same
-  engine, `debug.log:873`), so swapping it in does not capture the multiplicity.
-- Consequence for #69: the single-sample arc-band predicate cannot reproduce
-  X4's multi-point choice by construction. Open discriminator, needs one
-  controlled run: does `check_line_of_sight object=weapon
-  objectoffset=barrelposition target=<component> useaimtarget="true"` return true
-  exactly when X4 actually hits the component? If yes, LOS-useaimtarget (not a
-  pitch sample) is the fix; if X4 hits while it reads false, MD has no primitive
-  that reproduces engine-side aim-point selection and #69 can only be
-  approximated. Keep this in the issue/log until that run completes.
+- Live test: no — this paragraph records only the shipped interface; see the
+  Issue #69 live records above for runtime controls
+- Finding: both actions document `useaimtarget` as using an object's aim targets,
+  or its bounding-box centre when none exist, as the raycast destination or
+  orientation reference. `create_orientation` returns one orientation, and no
+  scriptproperty enumerates the native controller's chosen firing point. This
+  shipped interface therefore exposes a representative aim/reference result,
+  not an exact-impact contract. Do not infer multiple authored aim targets for a
+  specific asset without inspecting it; the Issue #69 engine used in the
+  controlled runs had exactly one. The FAR sibling-hit control further showed,
+  as live evidence rather than shipped semantics, that a clear
+  `useaimtarget=true` query can precede a projectile impact on a sibling child.
