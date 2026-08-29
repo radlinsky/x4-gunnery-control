@@ -2032,6 +2032,10 @@
               <set_value name="$BboxRange" exact="$Weapon.bboxdistanceto.{$Surface}"/>
               <check_line_of_sight name="$FastLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" useaimtarget="true" excludeself="false"/>
               <check_line_of_sight name="$FastLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" useaimtarget="true" excludeself="true"/>
+              <check_line_of_sight name="$ImplicitFastSelf" object="$Weapon" target="$Surface" useaimtarget="true" excludeself="false"/>
+              <check_line_of_sight name="$ImplicitFastEx" object="$Weapon" target="$Surface" useaimtarget="true" excludeself="true"/>
+              <check_line_of_sight name="$ZeroFastSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" useaimtarget="true" excludeself="false"/>
+              <check_line_of_sight name="$ZeroFastEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" useaimtarget="true" excludeself="true"/>
               <set_value name="$MinX" exact="2 * $Surface.macro.boundingbox.center.x - $Surface.macro.boundingbox.max.x"/>
               <set_value name="$MinY" exact="2 * $Surface.macro.boundingbox.center.y - $Surface.macro.boundingbox.max.y"/>
               <set_value name="$MinZ" exact="2 * $Surface.macro.boundingbox.center.z - $Surface.macro.boundingbox.max.z"/>
@@ -2043,14 +2047,26 @@
               <set_value name="$ZFracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
               <set_value name="$ClearSelf" exact="0"/>
               <set_value name="$ClearEx" exact="0"/>
+              <set_value name="$ImplicitClearSelf" exact="0"/>
+              <set_value name="$ImplicitClearEx" exact="0"/>
+              <set_value name="$ZeroClearSelf" exact="0"/>
+              <set_value name="$ZeroClearEx" exact="0"/>
               <do_for_each name="$Frac" in="$XFracs" counter="$I">
                 <create_position name="$Sample" object="$Surface" space="$Surface" x="$MinX + $XFracs.{$I} * $SpanX" y="$MinY + $YFracs.{$I} * $SpanY" z="$MinZ + $ZFracs.{$I} * $SpanZ"/>
                 <check_line_of_sight name="$SampleLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
                 <check_line_of_sight name="$SampleLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                <check_line_of_sight name="$ImplicitSampleLosSelf" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                <check_line_of_sight name="$ImplicitSampleLosEx" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                <check_line_of_sight name="$ZeroSampleLosSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                <check_line_of_sight name="$ZeroSampleLosEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
                 <do_if value="$SampleLosSelf"><set_value name="$ClearSelf" operation="add"/></do_if>
                 <do_if value="$SampleLosEx"><set_value name="$ClearEx" operation="add"/></do_if>
+                <do_if value="$ImplicitSampleLosSelf"><set_value name="$ImplicitClearSelf" operation="add"/></do_if>
+                <do_if value="$ImplicitSampleLosEx"><set_value name="$ImplicitClearEx" operation="add"/></do_if>
+                <do_if value="$ZeroSampleLosSelf"><set_value name="$ZeroClearSelf" operation="add"/></do_if>
+                <do_if value="$ZeroSampleLosEx"><set_value name="$ZeroClearEx" operation="add"/></do_if>
               </do_for_each>
-              <debug_text text="'[X4GC TEST ISSUE69 STATE] phase=' + event.param.$phase + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' mode=' + $Weapon.mode + ' ready=' + $Weapon.isreadytofire + ' mount_base=' + $MountBase + ' mount_yaw=' + $Weapon.rotation.yaw + ' mount_pitch=' + $Weapon.rotation.pitch + ' mount_roll=' + $Weapon.rotation.roll + ' barrel_raw=' + $Barrel + ' muzzle_base=' + $MuzzleBase + ' bbox_range=' + $BboxRange + ' maxrange=' + $Weapon.maxfirerange + ' bbox_pitch=' + $BboxLocal.pitch + ' fast_los_self=' + $FastLosSelf + ' fast_los_ex=' + $FastLosEx + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx"/>
+              <debug_text text="'[X4GC TEST ISSUE69 STATE] phase=' + event.param.$phase + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' mode=' + $Weapon.mode + ' ready=' + $Weapon.isreadytofire + ' mount_base=' + $MountBase + ' mount_yaw=' + $Weapon.rotation.yaw + ' mount_pitch=' + $Weapon.rotation.pitch + ' mount_roll=' + $Weapon.rotation.roll + ' barrel_raw=' + $Barrel + ' muzzle_base=' + $MuzzleBase + ' bbox_range=' + $BboxRange + ' maxrange=' + $Weapon.maxfirerange + ' bbox_pitch=' + $BboxLocal.pitch + ' fast_los_self=' + $FastLosSelf + ' fast_los_ex=' + $FastLosEx + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_fast_self=' + $ImplicitFastSelf + ' implicit_fast_ex=' + $ImplicitFastEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_fast_self=' + $ZeroFastSelf + ' zero_fast_ex=' + $ZeroFastEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx"/>
             </do_if>
           </actions>
         </cue>

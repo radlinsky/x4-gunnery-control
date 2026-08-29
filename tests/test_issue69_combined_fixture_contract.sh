@@ -130,7 +130,7 @@ grep -Fq "\$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures
 grep -Fq "\$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75" "$scenario" || fail "FAR live-range tolerance missing"
 grep -Fq 'turret_par_l_beam_01_mk1.xml:187-192 authors rotation_x' "$scenario" || fail "Beam arc lacks shipped-source evidence"
 grep -Fq "name=\"\$FarArcPass\" exact=\"\$FarBboxLocal.pitch ge -5deg and \$FarBboxLocal.pitch le 80deg\"" "$scenario" || fail "FAR does not use the authored Beam -5..80 degree arc"
-grep -Fq "(\$FarFastLosSelf or \$FarSampleClearSelf gt 0)" "$scenario" || fail "FAR production clear-path gate missing"
+grep -Fq "<set_value name=\"\$FarQualified\" exact=\"\$FarMayAttack and \$FarInRange and \$FarArcPass and \$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75 and (\$FarFastLosSelf or \$FarSampleClearSelf gt 0) and (\$FarFastLosEx or \$FarSampleClearEx gt 0) and \$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures == 0\"/>" "$scenario" || fail "FAR qualification expression changed"
 grep -Fq "and \$NearQualified and \$FarQualified" "$scenario" || fail "combined qualifier does not fail closed on both controls"
 grep -Fq "<set_value name=\"ScenarioRoot.\$Issue69RoleRepositionFailures\" exact=\"0\"/>" "$scenario" || fail "combined reposition failure counter is not initialized"
 grep -Fq "\$EngineStraddleSurface != null and \$Issue69PlasmaCount == 1" "$scenario" || fail "combined role qualifier does not guard MID before distance correlation"
@@ -148,12 +148,41 @@ grep -Fq "cue=\"Issue69StateLog\" param=\"table[\$phase = 'before', \$delay = 0s
 state_before_line=$(grep -nF "cue=\"Issue69StateLog\" param=\"table[\$phase = 'before'" "$scenario" | cut -d: -f1)
 far_gate_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$scenario" | tail -1 | cut -d: -f1)
 [[ "$state_before_line" -lt "$far_gate_line" ]] || fail "Issue69 before state is not emitted before FAR LOS qualification"
-for field in weapon= weapon_macro= surface= surface_macro= mode= ready= mount_base= mount_yaw= mount_pitch= mount_roll= barrel_raw= muzzle_base= bbox_range= maxrange= bbox_pitch= fast_los_self= fast_los_ex= six_clear_self= six_clear_ex=; do
+for field in weapon= weapon_macro= surface= surface_macro= mode= ready= mount_base= mount_yaw= mount_pitch= mount_roll= barrel_raw= muzzle_base= bbox_range= maxrange= bbox_pitch= fast_los_self= fast_los_ex= six_clear_self= six_clear_ex= implicit_fast_self= implicit_fast_ex= implicit_six_self= implicit_six_ex= zero_fast_self= zero_fast_ex= zero_six_self= zero_six_ex=; do
   [[ "$issue69_state" == *"$field"* ]] || fail "Issue69 state record missing $field"
 done
 [[ "$issue69_state" == *"value=\"\$Barrel\""* ]] || fail "Issue69 state does not transform the raw barrel position when schema-supported"
-[[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"false\""* ]] || fail "Issue69 state lost self-inclusive fast LOS"
-[[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"false\""* ]] || fail "Issue69 state lost self-inclusive fallback LOS"
+for self in false true; do
+  [[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"$self\""* ]] || fail "Issue69 state lost barrel-origin fast LOS excludeself=$self"
+  [[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"$self\""* ]] || fail "Issue69 state lost barrel-origin six-sample LOS excludeself=$self"
+done
+for spec in \
+  "ImplicitFastSelf|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"false\"" \
+  "ImplicitFastEx|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"true\"" \
+  "ImplicitSampleLosSelf|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"false\"" \
+  "ImplicitSampleLosEx|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"true\""; do
+  name=${spec%%|*}
+  attrs=${spec#*|}
+  line=$(grep -F "name=\"\$$name\" object=\"\$Weapon\" $attrs" "$scenario" || true)
+  [[ -n "$line" && "$line" != *objectoffset=* && $(grep -c "name=\"\$$name\"" "$scenario") -eq 1 ]] || fail "implicit candidate $name must occur once with objectoffset omitted"
+done
+for spec in \
+  "ZeroFastSelf|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"false\"" \
+  "ZeroFastEx|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"true\"" \
+  "ZeroSampleLosSelf|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"false\"" \
+  "ZeroSampleLosEx|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"true\""; do
+  name=${spec%%|*}
+  attrs=${spec#*|}
+  grep -Fq "name=\"\$$name\" object=\"\$Weapon\" objectoffset=\"position.[0m,0m,0m]\" $attrs" "$scenario" || fail "zero candidate $name lacks explicit weapon-local zero origin"
+  [[ $(grep -c "name=\"\$$name\"" "$scenario") -eq 1 ]] || fail "zero candidate $name must occur once"
+done
+state_sample_loop=$(awk '/<do_for_each name="\$Frac"/{f=1} f{print} f && /<\/do_for_each>/{exit}' "$scenario")
+for name in ImplicitSampleLosSelf ImplicitSampleLosEx ZeroSampleLosSelf ZeroSampleLosEx; do
+  [[ "$state_sample_loop" == *"name=\"\$$name\""* ]] || fail "$name does not reuse the existing six-sample loop"
+done
+for list in '[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]' '[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]' '[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]'; do
+  [[ "$issue69_state" == *"$list"* ]] || fail "Issue69 state six-sample list changed: $list"
+done
 if grep -E 'Issue69(StateLog|ObserveState).*\.idcode' "$scenario"; then fail "Issue69 state uses forbidden surface idcode"; fi
 if [[ "$issue69_state" =~ SetSofttarget|set_softtarget|set_weapon_mode|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "Issue69 telemetry mutates target or weapon mode"; fi
 grep -Fq "ScenarioRoot.\$Issue69FarBeam\" exact=\"\$Issue69Beam\"" "$scenario" || fail "exact FAR Beam is not persisted"
