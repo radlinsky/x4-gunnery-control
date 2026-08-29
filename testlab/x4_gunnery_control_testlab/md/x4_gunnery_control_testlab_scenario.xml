@@ -1382,7 +1382,7 @@
                         </warp>
                         <create_position name="$FarRootSector" object="ScenarioRoot.$FarTarget" space="$QualifySector"/>
                         <create_position name="$FarSurfaceSector" object="$FarSurface" space="$QualifySector"/>
-                        <create_position name="$FarDesiredSurface" object="$BeamWeapon" space="$QualifySector" x="0" y="0" z="$BeamWeapon.maxfirerange * 0.70"/>
+                        <create_position name="$FarDesiredSurface" object="$BeamWeapon" space="$QualifySector" x="0" y="0" z="$BeamWeapon.maxfirerange * -0.70"/>
                         <set_value name="$FarRotation" exact="ScenarioRoot.$FarTarget.rotation"/>
                         <warp object="ScenarioRoot.$FarTarget" sector="$QualifySector">
                           <position x="$FarDesiredSurface.x + $FarRootSector.x - $FarSurfaceSector.x" y="$FarDesiredSurface.y + $FarRootSector.y - $FarSurfaceSector.y" z="$FarDesiredSurface.z + $FarRootSector.z - $FarSurfaceSector.z"/>
@@ -1394,7 +1394,7 @@
                           <position x="$BlockerDesiredRoot.x" y="$BlockerDesiredRoot.y" z="$BlockerDesiredRoot.z"/>
                           <rotation value="$BlockerRotation"/>
                         </warp>
-                        <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] request_id=' + $RequestId + ' near_formula=plasma_local_z_450 far_formula=beam_local_z_0.70_maxrange blocker_formula=plasma_local_z_180 plasma=' + $PlasmaWeapon + ' beam=' + $BeamWeapon + ' beam_maxrange=' + $BeamWeapon.maxfirerange + ' near_desired=' + $NearDesiredSurface + ' far_desired=' + $FarDesiredSurface + ' blocker_desired=' + $BlockerDesiredRoot"/>
+                        <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] request_id=' + $RequestId + ' near_formula=plasma_local_z_450 far_formula=beam_local_z_-0.70_maxrange blocker_formula=plasma_local_z_180 plasma=' + $PlasmaWeapon + ' beam=' + $BeamWeapon + ' beam_maxrange=' + $BeamWeapon.maxfirerange + ' near_desired=' + $NearDesiredSurface + ' far_desired=' + $FarDesiredSurface + ' blocker_desired=' + $BlockerDesiredRoot"/>
                       </do_if>
                       <do_else>
                         <set_value name="ScenarioRoot.$Issue69RoleRepositionFailures" operation="add"/>
@@ -1838,7 +1838,7 @@
                 <create_position name="$NearSettledPlasmaLocal" object="$NearRoleSurface" space="$Issue69Plasma"/>
                 <create_position name="$BlockerSettledPlasmaLocal" object="ScenarioRoot.$NearBlocker" space="$Issue69Plasma"/>
                 <create_position name="$FarSettledBeamLocal" object="$FarRoleSurface" space="$Issue69Beam"/>
-                <set_value name="$FarSettledExpectedZ" exact="$Issue69Beam.maxfirerange * 0.70"/>
+                <set_value name="$FarSettledExpectedZ" exact="$Issue69Beam.maxfirerange * -0.70"/>
                 <set_value name="$NearSettledPoseValid" exact="$NearSettledPlasmaLocal.x ge 0m - $Issue69PoseTolerance and $NearSettledPlasmaLocal.x le 0m + $Issue69PoseTolerance and $NearSettledPlasmaLocal.y ge 0m - $Issue69PoseTolerance and $NearSettledPlasmaLocal.y le 0m + $Issue69PoseTolerance and $NearSettledPlasmaLocal.z ge 450m - $Issue69PoseTolerance and $NearSettledPlasmaLocal.z le 450m + $Issue69PoseTolerance"/>
                 <set_value name="$BlockerSettledPoseValid" exact="$BlockerSettledPlasmaLocal.x ge 0m - $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.x le 0m + $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.y ge 0m - $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.y le 0m + $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.z ge 180m - $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.z le 180m + $Issue69PoseTolerance"/>
                 <set_value name="$FarSettledPoseValid" exact="$FarSettledBeamLocal.x ge 0m - $Issue69PoseTolerance and $FarSettledBeamLocal.x le 0m + $Issue69PoseTolerance and $FarSettledBeamLocal.y ge 0m - $Issue69PoseTolerance and $FarSettledBeamLocal.y le 0m + $Issue69PoseTolerance and $FarSettledBeamLocal.z ge $FarSettledExpectedZ - $Issue69PoseTolerance and $FarSettledBeamLocal.z le $FarSettledExpectedZ + $Issue69PoseTolerance"/>
