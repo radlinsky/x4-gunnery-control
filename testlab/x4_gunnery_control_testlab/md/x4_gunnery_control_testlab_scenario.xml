@@ -1388,7 +1388,7 @@
                         <set_value name="$FarSurface" exact="$FarSurfaces.{1}"/>
                         <create_position name="$NearRootSector" object="ScenarioRoot.$NearTarget" space="$QualifySector"/>
                         <create_position name="$NearSurfaceSector" object="$NearSurface" space="$QualifySector"/>
-                        <create_position name="$NearDesiredSurface" object="$PlasmaWeapon" space="$QualifySector" x="0" y="0" z="450"/>
+                        <create_position name="$NearDesiredSurface" object="$BeamWeapon" space="$QualifySector" x="$BeamWeapon.maxfirerange * 0.40" y="0m" z="$BeamWeapon.maxfirerange * -0.40"/>
                         <set_value name="$NearRotation" exact="ScenarioRoot.$NearTarget.rotation"/>
                         <warp object="ScenarioRoot.$NearTarget" sector="$QualifySector">
                           <position x="$NearDesiredSurface.x + $NearRootSector.x - $NearSurfaceSector.x" y="$NearDesiredSurface.y + $NearRootSector.y - $NearSurfaceSector.y" z="$NearDesiredSurface.z + $NearRootSector.z - $NearSurfaceSector.z"/>
@@ -1402,13 +1402,13 @@
                           <position x="$FarDesiredSurface.x + $FarRootSector.x - $FarSurfaceSector.x" y="$FarDesiredSurface.y + $FarRootSector.y - $FarSurfaceSector.y" z="$FarDesiredSurface.z + $FarRootSector.z - $FarSurfaceSector.z"/>
                           <rotation value="$FarRotation"/>
                         </warp>
-                        <create_position name="$BlockerDesiredRoot" object="$PlasmaWeapon" space="$QualifySector" x="0" y="0" z="180"/>
+                        <create_position name="$BlockerDesiredRoot" object="$BeamWeapon" space="$QualifySector" x="$BeamWeapon.maxfirerange * 0.20" y="0m" z="$BeamWeapon.maxfirerange * -0.20"/>
                         <set_value name="$BlockerRotation" exact="ScenarioRoot.$NearBlocker.rotation"/>
                         <warp object="ScenarioRoot.$NearBlocker" sector="$QualifySector">
                           <position x="$BlockerDesiredRoot.x" y="$BlockerDesiredRoot.y" z="$BlockerDesiredRoot.z"/>
                           <rotation value="$BlockerRotation"/>
                         </warp>
-                        <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] request_id=' + $RequestId + ' near_formula=plasma_local_z_450 far_formula=beam_local_z_-0.70_maxrange blocker_formula=plasma_local_z_180 plasma=' + $PlasmaWeapon + ' beam=' + $BeamWeapon + ' beam_maxrange=' + $BeamWeapon.maxfirerange + ' near_desired=' + $NearDesiredSurface + ' far_desired=' + $FarDesiredSurface + ' blocker_desired=' + $BlockerDesiredRoot"/>
+                        <debug_text text="'[X4GC TEST QUALIFY ROLEPLACE] request_id=' + $RequestId + ' near_formula=beam_local_x_0.40_z_-0.40_maxrange far_formula=beam_local_z_-0.70_maxrange blocker_formula=beam_local_x_0.20_z_-0.20_maxrange plasma=' + $PlasmaWeapon + ' beam=' + $BeamWeapon + ' beam_maxrange=' + $BeamWeapon.maxfirerange + ' near_desired=' + $NearDesiredSurface + ' far_desired=' + $FarDesiredSurface + ' blocker_desired=' + $BlockerDesiredRoot"/>
                       </do_if>
                       <do_else>
                         <set_value name="ScenarioRoot.$Issue69RoleRepositionFailures" operation="add"/>
@@ -1855,28 +1855,47 @@
                 <set_value name="ScenarioRoot.$Issue69MatrixTick" exact="0"/>
                 <set_value name="ScenarioRoot.$Issue69MatrixPrevious" exact="table[]"/>
                 <set_value name="ScenarioRoot.$Issue69StateActive" exact="true"/>
-                <!-- Re-express the settled objects in the exact firing-weapon frames.
-                     Ten metres matches this cue's existing post-warp position idiom
-                     while remaining small relative to the 180/450/0.70R geometry. -->
+                <!-- Re-express all three roles in the exact firing-weapon frames.
+                     NEAR's exact sparse surface and separate blocker lie on one
+                     angled Beam-local firing line; FAR retains its accepted placement. -->
                 <set_value name="$Issue69PoseTolerance" exact="10m"/>
-                <create_position name="$NearSettledPlasmaLocal" object="$NearRoleSurface" space="$Issue69Plasma"/>
-                <create_position name="$BlockerSettledPlasmaLocal" object="ScenarioRoot.$NearBlocker" space="$Issue69Plasma"/>
+                <create_position name="$NearSettledBeamLocal" object="$NearRoleSurface" space="$Issue69Beam"/>
+                <create_position name="$BlockerSettledBeamLocal" object="ScenarioRoot.$NearBlocker" space="$Issue69Beam"/>
                 <create_position name="$FarSettledBeamLocal" object="$FarRoleSurface" space="$Issue69Beam"/>
+                <set_value name="$NearSettledExpectedX" exact="$Issue69Beam.maxfirerange * 0.40"/>
+                <set_value name="$NearSettledExpectedZ" exact="$Issue69Beam.maxfirerange * -0.40"/>
+                <set_value name="$BlockerSettledExpectedX" exact="$Issue69Beam.maxfirerange * 0.20"/>
+                <set_value name="$BlockerSettledExpectedZ" exact="$Issue69Beam.maxfirerange * -0.20"/>
                 <set_value name="$FarSettledExpectedZ" exact="$Issue69Beam.maxfirerange * -0.70"/>
-                <set_value name="$NearSettledPoseValid" exact="$NearSettledPlasmaLocal.x ge 0m - $Issue69PoseTolerance and $NearSettledPlasmaLocal.x le 0m + $Issue69PoseTolerance and $NearSettledPlasmaLocal.y ge 0m - $Issue69PoseTolerance and $NearSettledPlasmaLocal.y le 0m + $Issue69PoseTolerance and $NearSettledPlasmaLocal.z ge 450m - $Issue69PoseTolerance and $NearSettledPlasmaLocal.z le 450m + $Issue69PoseTolerance"/>
-                <set_value name="$BlockerSettledPoseValid" exact="$BlockerSettledPlasmaLocal.x ge 0m - $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.x le 0m + $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.y ge 0m - $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.y le 0m + $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.z ge 180m - $Issue69PoseTolerance and $BlockerSettledPlasmaLocal.z le 180m + $Issue69PoseTolerance"/>
+                <set_value name="$NearSettledPoseValid" exact="$NearSettledBeamLocal.x ge $NearSettledExpectedX - $Issue69PoseTolerance and $NearSettledBeamLocal.x le $NearSettledExpectedX + $Issue69PoseTolerance and $NearSettledBeamLocal.y ge 0m - $Issue69PoseTolerance and $NearSettledBeamLocal.y le 0m + $Issue69PoseTolerance and $NearSettledBeamLocal.z ge $NearSettledExpectedZ - $Issue69PoseTolerance and $NearSettledBeamLocal.z le $NearSettledExpectedZ + $Issue69PoseTolerance"/>
+                <set_value name="$BlockerSettledPoseValid" exact="$BlockerSettledBeamLocal.x ge $BlockerSettledExpectedX - $Issue69PoseTolerance and $BlockerSettledBeamLocal.x le $BlockerSettledExpectedX + $Issue69PoseTolerance and $BlockerSettledBeamLocal.y ge 0m - $Issue69PoseTolerance and $BlockerSettledBeamLocal.y le 0m + $Issue69PoseTolerance and $BlockerSettledBeamLocal.z ge $BlockerSettledExpectedZ - $Issue69PoseTolerance and $BlockerSettledBeamLocal.z le $BlockerSettledExpectedZ + $Issue69PoseTolerance"/>
                 <set_value name="$FarSettledPoseValid" exact="$FarSettledBeamLocal.x ge 0m - $Issue69PoseTolerance and $FarSettledBeamLocal.x le 0m + $Issue69PoseTolerance and $FarSettledBeamLocal.y ge 0m - $Issue69PoseTolerance and $FarSettledBeamLocal.y le 0m + $Issue69PoseTolerance and $FarSettledBeamLocal.z ge $FarSettledExpectedZ - $Issue69PoseTolerance and $FarSettledBeamLocal.z le $FarSettledExpectedZ + $Issue69PoseTolerance"/>
-                <debug_text text="'[X4GC TEST QUALIFY SETTLED POSE] request_id=' + $RequestId + ' tolerance=' + $Issue69PoseTolerance + ' near_plasma_local=' + $NearSettledPlasmaLocal + ' near_expected_z=450m near_valid=' + $NearSettledPoseValid + ' blocker_plasma_local=' + $BlockerSettledPlasmaLocal + ' blocker_expected_z=180m blocker_valid=' + $BlockerSettledPoseValid + ' far_beam_local=' + $FarSettledBeamLocal + ' far_expected_z=' + $FarSettledExpectedZ + ' far_valid=' + $FarSettledPoseValid"/>
-                <set_value name="$NearRange" exact="$Issue69Plasma.bboxdistanceto.{$NearRoleSurface}"/>
+                <debug_text text="'[X4GC TEST QUALIFY SETTLED POSE] request_id=' + $RequestId + ' tolerance=' + $Issue69PoseTolerance + ' near_beam_local=' + $NearSettledBeamLocal + ' near_expected_x=' + $NearSettledExpectedX + ' near_expected_z=' + $NearSettledExpectedZ + ' near_valid=' + $NearSettledPoseValid + ' blocker_beam_local=' + $BlockerSettledBeamLocal + ' blocker_expected_x=' + $BlockerSettledExpectedX + ' blocker_expected_z=' + $BlockerSettledExpectedZ + ' blocker_valid=' + $BlockerSettledPoseValid + ' far_beam_local=' + $FarSettledBeamLocal + ' far_expected_z=' + $FarSettledExpectedZ + ' far_valid=' + $FarSettledPoseValid"/>
+                <set_value name="$NearExactPairValid" exact="$Issue69Beam and $Issue69Beam.exists and $Issue69Beam.macro == macro.turret_par_l_beam_01_mk1_macro and $NearRoleSurface and $NearRoleSurface.exists and $NearRoleSurface.macro == macro.turret_arg_l_beam_01_mk1_macro"/>
+                <set_value name="$NearRange" exact="$Issue69Beam.bboxdistanceto.{$NearRoleSurface}"/>
                 <set_value name="$MidRange" exact="$Issue69Plasma.bboxdistanceto.{$EngineStraddleSurface}"/>
                 <create_orientation name="$NearBboxLocal" orientation="look_at_bbox" refobject="$NearRoleSurface">
-                  <position object="$Issue69Plasma" space="$Issue69Plasma"/>
+                  <position object="$Issue69Beam" space="$Issue69Beam"/>
+                </create_orientation>
+                <create_orientation name="$NearAimBearing" orientation="look_at" refobject="$NearRoleSurface" useaimtarget="true">
+                  <position object="$Issue69Beam" space="$Issue69Beam"/>
                 </create_orientation>
                 <set_value name="$NearArcPass" exact="$NearBboxLocal.pitch ge -5deg and $NearBboxLocal.pitch le 80deg"/>
-                <set_value name="$NearInRange" exact="$NearRange le $Issue69Plasma.maxfirerange"/>
+                <set_value name="$NearInRange" exact="$NearRange le $Issue69Beam.maxfirerange"/>
                 <set_value name="$NearMayAttack" exact="@ScenarioRoot.$GeometryShooter.mayattack.{$NearRoleSurface}"/>
-                <check_line_of_sight name="$NearFastLosSelf" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" useaimtarget="true" excludeself="false"/>
-                <check_line_of_sight name="$NearFastLosEx" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" useaimtarget="true" excludeself="true"/>
+                <!-- Same shipped Paranid L Beam construction accepted by FAR:
+                     O + Ry(runtime aim yaw) * (P + Rx(-runtime aim pitch) * D). -->
+                <create_rotation name="$NearVirtualPitchRotation" pitch="$NearAimBearing.pitch"/>
+                <transform_position name="$NearVirtualPitchedDownstream" refposition="position.[0m,0m,0m]" refrotation="$NearVirtualPitchRotation">
+                  <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
+                </transform_position>
+                <create_position name="$NearVirtualYawOrigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
+                <create_rotation name="$NearVirtualYawRotation" yaw="$NearAimBearing.yaw"/>
+                <transform_position name="$NearVirtualMuzzle" refposition="$NearVirtualYawOrigin" refrotation="$NearVirtualYawRotation">
+                  <position x="$NearVirtualPitchedDownstream.x - 1.730653e-6m" y="$NearVirtualPitchedDownstream.y + 2.926126m" z="$NearVirtualPitchedDownstream.z - 16.11956m"/>
+                </transform_position>
+                <check_line_of_sight name="$NearVirtualFastSelf" object="$Issue69Beam" objectoffset="$NearVirtualMuzzle" target="$NearRoleSurface" useaimtarget="true" excludeself="false"/>
+                <check_line_of_sight name="$NearVirtualFastEx" object="$Issue69Beam" objectoffset="$NearVirtualMuzzle" target="$NearRoleSurface" useaimtarget="true" excludeself="true"/>
                 <set_value name="$NearMinX" exact="2 * $NearRoleSurface.macro.boundingbox.center.x - $NearRoleSurface.macro.boundingbox.max.x"/>
                 <set_value name="$NearMinY" exact="2 * $NearRoleSurface.macro.boundingbox.center.y - $NearRoleSurface.macro.boundingbox.max.y"/>
                 <set_value name="$NearMinZ" exact="2 * $NearRoleSurface.macro.boundingbox.center.z - $NearRoleSurface.macro.boundingbox.max.z"/>
@@ -1886,21 +1905,27 @@
                 <set_value name="$Issue69XFracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
                 <set_value name="$Issue69YFracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
                 <set_value name="$Issue69ZFracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
-                <set_value name="$NearSampleClearSelf" exact="0"/>
-                <set_value name="$NearSampleClearEx" exact="0"/>
+                <set_value name="$NearVirtualSampleClearSelf" exact="0"/>
+                <set_value name="$NearVirtualSampleClearEx" exact="0"/>
+                <set_value name="$NearVirtualWitnessSelf" exact="[]"/>
+                <set_value name="$NearVirtualWitnessEx" exact="[]"/>
                 <do_for_each name="$NearFrac" in="$Issue69XFracs" counter="$NearI">
                   <create_position name="$NearSample" object="$NearRoleSurface" space="$NearRoleSurface" x="$NearMinX + $Issue69XFracs.{$NearI} * $NearSpanX" y="$NearMinY + $Issue69YFracs.{$NearI} * $NearSpanY" z="$NearMinZ + $Issue69ZFracs.{$NearI} * $NearSpanZ"/>
-                  <check_line_of_sight name="$NearSampleLosSelf" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" targetoffset="$NearSample" useaimtarget="false" excludeself="false"/>
-                  <check_line_of_sight name="$NearSampleLosEx" object="$Issue69Plasma" objectoffset="$Issue69Plasma.barrelposition" target="$NearRoleSurface" targetoffset="$NearSample" useaimtarget="false" excludeself="true"/>
-                  <do_if value="$NearSampleLosSelf"><set_value name="$NearSampleClearSelf" operation="add"/></do_if>
-                  <do_if value="$NearSampleLosEx"><set_value name="$NearSampleClearEx" operation="add"/></do_if>
-                  <debug_text text="'[X4GC TEST QUALIFY NEAR SAMPLE] request_id=' + $RequestId + ' sample=' + $NearI + ' los_self=' + $NearSampleLosSelf + ' los_ex=' + $NearSampleLosEx + ' offset=' + $NearSample"/>
+                  <check_line_of_sight name="$NearVirtualSampleLosSelf" object="$Issue69Beam" objectoffset="$NearVirtualMuzzle" target="$NearRoleSurface" targetoffset="$NearSample" useaimtarget="false" excludeself="false"/>
+                  <check_line_of_sight name="$NearVirtualSampleLosEx" object="$Issue69Beam" objectoffset="$NearVirtualMuzzle" target="$NearRoleSurface" targetoffset="$NearSample" useaimtarget="false" excludeself="true"/>
+                  <append_to_list name="$NearVirtualWitnessSelf" exact="$NearVirtualSampleLosSelf"/>
+                  <append_to_list name="$NearVirtualWitnessEx" exact="$NearVirtualSampleLosEx"/>
+                  <do_if value="$NearVirtualSampleLosSelf"><set_value name="$NearVirtualSampleClearSelf" operation="add"/></do_if>
+                  <do_if value="$NearVirtualSampleLosEx"><set_value name="$NearVirtualSampleClearEx" operation="add"/></do_if>
+                  <debug_text text="'[X4GC TEST QUALIFY NEAR SAMPLE] request_id=' + $RequestId + ' sample=' + $NearI + ' virtual_los_self=' + $NearVirtualSampleLosSelf + ' virtual_los_ex=' + $NearVirtualSampleLosEx + ' offset=' + $NearSample"/>
                 </do_for_each>
-                <set_value name="$NearRootClearance" exact="ScenarioRoot.$NearTarget.bboxdistanceto.{ScenarioRoot.$GeometryShooter} gt 0m"/>
+                <set_value name="$NearClearanceMargin" exact="250m"/>
+                <set_value name="$NearTargetShooterDistance" exact="ScenarioRoot.$NearTarget.bboxdistanceto.{ScenarioRoot.$GeometryShooter}"/>
                 <set_value name="$BlockerShooterDistance" exact="ScenarioRoot.$NearBlocker.bboxdistanceto.{ScenarioRoot.$GeometryShooter}"/>
                 <set_value name="$BlockerNearDistance" exact="ScenarioRoot.$NearBlocker.bboxdistanceto.{ScenarioRoot.$NearTarget}"/>
-                <set_value name="$BlockerClearance" exact="$BlockerShooterDistance gt 0m and $BlockerNearDistance gt 0m"/>
-                <set_value name="$NearQualified" exact="$NearMayAttack and $NearInRange and $NearArcPass and not $NearFastLosSelf and not $NearFastLosEx and $NearSampleClearSelf == 0 and $NearSampleClearEx == 0 and $NearSettledPoseValid and $BlockerSettledPoseValid and $NearRootClearance and $BlockerClearance and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
+                <set_value name="$NearBlockerValid" exact="ScenarioRoot.$NearBlocker and ScenarioRoot.$NearBlocker.exists and ScenarioRoot.$NearBlocker.macro == macro.ship_xen_l_terraformer_01_a_macro"/>
+                <set_value name="$NearSeparationValid" exact="$NearTargetShooterDistance ge $NearClearanceMargin and $BlockerShooterDistance ge $NearClearanceMargin and $BlockerNearDistance ge $NearClearanceMargin"/>
+                <set_value name="$NearQualified" exact="$NearExactPairValid and $NearBlockerValid and $NearMayAttack and $NearInRange and $NearArcPass and not $NearVirtualFastSelf and not $NearVirtualFastEx and $NearVirtualWitnessSelf.count == 6 and $NearVirtualWitnessEx.count == 6 and $NearVirtualSampleClearSelf == 0 and $NearVirtualSampleClearEx == 0 and $NearSettledPoseValid and $BlockerSettledPoseValid and $NearSeparationValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
                 <set_value name="$FarRange" exact="$Issue69Beam.bboxdistanceto.{$FarRoleSurface}"/>
                 <set_value name="$FarRangeRatio" exact="$FarRange / $Issue69Beam.maxfirerange"/>
                 <create_orientation name="$FarBboxLocal" orientation="look_at_bbox" refobject="$FarRoleSurface">
@@ -1944,7 +1969,7 @@
                      predicate under investigation or the invalid NEAR role to
                      qualify first. This does not alter $FarQualified/$Qualified. -->
                 <set_value name="$FarOriginReady" exact="$Issue69Beam == ScenarioRoot.$Issue69FarBeam and $FarRoleSurface == ScenarioRoot.$Issue69FarSurface and $FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
-                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=NEAR_BLOCKED target=' + ScenarioRoot.$NearTarget + ' target_id=' + ScenarioRoot.$NearTarget.idcode + ' surface=' + $NearRoleSurface + ' surface_id=' + $NearRoleSurface.idcode + ' surface_macro=' + $NearRoleSurface.macro + ' weapon=' + $Issue69Plasma + ' weapon_macro=' + $Issue69Plasma.macro + ' mayattack=' + $NearMayAttack + ' range=' + $NearRange + ' mid_range=' + $MidRange + ' inrange=' + $NearInRange + ' bbox_pitch=' + $NearBboxLocal.pitch + ' arc_pass=' + $NearArcPass + ' fast_los_self=' + $NearFastLosSelf + ' fast_los_ex=' + $NearFastLosEx + ' six_clear_self=' + $NearSampleClearSelf + ' six_clear_ex=' + $NearSampleClearEx + ' blocker=' + ScenarioRoot.$NearBlocker + ' near_settled_pose=' + $NearSettledPoseValid + ' blocker_settled_pose=' + $BlockerSettledPoseValid + ' near_root_clearance=' + $NearRootClearance + ' blocker_clearance=' + $BlockerClearance + ' blocker_shooter_distance=' + $BlockerShooterDistance + ' blocker_near_distance=' + $BlockerNearDistance + ' qualified=' + $NearQualified"/>
+                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=NEAR_BLOCKED target=' + ScenarioRoot.$NearTarget + ' target_id=' + ScenarioRoot.$NearTarget.idcode + ' surface=' + $NearRoleSurface + ' surface_id=' + $NearRoleSurface.idcode + ' surface_macro=' + $NearRoleSurface.macro + ' exact_pair=' + $NearExactPairValid + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' mayattack=' + $NearMayAttack + ' range=' + $NearRange + ' mid_range=' + $MidRange + ' inrange=' + $NearInRange + ' bbox_pitch=' + $NearBboxLocal.pitch + ' aim_yaw=' + $NearAimBearing.yaw + ' aim_pitch=' + $NearAimBearing.pitch + ' arc_pass=' + $NearArcPass + ' virtual_muzzle=' + $NearVirtualMuzzle + ' virtual_fast_self=' + $NearVirtualFastSelf + ' virtual_fast_ex=' + $NearVirtualFastEx + ' virtual_six_clear_self=' + $NearVirtualSampleClearSelf + ' virtual_six_clear_ex=' + $NearVirtualSampleClearEx + ' virtual_witness_self=' + $NearVirtualWitnessSelf + ' virtual_witness_ex=' + $NearVirtualWitnessEx + ' blocker=' + ScenarioRoot.$NearBlocker + ' blocker_macro=' + ScenarioRoot.$NearBlocker.macro + ' blocker_valid=' + $NearBlockerValid + ' near_settled_pose=' + $NearSettledPoseValid + ' blocker_settled_pose=' + $BlockerSettledPoseValid + ' clearance_margin=' + $NearClearanceMargin + ' target_shooter_distance=' + $NearTargetShooterDistance + ' blocker_shooter_distance=' + $BlockerShooterDistance + ' blocker_near_distance=' + $BlockerNearDistance + ' separation_valid=' + $NearSeparationValid + ' qualified=' + $NearQualified"/>
                 <!-- FAR Beam frame telemetry: sample the Beam component's local
                      axes 100 m out and express every probe in shooter-root space,
                      so the offline check can see how Beam-local +z (the placement

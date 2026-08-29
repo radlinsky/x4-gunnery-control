@@ -70,6 +70,7 @@ assert(mid.geometryRole == 'surface_mask' and mid.geometryCase == 'engine_stradd
 assert(s.groups[3].loadout == 'issue67_argon_sky_target' and s.groups[4].loadout == 'issue67_argon_sky_target')
 assert(s.groups[3].fixtureRole == 'near_blocked' and s.groups[4].fixtureRole == 'far_clear'
     and s.groups[3].geometryRole == nil and s.groups[4].geometryRole == nil)
+assert(s.groups[5].macro == 'ship_xen_l_terraformer_01_a_macro')
 assert(s.groups[5].hostile == false and s.groups[5].repairGuard == true)
 LUA
 
@@ -99,7 +100,9 @@ sparse_remote=$(awk "/<do_elseif value=\"\\\$Def.\\\$loadout == 'issue67_argon_s
    && "$sparse_remote" == *"if \$Def.\$geometryrole == 'surface_mask' then \$PStar.y + \$Def.\$oy else ScenarioRoot.\$PendingAnchorY + \$Def.\$y"* \
    && "$sparse_remote" == *"if \$Def.\$geometryrole == 'surface_mask' then \$PStar.z + \$Def.\$oz else ScenarioRoot.\$PendingAnchorZ + \$Def.\$distance"* ]] \
   || fail "remote surface_mask spawn must restore its historical PStar+ox/oy/oz while NEAR/FAR keep anchor positions"
-grep -Fq "near_formula=plasma_local_z_450 far_formula=beam_local_z_-0.70_maxrange blocker_formula=plasma_local_z_180" "$scenario" || fail "role placement formulas missing"
+grep -Fq "near_formula=beam_local_x_0.40_z_-0.40_maxrange far_formula=beam_local_z_-0.70_maxrange blocker_formula=beam_local_x_0.20_z_-0.20_maxrange" "$scenario" || fail "Beam-relative role placement formulas missing"
+grep -Fq "name=\"\$NearDesiredSurface\" object=\"\$BeamWeapon\" space=\"\$QualifySector\" x=\"\$BeamWeapon.maxfirerange * 0.40\" y=\"0m\" z=\"\$BeamWeapon.maxfirerange * -0.40\"" "$scenario" || fail "NEAR exact surface is not placed on its separate Beam-relative firing line"
+grep -Fq "name=\"\$BlockerDesiredRoot\" object=\"\$BeamWeapon\" space=\"\$QualifySector\" x=\"\$BeamWeapon.maxfirerange * 0.20\" y=\"0m\" z=\"\$BeamWeapon.maxfirerange * -0.20\"" "$scenario" || fail "NEAR blocker is not the midpoint of the NEAR Beam-relative firing line"
 settle=$(awk '/<cue name="GeometryQualifySettle"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
 measure=$(awk '/<cue name="GeometryQualifyMeasure"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
 [[ "$settle" == *"<delay exact=\"if event.param.\$settleIssue69 then 3s else 0s\"/>"* ]] || fail "combined fixture lacks its three-second settled measurement boundary"
@@ -107,39 +110,63 @@ measure=$(awk '/<cue name="GeometryQualifyMeasure"/{f=1} f{print} f && /^[[:spac
 [[ "$measure" == *"ScenarioRoot.\$GeometryQualifyRequestId == \$RequestId"* && "$measure" == *"action=stale_ignored"* ]] || fail "released measurement is not guarded against a replaced request"
 delay_line=$(grep -nF "<delay exact=\"if event.param.\$settleIssue69 then 3s else 0s\"/>" "$scenario" | cut -d: -f1)
 release_line=$(grep -nF "<signal_cue cue=\"GeometryQualifyMeasure\"/>" "$scenario" | cut -d: -f1)
-near_los_line=$(grep -nF "name=\"\$NearFastLosSelf\"" "$scenario" | cut -d: -f1)
-near_final_line=$(grep -nF "name=\"\$NearQualified\" exact=\"\$NearMayAttack" "$scenario" | cut -d: -f1)
+near_los_line=$(grep -nF "name=\"\$NearVirtualFastSelf\"" "$scenario" | cut -d: -f1)
+near_final_line=$(grep -nF "name=\"\$NearQualified\" exact=\"\$NearExactPairValid" "$scenario" | cut -d: -f1)
 far_final_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$scenario" | cut -d: -f1)
 [[ "$delay_line" -lt "$release_line" && "$release_line" -lt "$near_los_line" && "$near_los_line" -lt "$near_final_line" && "$near_final_line" -lt "$far_final_line" ]] || fail "post-warp LOS/final role gates are not downstream of settling"
 [[ $(grep -c "name=\"\$NearQualified\"" "$scenario") -eq 2 && $(grep -c "name=\"\$FarQualified\"" "$scenario") -eq 2 ]] || fail "an immediate alternate NEAR/FAR qualification path exists"
 grep -Fq "z=\"\$BeamWeapon.maxfirerange * -0.70\"" "$scenario" || fail "FAR is not placed from live Beam max range"
 if grep -Fq "and \$NearRange le \$MidRange * 0.75" "$scenario"; then fail "NEAR must not require a relative distance to MID"; fi
-grep -Fq "\$NearBboxLocal.pitch ge -5deg and \$NearBboxLocal.pitch le 80deg" "$scenario" || fail "NEAR bbox arc gate missing"
-grep -Fq "name=\"\$NearFastLosSelf\" object=\"\$Issue69Plasma\" objectoffset=\"\$Issue69Plasma.barrelposition\" target=\"\$NearRoleSurface\" useaimtarget=\"true\" excludeself=\"false\"" "$scenario" || fail "NEAR production fast LOS negative missing"
-grep -Fq "name=\"\$NearSampleLosSelf\" object=\"\$Issue69Plasma\" objectoffset=\"\$Issue69Plasma.barrelposition\" target=\"\$NearRoleSurface\" targetoffset=\"\$NearSample\" useaimtarget=\"false\" excludeself=\"false\"" "$scenario" || fail "NEAR production fallback samples missing"
-grep -Fq "name=\"\$NearSampleLosEx\" object=\"\$Issue69Plasma\" objectoffset=\"\$Issue69Plasma.barrelposition\" target=\"\$NearRoleSurface\" targetoffset=\"\$NearSample\" useaimtarget=\"false\" excludeself=\"true\"" "$scenario" || fail "NEAR external-obstruction controls missing"
+grep -Fq "\$NearBboxLocal.pitch ge -5deg and \$NearBboxLocal.pitch le 80deg" "$scenario" || fail "NEAR Beam bbox arc gate missing"
+near_control=$(awk '/<set_value name="[$]NearExactPairValid"/{f=1} f{print} f && /<set_value name="[$]NearQualified"/{exit}' "$scenario")
+[[ "$near_control" == *"\$Issue69Beam.macro == macro.turret_par_l_beam_01_mk1_macro"* && "$near_control" == *"\$NearRoleSurface.macro == macro.turret_arg_l_beam_01_mk1_macro"* ]] || fail "NEAR does not require the exact Beam and exact sparse surface"
+[[ "$near_control" == *"name=\"\$NearAimBearing\" orientation=\"look_at\" refobject=\"\$NearRoleSurface\" useaimtarget=\"true\""* ]] || fail "NEAR prospective pose does not use the runtime exact-surface bearing"
+[[ "$near_control" == *"x=\"-0.36177411330546533m\" y=\"0.4829345992763463m\" z=\"55.87084740617998m\""* ]] || fail "NEAR prospective muzzle does not reuse FAR's shipped downstream vector"
+[[ "$near_control" == *"x=\"1.877547e-6m\" y=\"2.018104m + 6.145042419433594m\" z=\"-1.043081e-5m\""* ]] || fail "NEAR prospective muzzle does not reuse FAR's shipped yaw origin"
+[[ "$near_control" == *"pitch=\"\$NearAimBearing.pitch\""* && "$near_control" == *"yaw=\"\$NearAimBearing.yaw\""* ]] || fail "NEAR prospective muzzle does not apply runtime pitch then yaw"
+[[ "$near_control" == *"x=\"\$NearVirtualPitchedDownstream.x - 1.730653e-6m\" y=\"\$NearVirtualPitchedDownstream.y + 2.926126m\" z=\"\$NearVirtualPitchedDownstream.z - 16.11956m\""* ]] || fail "NEAR prospective muzzle does not reuse FAR's shipped pivot formula"
+for self in false true; do
+  [[ "$near_control" == *"name=\"\$NearVirtualFast"*"object=\"\$Issue69Beam\" objectoffset=\"\$NearVirtualMuzzle\" target=\"\$NearRoleSurface\" useaimtarget=\"true\" excludeself=\"$self\""* ]] || fail "NEAR virtual fast LOS missing excludeself=$self"
+  [[ "$near_control" == *"object=\"\$Issue69Beam\" objectoffset=\"\$NearVirtualMuzzle\" target=\"\$NearRoleSurface\" targetoffset=\"\$NearSample\" useaimtarget=\"false\" excludeself=\"$self\""* ]] || fail "NEAR virtual witness LOS missing excludeself=$self"
+done
+if [[ "$near_control" == *barrelposition* || "$near_control" == *NearFastLosSelf* || "$near_control" == *NearSampleLosSelf* ]]; then fail "NEAR can still qualify from resting-barrel blockage"; fi
+near_gate=$(grep -F "name=\"\$NearQualified\" exact=\"\$NearExactPairValid" "$scenario")
+for required in NearExactPairValid NearBlockerValid NearMayAttack NearInRange NearArcPass NearSettledPoseValid BlockerSettledPoseValid NearSeparationValid; do
+  [[ "$near_gate" == *"\$$required"* ]] || fail "NEAR qualification gate missing $required"
+done
+if [[ "$near_control" =~ SetSofttarget|set_softtarget|set_weapon_mode|set_turret_targets|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "NEAR control mutates target or weapon mode"; fi
+if grep -Eq '<(warp|create_ship|create_station|create_object|set_owner|set_object_position|set_object_rotation)' <<<"$near_control"; then fail "NEAR control mutates fixture geometry during measurement"; fi
 for list in '[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]' '[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]' '[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]'; do
   grep -Fq "$list" "$scenario" || fail "missing production six-sample fraction list $list"
 done
-grep -Fq "\$NearSampleClearSelf == 0 and \$NearSampleClearEx == 0" "$scenario" || fail "NEAR does not require all six production/external rays blocked"
-grep -Fq "not \$NearFastLosSelf and not \$NearFastLosEx" "$scenario" || fail "NEAR gate does not require both fast LOS rays blocked"
+grep -Fq "not \$NearVirtualFastSelf and not \$NearVirtualFastEx" "$scenario" || fail "NEAR gate does not require both virtual fast LOS rays blocked"
+grep -Fq "\$NearVirtualWitnessSelf.count == 6 and \$NearVirtualWitnessEx.count == 6" "$scenario" || fail "NEAR gate does not require all six witnesses under both self policies"
+grep -Fq "\$NearVirtualSampleClearSelf == 0 and \$NearVirtualSampleClearEx == 0" "$scenario" || fail "NEAR gate does not require every virtual witness blocked"
 [[ "$measure" != *"<warp "* ]] || fail "settled measurement repositions objects"
 [[ "$settle" == *"name=\"\$RequestId\" exact=\"event.param.\$requestId\""* ]] || fail "settle guard does not use the signalled request token"
-grep -Fq "<create_position name=\"\$NearSettledPlasmaLocal\" object=\"\$NearRoleSurface\" space=\"\$Issue69Plasma\"/>" "$scenario" || fail "settled NEAR surface is not measured in Plasma space"
-grep -Fq "<create_position name=\"\$BlockerSettledPlasmaLocal\" object=\"ScenarioRoot.\$NearBlocker\" space=\"\$Issue69Plasma\"/>" "$scenario" || fail "settled blocker root is not measured in Plasma space"
+grep -Fq "<create_position name=\"\$NearSettledBeamLocal\" object=\"\$NearRoleSurface\" space=\"\$Issue69Beam\"/>" "$scenario" || fail "settled NEAR surface is not measured in exact Beam space"
+grep -Fq "<create_position name=\"\$BlockerSettledBeamLocal\" object=\"ScenarioRoot.\$NearBlocker\" space=\"\$Issue69Beam\"/>" "$scenario" || fail "settled blocker root is not measured in exact Beam space"
 grep -Fq "<create_position name=\"\$FarSettledBeamLocal\" object=\"\$FarRoleSurface\" space=\"\$Issue69Beam\"/>" "$scenario" || fail "settled FAR surface is not measured in Beam space"
 grep -Fq "[X4GC TEST QUALIFY FAR FRAME]" "$scenario" || fail "FAR Beam frame telemetry line missing"
 grep -Fq "x=\"0m\" y=\"0m\" z=\"100m\" space=\"ScenarioRoot.\$GeometryShooter\"" "$scenario" || fail "FAR +Z frame probe missing"
 grep -Fq "x=\"0m\" y=\"0m\" z=\"-100m\" space=\"ScenarioRoot.\$GeometryShooter\"" "$scenario" || fail "FAR -Z frame probe missing"
 grep -Fq "<set_value name=\"\$Issue69PoseTolerance\" exact=\"10m\"/>" "$scenario" || fail "settled pose tolerance is not small and explicit"
-grep -Fq "\$NearSettledPlasmaLocal.z ge 450m - \$Issue69PoseTolerance" "$scenario" || fail "settled NEAR is not checked against plasma-local 450m"
-grep -Fq "\$BlockerSettledPlasmaLocal.z ge 180m - \$Issue69PoseTolerance" "$scenario" || fail "settled blocker is not checked against plasma-local 180m"
+grep -Fq "<set_value name=\"\$NearSettledExpectedX\" exact=\"\$Issue69Beam.maxfirerange * 0.40\"/>" "$scenario" || fail "settled NEAR lateral line coordinate is not checked"
+grep -Fq "<set_value name=\"\$NearSettledExpectedZ\" exact=\"\$Issue69Beam.maxfirerange * -0.40\"/>" "$scenario" || fail "settled NEAR axial line coordinate is not checked"
+grep -Fq "<set_value name=\"\$BlockerSettledExpectedX\" exact=\"\$Issue69Beam.maxfirerange * 0.20\"/>" "$scenario" || fail "settled blocker lateral midpoint is not checked"
+grep -Fq "<set_value name=\"\$BlockerSettledExpectedZ\" exact=\"\$Issue69Beam.maxfirerange * -0.20\"/>" "$scenario" || fail "settled blocker axial midpoint is not checked"
 grep -Fq "<set_value name=\"\$FarSettledExpectedZ\" exact=\"\$Issue69Beam.maxfirerange * -0.70\"/>" "$scenario" || fail "settled FAR is not checked against live -0.70 max range"
 grep -Fq "[X4GC TEST QUALIFY SETTLED POSE]" "$scenario" || fail "settled pose measurement is not logged"
 grep -Fq "\$NearSettledPoseValid and \$BlockerSettledPoseValid" "$scenario" || fail "NEAR final gate lacks settled position checks"
-grep -Fq "<set_value name=\"\$BlockerShooterDistance\" exact=\"ScenarioRoot.\$NearBlocker.bboxdistanceto.{ScenarioRoot.\$GeometryShooter}\"/>" "$scenario" || fail "blocker-shooter clearance distance is not computed"
-grep -Fq "<set_value name=\"\$BlockerNearDistance\" exact=\"ScenarioRoot.\$NearBlocker.bboxdistanceto.{ScenarioRoot.\$NearTarget}\"/>" "$scenario" || fail "blocker-NEAR clearance distance is not computed"
-grep -Fq "' blocker_shooter_distance=' + \$BlockerShooterDistance + ' blocker_near_distance=' + \$BlockerNearDistance" "$scenario" || fail "blocker clearance distances are not logged"
+for distance in NearTargetShooterDistance BlockerShooterDistance BlockerNearDistance; do
+  [[ "$near_control" == *"name=\"\$$distance\""* ]] || fail "NEAR separation does not compute $distance"
+done
+grep -Fq "<set_value name=\"\$NearClearanceMargin\" exact=\"250m\"/>" "$scenario" || fail "NEAR lacks a meaningful explicit clearance margin"
+grep -Fq "\$NearTargetShooterDistance ge \$NearClearanceMargin and \$BlockerShooterDistance ge \$NearClearanceMargin and \$BlockerNearDistance ge \$NearClearanceMargin" "$scenario" || fail "target/blocker/shooter non-overlap is not a qualification gate"
+grep -Fq "\$NearBlocker.macro == macro.ship_xen_l_terraformer_01_a_macro" "$scenario" || fail "NEAR does not require the shipped Xenon L blocker macro"
+for field in target_shooter_distance= blocker_shooter_distance= blocker_near_distance= clearance_margin= separation_valid= virtual_fast_self= virtual_fast_ex= virtual_six_clear_self= virtual_six_clear_ex= virtual_witness_self= virtual_witness_ex=; do
+  grep -Fq "$field" "$scenario" || fail "NEAR live-review log missing $field"
+done
 grep -Fq "\$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures" "$scenario" || fail "FAR final gate lacks settled position check"
 grep -Fq "\$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75" "$scenario" || fail "FAR live-range tolerance missing"
 grep -Fq 'turret_par_l_beam_01_mk1.xml:187-192 authors rotation_x' "$scenario" || fail "Beam arc lacks shipped-source evidence"
