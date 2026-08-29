@@ -162,26 +162,42 @@ if grep -E 'SurfaceMaskPlacements.*(NearTarget|FarTarget|NearBlocker)' "$scenari
 if grep -E 'GeometryQualifiedTarget.*(Near|Far)' "$scenario"; then fail "NEAR/FAR crossed the marked-objective bridge"; fi
 
 issue69_matrix=$(awk '/<cue name="Issue69MatrixSampler"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
-issue69_periodic=$(awk '/<cue name="Issue69MatrixPeriodic"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
+issue69_timer_a=$(awk '/<cue name="Issue69MatrixTimerA"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
+issue69_timer_b=$(awk '/<cue name="Issue69MatrixTimerB"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
+issue69_timers="$issue69_timer_a$issue69_timer_b"
 [[ "$issue69_matrix" == *"ScenarioRoot.\$Issue69StateActive? and ScenarioRoot.\$Issue69StateActive"* && "$issue69_matrix" == *"ScenarioRoot.\$Issue69StateRequestId == \$RequestId"* ]] || fail "Issue69 matrix persistence is not bounded by active state/current request"
-[[ "$issue69_matrix" != *"<signal_cue cue=\"Issue69MatrixSampler\""* && "$issue69_matrix" != *"<signal_cue_instantly cue=\"Issue69MatrixSampler\""* ]] || fail "regression: active Issue69 matrix worker signals itself"
+[[ "$issue69_matrix" != *"<signal_cue cue=\"Issue69MatrixSampler\""* && "$issue69_matrix" != *"<signal_cue_instantly cue=\"Issue69MatrixSampler\""* ]] || fail "regression: e0e6ff active Issue69 matrix worker signals itself"
 [[ "$issue69_matrix" != *"<reset_cue"* ]] || fail "Issue69 matrix worker resets itself"
-[[ "$issue69_periodic" == *"<delay exact=\"1s\"/>"* ]] || fail "Issue69 periodic rearm lacks a real one-second delay"
-[[ "$issue69_periodic" == *"signal_cue_instantly cue=\"Issue69MatrixSampler\" param=\"table[\$tick = ScenarioRoot.\$Issue69MatrixTick, \$requestId = \$RequestId]"* ]] || fail "Issue69 periodic cue does not invoke the separate idle matrix listener"
-[[ "$issue69_periodic" == *"<reset_cue cue=\"Issue69MatrixPeriodic\"/>"* ]] || fail "Issue69 periodic cue does not use the live-proven delayed rearm"
-[[ "$issue69_periodic" == *"ScenarioRoot.\$Issue69StateRequestId == \$RequestId"* && "$issue69_periodic" == *"ScenarioRoot.\$Issue69MatrixTick\" operation=\"add\""* ]] || fail "Issue69 periodic path lacks fail-closed token guard or monotonic tick increment"
-periodic_delay_line=$(grep -nF '<delay exact="1s"/>' <<<"$issue69_periodic" | cut -d: -f1)
-periodic_signal_line=$(grep -nF 'signal_cue_instantly cue="Issue69MatrixSampler"' <<<"$issue69_periodic" | cut -d: -f1)
-periodic_reset_line=$(grep -nF '<reset_cue cue="Issue69MatrixPeriodic"/>' <<<"$issue69_periodic" | cut -d: -f1)
-[[ "$periodic_delay_line" -lt "$periodic_signal_line" && "$periodic_signal_line" -lt "$periodic_reset_line" ]] || fail "Issue69 periodic path does not delay, sample, then rearm in order"
+[[ "$issue69_timers" != *"Issue69MatrixPeriodic"* && "$issue69_timers" != *"<check_value"* ]] || fail "regression: ea5e3c4 non-event Issue69 periodic condition remains"
+[[ "$issue69_timers" != *"<reset_cue"* && "$issue69_timers" != *"checkinterval="* ]] || fail "Issue69 sibling timers use reset or polling recurrence"
+
+for timer_name in A B; do
+  timer_var="issue69_timer_$(tr 'AB' 'ab' <<<"$timer_name")"
+  timer=${!timer_var}
+  [[ "$timer" == *"<cue name=\"Issue69MatrixTimer$timer_name\" instantiate=\"true\">"* ]] || fail "Issue69 Timer$timer_name is not instantiated"
+  [[ "$timer" == *"<conditions>"* && "$timer" == *"<event_cue_signalled/>"* ]] || fail "Issue69 Timer$timer_name lacks an event condition"
+  [[ "$timer" == *"<delay exact=\"1s\"/>"* ]] || fail "Issue69 Timer$timer_name lacks a real one-second delay"
+  [[ "$timer" == *"ScenarioRoot.\$Issue69StateActive? and ScenarioRoot.\$Issue69StateActive and ScenarioRoot.\$Issue69StateRequestId == \$RequestId"* ]] || fail "Issue69 Timer$timer_name lacks its fail-closed state/token guard"
+  [[ "$timer" == *"ScenarioRoot.\$Issue69MatrixTick\" operation=\"add\""* ]] || fail "Issue69 Timer$timer_name does not increment the monotonic tick"
+  [[ "$timer" == *"signal_cue_instantly cue=\"Issue69MatrixSampler\" param=\"table[\$tick = ScenarioRoot.\$Issue69MatrixTick, \$requestId = \$RequestId]"* ]] || fail "Issue69 Timer$timer_name does not signal the matrix sampler"
+done
+[[ "$issue69_timer_a" == *"signal_cue_instantly cue=\"Issue69MatrixTimerB\" param=\"table[\$requestId = \$RequestId]"* && "$issue69_timer_a" != *"signal_cue_instantly cue=\"Issue69MatrixTimerA\""* ]] || fail "Issue69 TimerA does not wake only TimerB"
+[[ "$issue69_timer_b" == *"signal_cue_instantly cue=\"Issue69MatrixTimerA\" param=\"table[\$requestId = \$RequestId]"* && "$issue69_timer_b" != *"signal_cue_instantly cue=\"Issue69MatrixTimerB\""* ]] || fail "Issue69 TimerB does not wake only TimerA"
+for timer in "$issue69_timer_a" "$issue69_timer_b"; do
+  guard_line=$(grep -nF "<do_if value=\"ScenarioRoot.\$Issue69StateActive?" <<<"$timer" | cut -d: -f1)
+  tick_line=$(grep -nF "ScenarioRoot.\$Issue69MatrixTick\" operation=\"add\"" <<<"$timer" | cut -d: -f1)
+  sampler_line=$(grep -nF 'signal_cue_instantly cue="Issue69MatrixSampler"' <<<"$timer" | cut -d: -f1)
+  successor_line=$(grep -nF 'signal_cue_instantly cue="Issue69MatrixTimer' <<<"$timer" | cut -d: -f1)
+  [[ "$guard_line" -lt "$tick_line" && "$tick_line" -lt "$sampler_line" && "$sampler_line" -lt "$successor_line" ]] || fail "Issue69 timer does not guard, increment, sample, then wake its sibling"
+done
 
 sampler_start_line=$(grep -nF "cue=\"Issue69MatrixSampler\" param=\"table[\$tick = 0" "$scenario" | cut -d: -f1)
-sampler_rearm_line=$(grep -nF '<reset_cue cue="Issue69MatrixPeriodic"/>' "$scenario" | head -1 | cut -d: -f1)
+timer_a_start_line=$(grep -nF "cue=\"Issue69MatrixTimerA\" param=\"table[\$requestId = \$RequestId]" "$scenario" | head -1 | cut -d: -f1)
 far_gate_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$scenario" | tail -1 | cut -d: -f1)
-[[ "$sampler_start_line" -lt "$sampler_rearm_line" && "$sampler_rearm_line" -lt "$far_gate_line" && "$sampler_start_line" -lt "$far_origin_token_line" ]] || fail "Issue69 tick zero/rearm does not begin synchronously before designation transport"
+[[ "$sampler_start_line" -lt "$timer_a_start_line" && "$timer_a_start_line" -lt "$far_gate_line" && "$timer_a_start_line" -lt "$far_origin_token_line" ]] || fail "Issue69 synchronous tick zero/TimerA start does not precede designation transport"
 [[ "$issue69_matrix" != *observe_state* && "$issue69_matrix" != *aimtgt* ]] || fail "Issue69 matrix still depends on owner designation"
 if grep -Eq 'Issue69(StateLog|ObserveState|PostBurstIssued)' "$scenario"; then fail "bounded designation-triggered Issue69 burst remains"; fi
-if [[ "$issue69_matrix$issue69_periodic" == *"\$delay = 500ms"* || "$issue69_matrix$issue69_periodic" == *"\$delay = 2s"* || "$issue69_matrix$issue69_periodic" == *"\$delay = 3s"* ]]; then fail "Issue69 matrix retains a fixed burst endpoint"; fi
+if [[ "$issue69_matrix$issue69_timers" == *"\$delay = 500ms"* || "$issue69_matrix$issue69_timers" == *"\$delay = 2s"* || "$issue69_matrix$issue69_timers" == *"\$delay = 3s"* ]]; then fail "Issue69 matrix retains a fixed burst endpoint"; fi
 
 [[ "$issue69_matrix" == *"in=\"\$Shooter.turrets.operational.list\""* ]] || fail "Issue69 matrix does not enumerate every live operational shooter turret"
 for role in MID NEAR FAR; do
