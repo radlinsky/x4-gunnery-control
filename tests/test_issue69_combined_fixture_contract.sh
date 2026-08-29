@@ -77,7 +77,21 @@ switch=$(awk '/local function selectFarTestGroup\(\)/{f=1} f{print} /local funct
 [[ "$switch" == *'resolveExactGroup("secondary")'* ]] || fail "FAR switch does not revalidate secondary exact group"
 [[ "$switch" == *'applyExactGroup(secondary)'* ]] || fail "FAR switch does not reuse exact-group selection"
 [[ "$switch" != *'toggleAllGroups'* && "$switch" != *'selectAll'* ]] || fail "FAR switch uses select-all path"
-[[ "$switch" == *'checkedCount ~= 1'* && "$switch" == *'far_group_select'* ]] || fail "FAR switch lacks exact post-selection verification/log"
+[[ "$switch" == *'onlyExactGroupSelected(secondary)'* && "$switch" == *'far_group_select'* ]] || fail "FAR switch lacks exact post-selection verification/log"
+
+far_handoff=$(awk '/local function handoffFarOriginDiscriminator\(request\)/{f=1} f{print} /-- Phase-two acknowledgement/{exit}' "$ui")
+[[ "$far_handoff" == *'resolveExactGroup("secondary")'* && "$far_handoff" == *'secondary.shipID ~= request.selection.shipID'* ]] || fail "FAR-origin handoff does not revalidate the exact Beam group on the same shooter"
+[[ "$far_handoff" == *'applyExactGroup(secondary)'* && "$far_handoff" == *'onlyExactGroupSelected(secondary)'* ]] || fail "FAR-origin handoff does not apply only the exact secondary group"
+[[ "$far_handoff" == *'suggestTestEngagement(request.farOriginComponent'* ]] || fail "FAR-origin handoff does not mark the transported exact FAR surface"
+[[ "$far_handoff" == *'combinedFixtureQualified = false'* && "$far_handoff" == *'overall_combined_qualified = "false"'* ]] || fail "FAR-origin handoff incorrectly qualifies the combined fixture"
+[[ "$far_handoff" == *'event=far_origin_handoff'* || "$far_handoff" == *'log("far_origin_handoff"'* ]] || fail "FAR-origin handoff lacks a distinct audit event"
+if [[ "$far_handoff" =~ SetSofttarget|set_softtarget|set_weapon_mode|select_target|selectTarget|directMode[[:space:]]*= ]]; then fail "FAR-origin handoff automates Direct-control designation"; fi
+far_handlers=$(awk '/local function onFarOriginReadyTargetToken/{f=1} f{print} /local function handoffFarOriginDiscriminator/{exit}' "$ui")
+[[ "$far_handlers" == *'tostring(token or "") ~= pendingQualify.requestId'* && "$far_handlers" == *'farOriginTokenAuthorized'* && "$far_handlers" == *'farOriginComponent = component'* ]] || fail "dedicated FAR component transport is not request-token-correlated"
+geometry_handler=$(awk '/local function onGeometryQualified\(_, param\)/{f=1} f{print} /local function shipFields/{exit}' "$ui")
+[[ "$geometry_handler" == *'request.issue69Combined and qualified == 0'* && "$geometry_handler" == *'request.farOriginComponent ~= nil'* && "$geometry_handler" == *'handoffFarOriginDiscriminator(request)'* ]] || fail "fallback handoff is not restricted to failed Issue69 combined plus FAR-origin-ready"
+grep -Fq 'RegisterEvent("X4GunneryTestLab.FarOriginReadyTargetToken", onFarOriginReadyTargetToken)' "$ui" || fail "FAR-origin token event is not registered"
+grep -Fq 'RegisterEvent("X4GunneryTestLab.FarOriginReadyTarget", onFarOriginReadyTarget)' "$ui" || fail "FAR-origin component event is not registered"
 
 grep -Fq "\$fixturerole = if @event.param3.\$fixtureRole" "$scenario" || fail "fixtureRole is not transported"
 sparse_remote=$(awk "/<do_elseif value=\"\\\$Def.\\\$loadout == 'issue67_argon_sky_target'.*near_blocked/{f=1} f{print} f && /<\\/do_elseif>/{exit}" "$scenario")
@@ -131,6 +145,16 @@ grep -Fq "\$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75" "$scenario" || fa
 grep -Fq 'turret_par_l_beam_01_mk1.xml:187-192 authors rotation_x' "$scenario" || fail "Beam arc lacks shipped-source evidence"
 grep -Fq "name=\"\$FarArcPass\" exact=\"\$FarBboxLocal.pitch ge -5deg and \$FarBboxLocal.pitch le 80deg\"" "$scenario" || fail "FAR does not use the authored Beam -5..80 degree arc"
 grep -Fq "<set_value name=\"\$FarQualified\" exact=\"\$FarMayAttack and \$FarInRange and \$FarArcPass and \$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75 and (\$FarFastLosSelf or \$FarSampleClearSelf gt 0) and (\$FarFastLosEx or \$FarSampleClearEx gt 0) and \$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures == 0\"/>" "$scenario" || fail "FAR qualification expression changed"
+far_origin_ready=$(grep -F "name=\"\$FarOriginReady\" exact=\"\$Issue69Beam ==" "$scenario")
+[[ "$far_origin_ready" == *"\$Issue69Beam == ScenarioRoot.\$Issue69FarBeam"* && "$far_origin_ready" == *"\$FarRoleSurface == ScenarioRoot.\$Issue69FarSurface"* && "$far_origin_ready" == *"\$FarMayAttack and \$FarInRange and \$FarArcPass"* && "$far_origin_ready" == *"\$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75"* && "$far_origin_ready" == *"\$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures == 0"* ]] || fail "FAR-origin-ready lacks its exact persisted pair and non-LOS gates"
+if [[ "$far_origin_ready" =~ Los|LOS|Near|Blocker|ClearSelf|ClearEx ]]; then fail "FAR-origin-ready depends on LOS or NEAR/blocker geometry"; fi
+far_origin_token_line=$(grep -nF "X4GunneryTestLab.FarOriginReadyTargetToken" "$scenario" | cut -d: -f1)
+far_origin_component_line=$(grep -nF "X4GunneryTestLab.FarOriginReadyTarget'" "$scenario" | cut -d: -f1)
+terminal_geometry_line=$(grep -nF "X4GunneryTestLab.GeometryQualified'" "$scenario" | tail -1 | cut -d: -f1)
+[[ "$far_origin_token_line" -lt "$far_origin_component_line" && "$far_origin_component_line" -lt "$terminal_geometry_line" ]] || fail "dedicated FAR token/component pair is not emitted before terminal GeometryQualified"
+grep -Fq "<do_if value=\"\$Issue69Combined and \$FarOriginReady\">" "$scenario" || fail "dedicated FAR transport is not gated on Issue69 combined readiness"
+grep -Fq "name=\"'X4GunneryTestLab.FarOriginReadyTargetToken'\" param=\"\$RequestId\"" "$scenario" || fail "dedicated FAR transport lacks the current request token"
+grep -Fq "name=\"'X4GunneryTestLab.FarOriginReadyTarget'\" param=\"ScenarioRoot.\$Issue69FarSurface\"" "$scenario" || fail "dedicated FAR transport does not carry the exact persisted surface"
 grep -Fq "and \$NearQualified and \$FarQualified" "$scenario" || fail "combined qualifier does not fail closed on both controls"
 grep -Fq "<set_value name=\"ScenarioRoot.\$Issue69RoleRepositionFailures\" exact=\"0\"/>" "$scenario" || fail "combined reposition failure counter is not initialized"
 grep -Fq "\$EngineStraddleSurface != null and \$Issue69PlasmaCount == 1" "$scenario" || fail "combined role qualifier does not guard MID before distance correlation"

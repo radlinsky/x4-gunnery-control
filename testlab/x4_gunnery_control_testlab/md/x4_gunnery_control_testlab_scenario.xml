@@ -1821,6 +1821,7 @@
             <set_value name="$Issue69RoleObjectsReady" exact="ScenarioRoot.$NearTarget and ScenarioRoot.$NearTarget.exists and ScenarioRoot.$FarTarget and ScenarioRoot.$FarTarget.exists and ScenarioRoot.$NearBlocker and ScenarioRoot.$NearBlocker.exists"/>
             <set_value name="$NearQualified" exact="not $Issue69Combined"/>
             <set_value name="$FarQualified" exact="not $Issue69Combined"/>
+            <set_value name="$FarOriginReady" exact="false"/>
             <do_if value="$Issue69Combined and $Issue69RoleObjectsReady">
               <set_value name="$Issue69Plasma" exact="null"/>
               <set_value name="$Issue69Beam" exact="null"/>
@@ -1926,6 +1927,11 @@
                      even if the subsequent FAR LOS gate rejects the fixture. -->
                 <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'before', $delay = 0s, $requestId = $RequestId]"/>
                 <set_value name="$FarQualified" exact="$FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and ($FarFastLosSelf or $FarSampleClearSelf gt 0) and ($FarFastLosEx or $FarSampleClearEx gt 0) and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
+                <!-- Dedicated #69 handoff gate: the exact persisted Beam/surface
+                     pair may run the origin discriminator without asking the LOS
+                     predicate under investigation or the invalid NEAR role to
+                     qualify first. This does not alter $FarQualified/$Qualified. -->
+                <set_value name="$FarOriginReady" exact="$Issue69Beam == ScenarioRoot.$Issue69FarBeam and $FarRoleSurface == ScenarioRoot.$Issue69FarSurface and $FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
                 <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=NEAR_BLOCKED target=' + ScenarioRoot.$NearTarget + ' target_id=' + ScenarioRoot.$NearTarget.idcode + ' surface=' + $NearRoleSurface + ' surface_id=' + $NearRoleSurface.idcode + ' surface_macro=' + $NearRoleSurface.macro + ' weapon=' + $Issue69Plasma + ' weapon_macro=' + $Issue69Plasma.macro + ' mayattack=' + $NearMayAttack + ' range=' + $NearRange + ' mid_range=' + $MidRange + ' inrange=' + $NearInRange + ' bbox_pitch=' + $NearBboxLocal.pitch + ' arc_pass=' + $NearArcPass + ' fast_los_self=' + $NearFastLosSelf + ' fast_los_ex=' + $NearFastLosEx + ' six_clear_self=' + $NearSampleClearSelf + ' six_clear_ex=' + $NearSampleClearEx + ' blocker=' + ScenarioRoot.$NearBlocker + ' near_settled_pose=' + $NearSettledPoseValid + ' blocker_settled_pose=' + $BlockerSettledPoseValid + ' near_root_clearance=' + $NearRootClearance + ' blocker_clearance=' + $BlockerClearance + ' blocker_shooter_distance=' + $BlockerShooterDistance + ' blocker_near_distance=' + $BlockerNearDistance + ' qualified=' + $NearQualified"/>
                 <!-- FAR Beam frame telemetry: sample the Beam component's local
                      axes 100 m out and express every probe in shooter-root space,
@@ -1941,7 +1947,7 @@
                 <create_position name="$Issue69FramePZ" object="$Issue69Beam" x="0m" y="0m" z="100m" space="ScenarioRoot.$GeometryShooter"/>
                 <create_position name="$Issue69FrameNZ" object="$Issue69Beam" x="0m" y="0m" z="-100m" space="ScenarioRoot.$GeometryShooter"/>
                 <debug_text text="'[X4GC TEST QUALIFY FAR FRAME] request_id=' + $RequestId + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' space=' + ScenarioRoot.$GeometryShooter + ' origin=' + $Issue69FrameOrigin + ' px=' + $Issue69FramePX + ' nx=' + $Issue69FrameNX + ' py=' + $Issue69FramePY + ' ny=' + $Issue69FrameNY + ' pz=' + $Issue69FramePZ + ' nz=' + $Issue69FrameNZ"/>
-                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=FAR_CLEAR_SECOND_FAMILY target=' + ScenarioRoot.$FarTarget + ' target_id=' + ScenarioRoot.$FarTarget.idcode + ' surface=' + $FarRoleSurface + ' surface_id=' + $FarRoleSurface.idcode + ' surface_macro=' + $FarRoleSurface.macro + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' maxrange=' + $Issue69Beam.maxfirerange + ' range=' + $FarRange + ' range_ratio=' + $FarRangeRatio + ' mayattack=' + $FarMayAttack + ' inrange=' + $FarInRange + ' bbox_pitch=' + $FarBboxLocal.pitch + ' arc_pass=' + $FarArcPass + ' fast_los_self=' + $FarFastLosSelf + ' fast_los_ex=' + $FarFastLosEx + ' six_clear_self=' + $FarSampleClearSelf + ' six_clear_ex=' + $FarSampleClearEx + ' settled_pose=' + $FarSettledPoseValid + ' qualified=' + $FarQualified"/>
+                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=FAR_CLEAR_SECOND_FAMILY target=' + ScenarioRoot.$FarTarget + ' target_id=' + ScenarioRoot.$FarTarget.idcode + ' surface=' + $FarRoleSurface + ' surface_id=' + $FarRoleSurface.idcode + ' surface_macro=' + $FarRoleSurface.macro + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' maxrange=' + $Issue69Beam.maxfirerange + ' range=' + $FarRange + ' range_ratio=' + $FarRangeRatio + ' mayattack=' + $FarMayAttack + ' inrange=' + $FarInRange + ' bbox_pitch=' + $FarBboxLocal.pitch + ' arc_pass=' + $FarArcPass + ' fast_los_self=' + $FarFastLosSelf + ' fast_los_ex=' + $FarFastLosEx + ' six_clear_self=' + $FarSampleClearSelf + ' six_clear_ex=' + $FarSampleClearEx + ' settled_pose=' + $FarSettledPoseValid + ' far_origin_ready=' + $FarOriginReady + ' qualified=' + $FarQualified"/>
               </do_if>
               <do_else>
                 <debug_text text="'[X4GC TEST QUALIFY ROLE] FAILED request_id=' + $RequestId + ' reason=exact_role_census plasma=' + $Issue69PlasmaCount + ' beam=' + $Issue69BeamCount + ' shooter_turrets=' + ScenarioRoot.$GeometryShooter.turrets.operational.count + ' shooter_weapons=' + ScenarioRoot.$GeometryShooter.weapons.operational.count + ' missile_turrets=' + ScenarioRoot.$GeometryShooter.missileturrets.operational.count + ' near_surfaces=' + $NearRoleSurfaces.count + ' far_surfaces=' + $FarRoleSurfaces.count"/>
@@ -1976,6 +1982,10 @@
                   <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$EngineStraddleSurface"/>
                 </do_if>
               </do_else>
+            </do_if>
+            <do_if value="$Issue69Combined and $FarOriginReady">
+              <raise_lua_event name="'X4GunneryTestLab.FarOriginReadyTargetToken'" param="$RequestId"/>
+              <raise_lua_event name="'X4GunneryTestLab.FarOriginReadyTarget'" param="ScenarioRoot.$Issue69FarSurface"/>
             </do_if>
             <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
                              param="'x4gcq9:' + $RequestId + ':' + (if $Qualified then 1 else 0) + ':' + $TargetCount + ':' + $SurfaceCount + ':' + $Measured + ':' + $SurfacePairs + ':' + $SurfaceOriginOutsidePairs + ':' + $SurfaceAimInsidePairs + ':' + $SurfaceArcSplitPairs + ':' + $SurfaceArcCandidatePairs + ':' + $ArcSplitSurfaceMembers + ':' + $PositiveControlSurfaceMembers + ':' + $EngineStraddleSurfaceMembers"/>

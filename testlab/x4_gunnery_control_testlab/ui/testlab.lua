@@ -721,6 +721,17 @@ local function applyExactGroup(selection)
     end
 end
 
+local function onlyExactGroupSelected(selection)
+    local checkedCount, onlyExact = 0, true
+    for key in pairs(selection.session.checkedGroupKeys or {}) do
+        checkedCount = checkedCount + 1
+        if key ~= selection.exactGroupKey then onlyExact = false end
+    end
+    return checkedCount == 1 and onlyExact
+        and selection.session.checkedGroupKeys[selection.exactGroupKey] == true,
+        checkedCount
+end
+
 local function selectFarTestGroup()
     if not combinedFixtureQualified or not scenarioSpec or not scenarioSpec.setup
             or not scenarioSpec.setup.secondary then
@@ -740,13 +751,8 @@ local function selectFarTestGroup()
         return
     end
     applyExactGroup(secondary)
-    local checkedCount, onlySecondary = 0, true
-    for key in pairs(secondary.session.checkedGroupKeys or {}) do
-        checkedCount = checkedCount + 1
-        if key ~= secondary.exactGroupKey then onlySecondary = false end
-    end
-    if checkedCount ~= 1 or not onlySecondary
-            or not secondary.session.checkedGroupKeys[secondary.exactGroupKey] then
+    local onlySecondary, checkedCount = onlyExactGroupSelected(secondary)
+    if not onlySecondary then
         scenarioActionStatus = "FAILED: exact FAR group selection did not converge"
         log("far_group_select", { action = "failed", reason = "checked_membership_mismatch",
             checked = checkedCount })
@@ -1153,6 +1159,80 @@ local function onGeometryQualifiedTarget(_, component)
     pendingQualify.designatedComponent = component
 end
 
+-- Dedicated #69 transport. This is deliberately separate from the ordinary
+-- qualified-target channel: receiving the exact FAR component authorizes only
+-- the bounded origin discriminator, never overall combined qualification.
+local function onFarOriginReadyTargetToken(_, token)
+    if not pendingQualify or tostring(token or "") ~= pendingQualify.requestId then return end
+    pendingQualify.farOriginTokenAuthorized = true
+end
+
+local function onFarOriginReadyTarget(_, component)
+    if not pendingQualify or not pendingQualify.farOriginTokenAuthorized or component == nil then return end
+    pendingQualify.farOriginTokenAuthorized = nil
+    pendingQualify.farOriginComponent = component
+end
+
+local function handoffFarOriginDiscriminator(request)
+    local secondary, secondaryReason = resolveExactGroup("secondary")
+    if not secondary or not request.secondarySelection
+            or secondary.shipID ~= request.selection.shipID
+            or secondary.shipID ~= request.secondarySelection.shipID
+            or secondary.groupKey == request.selection.groupKey then
+        local reason = secondaryReason or "secondary exact Beam group/shooter mismatch"
+        scenarioActionStatus = "FAILED: " .. reason
+        log("far_origin_handoff", { action = "failed", request_id = request.requestId,
+            reason = reason })
+        menu.display()
+        return
+    end
+    applyExactGroup(secondary)
+    local onlySecondary, checkedCount = onlyExactGroupSelected(secondary)
+    if not onlySecondary then
+        scenarioActionStatus = "FAILED: exact FAR Beam group selection did not converge"
+        log("far_origin_handoff", { action = "failed", request_id = request.requestId,
+            reason = "checked_membership_mismatch", checked = checkedCount })
+        menu.display()
+        return
+    end
+    local bridge = api()
+    local marked = bridge and bridge.suggestTestEngagement
+        and bridge.suggestTestEngagement(request.farOriginComponent, function(selected)
+            if not selected then return end
+            scenarioActionStatus = "RUNNING: owner manually designated exact FAR origin surface "
+                .. tostring(request.farOriginComponent) .. "; observation armed"
+            log("far_origin_handoff", { action = "operator_designated",
+                request_id = request.requestId,
+                designated_target = "ship_surface",
+                designated_component = request.farOriginComponent,
+                direct_mode = "manual", ship_id = secondary.shipID,
+                group = secondary.rawGroup, member_ids = secondary.memberIDs,
+                member_macros = secondary.memberMacros })
+            setObserving(true)
+        end)
+    if not marked then
+        scenarioActionStatus = "FAILED: exact FAR origin surface could not be marked; discriminator not started"
+        log("far_origin_handoff", { action = "failed", request_id = request.requestId,
+            reason = "manual_component_mark_failed",
+            designated_component = request.farOriginComponent,
+            group = secondary.rawGroup })
+        menu.display()
+        return
+    end
+    combinedFixtureQualified = false
+    remoteScenarioReady = false
+    remoteGeometryPending = false
+    scenarioActionStatus = "FAR ORIGIN READY: Rear Lower Mid Beam selected; manually click the marked FAR root, then its marked surface"
+    log("far_origin_handoff", { action = "ready", request_id = request.requestId,
+        overall_combined_qualified = "false",
+        designation = "manual_pending", direct_mode = "manual_pending",
+        designated_target = "ship_surface",
+        designated_component = request.farOriginComponent,
+        ship_id = secondary.shipID, group = secondary.rawGroup,
+        member_ids = secondary.memberIDs, member_macros = secondary.memberMacros })
+    returnToGunnery("far_origin_discriminator_ready")
+end
+
 -- Phase-two acknowledgement for the #67 direct ship-surface sky-survey
 -- discriminator. Qualify only when the exact Plasma census and both authored
 -- Argon L Beam roles independently reproduce: one upper-limit arc split and
@@ -1170,6 +1250,7 @@ local function onGeometryQualified(_, param)
     local request = pendingQualify
     pendingQualify = nil
     request.targetTokenAuthorized = nil
+    request.farOriginTokenAuthorized = nil
     qualified, targetCount, surfaceCount = tonumber(qualified), tonumber(targetCount), tonumber(surfaceCount)
     measured, surfacePairs = tonumber(measured), tonumber(surfacePairs)
     originOutsidePairs, aimInsidePairs = tonumber(originOutsidePairs), tonumber(aimInsidePairs)
@@ -1243,6 +1324,9 @@ local function onGeometryQualified(_, param)
             group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
             member_macros = request.selection.memberMacros })
         returnToGunnery("geometry_qualified")
+    elseif request.issue69Combined and qualified == 0
+            and request.farOriginComponent ~= nil then
+        handoffFarOriginDiscriminator(request)
     else
         local failDesc
         if request.geometryObjective == "engine_straddle" then
@@ -1413,12 +1497,14 @@ function menu.onShowMenu()
                         break
                     end
                 end
+                local issue69Combined = specIsIssue69Combined()
                 pendingQualify = { requestId = token, selection = selection,
                     secondarySelection = secondarySelection,
                     expectedGeometryWeapons = scenarioSpec.groups[1].expectedGeometryWeapons,
                     geometryObjective = geometryObjective,
+                    issue69Combined = issue69Combined,
                     deadline = getElapsedTime() + 30 }
-                if specIsIssue69Combined() then
+                if issue69Combined then
                     -- The combined diagnostic needs telemetry even when the
                     -- geometry gate fails. Suppress the parked aim target until
                     -- Gunnery publishes a different, live component.
@@ -1643,6 +1729,8 @@ local function init()
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
     RegisterEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", onGeometryQualifiedTargetToken)
     RegisterEvent("X4GunneryTestLab.GeometryQualifiedTarget", onGeometryQualifiedTarget)
+    RegisterEvent("X4GunneryTestLab.FarOriginReadyTargetToken", onFarOriginReadyTargetToken)
+    RegisterEvent("X4GunneryTestLab.FarOriginReadyTarget", onFarOriginReadyTarget)
     RegisterEvent("X4GunneryTestLab.GeometryQualified", onGeometryQualified)
     if api() then
         api().registerTestLab({ open = function()
