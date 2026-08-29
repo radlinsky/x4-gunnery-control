@@ -740,15 +740,29 @@ local function shippedTwoPhaseToQualify()
         "OOS Paranid L survey must verify census and report geometry PENDING")
     modelParanidPlasma(harness)
     harness.fix.gcMenu.onShowMenu(); harness.fix.gcMenu.display()
+    local staleAimTarget = 9001
+    harness.fix.API.getSession().aimTargetID = staleAimTarget
     harness.fix.buttonByText(ReadText(20991, 32)).handlers.onClick()
     harness.testMenu.onShowMenu()
-    local qualifyEvents = {}
-    for _, event in ipairs(harness.fix.uiTriggeredEvents) do
-        if event.control == "qualify_geometry" then qualifyEvents[#qualifyEvents + 1] = event end
+    local qualifyEvents, qualifyIndex, observeArmIndex = {}, nil, nil
+    for index, event in ipairs(harness.fix.uiTriggeredEvents) do
+        if event.control == "observe_toggle" and event.params.enabled then observeArmIndex = index end
+        if event.control == "qualify_geometry" then
+            qualifyEvents[#qualifyEvents + 1] = event
+            qualifyIndex = index
+        end
     end
     assert(#qualifyEvents == 1 and harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "one post-teleport Test Lab open must issue exactly one Paranid L qualifier")
-    return harness, qualifyEvents[1].params.requestId
+    assert(observeArmIndex and observeArmIndex < qualifyIndex,
+        "combined qualification must arm observation before requesting geometry")
+    for index = observeArmIndex + 1, qualifyIndex - 1 do
+        local event = harness.fix.uiTriggeredEvents[index]
+        assert(not (event.control == "observe_state" and event.params.aimtgt == staleAimTarget)
+                and event.control ~= "observe_mark",
+            "combined qualification must suppress the parked aim target while arming observation")
+    end
+    return harness, qualifyEvents[1].params.requestId, observeArmIndex
 end
 
 do
@@ -777,10 +791,10 @@ do
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
         if event.control == "observe_toggle" and event.params.enabled then observed = true end
     end
-    assert(not observed, "qualification alone must not arm observation")
+    assert(observed, "combined qualification must already have armed observation")
     suggested[1].callback(true, "")
     assert(harness.fix.logContains("action=operator_designated"),
-        "observation begins only after the owner performs the manual surface click")
+        "the owner manual surface click must still complete designation")
 
     -- Before FAR the fixture-only action revalidates both groups, clears every
     -- prior check individually, and selects only the exact Beam group.
@@ -836,12 +850,30 @@ do
 end
 
 do
-    local harness, token = shippedTwoPhaseToQualify()
+    local harness, token, observeArmIndex = shippedTwoPhaseToQualify()
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
         "x4gcq9:" .. token .. ":1:1:35:3:70:8:44:3:1:1:0:0")
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=failed"),
         "a mismatched measured Plasma count must fail closed")
+    local observeStates = 0
+    for index = observeArmIndex + 1, #harness.fix.uiTriggeredEvents do
+        local event = harness.fix.uiTriggeredEvents[index]
+        assert(not (event.control == "observe_toggle" and event.params.enabled == false),
+            "failed combined qualification must leave observation armed")
+        if event.control == "observe_state" then observeStates = observeStates + 1 end
+    end
+    local callback = harness.fix.pendingCallbacks[#harness.fix.pendingCallbacks]
+    assert(callback, "armed combined observation must retain its state-push callback after failure")
+    harness.fix.runCallback(callback)
+    local observeStatesAfter = 0
+    for index = observeArmIndex + 1, #harness.fix.uiTriggeredEvents do
+        if harness.fix.uiTriggeredEvents[index].control == "observe_state" then
+            observeStatesAfter = observeStatesAfter + 1
+        end
+    end
+    assert(observeStatesAfter == observeStates + 1,
+        "failed combined qualification must keep observation state pushes active")
 end
 
 -- Stale and malformed q8 payloads must not consume the pending qualifier.

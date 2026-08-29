@@ -544,6 +544,15 @@ local function specHasPendingGeometry()
     return false
 end
 
+local function specIsIssue69Combined()
+    local roles = {}
+    for _, group in ipairs(scenarioSpec and scenarioSpec.groups or {}) do
+        if group.fixtureRole then roles[group.fixtureRole] = true end
+    end
+    return scenarioSpec and scenarioSpec.setup and scenarioSpec.setup.secondary
+        and roles.mid_engine and roles.near_blocked and roles.far_clear and roles.near_blocker
+end
+
 -- A remote fixture's player ship is disposable only while the owner is not
 -- aboard it.  Keep this identity check deliberately narrower than
 -- resolveExactGroup(): damaged/missing turrets must not make an occupied
@@ -1409,6 +1418,13 @@ function menu.onShowMenu()
                     expectedGeometryWeapons = scenarioSpec.groups[1].expectedGeometryWeapons,
                     geometryObjective = geometryObjective,
                     deadline = getElapsedTime() + 30 }
+                if specIsIssue69Combined() then
+                    -- The combined diagnostic needs telemetry even when the
+                    -- geometry gate fails. Suppress the parked aim target until
+                    -- Gunnery publishes a different, live component.
+                    local currentSession = api() and api().getSession and api().getSession()
+                    setObserving(true, currentSession and currentSession.aimTargetID)
+                end
                 AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
                     { requestId = token })
                 scenarioActionStatus = "QUALIFYING: checking MID, NEAR blocked, and FAR clear roles with "
