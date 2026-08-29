@@ -260,10 +260,11 @@
             <set_value name="ScenarioRoot.$FarTarget" exact="null"/>
             <set_value name="ScenarioRoot.$NearBlocker" exact="null"/>
             <set_value name="ScenarioRoot.$Issue69StateActive" exact="false"/>
-            <set_value name="ScenarioRoot.$Issue69PostBurstIssued" exact="false"/>
+            <set_value name="ScenarioRoot.$Issue69MidTarget" exact="null"/>
             <set_value name="ScenarioRoot.$Issue69FarBeam" exact="null"/>
             <set_value name="ScenarioRoot.$Issue69FarSurface" exact="null"/>
             <set_value name="ScenarioRoot.$Issue69StateRequestId" exact="''"/>
+            <set_value name="ScenarioRoot.$Issue69MatrixPrevious" exact="table[]"/>
             <set_value name="$StationModules" exact="0"/>
             <set_value name="$StationTurrets" exact="0"/>
             <set_value name="$StationMissileTurrets" exact="0"/>
@@ -1208,10 +1209,11 @@
             <remove_value name="ScenarioRoot.$FarTarget"/>
             <remove_value name="ScenarioRoot.$NearBlocker"/>
             <remove_value name="ScenarioRoot.$Issue69StateActive"/>
-            <remove_value name="ScenarioRoot.$Issue69PostBurstIssued"/>
+            <remove_value name="ScenarioRoot.$Issue69MidTarget"/>
             <remove_value name="ScenarioRoot.$Issue69FarBeam"/>
             <remove_value name="ScenarioRoot.$Issue69FarSurface"/>
             <remove_value name="ScenarioRoot.$Issue69StateRequestId"/>
+            <remove_value name="ScenarioRoot.$Issue69MatrixPrevious"/>
             <do_if value="ScenarioRoot.$GeometryStation?">
               <remove_value name="ScenarioRoot.$GeometryStation"/>
             </do_if>
@@ -1844,11 +1846,12 @@
                 <set_value name="$FarRoleSurface" exact="$FarRoleSurfaces.{1}"/>
                 <!-- Preserve the exact resolved FAR pair before applying its LOS
                      qualification.  The diagnostic must survive a failed FAR gate. -->
+                <set_value name="ScenarioRoot.$Issue69MidTarget" exact="ScenarioRoot.$SurfaceMaskPlacements.{1}.$target"/>
                 <set_value name="ScenarioRoot.$Issue69FarBeam" exact="$Issue69Beam"/>
                 <set_value name="ScenarioRoot.$Issue69FarSurface" exact="$FarRoleSurface"/>
                 <set_value name="ScenarioRoot.$Issue69StateRequestId" exact="$RequestId"/>
+                <set_value name="ScenarioRoot.$Issue69MatrixPrevious" exact="table[]"/>
                 <set_value name="ScenarioRoot.$Issue69StateActive" exact="true"/>
-                <set_value name="ScenarioRoot.$Issue69PostBurstIssued" exact="false"/>
                 <!-- Re-express the settled objects in the exact firing-weapon frames.
                      Ten metres matches this cue's existing post-warp position idiom
                      while remaining small relative to the 180/450/0.70R geometry. -->
@@ -1925,7 +1928,10 @@
                 </do_for_each>
                 <!-- The settled, pre-designation source state. This is emitted
                      even if the subsequent FAR LOS gate rejects the fixture. -->
-                <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'before', $delay = 0s, $requestId = $RequestId]"/>
+                <!-- Tick zero is synchronous with qualification, before either
+                     target transport can permit owner designation. Every later
+                     instance carries a real one-second delay. -->
+                <signal_cue_instantly cue="Issue69MatrixSampler" param="table[$delay = 0s, $tick = 0, $requestId = $RequestId]"/>
                 <set_value name="$FarQualified" exact="$FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and ($FarFastLosSelf or $FarSampleClearSelf gt 0) and ($FarFastLosEx or $FarSampleClearEx gt 0) and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
                 <!-- Dedicated #69 handoff gate: the exact persisted Beam/surface
                      pair may run the origin discriminator without asking the LOS
@@ -2001,82 +2007,117 @@
           </actions>
         </cue>
 
-        <!-- Issue #69 articulation probe. The Observer UI is the sole target
-             source: this listener only observes its aimtgt payload and never
-             assigns a target or changes a weapon mode. -->
-        <cue name="Issue69ObserveState" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_state'"/>
-          </conditions>
-          <actions>
-            <do_if value="ScenarioRoot.$Issue69StateActive? and ScenarioRoot.$Issue69StateActive and not ScenarioRoot.$Issue69PostBurstIssued and @event.param3.$aimtgt == ScenarioRoot.$Issue69FarSurface">
-              <set_value name="ScenarioRoot.$Issue69PostBurstIssued" exact="true"/>
-              <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'after', $delay = 0s, $requestId = ScenarioRoot.$Issue69StateRequestId]"/>
-              <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'after', $delay = 500ms, $requestId = ScenarioRoot.$Issue69StateRequestId]"/>
-              <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'after', $delay = 1s, $requestId = ScenarioRoot.$Issue69StateRequestId]"/>
-              <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'after', $delay = 2s, $requestId = ScenarioRoot.$Issue69StateRequestId]"/>
-              <signal_cue_instantly cue="Issue69StateLog" param="table[$phase = 'after', $delay = 3s, $requestId = ScenarioRoot.$Issue69StateRequestId]"/>
-            </do_if>
-          </actions>
-        </cue>
-
-        <!-- One record format for the settled baseline and every post-designation
-             sample.  The self-inclusive rays intentionally remain conventional
-             own-hull LOS diagnostics; this probe proposes no production change. -->
-        <cue name="Issue69StateLog" instantiate="true">
+        <!-- Persistent Issue #69 articulation/LOS matrix. Tick zero runs
+             synchronously inside qualification, before Lua can hand the owner a
+             marked surface. Each successor instance waits a real second, then
+             rediscovers the live shooter turrets and role-root surfaces. The
+             chain ends naturally when cleanup clears StateActive or a newer
+             qualification replaces its request token. -->
+        <cue name="Issue69MatrixSampler" instantiate="true">
           <conditions>
             <event_cue_signalled/>
           </conditions>
           <delay exact="event.param.$delay"/>
           <actions>
             <set_value name="$RequestId" exact="event.param.$requestId"/>
-            <do_if value="ScenarioRoot.$Issue69StateActive? and ScenarioRoot.$Issue69StateActive and ScenarioRoot.$Issue69StateRequestId == $RequestId and ScenarioRoot.$Issue69FarBeam and ScenarioRoot.$Issue69FarBeam.exists and ScenarioRoot.$Issue69FarSurface and ScenarioRoot.$Issue69FarSurface.exists">
-              <set_value name="$Weapon" exact="ScenarioRoot.$Issue69FarBeam"/>
-              <set_value name="$Surface" exact="ScenarioRoot.$Issue69FarSurface"/>
-              <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
-              <create_position name="$MountBase" object="$Weapon" space="ScenarioRoot.$GeometryShooter"/>
-              <create_position name="$MuzzleBase" object="$Weapon" space="ScenarioRoot.$GeometryShooter" value="$Barrel"/>
-              <create_orientation name="$BboxLocal" orientation="look_at_bbox" refobject="$Surface">
-                <position object="$Weapon" space="$Weapon"/>
-              </create_orientation>
-              <set_value name="$BboxRange" exact="$Weapon.bboxdistanceto.{$Surface}"/>
-              <check_line_of_sight name="$FastLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" useaimtarget="true" excludeself="false"/>
-              <check_line_of_sight name="$FastLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" useaimtarget="true" excludeself="true"/>
-              <check_line_of_sight name="$ImplicitFastSelf" object="$Weapon" target="$Surface" useaimtarget="true" excludeself="false"/>
-              <check_line_of_sight name="$ImplicitFastEx" object="$Weapon" target="$Surface" useaimtarget="true" excludeself="true"/>
-              <check_line_of_sight name="$ZeroFastSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" useaimtarget="true" excludeself="false"/>
-              <check_line_of_sight name="$ZeroFastEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" useaimtarget="true" excludeself="true"/>
-              <set_value name="$MinX" exact="2 * $Surface.macro.boundingbox.center.x - $Surface.macro.boundingbox.max.x"/>
-              <set_value name="$MinY" exact="2 * $Surface.macro.boundingbox.center.y - $Surface.macro.boundingbox.max.y"/>
-              <set_value name="$MinZ" exact="2 * $Surface.macro.boundingbox.center.z - $Surface.macro.boundingbox.max.z"/>
-              <set_value name="$SpanX" exact="$Surface.macro.boundingbox.max.x - $MinX"/>
-              <set_value name="$SpanY" exact="$Surface.macro.boundingbox.max.y - $MinY"/>
-              <set_value name="$SpanZ" exact="$Surface.macro.boundingbox.max.z - $MinZ"/>
-              <set_value name="$XFracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
-              <set_value name="$YFracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
-              <set_value name="$ZFracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
-              <set_value name="$ClearSelf" exact="0"/>
-              <set_value name="$ClearEx" exact="0"/>
-              <set_value name="$ImplicitClearSelf" exact="0"/>
-              <set_value name="$ImplicitClearEx" exact="0"/>
-              <set_value name="$ZeroClearSelf" exact="0"/>
-              <set_value name="$ZeroClearEx" exact="0"/>
-              <do_for_each name="$Frac" in="$XFracs" counter="$I">
-                <create_position name="$Sample" object="$Surface" space="$Surface" x="$MinX + $XFracs.{$I} * $SpanX" y="$MinY + $YFracs.{$I} * $SpanY" z="$MinZ + $ZFracs.{$I} * $SpanZ"/>
-                <check_line_of_sight name="$SampleLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
-                <check_line_of_sight name="$SampleLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
-                <check_line_of_sight name="$ImplicitSampleLosSelf" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
-                <check_line_of_sight name="$ImplicitSampleLosEx" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
-                <check_line_of_sight name="$ZeroSampleLosSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
-                <check_line_of_sight name="$ZeroSampleLosEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
-                <do_if value="$SampleLosSelf"><set_value name="$ClearSelf" operation="add"/></do_if>
-                <do_if value="$SampleLosEx"><set_value name="$ClearEx" operation="add"/></do_if>
-                <do_if value="$ImplicitSampleLosSelf"><set_value name="$ImplicitClearSelf" operation="add"/></do_if>
-                <do_if value="$ImplicitSampleLosEx"><set_value name="$ImplicitClearEx" operation="add"/></do_if>
-                <do_if value="$ZeroSampleLosSelf"><set_value name="$ZeroClearSelf" operation="add"/></do_if>
-                <do_if value="$ZeroSampleLosEx"><set_value name="$ZeroClearEx" operation="add"/></do_if>
+            <set_value name="$Tick" exact="event.param.$tick"/>
+            <do_if value="ScenarioRoot.$Issue69StateActive? and ScenarioRoot.$Issue69StateActive and ScenarioRoot.$Issue69StateRequestId == $RequestId and ScenarioRoot.$GeometryShooter and ScenarioRoot.$GeometryShooter.exists and ScenarioRoot.$Issue69MidTarget and ScenarioRoot.$Issue69MidTarget.exists and ScenarioRoot.$NearTarget and ScenarioRoot.$NearTarget.exists and ScenarioRoot.$FarTarget and ScenarioRoot.$FarTarget.exists">
+              <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
+              <set_value name="$RoleRoots" exact="[]"/>
+              <append_to_list name="$RoleRoots" exact="table[$role = 'MID', $root = ScenarioRoot.$Issue69MidTarget]"/>
+              <append_to_list name="$RoleRoots" exact="table[$role = 'NEAR', $root = ScenarioRoot.$NearTarget]"/>
+              <append_to_list name="$RoleRoots" exact="table[$role = 'FAR', $root = ScenarioRoot.$FarTarget]"/>
+              <do_for_each name="$Weapon" in="$Shooter.turrets.operational.list">
+                <do_if value="not ScenarioRoot.$Issue69MatrixPrevious.{$Weapon}?">
+                  <set_value name="ScenarioRoot.$Issue69MatrixPrevious.{$Weapon}" exact="table[]"/>
+                </do_if>
+                <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                <create_position name="$MountShooter" object="$Weapon" space="$Shooter"/>
+                <create_position name="$MuzzleShooter" object="$Weapon" space="$Shooter" value="$Barrel"/>
+                <do_for_each name="$RoleRoot" in="$RoleRoots">
+                  <set_value name="$TargetRoot" exact="$RoleRoot.$root"/>
+                  <find_object_component name="$LiveSurfaces" object="$TargetRoot" surfaceelement="true" multiple="true" state="componentstate.operational"/>
+                  <do_for_each name="$Surface" in="$LiveSurfaces">
+                    <set_value name="$BboxRange" exact="$Weapon.bboxdistanceto.{$Surface}"/>
+                    <set_value name="$InRange" exact="$BboxRange le $Weapon.maxfirerange"/>
+                    <set_value name="$MayAttack" exact="@$Shooter.mayattack.{$Surface}"/>
+                    <set_value name="$TargetRelative" exact="$Surface.relativeposition.{$Weapon}"/>
+                    <create_orientation name="$BboxBearing" orientation="look_at_bbox" refobject="$Surface">
+                      <position object="$Weapon" space="$Weapon"/>
+                    </create_orientation>
+                    <create_orientation name="$AimBearing" orientation="look_at" refobject="$Surface" useaimtarget="true">
+                      <position object="$Weapon" space="$Weapon"/>
+                    </create_orientation>
+                    <!-- Six independent fast results: current articulated barrel,
+                         omitted offset, and explicit zero are never conflated. -->
+                    <check_line_of_sight name="$BarrelFastSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" useaimtarget="true" excludeself="false"/>
+                    <check_line_of_sight name="$BarrelFastEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" useaimtarget="true" excludeself="true"/>
+                    <check_line_of_sight name="$ImplicitFastSelf" object="$Weapon" target="$Surface" useaimtarget="true" excludeself="false"/>
+                    <check_line_of_sight name="$ImplicitFastEx" object="$Weapon" target="$Surface" useaimtarget="true" excludeself="true"/>
+                    <check_line_of_sight name="$ZeroFastSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" useaimtarget="true" excludeself="false"/>
+                    <check_line_of_sight name="$ZeroFastEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" useaimtarget="true" excludeself="true"/>
+                    <set_value name="$FastSignature" exact="(if $BarrelFastSelf then 1 else 0) + (if $BarrelFastEx then 2 else 0) + (if $ImplicitFastSelf then 4 else 0) + (if $ImplicitFastEx then 8 else 0) + (if $ZeroFastSelf then 16 else 0) + (if $ZeroFastEx then 32 else 0)"/>
+                    <set_value name="$HadPrevious" exact="ScenarioRoot.$Issue69MatrixPrevious.{$Weapon}.{$Surface}?"/>
+                    <set_value name="$PreviousSignature" exact="if $HadPrevious then ScenarioRoot.$Issue69MatrixPrevious.{$Weapon}.{$Surface} else -1"/>
+                    <set_value name="$Changed" exact="$HadPrevious and $PreviousSignature != $FastSignature"/>
+                    <set_value name="ScenarioRoot.$Issue69MatrixPrevious.{$Weapon}.{$Surface}" exact="$FastSignature"/>
+                    <set_value name="$ExactFarPair" exact="$Weapon == ScenarioRoot.$Issue69FarBeam and $Surface == ScenarioRoot.$Issue69FarSurface"/>
+                    <set_value name="$Detailed" exact="$ExactFarPair or $Changed"/>
+                    <set_value name="$BarrelWitnessSelf" exact="[]"/>
+                    <set_value name="$BarrelWitnessEx" exact="[]"/>
+                    <set_value name="$ImplicitWitnessSelf" exact="[]"/>
+                    <set_value name="$ImplicitWitnessEx" exact="[]"/>
+                    <set_value name="$ZeroWitnessSelf" exact="[]"/>
+                    <set_value name="$ZeroWitnessEx" exact="[]"/>
+                    <set_value name="$ClearSelf" exact="0"/>
+                    <set_value name="$ClearEx" exact="0"/>
+                    <set_value name="$ImplicitClearSelf" exact="0"/>
+                    <set_value name="$ImplicitClearEx" exact="0"/>
+                    <set_value name="$ZeroClearSelf" exact="0"/>
+                    <set_value name="$ZeroClearEx" exact="0"/>
+                    <do_if value="$Detailed">
+                      <set_value name="$MinX" exact="2 * $Surface.macro.boundingbox.center.x - $Surface.macro.boundingbox.max.x"/>
+                      <set_value name="$MinY" exact="2 * $Surface.macro.boundingbox.center.y - $Surface.macro.boundingbox.max.y"/>
+                      <set_value name="$MinZ" exact="2 * $Surface.macro.boundingbox.center.z - $Surface.macro.boundingbox.max.z"/>
+                      <set_value name="$SpanX" exact="$Surface.macro.boundingbox.max.x - $MinX"/>
+                      <set_value name="$SpanY" exact="$Surface.macro.boundingbox.max.y - $MinY"/>
+                      <set_value name="$SpanZ" exact="$Surface.macro.boundingbox.max.z - $MinZ"/>
+                      <set_value name="$XFracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
+                      <set_value name="$YFracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
+                      <set_value name="$ZFracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
+                      <do_for_each name="$Frac" in="$XFracs" counter="$I">
+                        <create_position name="$Sample" object="$Surface" space="$Surface" x="$MinX + $XFracs.{$I} * $SpanX" y="$MinY + $YFracs.{$I} * $SpanY" z="$MinZ + $ZFracs.{$I} * $SpanZ"/>
+                        <check_line_of_sight name="$SampleLosSelf" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                        <check_line_of_sight name="$SampleLosEx" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                        <check_line_of_sight name="$ImplicitSampleLosSelf" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                        <check_line_of_sight name="$ImplicitSampleLosEx" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                        <check_line_of_sight name="$ZeroSampleLosSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                        <check_line_of_sight name="$ZeroSampleLosEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                        <append_to_list name="$BarrelWitnessSelf" exact="$SampleLosSelf"/>
+                        <append_to_list name="$BarrelWitnessEx" exact="$SampleLosEx"/>
+                        <append_to_list name="$ImplicitWitnessSelf" exact="$ImplicitSampleLosSelf"/>
+                        <append_to_list name="$ImplicitWitnessEx" exact="$ImplicitSampleLosEx"/>
+                        <append_to_list name="$ZeroWitnessSelf" exact="$ZeroSampleLosSelf"/>
+                        <append_to_list name="$ZeroWitnessEx" exact="$ZeroSampleLosEx"/>
+                        <do_if value="$SampleLosSelf"><set_value name="$ClearSelf" operation="add"/></do_if>
+                        <do_if value="$SampleLosEx"><set_value name="$ClearEx" operation="add"/></do_if>
+                        <do_if value="$ImplicitSampleLosSelf"><set_value name="$ImplicitClearSelf" operation="add"/></do_if>
+                        <do_if value="$ImplicitSampleLosEx"><set_value name="$ImplicitClearEx" operation="add"/></do_if>
+                        <do_if value="$ZeroSampleLosSelf"><set_value name="$ZeroClearSelf" operation="add"/></do_if>
+                        <do_if value="$ZeroSampleLosEx"><set_value name="$ZeroClearEx" operation="add"/></do_if>
+                      </do_for_each>
+                    </do_if>
+                    <debug_text text="'[X4GC TEST ISSUE69 MATRIX] request_id=' + $RequestId + ' tick=' + $Tick + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' mode=' + $Weapon.mode + ' ready=' + $Weapon.isreadytofire + ' mount_shooter=' + $MountShooter + ' mount_yaw=' + $Weapon.rotation.yaw + ' mount_pitch=' + $Weapon.rotation.pitch + ' mount_roll=' + $Weapon.rotation.roll + ' barrel_raw=' + $Barrel + ' muzzle_shooter=' + $MuzzleShooter + ' target_root=' + $TargetRoot + ' role=' + $RoleRoot.$role + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' surface_class=' + $Surface.class + ' bbox_range=' + $BboxRange + ' maxrange=' + $Weapon.maxfirerange + ' inrange=' + $InRange + ' relative_yaw=' + $TargetRelative.rotation.yaw + ' relative_pitch=' + $TargetRelative.rotation.pitch + ' relative_roll=' + $TargetRelative.rotation.roll + ' bbox_yaw=' + $BboxBearing.yaw + ' bbox_pitch=' + $BboxBearing.pitch + ' bbox_roll=' + $BboxBearing.roll + ' aim_yaw=' + $AimBearing.yaw + ' aim_pitch=' + $AimBearing.pitch + ' aim_roll=' + $AimBearing.roll + ' mayattack=' + $MayAttack + ' barrel_fast_self=' + $BarrelFastSelf + ' barrel_fast_ex=' + $BarrelFastEx + ' implicit_fast_self=' + $ImplicitFastSelf + ' implicit_fast_ex=' + $ImplicitFastEx + ' zero_fast_self=' + $ZeroFastSelf + ' zero_fast_ex=' + $ZeroFastEx + ' fast_signature=' + $FastSignature + ' changed=' + $Changed + ' detailed=' + $Detailed + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx + ' barrel_witness_self=' + $BarrelWitnessSelf + ' barrel_witness_ex=' + $BarrelWitnessEx + ' implicit_witness_self=' + $ImplicitWitnessSelf + ' implicit_witness_ex=' + $ImplicitWitnessEx + ' zero_witness_self=' + $ZeroWitnessSelf + ' zero_witness_ex=' + $ZeroWitnessEx"/>
+                    <do_if value="$Changed">
+                      <debug_text text="'[X4GC TEST ISSUE69 MATRIX CHANGE] request_id=' + $RequestId + ' tick=' + $Tick + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' target_root=' + $TargetRoot + ' role=' + $RoleRoot.$role + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' previous_signature=' + $PreviousSignature + ' fast_signature=' + $FastSignature + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx + ' barrel_witness_self=' + $BarrelWitnessSelf + ' barrel_witness_ex=' + $BarrelWitnessEx + ' implicit_witness_self=' + $ImplicitWitnessSelf + ' implicit_witness_ex=' + $ImplicitWitnessEx + ' zero_witness_self=' + $ZeroWitnessSelf + ' zero_witness_ex=' + $ZeroWitnessEx"/>
+                    </do_if>
+                  </do_for_each>
+                </do_for_each>
               </do_for_each>
-              <debug_text text="'[X4GC TEST ISSUE69 STATE] phase=' + event.param.$phase + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' mode=' + $Weapon.mode + ' ready=' + $Weapon.isreadytofire + ' mount_base=' + $MountBase + ' mount_yaw=' + $Weapon.rotation.yaw + ' mount_pitch=' + $Weapon.rotation.pitch + ' mount_roll=' + $Weapon.rotation.roll + ' barrel_raw=' + $Barrel + ' muzzle_base=' + $MuzzleBase + ' bbox_range=' + $BboxRange + ' maxrange=' + $Weapon.maxfirerange + ' bbox_pitch=' + $BboxLocal.pitch + ' fast_los_self=' + $FastLosSelf + ' fast_los_ex=' + $FastLosEx + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_fast_self=' + $ImplicitFastSelf + ' implicit_fast_ex=' + $ImplicitFastEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_fast_self=' + $ZeroFastSelf + ' zero_fast_ex=' + $ZeroFastEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx"/>
+              <!-- No reset loop: an instantiated successor is throttled by this
+                   explicit delay, and only the still-current active token may
+                   schedule another tick. -->
+              <signal_cue cue="Issue69MatrixSampler" param="table[$delay = 1s, $tick = $Tick + 1, $requestId = $RequestId]"/>
             </do_if>
           </actions>
         </cue>

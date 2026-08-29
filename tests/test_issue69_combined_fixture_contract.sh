@@ -161,54 +161,56 @@ grep -Fq "\$EngineStraddleSurface != null and \$Issue69PlasmaCount == 1" "$scena
 if grep -E 'SurfaceMaskPlacements.*(NearTarget|FarTarget|NearBlocker)' "$scenario"; then fail "unmarked roles entered MID objective placements"; fi
 if grep -E 'GeometryQualifiedTarget.*(Near|Far)' "$scenario"; then fail "NEAR/FAR crossed the marked-objective bridge"; fi
 
-issue69_state=$(awk '/<cue name="Issue69ObserveState"/{f=1} f{print} /<cue name="Issue69StateLog"/{g=1} g{print} g && /<\/cue>/{exit}' "$scenario")
-[[ "$issue69_state" == *'control="'"'observe_state'"'"'* ]] || fail "Issue69 post trigger does not consume Observer state"
-[[ "$issue69_state" == *"@event.param3.\$aimtgt == ScenarioRoot.\$Issue69FarSurface"* ]] || fail "Issue69 post trigger is not exact FAR-surface aimtgt equality"
-[[ "$issue69_state" == *"not ScenarioRoot.\$Issue69PostBurstIssued"* && "$issue69_state" == *"ScenarioRoot.\$Issue69PostBurstIssued\" exact=\"true\""* ]] || fail "Issue69 post trigger is not deduplicated"
-for delay in '0s' '500ms' '1s' '2s' '3s'; do
-  [[ "$issue69_state" == *"\$phase = 'after', \$delay = $delay"* ]] || fail "Issue69 post burst missing $delay sample"
-done
-grep -Fq "cue=\"Issue69StateLog\" param=\"table[\$phase = 'before', \$delay = 0s" "$scenario" || fail "Issue69 settled pre-designation state missing"
-state_before_line=$(grep -nF "cue=\"Issue69StateLog\" param=\"table[\$phase = 'before'" "$scenario" | cut -d: -f1)
+issue69_matrix=$(awk '/<cue name="Issue69MatrixSampler"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
+[[ "$issue69_matrix" == *"<delay exact=\"event.param.\$delay\"/>"* ]] || fail "Issue69 matrix cue does not consume its explicit throttle delay"
+[[ "$issue69_matrix" == *"table[\$delay = 1s, \$tick = \$Tick + 1, \$requestId = \$RequestId]"* ]] || fail "Issue69 matrix successor lacks a real one-second delay"
+[[ "$issue69_matrix" == *"ScenarioRoot.\$Issue69StateActive? and ScenarioRoot.\$Issue69StateActive"* && "$issue69_matrix" == *"ScenarioRoot.\$Issue69StateRequestId == \$RequestId"* ]] || fail "Issue69 matrix persistence is not bounded by active state/current request"
+[[ "$issue69_matrix" != *"<reset_cue"* ]] || fail "Issue69 matrix uses an unthrottled reset loop"
+
+sampler_start_line=$(grep -nF "cue=\"Issue69MatrixSampler\" param=\"table[\$delay = 0s, \$tick = 0" "$scenario" | cut -d: -f1)
 far_gate_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$scenario" | tail -1 | cut -d: -f1)
-[[ "$state_before_line" -lt "$far_gate_line" ]] || fail "Issue69 before state is not emitted before FAR LOS qualification"
-for field in weapon= weapon_macro= surface= surface_macro= mode= ready= mount_base= mount_yaw= mount_pitch= mount_roll= barrel_raw= muzzle_base= bbox_range= maxrange= bbox_pitch= fast_los_self= fast_los_ex= six_clear_self= six_clear_ex= implicit_fast_self= implicit_fast_ex= implicit_six_self= implicit_six_ex= zero_fast_self= zero_fast_ex= zero_six_self= zero_six_ex=; do
-  [[ "$issue69_state" == *"$field"* ]] || fail "Issue69 state record missing $field"
+[[ "$sampler_start_line" -lt "$far_gate_line" && "$sampler_start_line" -lt "$far_origin_token_line" ]] || fail "Issue69 matrix does not begin synchronously during qualification before designation transport"
+[[ "$issue69_matrix" != *observe_state* && "$issue69_matrix" != *aimtgt* ]] || fail "Issue69 matrix still depends on owner designation"
+if grep -Eq 'Issue69(StateLog|ObserveState|PostBurstIssued)' "$scenario"; then fail "bounded designation-triggered Issue69 burst remains"; fi
+if [[ "$issue69_matrix" == *"\$delay = 500ms"* || "$issue69_matrix" == *"\$delay = 2s"* || "$issue69_matrix" == *"\$delay = 3s"* ]]; then fail "Issue69 matrix retains a fixed burst endpoint"; fi
+
+[[ "$issue69_matrix" == *"in=\"\$Shooter.turrets.operational.list\""* ]] || fail "Issue69 matrix does not enumerate every live operational shooter turret"
+for role in MID NEAR FAR; do
+  [[ "$issue69_matrix" == *"table[\$role = '$role', \$root = "* ]] || fail "Issue69 matrix does not enumerate the $role target root"
 done
-[[ "$issue69_state" == *"value=\"\$Barrel\""* ]] || fail "Issue69 state does not transform the raw barrel position when schema-supported"
+[[ "$issue69_matrix" == *"find_object_component name=\"\$LiveSurfaces\" object=\"\$TargetRoot\" surfaceelement=\"true\" multiple=\"true\" state=\"componentstate.operational\""* && "$issue69_matrix" == *"in=\"\$LiveSurfaces\""* ]] || fail "Issue69 matrix does not rediscover every operational surface live on each role root"
+
+for field in request_id= tick= t= weapon= weapon_macro= mode= ready= mount_shooter= mount_yaw= mount_pitch= mount_roll= barrel_raw= muzzle_shooter= target_root= role= surface= surface_macro= surface_class= bbox_range= maxrange= inrange= relative_yaw= relative_pitch= relative_roll= bbox_yaw= bbox_pitch= bbox_roll= aim_yaw= aim_pitch= aim_roll= mayattack= barrel_fast_self= barrel_fast_ex= implicit_fast_self= implicit_fast_ex= zero_fast_self= zero_fast_ex=; do
+  [[ "$issue69_matrix" == *"$field"* ]] || fail "Issue69 matrix record missing $field"
+done
+[[ $(grep -cF '[X4GC TEST ISSUE69 MATRIX]' "$scenario") -eq 1 ]] || fail "Issue69 matrix must emit one compact base record per pair source path"
+[[ "$issue69_matrix" == *"value=\"\$Barrel\""* ]] || fail "Issue69 matrix does not transform current barrelposition into shooter space"
 for self in false true; do
-  [[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"$self\""* ]] || fail "Issue69 state lost barrel-origin fast LOS excludeself=$self"
-  [[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"$self\""* ]] || fail "Issue69 state lost barrel-origin six-sample LOS excludeself=$self"
+  [[ "$issue69_matrix" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"$self\""* ]] || fail "matrix lost barrel-origin fast LOS excludeself=$self"
+  implicit_line=$(grep -F "object=\"\$Weapon\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"$self\"" <<<"$issue69_matrix" || true)
+  [[ -n "$implicit_line" && "$implicit_line" != *objectoffset=* ]] || fail "matrix implicit fast LOS must omit objectoffset for excludeself=$self"
+  [[ "$issue69_matrix" == *"object=\"\$Weapon\" objectoffset=\"position.[0m,0m,0m]\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"$self\""* ]] || fail "matrix explicit-zero fast LOS missing excludeself=$self"
 done
-for spec in \
-  "ImplicitFastSelf|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"false\"" \
-  "ImplicitFastEx|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"true\"" \
-  "ImplicitSampleLosSelf|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"false\"" \
-  "ImplicitSampleLosEx|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"true\""; do
-  name=${spec%%|*}
-  attrs=${spec#*|}
-  line=$(grep -F "name=\"\$$name\" object=\"\$Weapon\" $attrs" "$scenario" || true)
-  [[ -n "$line" && "$line" != *objectoffset=* && $(grep -c "name=\"\$$name\"" "$scenario") -eq 1 ]] || fail "implicit candidate $name must occur once with objectoffset omitted"
-done
-for spec in \
-  "ZeroFastSelf|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"false\"" \
-  "ZeroFastEx|target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"true\"" \
-  "ZeroSampleLosSelf|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"false\"" \
-  "ZeroSampleLosEx|target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"true\""; do
-  name=${spec%%|*}
-  attrs=${spec#*|}
-  grep -Fq "name=\"\$$name\" object=\"\$Weapon\" objectoffset=\"position.[0m,0m,0m]\" $attrs" "$scenario" || fail "zero candidate $name lacks explicit weapon-local zero origin"
-  [[ $(grep -c "name=\"\$$name\"" "$scenario") -eq 1 ]] || fail "zero candidate $name must occur once"
-done
-state_sample_loop=$(awk '/<do_for_each name="\$Frac"/{f=1} f{print} f && /<\/do_for_each>/{exit}' "$scenario")
-for name in ImplicitSampleLosSelf ImplicitSampleLosEx ZeroSampleLosSelf ZeroSampleLosEx; do
-  [[ "$state_sample_loop" == *"name=\"\$$name\""* ]] || fail "$name does not reuse the existing six-sample loop"
-done
+[[ "$issue69_matrix" == *"name=\"\$FastSignature\""* && "$issue69_matrix" == *"name=\"\$PreviousSignature\""* && "$issue69_matrix" == *"name=\"\$Changed\" exact=\"\$HadPrevious and \$PreviousSignature != \$FastSignature\""* ]] || fail "matrix does not compare all six fast-origin results with the preceding tick"
+
+[[ "$issue69_matrix" == *"name=\"\$ExactFarPair\" exact=\"\$Weapon == ScenarioRoot.\$Issue69FarBeam and \$Surface == ScenarioRoot.\$Issue69FarSurface\""* && "$issue69_matrix" == *"name=\"\$Detailed\" exact=\"\$ExactFarPair or \$Changed\""* && "$issue69_matrix" == *"<do_if value=\"\$Detailed\">"* ]] || fail "full six-witness expansion is not every-tick FAR plus changed-pair only"
 for list in '[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]' '[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]' '[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]'; do
-  [[ "$issue69_state" == *"$list"* ]] || fail "Issue69 state six-sample list changed: $list"
+  [[ "$issue69_matrix" == *"$list"* ]] || fail "Issue69 detailed matrix six-sample list changed: $list"
 done
-if grep -E 'Issue69(StateLog|ObserveState).*\.idcode' "$scenario"; then fail "Issue69 state uses forbidden surface idcode"; fi
-if [[ "$issue69_state" =~ SetSofttarget|set_softtarget|set_weapon_mode|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "Issue69 telemetry mutates target or weapon mode"; fi
+for self in false true; do
+  [[ "$issue69_matrix" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"$self\""* ]] || fail "detailed matrix lost barrel witnesses excludeself=$self"
+  implicit_line=$(grep -F "object=\"\$Weapon\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"$self\"" <<<"$issue69_matrix" || true)
+  [[ -n "$implicit_line" && "$implicit_line" != *objectoffset=* ]] || fail "detailed implicit witnesses must omit objectoffset for excludeself=$self"
+  [[ "$issue69_matrix" == *"object=\"\$Weapon\" objectoffset=\"position.[0m,0m,0m]\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"$self\""* ]] || fail "detailed explicit-zero witnesses missing excludeself=$self"
+done
+for name in BarrelWitnessSelf BarrelWitnessEx ImplicitWitnessSelf ImplicitWitnessEx ZeroWitnessSelf ZeroWitnessEx; do
+  [[ "$issue69_matrix" == *"append_to_list name=\"\$$name\""* ]] || fail "Issue69 detailed matrix does not retain all six $name results"
+done
+for field in barrel_witness_self= barrel_witness_ex= implicit_witness_self= implicit_witness_ex= zero_witness_self= zero_witness_ex= six_clear_self= six_clear_ex= implicit_six_self= implicit_six_ex= zero_six_self= zero_six_ex=; do
+  [[ "$issue69_matrix" == *"$field"* ]] || fail "Issue69 detailed matrix record missing $field"
+done
+[[ $(grep -cF '[X4GC TEST ISSUE69 MATRIX CHANGE]' "$scenario") -eq 1 && "$issue69_matrix" == *"<do_if value=\"\$Changed\">"* && "$issue69_matrix" == *previous_signature=* ]] || fail "changed pair does not emit exactly one detailed MATRIX CHANGE record"
+if [[ "$issue69_matrix" =~ SetSofttarget|set_softtarget|set_weapon_mode|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "Issue69 matrix mutates target or weapon mode"; fi
 grep -Fq "ScenarioRoot.\$Issue69FarBeam\" exact=\"\$Issue69Beam\"" "$scenario" || fail "exact FAR Beam is not persisted"
 grep -Fq "ScenarioRoot.\$Issue69FarSurface\" exact=\"\$FarRoleSurface\"" "$scenario" || fail "exact FAR surface is not persisted"
 
