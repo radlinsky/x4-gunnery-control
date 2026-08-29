@@ -264,6 +264,8 @@
             <set_value name="ScenarioRoot.$Issue69FarBeam" exact="null"/>
             <set_value name="ScenarioRoot.$Issue69FarSurface" exact="null"/>
             <set_value name="ScenarioRoot.$Issue69StateRequestId" exact="''"/>
+            <set_value name="ScenarioRoot.$Issue69MatrixScheduleRequestId" exact="''"/>
+            <set_value name="ScenarioRoot.$Issue69MatrixTick" exact="0"/>
             <set_value name="ScenarioRoot.$Issue69MatrixPrevious" exact="table[]"/>
             <set_value name="$StationModules" exact="0"/>
             <set_value name="$StationTurrets" exact="0"/>
@@ -1213,6 +1215,8 @@
             <remove_value name="ScenarioRoot.$Issue69FarBeam"/>
             <remove_value name="ScenarioRoot.$Issue69FarSurface"/>
             <remove_value name="ScenarioRoot.$Issue69StateRequestId"/>
+            <remove_value name="ScenarioRoot.$Issue69MatrixScheduleRequestId"/>
+            <remove_value name="ScenarioRoot.$Issue69MatrixTick"/>
             <remove_value name="ScenarioRoot.$Issue69MatrixPrevious"/>
             <do_if value="ScenarioRoot.$GeometryStation?">
               <remove_value name="ScenarioRoot.$GeometryStation"/>
@@ -1850,6 +1854,8 @@
                 <set_value name="ScenarioRoot.$Issue69FarBeam" exact="$Issue69Beam"/>
                 <set_value name="ScenarioRoot.$Issue69FarSurface" exact="$FarRoleSurface"/>
                 <set_value name="ScenarioRoot.$Issue69StateRequestId" exact="$RequestId"/>
+                <set_value name="ScenarioRoot.$Issue69MatrixScheduleRequestId" exact="$RequestId"/>
+                <set_value name="ScenarioRoot.$Issue69MatrixTick" exact="0"/>
                 <set_value name="ScenarioRoot.$Issue69MatrixPrevious" exact="table[]"/>
                 <set_value name="ScenarioRoot.$Issue69StateActive" exact="true"/>
                 <!-- Re-express the settled objects in the exact firing-weapon frames.
@@ -1931,7 +1937,10 @@
                 <!-- Tick zero is synchronous with qualification, before either
                      target transport can permit owner designation. Every later
                      instance carries a real one-second delay. -->
-                <signal_cue_instantly cue="Issue69MatrixSampler" param="table[$delay = 0s, $tick = 0, $requestId = $RequestId]"/>
+                <signal_cue_instantly cue="Issue69MatrixSampler" param="table[$tick = 0, $requestId = $RequestId]"/>
+                <!-- Event-driven rearm cancels any stale delayed cycle. The
+                     periodic cue itself supplies the proven one-second gate. -->
+                <reset_cue cue="Issue69MatrixPeriodic"/>
                 <set_value name="$FarQualified" exact="$FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and ($FarFastLosSelf or $FarSampleClearSelf gt 0) and ($FarFastLosEx or $FarSampleClearEx gt 0) and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
                 <!-- Dedicated #69 handoff gate: the exact persisted Beam/surface
                      pair may run the origin discriminator without asking the LOS
@@ -2007,17 +2016,14 @@
           </actions>
         </cue>
 
-        <!-- Persistent Issue #69 articulation/LOS matrix. Tick zero runs
+        <!-- Persistent Issue #69 articulation/LOS matrix worker. Tick zero runs
              synchronously inside qualification, before Lua can hand the owner a
-             marked surface. Each successor instance waits a real second, then
-             rediscovers the live shooter turrets and role-root surfaces. The
-             chain ends naturally when cleanup clears StateActive or a newer
-             qualification replaces its request token. -->
+             marked surface. Later invocations come only from the separately
+             delayed periodic cue below; this worker never signals itself. -->
         <cue name="Issue69MatrixSampler" instantiate="true">
           <conditions>
             <event_cue_signalled/>
           </conditions>
-          <delay exact="event.param.$delay"/>
           <actions>
             <set_value name="$RequestId" exact="event.param.$requestId"/>
             <set_value name="$Tick" exact="event.param.$tick"/>
@@ -2114,10 +2120,25 @@
                   </do_for_each>
                 </do_for_each>
               </do_for_each>
-              <!-- No reset loop: an instantiated successor is throttled by this
-                   explicit delay, and only the still-current active token may
-                   schedule another tick. -->
-              <signal_cue cue="Issue69MatrixSampler" param="table[$delay = 1s, $tick = $Tick + 1, $requestId = $RequestId]"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <!-- Live-proven periodic MD pattern: conditions pass, a real delay
+             throttles the cycle, actions invoke the now-idle matrix listener,
+             then the periodic cue rearms itself. The trailing reset cannot form
+             a same-frame loop because every cycle must cross this delay. -->
+        <cue name="Issue69MatrixPeriodic">
+          <conditions>
+            <check_value value="ScenarioRoot.$Issue69StateActive? and ScenarioRoot.$Issue69StateActive"/>
+          </conditions>
+          <delay exact="1s"/>
+          <actions>
+            <set_value name="$RequestId" exact="if ScenarioRoot.$Issue69MatrixScheduleRequestId? then ScenarioRoot.$Issue69MatrixScheduleRequestId else ''"/>
+            <do_if value="ScenarioRoot.$Issue69StateActive? and ScenarioRoot.$Issue69StateActive and ScenarioRoot.$Issue69StateRequestId == $RequestId">
+              <set_value name="ScenarioRoot.$Issue69MatrixTick" operation="add"/>
+              <signal_cue_instantly cue="Issue69MatrixSampler" param="table[$tick = ScenarioRoot.$Issue69MatrixTick, $requestId = $RequestId]"/>
+              <reset_cue cue="Issue69MatrixPeriodic"/>
             </do_if>
           </actions>
         </cue>

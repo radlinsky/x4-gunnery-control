@@ -162,17 +162,26 @@ if grep -E 'SurfaceMaskPlacements.*(NearTarget|FarTarget|NearBlocker)' "$scenari
 if grep -E 'GeometryQualifiedTarget.*(Near|Far)' "$scenario"; then fail "NEAR/FAR crossed the marked-objective bridge"; fi
 
 issue69_matrix=$(awk '/<cue name="Issue69MatrixSampler"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
-[[ "$issue69_matrix" == *"<delay exact=\"event.param.\$delay\"/>"* ]] || fail "Issue69 matrix cue does not consume its explicit throttle delay"
-[[ "$issue69_matrix" == *"table[\$delay = 1s, \$tick = \$Tick + 1, \$requestId = \$RequestId]"* ]] || fail "Issue69 matrix successor lacks a real one-second delay"
+issue69_periodic=$(awk '/<cue name="Issue69MatrixPeriodic"/{f=1} f{print} f && /^[[:space:]]*<\/cue>/{exit}' "$scenario")
 [[ "$issue69_matrix" == *"ScenarioRoot.\$Issue69StateActive? and ScenarioRoot.\$Issue69StateActive"* && "$issue69_matrix" == *"ScenarioRoot.\$Issue69StateRequestId == \$RequestId"* ]] || fail "Issue69 matrix persistence is not bounded by active state/current request"
-[[ "$issue69_matrix" != *"<reset_cue"* ]] || fail "Issue69 matrix uses an unthrottled reset loop"
+[[ "$issue69_matrix" != *"<signal_cue cue=\"Issue69MatrixSampler\""* && "$issue69_matrix" != *"<signal_cue_instantly cue=\"Issue69MatrixSampler\""* ]] || fail "regression: active Issue69 matrix worker signals itself"
+[[ "$issue69_matrix" != *"<reset_cue"* ]] || fail "Issue69 matrix worker resets itself"
+[[ "$issue69_periodic" == *"<delay exact=\"1s\"/>"* ]] || fail "Issue69 periodic rearm lacks a real one-second delay"
+[[ "$issue69_periodic" == *"signal_cue_instantly cue=\"Issue69MatrixSampler\" param=\"table[\$tick = ScenarioRoot.\$Issue69MatrixTick, \$requestId = \$RequestId]"* ]] || fail "Issue69 periodic cue does not invoke the separate idle matrix listener"
+[[ "$issue69_periodic" == *"<reset_cue cue=\"Issue69MatrixPeriodic\"/>"* ]] || fail "Issue69 periodic cue does not use the live-proven delayed rearm"
+[[ "$issue69_periodic" == *"ScenarioRoot.\$Issue69StateRequestId == \$RequestId"* && "$issue69_periodic" == *"ScenarioRoot.\$Issue69MatrixTick\" operation=\"add\""* ]] || fail "Issue69 periodic path lacks fail-closed token guard or monotonic tick increment"
+periodic_delay_line=$(grep -nF '<delay exact="1s"/>' <<<"$issue69_periodic" | cut -d: -f1)
+periodic_signal_line=$(grep -nF 'signal_cue_instantly cue="Issue69MatrixSampler"' <<<"$issue69_periodic" | cut -d: -f1)
+periodic_reset_line=$(grep -nF '<reset_cue cue="Issue69MatrixPeriodic"/>' <<<"$issue69_periodic" | cut -d: -f1)
+[[ "$periodic_delay_line" -lt "$periodic_signal_line" && "$periodic_signal_line" -lt "$periodic_reset_line" ]] || fail "Issue69 periodic path does not delay, sample, then rearm in order"
 
-sampler_start_line=$(grep -nF "cue=\"Issue69MatrixSampler\" param=\"table[\$delay = 0s, \$tick = 0" "$scenario" | cut -d: -f1)
+sampler_start_line=$(grep -nF "cue=\"Issue69MatrixSampler\" param=\"table[\$tick = 0" "$scenario" | cut -d: -f1)
+sampler_rearm_line=$(grep -nF '<reset_cue cue="Issue69MatrixPeriodic"/>' "$scenario" | head -1 | cut -d: -f1)
 far_gate_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$scenario" | tail -1 | cut -d: -f1)
-[[ "$sampler_start_line" -lt "$far_gate_line" && "$sampler_start_line" -lt "$far_origin_token_line" ]] || fail "Issue69 matrix does not begin synchronously during qualification before designation transport"
+[[ "$sampler_start_line" -lt "$sampler_rearm_line" && "$sampler_rearm_line" -lt "$far_gate_line" && "$sampler_start_line" -lt "$far_origin_token_line" ]] || fail "Issue69 tick zero/rearm does not begin synchronously before designation transport"
 [[ "$issue69_matrix" != *observe_state* && "$issue69_matrix" != *aimtgt* ]] || fail "Issue69 matrix still depends on owner designation"
 if grep -Eq 'Issue69(StateLog|ObserveState|PostBurstIssued)' "$scenario"; then fail "bounded designation-triggered Issue69 burst remains"; fi
-if [[ "$issue69_matrix" == *"\$delay = 500ms"* || "$issue69_matrix" == *"\$delay = 2s"* || "$issue69_matrix" == *"\$delay = 3s"* ]]; then fail "Issue69 matrix retains a fixed burst endpoint"; fi
+if [[ "$issue69_matrix$issue69_periodic" == *"\$delay = 500ms"* || "$issue69_matrix$issue69_periodic" == *"\$delay = 2s"* || "$issue69_matrix$issue69_periodic" == *"\$delay = 3s"* ]]; then fail "Issue69 matrix retains a fixed burst endpoint"; fi
 
 [[ "$issue69_matrix" == *"in=\"\$Shooter.turrets.operational.list\""* ]] || fail "Issue69 matrix does not enumerate every live operational shooter turret"
 for role in MID NEAR FAR; do
