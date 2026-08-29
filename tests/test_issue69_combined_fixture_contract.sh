@@ -219,6 +219,63 @@ done
 [[ "$issue69_matrix" == *"name=\"\$FastSignature\""* && "$issue69_matrix" == *"name=\"\$PreviousSignature\""* && "$issue69_matrix" == *"name=\"\$Changed\" exact=\"\$HadPrevious and \$PreviousSignature != \$FastSignature\""* ]] || fail "matrix does not compare all six fast-origin results with the preceding tick"
 
 [[ "$issue69_matrix" == *"name=\"\$ExactFarPair\" exact=\"\$Weapon == ScenarioRoot.\$Issue69FarBeam and \$Surface == ScenarioRoot.\$Issue69FarSurface\""* && "$issue69_matrix" == *"name=\"\$Detailed\" exact=\"\$ExactFarPair or \$Changed\""* && "$issue69_matrix" == *"<do_if value=\"\$Detailed\">"* ]] || fail "full six-witness expansion is not every-tick FAR plus changed-pair only"
+
+virtual_setup=$(awk '/<!-- Exact FAR discriminator only\./{f=1} f{print} /<set_value name="\$Detailed"/{exit}' <<<"$issue69_matrix")
+[[ "$virtual_setup" == *"<do_if value=\"\$ExactFarPair\">"* ]] || fail "virtual muzzle setup is not restricted to the exact FAR pair"
+[[ "$virtual_setup" == *"name=\"\$VirtualBearingYaw\" exact=\"\$AimBearing.yaw\""* && "$virtual_setup" == *"name=\"\$VirtualBearingPitch\" exact=\"\$AimBearing.pitch\""* ]] || fail "virtual muzzle does not derive runtime yaw/pitch from the exact FAR surface fast-target bearing"
+if [[ "$virtual_setup" == *'180deg'* || "$virtual_setup" == *'3.14159'* || "$virtual_setup" == *'0.00135549'* ]]; then fail "virtual muzzle hard-codes the prior live FAR bearing"; fi
+[[ "$virtual_setup" == *'x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"'* ]] || fail "virtual muzzle shipped active downstream vector changed"
+[[ "$virtual_setup" == *'x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"'* ]] || fail "virtual muzzle shipped root/active yaw origin changed"
+python3 - "$scenario" tests/test_issue69_virtual_muzzle_geometry.lua <<'PY'
+import re, sys
+scenario = open(sys.argv[1], encoding='utf-8').read()
+lua = open(sys.argv[2], encoding='utf-8').read()
+def values(kind, name):
+    match = re.search(rf'local {name} = {kind}\((.*?)\)', lua, re.S)
+    assert match, name
+    return tuple(float(x.strip()) for x in match.group(1).split(','))
+def add(a, b): return tuple(x + y for x, y in zip(a, b))
+def qmul(a, b):
+    x,y,z,w = a; X,Y,Z,W = b
+    return (w*X+x*W+y*Z-z*Y, w*Y-x*Z+y*W+z*X,
+            w*Z+x*Y-y*X+z*W, w*W-x*X-y*Y-z*Z)
+def qrot(q, v):
+    x,y,z,w = q; X,Y,Z = v
+    tx,ty,tz = 2*(y*Z-z*Y), 2*(z*X-x*Z), 2*(x*Y-y*X)
+    return (X+w*tx+y*tz-z*ty, Y+w*ty+z*tx-x*tz,
+            Z+w*tz+x*ty-y*tx)
+barrel = add(values('vec', 'barrel_connection'),
+             values('vec', 'barrel_active_translation'))
+gun = values('quaternion', 'gun_base_rotation')
+combined = qmul(gun, values('quaternion', 'barrel_base_rotation'))
+derived = add(qrot(gun, barrel), qrot(combined, values('vec', 'laser_02')))
+match = re.search(r'<position x="(-?[0-9.eE+-]+)m" y="(-?[0-9.eE+-]+)m" z="(-?[0-9.eE+-]+)m"/>\s*</transform_position>\s*<create_position name="\$VirtualYawOrigin"', scenario)
+assert match, 'scenario virtual downstream position missing'
+encoded = tuple(float(x) for x in match.groups())
+assert max(abs(a-b) for a,b in zip(derived, encoded)) < 1e-12, (derived, encoded)
+PY
+virtual_init_line=$(grep -nF "<set_value name=\"\$VirtualMuzzle\" exact=\"position.[0m,0m,0m]\"/>" <<<"$virtual_setup" | cut -d: -f1)
+virtual_scope_line=$(grep -nF "<do_if value=\"\$ExactFarPair\">" <<<"$virtual_setup" | cut -d: -f1)
+virtual_transform_line=$(grep -nF "name=\"\$VirtualPitchedDownstream\"" <<<"$virtual_setup" | cut -d: -f1)
+[[ "$virtual_init_line" -lt "$virtual_scope_line" && "$virtual_scope_line" -lt "$virtual_transform_line" ]] || fail "virtual defaults do not prevent a stale FAR pose from leaking into other pairs"
+[[ "$virtual_setup" == *"pitch=\"\$VirtualBearingPitch\""* && "$virtual_setup" == *"yaw=\"\$VirtualBearingYaw\""* ]] || fail "virtual muzzle does not apply runtime pitch then yaw"
+[[ "$virtual_setup" == *"x=\"\$VirtualPitchedDownstream.x - 1.730653e-6m\" y=\"\$VirtualPitchedDownstream.y + 2.926126m\" z=\"\$VirtualPitchedDownstream.z - 16.11956m\""* ]] || fail "virtual muzzle authored elevation pivot changed"
+for self in false true; do
+  [[ "$virtual_setup" == *"object=\"\$Weapon\" objectoffset=\"\$VirtualMuzzle\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"$self\""* ]] || fail "virtual fast FAR probe missing excludeself=$self"
+done
+[[ $(grep -cF "objectoffset=\"\$VirtualMuzzle\"" <<<"$issue69_matrix") -eq 4 ]] || fail "virtual probes escaped the exact FAR fast/witness paths"
+virtual_samples=$(awk '/<do_if value="\$ExactFarPair">/{n++; if (n == 2) f=1} f{print} f && /^[[:space:]]*<\/do_if>/{exit}' <<<"$issue69_matrix")
+for self in false true; do
+  [[ "$virtual_samples" == *"object=\"\$Weapon\" objectoffset=\"\$VirtualMuzzle\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"$self\""* ]] || fail "virtual six-witness FAR probe missing excludeself=$self"
+done
+for name in VirtualWitnessSelf VirtualWitnessEx; do
+  [[ "$virtual_samples" == *"append_to_list name=\"\$$name\""* ]] || fail "virtual FAR discriminator does not retain all six $name results"
+done
+for field in virtual_raw= virtual_pair= virtual_bearing_yaw= virtual_bearing_pitch= virtual_fast_self= virtual_fast_ex= virtual_six_self= virtual_six_ex= virtual_witness_self= virtual_witness_ex=; do
+  [[ "$issue69_matrix" == *"$field"* ]] || fail "Issue69 matrix record missing $field"
+done
+[[ "$issue69_matrix" == *"barrel_raw=' + \$Barrel + ' virtual_raw=' + \$VirtualMuzzle"* ]] || fail "virtual weapon-local position is not logged alongside current barrelposition"
+
 for list in '[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]' '[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]' '[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]'; do
   [[ "$issue69_matrix" == *"$list"* ]] || fail "Issue69 detailed matrix six-sample list changed: $list"
 done
@@ -235,7 +292,8 @@ for field in barrel_witness_self= barrel_witness_ex= implicit_witness_self= impl
   [[ "$issue69_matrix" == *"$field"* ]] || fail "Issue69 detailed matrix record missing $field"
 done
 [[ $(grep -cF '[X4GC TEST ISSUE69 MATRIX CHANGE]' "$scenario") -eq 1 && "$issue69_matrix" == *"<do_if value=\"\$Changed\">"* && "$issue69_matrix" == *previous_signature=* ]] || fail "changed pair does not emit exactly one detailed MATRIX CHANGE record"
-if [[ "$issue69_matrix" =~ SetSofttarget|set_softtarget|set_weapon_mode|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "Issue69 matrix mutates target or weapon mode"; fi
+if [[ "$issue69_matrix" =~ SetSofttarget|set_softtarget|set_weapon_mode|set_turret_targets|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "Issue69 matrix mutates target or weapon mode"; fi
+if grep -Eq '<(warp|create_ship|create_station|create_object|set_owner|set_object_position|set_object_rotation)' <<<"$issue69_matrix"; then fail "Issue69 matrix mutates fixture geometry"; fi
 grep -Fq "ScenarioRoot.\$Issue69FarBeam\" exact=\"\$Issue69Beam\"" "$scenario" || fail "exact FAR Beam is not persisted"
 grep -Fq "ScenarioRoot.\$Issue69FarSurface\" exact=\"\$FarRoleSurface\"" "$scenario" || fail "exact FAR surface is not persisted"
 

@@ -2065,6 +2065,33 @@
                     <set_value name="$Changed" exact="$HadPrevious and $PreviousSignature != $FastSignature"/>
                     <set_value name="ScenarioRoot.$Issue69MatrixPrevious.{$Weapon}.{$Surface}" exact="$FastSignature"/>
                     <set_value name="$ExactFarPair" exact="$Weapon == ScenarioRoot.$Issue69FarBeam and $Surface == ScenarioRoot.$Issue69FarSurface"/>
+                    <!-- Exact FAR discriminator only. O is the shipped component-root plus
+                         part_rotator/turret_active translation; P is the authored elevation
+                         pivot; D is the shipped active barrel/laser hierarchy composed by the
+                         accepted offline regression. The runtime fast-target aim bearing supplies
+                         yaw and pitch; no live yaw/pitch or trajectory distance is fitted here. X4's
+                         positive pitch rotation is the mathematical Rx(-pitch) used by the
+                         offline formula: O + Ry(yaw) * (P + Rx(-pitch) * D). -->
+                    <set_value name="$VirtualMuzzle" exact="position.[0m,0m,0m]"/>
+                    <set_value name="$VirtualBearingYaw" exact="0deg"/>
+                    <set_value name="$VirtualBearingPitch" exact="0deg"/>
+                    <set_value name="$VirtualFastSelf" exact="false"/>
+                    <set_value name="$VirtualFastEx" exact="false"/>
+                    <do_if value="$ExactFarPair">
+                      <set_value name="$VirtualBearingYaw" exact="$AimBearing.yaw"/>
+                      <set_value name="$VirtualBearingPitch" exact="$AimBearing.pitch"/>
+                      <create_rotation name="$VirtualPitchRotation" pitch="$VirtualBearingPitch"/>
+                      <transform_position name="$VirtualPitchedDownstream" refposition="position.[0m,0m,0m]" refrotation="$VirtualPitchRotation">
+                        <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
+                      </transform_position>
+                      <create_position name="$VirtualYawOrigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
+                      <create_rotation name="$VirtualYawRotation" yaw="$VirtualBearingYaw"/>
+                      <transform_position name="$VirtualMuzzle" refposition="$VirtualYawOrigin" refrotation="$VirtualYawRotation">
+                        <position x="$VirtualPitchedDownstream.x - 1.730653e-6m" y="$VirtualPitchedDownstream.y + 2.926126m" z="$VirtualPitchedDownstream.z - 16.11956m"/>
+                      </transform_position>
+                      <check_line_of_sight name="$VirtualFastSelf" object="$Weapon" objectoffset="$VirtualMuzzle" target="$Surface" useaimtarget="true" excludeself="false"/>
+                      <check_line_of_sight name="$VirtualFastEx" object="$Weapon" objectoffset="$VirtualMuzzle" target="$Surface" useaimtarget="true" excludeself="true"/>
+                    </do_if>
                     <set_value name="$Detailed" exact="$ExactFarPair or $Changed"/>
                     <set_value name="$BarrelWitnessSelf" exact="[]"/>
                     <set_value name="$BarrelWitnessEx" exact="[]"/>
@@ -2072,12 +2099,16 @@
                     <set_value name="$ImplicitWitnessEx" exact="[]"/>
                     <set_value name="$ZeroWitnessSelf" exact="[]"/>
                     <set_value name="$ZeroWitnessEx" exact="[]"/>
+                    <set_value name="$VirtualWitnessSelf" exact="[]"/>
+                    <set_value name="$VirtualWitnessEx" exact="[]"/>
                     <set_value name="$ClearSelf" exact="0"/>
                     <set_value name="$ClearEx" exact="0"/>
                     <set_value name="$ImplicitClearSelf" exact="0"/>
                     <set_value name="$ImplicitClearEx" exact="0"/>
                     <set_value name="$ZeroClearSelf" exact="0"/>
                     <set_value name="$ZeroClearEx" exact="0"/>
+                    <set_value name="$VirtualClearSelf" exact="0"/>
+                    <set_value name="$VirtualClearEx" exact="0"/>
                     <do_if value="$Detailed">
                       <set_value name="$MinX" exact="2 * $Surface.macro.boundingbox.center.x - $Surface.macro.boundingbox.max.x"/>
                       <set_value name="$MinY" exact="2 * $Surface.macro.boundingbox.center.y - $Surface.macro.boundingbox.max.y"/>
@@ -2096,6 +2127,14 @@
                         <check_line_of_sight name="$ImplicitSampleLosEx" object="$Weapon" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
                         <check_line_of_sight name="$ZeroSampleLosSelf" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
                         <check_line_of_sight name="$ZeroSampleLosEx" object="$Weapon" objectoffset="position.[0m,0m,0m]" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                        <do_if value="$ExactFarPair">
+                          <check_line_of_sight name="$VirtualSampleLosSelf" object="$Weapon" objectoffset="$VirtualMuzzle" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                          <check_line_of_sight name="$VirtualSampleLosEx" object="$Weapon" objectoffset="$VirtualMuzzle" target="$Surface" targetoffset="$Sample" useaimtarget="false" excludeself="true"/>
+                          <append_to_list name="$VirtualWitnessSelf" exact="$VirtualSampleLosSelf"/>
+                          <append_to_list name="$VirtualWitnessEx" exact="$VirtualSampleLosEx"/>
+                          <do_if value="$VirtualSampleLosSelf"><set_value name="$VirtualClearSelf" operation="add"/></do_if>
+                          <do_if value="$VirtualSampleLosEx"><set_value name="$VirtualClearEx" operation="add"/></do_if>
+                        </do_if>
                         <append_to_list name="$BarrelWitnessSelf" exact="$SampleLosSelf"/>
                         <append_to_list name="$BarrelWitnessEx" exact="$SampleLosEx"/>
                         <append_to_list name="$ImplicitWitnessSelf" exact="$ImplicitSampleLosSelf"/>
@@ -2110,9 +2149,9 @@
                         <do_if value="$ZeroSampleLosEx"><set_value name="$ZeroClearEx" operation="add"/></do_if>
                       </do_for_each>
                     </do_if>
-                    <debug_text text="'[X4GC TEST ISSUE69 MATRIX] request_id=' + $RequestId + ' tick=' + $Tick + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' mode=' + $Weapon.mode + ' ready=' + $Weapon.isreadytofire + ' mount_shooter=' + $MountShooter + ' mount_yaw=' + $Weapon.rotation.yaw + ' mount_pitch=' + $Weapon.rotation.pitch + ' mount_roll=' + $Weapon.rotation.roll + ' barrel_raw=' + $Barrel + ' muzzle_shooter=' + $MuzzleShooter + ' target_root=' + $TargetRoot + ' role=' + $RoleRoot.$role + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' surface_class=' + $Surface.class + ' bbox_range=' + $BboxRange + ' maxrange=' + $Weapon.maxfirerange + ' inrange=' + $InRange + ' relative_yaw=' + $TargetRelative.rotation.yaw + ' relative_pitch=' + $TargetRelative.rotation.pitch + ' relative_roll=' + $TargetRelative.rotation.roll + ' bbox_yaw=' + $BboxBearing.yaw + ' bbox_pitch=' + $BboxBearing.pitch + ' bbox_roll=' + $BboxBearing.roll + ' aim_yaw=' + $AimBearing.yaw + ' aim_pitch=' + $AimBearing.pitch + ' aim_roll=' + $AimBearing.roll + ' mayattack=' + $MayAttack + ' barrel_fast_self=' + $BarrelFastSelf + ' barrel_fast_ex=' + $BarrelFastEx + ' implicit_fast_self=' + $ImplicitFastSelf + ' implicit_fast_ex=' + $ImplicitFastEx + ' zero_fast_self=' + $ZeroFastSelf + ' zero_fast_ex=' + $ZeroFastEx + ' fast_signature=' + $FastSignature + ' changed=' + $Changed + ' detailed=' + $Detailed + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx + ' barrel_witness_self=' + $BarrelWitnessSelf + ' barrel_witness_ex=' + $BarrelWitnessEx + ' implicit_witness_self=' + $ImplicitWitnessSelf + ' implicit_witness_ex=' + $ImplicitWitnessEx + ' zero_witness_self=' + $ZeroWitnessSelf + ' zero_witness_ex=' + $ZeroWitnessEx"/>
+                    <debug_text text="'[X4GC TEST ISSUE69 MATRIX] request_id=' + $RequestId + ' tick=' + $Tick + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' mode=' + $Weapon.mode + ' ready=' + $Weapon.isreadytofire + ' mount_shooter=' + $MountShooter + ' mount_yaw=' + $Weapon.rotation.yaw + ' mount_pitch=' + $Weapon.rotation.pitch + ' mount_roll=' + $Weapon.rotation.roll + ' barrel_raw=' + $Barrel + ' virtual_raw=' + $VirtualMuzzle + ' virtual_pair=' + $ExactFarPair + ' virtual_bearing_yaw=' + $VirtualBearingYaw + ' virtual_bearing_pitch=' + $VirtualBearingPitch + ' muzzle_shooter=' + $MuzzleShooter + ' target_root=' + $TargetRoot + ' role=' + $RoleRoot.$role + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' surface_class=' + $Surface.class + ' bbox_range=' + $BboxRange + ' maxrange=' + $Weapon.maxfirerange + ' inrange=' + $InRange + ' relative_yaw=' + $TargetRelative.rotation.yaw + ' relative_pitch=' + $TargetRelative.rotation.pitch + ' relative_roll=' + $TargetRelative.rotation.roll + ' bbox_yaw=' + $BboxBearing.yaw + ' bbox_pitch=' + $BboxBearing.pitch + ' bbox_roll=' + $BboxBearing.roll + ' aim_yaw=' + $AimBearing.yaw + ' aim_pitch=' + $AimBearing.pitch + ' aim_roll=' + $AimBearing.roll + ' mayattack=' + $MayAttack + ' barrel_fast_self=' + $BarrelFastSelf + ' barrel_fast_ex=' + $BarrelFastEx + ' implicit_fast_self=' + $ImplicitFastSelf + ' implicit_fast_ex=' + $ImplicitFastEx + ' zero_fast_self=' + $ZeroFastSelf + ' zero_fast_ex=' + $ZeroFastEx + ' virtual_fast_self=' + $VirtualFastSelf + ' virtual_fast_ex=' + $VirtualFastEx + ' fast_signature=' + $FastSignature + ' changed=' + $Changed + ' detailed=' + $Detailed + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx + ' virtual_six_self=' + $VirtualClearSelf + ' virtual_six_ex=' + $VirtualClearEx + ' barrel_witness_self=' + $BarrelWitnessSelf + ' barrel_witness_ex=' + $BarrelWitnessEx + ' implicit_witness_self=' + $ImplicitWitnessSelf + ' implicit_witness_ex=' + $ImplicitWitnessEx + ' zero_witness_self=' + $ZeroWitnessSelf + ' zero_witness_ex=' + $ZeroWitnessEx + ' virtual_witness_self=' + $VirtualWitnessSelf + ' virtual_witness_ex=' + $VirtualWitnessEx"/>
                     <do_if value="$Changed">
-                      <debug_text text="'[X4GC TEST ISSUE69 MATRIX CHANGE] request_id=' + $RequestId + ' tick=' + $Tick + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' target_root=' + $TargetRoot + ' role=' + $RoleRoot.$role + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' previous_signature=' + $PreviousSignature + ' fast_signature=' + $FastSignature + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx + ' barrel_witness_self=' + $BarrelWitnessSelf + ' barrel_witness_ex=' + $BarrelWitnessEx + ' implicit_witness_self=' + $ImplicitWitnessSelf + ' implicit_witness_ex=' + $ImplicitWitnessEx + ' zero_witness_self=' + $ZeroWitnessSelf + ' zero_witness_ex=' + $ZeroWitnessEx"/>
+                      <debug_text text="'[X4GC TEST ISSUE69 MATRIX CHANGE] request_id=' + $RequestId + ' tick=' + $Tick + ' t=' + player.age + ' weapon=' + $Weapon + ' weapon_macro=' + $Weapon.macro + ' target_root=' + $TargetRoot + ' role=' + $RoleRoot.$role + ' surface=' + $Surface + ' surface_macro=' + $Surface.macro + ' previous_signature=' + $PreviousSignature + ' fast_signature=' + $FastSignature + ' six_clear_self=' + $ClearSelf + ' six_clear_ex=' + $ClearEx + ' implicit_six_self=' + $ImplicitClearSelf + ' implicit_six_ex=' + $ImplicitClearEx + ' zero_six_self=' + $ZeroClearSelf + ' zero_six_ex=' + $ZeroClearEx + ' virtual_six_self=' + $VirtualClearSelf + ' virtual_six_ex=' + $VirtualClearEx + ' barrel_witness_self=' + $BarrelWitnessSelf + ' barrel_witness_ex=' + $BarrelWitnessEx + ' implicit_witness_self=' + $ImplicitWitnessSelf + ' implicit_witness_ex=' + $ImplicitWitnessEx + ' zero_witness_self=' + $ZeroWitnessSelf + ' zero_witness_ex=' + $ZeroWitnessEx + ' virtual_witness_self=' + $VirtualWitnessSelf + ' virtual_witness_ex=' + $VirtualWitnessEx"/>
                     </do_if>
                   </do_for_each>
                 </do_for_each>
