@@ -137,4 +137,26 @@ grep -Fq "\$EngineStraddleSurface != null and \$Issue69PlasmaCount == 1" "$scena
 if grep -E 'SurfaceMaskPlacements.*(NearTarget|FarTarget|NearBlocker)' "$scenario"; then fail "unmarked roles entered MID objective placements"; fi
 if grep -E 'GeometryQualifiedTarget.*(Near|Far)' "$scenario"; then fail "NEAR/FAR crossed the marked-objective bridge"; fi
 
+issue69_state=$(awk '/<cue name="Issue69ObserveState"/{f=1} f{print} /<cue name="Issue69StateLog"/{g=1} g{print} g && /<\/cue>/{exit}' "$scenario")
+[[ "$issue69_state" == *'control="'"'observe_state'"'"'* ]] || fail "Issue69 post trigger does not consume Observer state"
+[[ "$issue69_state" == *"@event.param3.\$aimtgt == ScenarioRoot.\$Issue69FarSurface"* ]] || fail "Issue69 post trigger is not exact FAR-surface aimtgt equality"
+[[ "$issue69_state" == *"not ScenarioRoot.\$Issue69PostBurstIssued"* && "$issue69_state" == *"ScenarioRoot.\$Issue69PostBurstIssued\" exact=\"true\""* ]] || fail "Issue69 post trigger is not deduplicated"
+for delay in '0s' '500ms' '1s' '2s' '3s'; do
+  [[ "$issue69_state" == *"\$phase = 'after', \$delay = $delay"* ]] || fail "Issue69 post burst missing $delay sample"
+done
+grep -Fq "cue=\"Issue69StateLog\" param=\"table[\$phase = 'before', \$delay = 0s" "$scenario" || fail "Issue69 settled pre-designation state missing"
+state_before_line=$(grep -nF "cue=\"Issue69StateLog\" param=\"table[\$phase = 'before'" "$scenario" | cut -d: -f1)
+far_gate_line=$(grep -nF "name=\"\$FarQualified\" exact=\"\$FarMayAttack" "$scenario" | tail -1 | cut -d: -f1)
+[[ "$state_before_line" -lt "$far_gate_line" ]] || fail "Issue69 before state is not emitted before FAR LOS qualification"
+for field in weapon= weapon_macro= surface= surface_macro= mode= ready= mount_base= mount_yaw= mount_pitch= mount_roll= barrel_raw= muzzle_base= bbox_range= maxrange= bbox_pitch= fast_los_self= fast_los_ex= six_clear_self= six_clear_ex=; do
+  [[ "$issue69_state" == *"$field"* ]] || fail "Issue69 state record missing $field"
+done
+[[ "$issue69_state" == *"value=\"\$Barrel\""* ]] || fail "Issue69 state does not transform the raw barrel position when schema-supported"
+[[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" useaimtarget=\"true\" excludeself=\"false\""* ]] || fail "Issue69 state lost self-inclusive fast LOS"
+[[ "$issue69_state" == *"object=\"\$Weapon\" objectoffset=\"\$Weapon.barrelposition\" target=\"\$Surface\" targetoffset=\"\$Sample\" useaimtarget=\"false\" excludeself=\"false\""* ]] || fail "Issue69 state lost self-inclusive fallback LOS"
+if grep -E 'Issue69(StateLog|ObserveState).*\.idcode' "$scenario"; then fail "Issue69 state uses forbidden surface idcode"; fi
+if [[ "$issue69_state" =~ SetSofttarget|set_softtarget|set_weapon_mode|\.mode[[:space:]]*=|select_target|selectTarget ]]; then fail "Issue69 telemetry mutates target or weapon mode"; fi
+grep -Fq "ScenarioRoot.\$Issue69FarBeam\" exact=\"\$Issue69Beam\"" "$scenario" || fail "exact FAR Beam is not persisted"
+grep -Fq "ScenarioRoot.\$Issue69FarSurface\" exact=\"\$FarRoleSurface\"" "$scenario" || fail "exact FAR surface is not persisted"
+
 echo "issue69 combined fixture contract passed"
