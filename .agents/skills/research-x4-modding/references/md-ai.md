@@ -715,6 +715,91 @@
   runs; changing target samples alone cannot cure this source-origin failure,
   because all six were blocked until the barrel origin moved.
 
+### Issue #69 prospective/stable conventional-turret LOS-origin census
+- X4: 9.00 (base catalogs and schemas shipped with build 611726)
+- Status: shipped-source
+- Source: `libraries/common.xsd:7253-7286,21691-21729,24111-24131,24974-25009`;
+  `libraries/scriptproperties.xml:55-60,1452,1471-1502,2070-2102,2648-2649`;
+  `aiscripts/move.attack.object.capital.xml:400-402,441,644-681`;
+  `aiscripts/mining.collect.ship.capital.xml:224-230`;
+  `assets/props/WeaponSystems/energy/turret_par_l_beam_01_mk1.xml:137-282,305-307`;
+  `assets/props/WeaponSystems/energy/macros/turret_par_l_beam_01_mk1_macro.xml:4-17`;
+  `assets/units/size_l/macros/ship_par_l_destroyer_01_a_macro.xml:4-5`;
+  `assets/units/size_l/ship_par_l_destroyer_01.xml:323-327`; and a census of all
+  60 base-game `component class="turret"` definitions selected from X4 9.00
+  `01.cat` through `09.cat` under
+  `assets/props/WeaponSystems/*/turret_*.xml`
+- Live test: no — this is the OFFLINE candidate census for Issue #69; the two
+  survivors below still require the FAR before/after discriminator
+- Finding: two runtime candidates survive for discrimination, but shipped source
+  exposes no exact prospective firing origin. Negative API-search conclusions
+  below are bounded inferences, not shipped API guarantees.
+- Scope and transform semantics:
+  - `check_line_of_sight.objectoffset` is an offset relative to its `object`.
+    `create_position` uses the same positional attribute group: coordinates or
+    `value` are relative to `object`, and `space` chooses the output reference
+    space. Shipped AI demonstrates `create_position object=... space=...` on a
+    ship and a target child, and reads a weapon's
+    `relativeposition.{this.assignedcontrolled}`. These are coordinate
+    transforms only; they do not add firing semantics.
+  - `create_orientation` creates a rotation looking from its child `position`
+    toward a reference. `transform_position` applies a supplied reference
+    position and rotation. Neither action discovers a muzzle, mount, connection,
+    or prospective controller pose; a nonzero displacement still has to come
+    from some other source.
+  - Runtime `component.position` / `relativeposition` and
+    `component.rotation` / `relativerotation` are script-visible. Authored hull
+    and weapon-component `<connection><offset>` values are not automatically
+    script-visible `componentslot` values. `componentslot.offset`,
+    `staticoffset`, and `staticrotation` are readable only after MD already has
+    that slot; the 9.00 surface has no installed-weapon-to-mount-slot property
+    and no generic turret-slot finder. This last absence is an inference bounded
+    by the complete component, weapon, turret, componentslot, and macroslot
+    property blocks plus the complete `find_*_slot` action census in
+    `common.xsd`.
+
+The table separates an origin that MD can actually pass at runtime from an
+interesting coordinate that exists only in authored XML. “Hull retained” means
+only that `excludeself="false"` still leaves the firing hull eligible to block
+that ray; it does not claim undocumented first-hit or collision-mask semantics.
+
+| Candidate; exact property/action/transform | How MD obtains it | Exact shipped-source basis | Frame | Articulation dependence established by source? | Acquisition/target-state dependence established by source? | Hull retained? | Generic production viability | FAR live test still needed |
+|---|---|---|---|---|---|---|---|---|
+| **Implicit weapon LOS source:** `<check_line_of_sight object="$weapon" ...>` with **no** `objectoffset` | No position value is returned; let the action choose its source for that weapon. Set `excludeself="false"` explicitly. | `common.xsd:21691-21729`; vanilla combat uses exactly this per weapon at `move.attack.object.capital.xml:656-657,680-681`, and mining uses it per turret at `mining.collect.ship.capital.xml:224-230`. | Engine-selected source associated with the weapon; the schema does **not** say coordinate origin, bbox centre, mount, or muzzle. | **Unknown.** Omission of `objectoffset` does not prove the engine avoids the current articulated barrel. | **Unknown.** The action is callable in pre-fire AI evaluation, but its hidden source choice is undocumented. | Yes, when this experiment explicitly passes `false`; never infer the value from the contradictory XSD default/documentation. | **Survives as the strongest shipped-usage candidate**, but only as an opaque vanilla per-weapon LOS predicate, not an exact prospective firing origin. | Compare omitted-offset self-inclusive/self-excluding results with explicit component-origin and `barrelposition` results before designation, during traverse, and settled; determine whether it merely aliases the current muzzle internally. |
+| **Explicit weapon component coordinate origin:** zero local offset, e.g. `object="$weapon" objectoffset="position.[0m,0m,0m]"`; inspect the same point with `<create_position object="$weapon" space="$weapon.ship"/>` or `$weapon.relativeposition.{$weapon.ship}` | The zero offset forces the ray source to the weapon's component coordinate origin; `create_position` or `relativeposition` only re-expresses that point for logging. Equivalent parent-frame construction is `$weapon.position` relative to `$weapon.parent`. | Offset/transform semantics `common.xsd:7253-7286,21691-21708,24974-25009`; component properties `scriptproperties.xml:55-60`; position literal `:2648-2649`; shipped weapon transform use `move.attack.object.capital.xml:441`. For the exact Beam, the equipment socket `con_turret_beam_l` is a root, empty-offset connection (`turret_par_l_beam_01_mk1.xml:305-307`) while yaw/elevation/barrel/laser nodes are descendants (`:137-282`). All 60 base-game turret components in the recorded catalog census likewise have exactly one `turret component` equipment connection and all 60 omit a socket offset/rotation. | Weapon component local origin; transformable to parent, ship, or sector space. For the exact Beam and the 60-file base census, authored equipment-socket origin coincides with component origin. | **Authored hierarchy: yes, independent** of the Beam's internal animated rotator/gun/barrel chain. **Runtime stability: unknown**; source does not guarantee that the component-origin transform itself stays fixed. | **Unknown.** No target state appears in the property docs, but absence is not a runtime guarantee. | Yes. A ray from the mount-interface point can still meet firing-hull geometry with `false`; whether that point starts on/inside accepted hull collision is precisely untested. | **Survives for the discriminator.** It is generic and has a shipped mount-interface basis across the 60 base-game turrets searched, but source does not establish it as a muzzle or prospective firing point; DLC/modded assets are outside that census. | Record explicit zero-origin position and both self policies at the same before/after boundaries; require it to avoid the FAR idle false negative, remain stable, become consistent with exact-hit behavior, and later reject a repaired genuine own-hull obstruction. |
+| **Installed hull mount `componentslot.staticoffset/staticrotation`** (or animated `offset/rotation`) | Only if MD already possesses the exact `componentslot`; then use `slot.staticoffset` in `slot.component` space, or `relativeposition.{ship}`. | `scriptproperties.xml:1471-1486`. Exact Odysseus mount `con_turret_laser_l_04`, group `group_rear_down_mid`, has an authored position and rotation at `ship_par_l_destroyer_01.xml:323-327`. | Hull-component connection frame. | `static*`: explicitly ignores animation; plain forms may change with animation. | The static authored coordinate is target-independent; runtime retrieval for an installed turret is unavailable generically. | Yes in principle with a self-inclusive ray. | **Eliminated generically:** no `weapon.componentslot`, no general connection-name lookup, and no turret-slot finder is exposed. Hard-coding the Odysseus connection would be hull/loadout-specific, not a production predicate. | Do not instrument unless a later shipped-source route from the exact weapon to its slot is found. |
+| **Authored equipment socket / hull connection XML coordinates** | Offline asset lookup only; a mod would need a per-hull/per-macro table and attachment composition. They are not position properties on the live weapon. | Exact Beam root socket `turret_par_l_beam_01_mk1.xml:305-307`; exact Odysseus hull mount `ship_par_l_destroyer_01.xml:323-327`; 60-base-turret socket census above. | Authored component/macro connection frames. | The Beam socket is outside its internal animated chain; the hull mount is static authored XML. | Authored values are target-independent, but source does not expose the engine's complete runtime attachment/controller transform. | Potentially, after a correct transform. | **Eliminated as a direct MD candidate:** source-visible is not runtime-accessible. The zero equipment-socket result supports the explicit component-origin candidate; it does not justify copying metre offsets into production. | None as a separate origin; test the runtime component origin instead. |
+| **Authored `con_laser_01` / `con_laser_02` muzzle connections** | No generic MD connection accessor. Static XML composition would require per-asset hierarchy/animation state. | `turret_par_l_beam_01_mk1.xml:273-282`; both laser connections are parented to `anim_barrel`, itself below the elevation and rotator chain at `:137-272`. | Animated barrel-local, then weapon component, mount, and hull frames. | **Yes: dependent.** The authored muzzle nodes descend from articulated parts. | Native controller/acquisition dependence is not documented, but the current transform necessarily follows articulation; the live `barrelposition` record above demonstrates the corresponding runtime state problem. | Yes if the exact current/prospective transform were available. | **Eliminated:** not prospective/stable and not generically runtime-accessible. `barrelposition` is the only exposed muzzle-like property and is already the failed current-pose origin. | No additional static-XML probe; retain `barrelposition` only as the changing control. |
+| **Weapon macro bbox centre or another bbox-derived point:** `$weapon.macro.boundingbox.center` (or a constructed point from `.max`) as `objectoffset` | Read the runtime macro DB vector and pass it as a weapon-local offset. | `scriptproperties.xml:2070,2100-2102`. | Documented only as the macro bounding-box centre/max; source does not explicitly define a firing/mount frame for it. | Macro DB data is static, but its relationship to animated collision/render extents is not documented. | The macro value itself is target-independent. | Yes. | **Eliminated by lack of source basis:** it is geometry metadata, not a mount or firing origin. A stable arbitrary point is not thereby a valid prospective muzzle, and no bbox offset is adopted. | Do not include in the next discriminator absent new source evidence tying it to firing. |
+| **Weapon/ship/parent coordinate centre chosen only because it is available** (for example `object="$weapon.ship"` with no offset) | Use the component directly or transform its `.position`. | Generic component position/rotation properties at `scriptproperties.xml:55-60`; no weapon-origin-specific shipped usage supports a parent/root centre. | Parent, ship, or other chosen component origin. | Depends on the chosen component, not turret articulation. | Usually target-independent, but source does not make it a firing point. | Yes, often from inside the hull. | **Eliminated:** no source relationship to this turret's mount or discharge path; it would discard per-mount geometry and can manufacture self-blocking. | None. |
+| **Synthesized look-at orientation plus `transform_position`** | `create_orientation orientation="look_at"` from a chosen origin to the target, then transform a nonzero local displacement. | `common.xsd:24111-24131,24987-25009`. | Whatever origin/frame and displacement the caller supplies. | The synthesized rotation is target-dependent by construction. | **Yes: dependent** on the supplied target/reference. | Potentially. | **Eliminated without a source-backed displacement:** the actions rotate coordinates but do not discover barrel length, pivot, mount clearance, gimbal limits, or a prospective native controller pose. Using zero collapses to the explicit component-origin candidate. | None unless another source exposes an exact generic displacement. |
+| **Observed projectile/bullet origin or rotation** | Listen for `event_weapon_fired`, then read the fired component's position/rotation and launcher. | `common.xsd:16836-16839`; `scriptproperties.xml:55-60,890-891`; see the `bullet.launcher` record above. | Fired projectile component frame at/after trigger time. | Captures the actual shot state, after articulation. | **Yes in availability:** it does not exist for MD to inspect until the weapon fires. | Useful for retrospective diagnostic rays. | **Eliminated prospectively:** cannot classify a never-acquired/holding-fire turret before engagement. | Keep only as exact-hit/wrong-child control, not as a candidate origin. |
+| **Current `$weapon.barrelposition`** | Existing production form: `object="$weapon" objectoffset="$weapon.barrelposition"`. | `scriptproperties.xml:1452`; controlled live record immediately above. | Position offset relative to the weapon for LOS use; the property documentation itself does not state a frame. | Shipped source says only “barrel”; the controlled FAR run establishes live articulation dependence for this Beam. | Live state dependence is established in the controlled FAR run, not by shipped source. | Yes, and it transiently self-masked in FAR. | **Eliminated as the stable/prospective candidate:** retain as baseline/current-muzzle telemetry only. | Continue logging it as the known-changing control. |
+
+**Disposition for the next FAR discriminator.** Two runtime candidates survive:
+(1) vanilla's omitted-`objectoffset` per-weapon LOS form, whose internal source
+choice is opaque, and (2) an explicit zero local offset at the weapon component
+origin, whose mount-interface basis is source-visible but whose runtime stability
+and firing relevance are not yet proven. Test them as distinct candidates;
+omitting the offset must not be described as equivalent to zero until the run
+shows that.
+
+Eliminated are the inaccessible authored hull slot and muzzle connections,
+macro/ship/parent bbox or coordinate-centre approximations with no firing basis,
+a synthesized target-looking transform with no exact displacement, retrospective
+projectile state, and the already-failed current `barrelposition`. None should
+receive an invented metre offset.
+
+**Exact-origin boundary.** Shipped X4 9.00 source does **not** expose an exact
+prospective conventional-turret firing origin. It exposes an opaque vanilla
+per-weapon LOS call, a generic component origin that coincides with the authored
+equipment mount interface for every base-game turret component searched, static
+slot properties that MD cannot map back from an installed weapon, and current or
+post-fire muzzle/projectile state. If both survivors fail the FAR and repaired
+own-hull controls, no source-backed candidate remains; any production replacement
+would have to be labelled a bounded approximation rather than native firing or
+controller semantics.
+
 ### No aiscript reads a turret's rotation
 - X4: 9.00
 - Status: inference
