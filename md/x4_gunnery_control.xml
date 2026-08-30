@@ -268,6 +268,80 @@
                         </do_for_each>
                         <remove_value name="$modules"/>
                       </do_if>
+                      <!-- Bounded surface-element line-of-fire fallback (#69). The
+                           root useaimtarget ray above samples a SINGLE hittable
+                           aim point of the victim mesh; live proof on the selected
+                           Argon L engine shows that point (and the bbox centre)
+                           self-block while X4 fires at and hits a different in-arc
+                           point of the same component. When the target is a child
+                           surface element (its .defensible resolves to the parent
+                           ship/station, i.e. $target != $target.defensible, which
+                           is the complement of the whole-root module fallback
+                           above) on a conventional turret, probe a fixed handful of
+                           interior bounding-box points and accept on the first one
+                           with a clear muzzle ray. bbox min per axis = 2*center -
+                           max (repo idiom). Six face-interior samples only: two per
+                           axis at 0.25/0.75 with the others centred; this is a
+                           bounded diagnostic-derived witness set, not a
+                           reproduction of native fire-control sampling. -->
+                      <do_if value="not $lineoffireclear
+                                    and $weapon.class != class.missileturret
+                                    and $target != $target.defensible">
+                        <set_value name="$surfaceminx" exact="2 * $target.macro.boundingbox.center.x - $target.macro.boundingbox.max.x"/>
+                        <set_value name="$surfaceminy" exact="2 * $target.macro.boundingbox.center.y - $target.macro.boundingbox.max.y"/>
+                        <set_value name="$surfaceminz" exact="2 * $target.macro.boundingbox.center.z - $target.macro.boundingbox.max.z"/>
+                        <set_value name="$surfacespanx" exact="$target.macro.boundingbox.max.x - $surfaceminx"/>
+                        <set_value name="$surfacespany" exact="$target.macro.boundingbox.max.y - $surfaceminy"/>
+                        <set_value name="$surfacespanz" exact="$target.macro.boundingbox.max.z - $surfaceminz"/>
+                        <set_value name="$surfacexfracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
+                        <set_value name="$surfaceyfracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
+                        <set_value name="$surfacezfracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
+                        <do_for_each name="$surfacefrac" in="$surfacexfracs" counter="$surfacei">
+                          <create_position name="$surfacesample" object="$target" space="$target"
+                                           x="$surfaceminx + $surfacexfracs.{$surfacei} * $surfacespanx"
+                                           y="$surfaceminy + $surfaceyfracs.{$surfacei} * $surfacespany"
+                                           z="$surfaceminz + $surfacezfracs.{$surfacei} * $surfacespanz"/>
+                          <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" targetoffset="$surfacesample" useaimtarget="false" excludeself="false"/>
+                          <do_if value="$lineoffireclear">
+                            <break/>
+                          </do_if>
+                        </do_for_each>
+                        <!-- The exact Paranid L Beam can still be self-masked at
+                             its resting/current barrelposition while its authored
+                             deployed muzzle has a clear ray. Only after the
+                             current-origin fast query and all six current-origin
+                             witnesses remain blocked, use the accepted per-macro
+                             prospective construction. This is not generic turret
+                             geometry: O + Ry(runtime aim yaw) *
+                             (P + Rx(-runtime aim pitch) * D). -->
+                        <do_if value="not $lineoffireclear and $weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
+                          <create_orientation name="$prospectivebearing" orientation="look_at" refobject="$target" useaimtarget="true">
+                            <position object="$weapon" space="$weapon"/>
+                          </create_orientation>
+                          <create_rotation name="$prospectivepitchrotation" pitch="$prospectivebearing.pitch"/>
+                          <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
+                            <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
+                          </transform_position>
+                          <create_position name="$prospectiveyaworigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
+                          <create_rotation name="$prospectiveyawrotation" yaw="$prospectivebearing.yaw"/>
+                          <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
+                            <position x="$prospectivepitcheddownstream.x - 1.730653e-6m" y="$prospectivepitcheddownstream.y + 2.926126m" z="$prospectivepitcheddownstream.z - 16.11956m"/>
+                          </transform_position>
+                          <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"/>
+                          <do_if value="not $lineoffireclear">
+                            <do_for_each name="$prospectivefrac" in="$surfacexfracs" counter="$prospectivei">
+                              <create_position name="$prospectivesample" object="$target" space="$target"
+                                               x="$surfaceminx + $surfacexfracs.{$prospectivei} * $surfacespanx"
+                                               y="$surfaceminy + $surfaceyfracs.{$prospectivei} * $surfacespany"
+                                               z="$surfaceminz + $surfacezfracs.{$prospectivei} * $surfacespanz"/>
+                              <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" targetoffset="$prospectivesample" useaimtarget="false" excludeself="false"/>
+                              <do_if value="$lineoffireclear">
+                                <break/>
+                              </do_if>
+                            </do_for_each>
+                          </do_if>
+                        </do_if>
+                      </do_if>
                       <do_if value="$lineoffireclear">
                         <set_value name="$engageable" operation="add"/>
                       </do_if>
