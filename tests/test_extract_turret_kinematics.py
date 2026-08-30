@@ -650,9 +650,8 @@ def test_ani_multirecord_keyframe_offset(tmp_path: Path) -> None:
 # verifies it reproduces the geometry from test_issue69_virtual_muzzle_geometry.lua.
 # ---------------------------------------------------------------------------
 
-_RESEARCH_CACHE = Path(
-    "/home/pc/projects/x4-gunnery-control/.x4-research-cache"
-)
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_RESEARCH_CACHE = _REPO_ROOT / ".x4-research-cache"
 _CORPUS_DIR = (
     _RESEARCH_CACHE
     / "extracted/issue69-all-turret-components-9.00"
@@ -664,9 +663,7 @@ _PAR_L_BEAM_XML = (
     / "assets/props/WeaponSystems/energy/turret_par_l_beam_01_mk1.xml"
 )
 _ANI_SEARCH_DIRS = [
-    _RESEARCH_CACHE / "extracted/issue69-par-l-assets-9.00",
-    _RESEARCH_CACHE / "extracted/issue65-remote-fixture",
-    _RESEARCH_CACHE / "beam-turret-extract",
+    _RESEARCH_CACHE / "extracted/issue69-all-turret-animations-9.00",
 ]
 
 
@@ -686,7 +683,7 @@ def _vec3_add(a: Vec3, b: Vec3) -> Vec3:
 
 _PAR_L_BEAM_ANI = (
     _RESEARCH_CACHE
-    / "extracted/issue69-par-l-assets-9.00"
+    / "extracted/issue69-all-turret-animations-9.00"
     / "assets/props/WeaponSystems/energy/TURRET_PAR_L_BEAM_01_MK1_DATA.ANI"
 )
 
@@ -814,17 +811,51 @@ def test_census_counts() -> None:
     unsupported = len(by_status.get("UNSUPPORTED", []))
 
     assert total == 79, f"expected 79 components, got {total}"
-    assert (resolved, ambiguous, unsupported) == (8, 69, 2), (
+    assert (resolved, ambiguous, unsupported) == (18, 59, 2), (
         f"unexpected census split: RESOLVED={resolved} AMBIGUOUS={ambiguous} "
         f"UNSUPPORTED={unsupported}"
     )
+
+    resolved_components = {result.component for result in by_status.get("RESOLVED", [])}
+    assert resolved_components == {
+        "turret_arg_m_dumbfire_01_mk1",
+        "turret_arg_m_dumbfire_02_mk1",
+        "turret_arg_m_guided_01_mk1",
+        "turret_arg_m_guided_02_mk1",
+        "turret_gen_m_scrapbeam_01_mk1",
+        "turret_par_l_beam_01_mk1",
+        "turret_par_l_dumbfire_01_mk1",
+        "turret_par_l_guided_01_mk1",
+        "turret_par_l_laser_01_mk1",
+        "turret_par_l_mining_01_mk1",
+        "turret_par_l_plasma_01_mk1",
+        "turret_par_m_dumbfire_01_mk1",
+        "turret_par_m_dumbfire_02_mk1",
+        "turret_par_m_guided_01_mk1",
+        "turret_par_m_guided_02_mk1",
+        "turret_tel_l_dumbfire_01_mk1",
+        "turret_tel_m_guided_01_mk1",
+        "turret_tel_m_guided_02_mk1",
+    }, resolved_components
 
     reason_counts: dict[str, int] = {}
     for status in ("AMBIGUOUS", "UNSUPPORTED"):
         for result in by_status.get(status, []):
             reason_counts[result.reason] = reason_counts.get(result.reason, 0) + 1
     assert reason_counts == {
-        "active-path-ani-not-found": 69,
+        "active-path-ani-unsupported-channels(anim_arm:rotation)": 1,
+        "active-path-ani-unsupported-channels(anim_barrel:rotation,scale)": 1,
+        "active-path-ani-unsupported-channels(anim_base:rotation,scale)": 7,
+        "active-path-ani-unsupported-channels(detail_m_barrel:rotation,scale)": 1,
+        "active-path-ani-unsupported-channels(detail_xl_barrel:rotation,scale)": 5,
+        "active-path-ani-unsupported-channels(detail_xl_gun:rotation,scale)": 2,
+        "active-path-ani-unsupported-channels(detail_xl_gun:scale)": 1,
+        "active-path-ani-unsupported-channels(detail_xl_rotator:rotation,scale)": 2,
+        "active-path-ani-unsupported-channels(part_barrel:rotation,scale)": 12,
+        "active-path-ani-unsupported-channels(part_gun:rotation,scale)": 2,
+        "active-path-ani-unsupported-position-interpolation(anim_base)": 12,
+        "active-path-ani-unsupported-position-interpolation(part_base)": 2,
+        "active-path-ani-unsupported-position-interpolation(part_rotator)": 11,
         "ambiguous-joints(yaw=1,pitch=2)": 1,
         "no-supported-class": 1,
     }, reason_counts
@@ -852,7 +883,7 @@ def test_census_counts() -> None:
     topo_counts: dict[str, int] = {}
     for r in by_status.get("RESOLVED", []):
         topo_counts[r.topology] = topo_counts.get(r.topology, 0) + 1
-    assert topo_counts == {"ANI_BARREL": 8}, topo_counts
+    assert topo_counts == {"ANI_BARREL": 18}, topo_counts
     print(f"Resolved topology groups: {topo_counts}")
 
     # Print non-resolved reasons
