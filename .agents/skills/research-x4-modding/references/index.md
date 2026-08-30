@@ -5,6 +5,7 @@ before relying on any claim.
 
 | Topic | Reference | Current evidence |
 |---|---|---|
+| Turret asset, mounting, and runtime identity terminology | [TURRET_ASSET_KINEMATICS.md](../../../../docs/TURRET_ASSET_KINEMATICS.md) | Canonical identity layers and X4 9.00 illustrative chain |
 | Source hierarchy and classification | [source-policy.md](source-policy.md) | Rules and claim record shape |
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |

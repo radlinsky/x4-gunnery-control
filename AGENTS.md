@@ -26,7 +26,10 @@ together.
 Route X4 modding API, feasibility, unpacked Lua/MD/AI/XSD, and evidence-KB work
 through `$research-x4-modding`. Preserve its evidence classifications and do
 not upgrade observations without reproduction. Never commit unpacked game,
-catalog/data, or third-party extension files.
+catalog/data, or third-party extension files. Use
+[docs/TURRET_ASSET_KINEMATICS.md](docs/TURRET_ASSET_KINEMATICS.md) as the
+canonical turret asset, mounting, runtime-instance, and muzzle identity
+vocabulary; do not infer one identity from another's spelling.
 
 Treat each use as feedback on the skill. When research exposes a repeated
 lookup, missing source route, stale claim, unsafe/manual step, or reusable
