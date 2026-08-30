@@ -1,4 +1,6 @@
 dist/
+__pycache__/
+*.pyc
 .x4-research-cache/
 /XTools_*.zip
 /XTools_*.zip:*
