@@ -15,6 +15,7 @@ import struct
 import sys
 import tempfile
 import textwrap
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -387,6 +388,62 @@ def test_ani_barrel_resolved_with_ani(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# ANI parser: multi-record sequential keyframe offset
+#
+# Verifies that kf_offset += nkeys * 128 accumulates correctly when the first
+# record has nkeys > 1.  The second record's first keyframe must be read at
+# DESC_START + 2*160 + 3*128 (first record has nkeys=3), not at +0.
+# ---------------------------------------------------------------------------
+
+def _make_multirecord_ani(tmp: Path) -> Path:
+    """Two-record ANI: record 0 has nkeys=3 (translation 1,2,3), record 1 has nkeys=1 (translation 4,5,6)."""
+    num_records = 2
+    desc0 = bytearray(160)
+    desc0[0:len(b"part_one")] = b"part_one"
+    desc0[64:64 + len(b"turret_active")] = b"turret_active"
+    struct.pack_into("<I", desc0, 128, 3)  # nkeys=3
+
+    desc1 = bytearray(160)
+    desc1[0:len(b"part_two")] = b"part_two"
+    desc1[64:64 + len(b"turret_active")] = b"turret_active"
+    struct.pack_into("<I", desc1, 128, 1)  # nkeys=1
+
+    # Record 0: 3 keyframe blocks, first = (1,2,3)
+    kf0_block0 = bytearray(128)
+    struct.pack_into("<3f", kf0_block0, 0, 1.0, 2.0, 3.0)
+    kf0_block1 = bytearray(128)
+    kf0_block2 = bytearray(128)
+
+    # Record 1: 1 keyframe block = (4,5,6)
+    kf1_block0 = bytearray(128)
+    struct.pack_into("<3f", kf1_block0, 0, 4.0, 5.0, 6.0)
+
+    header = struct.pack("<II", num_records, num_records * 160)
+    padding = b"\x00" * 8
+    p = tmp / "MULTIRECORD.ANI"
+    p.write_bytes(
+        header + padding
+        + bytes(desc0) + bytes(desc1)
+        + bytes(kf0_block0) + bytes(kf0_block1) + bytes(kf0_block2)
+        + bytes(kf1_block0)
+    )
+    return p
+
+
+def test_ani_multirecord_keyframe_offset(tmp_path: Path) -> None:
+    """parse_ani must advance kf_offset by nkeys*128 per record."""
+    p = _make_multirecord_ani(tmp_path)
+    ani = parse_ani(p)
+
+    t0 = ani.get(("part_one", "turret_active"))
+    t1 = ani.get(("part_two", "turret_active"))
+    assert t0 is not None, "part_one/turret_active missing"
+    assert abs(t0.x - 1.0) < 1e-6 and abs(t0.y - 2.0) < 1e-6 and abs(t0.z - 3.0) < 1e-6, t0
+    assert t1 is not None, "part_two/turret_active missing — kf_offset not advanced correctly"
+    assert abs(t1.x - 4.0) < 1e-6 and abs(t1.y - 5.0) < 1e-6 and abs(t1.z - 6.0) < 1e-6, t1
+
+
+# ---------------------------------------------------------------------------
 # Integration: Paranid L Beam golden case
 #
 # Uses real research-cache files. Independently derives the hierarchy and
@@ -427,11 +484,30 @@ def _vec3_add(a: Vec3, b: Vec3) -> Vec3:
     return Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
 
 
+_PAR_L_BEAM_ANI = (
+    _RESEARCH_CACHE
+    / "extracted/issue69-par-l-assets-9.00"
+    / "assets/props/WeaponSystems/energy/TURRET_PAR_L_BEAM_01_MK1_DATA.ANI"
+)
+
+
 def test_paranid_l_beam_golden() -> None:
     """Extract Paranid L Beam from real cache; verify against Lua test geometry."""
     if not _PAR_L_BEAM_XML.exists():
-        print("SKIP: research cache not available")
-        return
+        raise unittest.SkipTest("research cache not available")
+
+    # Pin the ANI parse directly — the golden error check depends on these values.
+    # Documented in test_issue69_virtual_muzzle_geometry.lua header.
+    if _PAR_L_BEAM_ANI.exists():
+        ani = parse_ani(_PAR_L_BEAM_ANI)
+        rotator_t = ani.get(("part_rotator", "turret_active"))
+        barrel_t = ani.get(("anim_barrel", "turret_active"))
+        assert rotator_t is not None, "parse_ani: part_rotator/turret_active missing"
+        assert abs(rotator_t.y - 6.145042) < 1e-4, f"rotator y={rotator_t.y}"
+        assert rotator_t.x == 0.0 and rotator_t.z == 0.0, f"rotator xz non-zero: {rotator_t}"
+        assert barrel_t is not None, "parse_ani: anim_barrel/turret_active missing"
+        assert abs(barrel_t.y - (-0.23982)) < 1e-4, f"barrel y={barrel_t.y}"
+        assert abs(barrel_t.z - 27.710205) < 1e-4, f"barrel z={barrel_t.z}"
 
     r = extract_kinematics(_PAR_L_BEAM_XML, _ANI_SEARCH_DIRS)
 
@@ -512,8 +588,7 @@ def test_paranid_l_beam_golden() -> None:
 def test_census_counts() -> None:
     """Census over the 79-component corpus; verify expected totals."""
     if not _CORPUS_DIR.exists():
-        print("SKIP: corpus directory not available")
-        return
+        raise unittest.SkipTest("corpus directory not available")
 
     results = run_census(_CORPUS_DIR, _ANI_SEARCH_DIRS)
     total = len(results)
@@ -565,14 +640,15 @@ def test_census_counts() -> None:
 
 def _run_all() -> None:
     tests = [
-        ("simple_yaw_pitch",        True,  test_simple_yaw_pitch),
-        ("fixed_rot_two_muzzles",   True,  test_fixed_rot_two_muzzles),
-        ("missile_turret",          True,  test_missile_turret),
-        ("unsupported_no_yaw",      True,  test_unsupported_no_yaw),
-        ("ani_barrel_ambiguous",    True,  test_ani_barrel_ambiguous_without_ani),
-        ("ani_barrel_resolved",     True,  test_ani_barrel_resolved_with_ani),
-        ("paranid_l_beam_golden",   False, test_paranid_l_beam_golden),
-        ("census_counts",           False, test_census_counts),
+        ("simple_yaw_pitch",              True,  test_simple_yaw_pitch),
+        ("fixed_rot_two_muzzles",         True,  test_fixed_rot_two_muzzles),
+        ("missile_turret",                True,  test_missile_turret),
+        ("unsupported_no_yaw",            True,  test_unsupported_no_yaw),
+        ("ani_barrel_ambiguous",          True,  test_ani_barrel_ambiguous_without_ani),
+        ("ani_barrel_resolved",           True,  test_ani_barrel_resolved_with_ani),
+        ("ani_multirecord_kf_offset",     True,  test_ani_multirecord_keyframe_offset),
+        ("paranid_l_beam_golden",         False, test_paranid_l_beam_golden),
+        ("census_counts",                 False, test_census_counts),
     ]
 
     passed = failed = skipped = 0
@@ -585,6 +661,9 @@ def _run_all() -> None:
                 fn()
             print(f"  PASS  {name}")
             passed += 1
+        except unittest.SkipTest as exc:
+            print(f"  SKIP  {name}: {exc}")
+            skipped += 1
         except AssertionError as exc:
             print(f"  FAIL  {name}: {exc}")
             failed += 1

@@ -13,6 +13,7 @@ structural: hierarchy shape, restriction types, and part-name semantics.
 from __future__ import annotations
 
 import argparse
+import math
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -141,11 +142,10 @@ class ConnInfo:
     tags: set[str]
     parent: str          # parent part name, empty string = root
     pos: Vec3
-    quat: Quat           # CONJUGATE of stored quaternion per KB finding
+    quat: Quat           # stored quaternion values used directly (not conjugated)
     restriction: str     # "rotation_y", "rotation_x", or ""
     limits: tuple[float, float] | None
-    parts: list[str]     # geometry part names created by this connection
-    has_animation: bool  # "animation" in tags
+    parts: list[str]     # direct geometry part names created by this connection
 
 
 def _parse_quat(elem: ET.Element | None) -> Quat:
@@ -208,7 +208,8 @@ def parse_xml(path: Path) -> tuple[str, str, str, list[ConnInfo]]:
                     mx = lim.find("max")
                     if mn is not None and mx is not None:
                         limits = (float(mn.get("value", 0)), float(mx.get("value", 0)))
-        parts = [p.get("name", "") for p in conn.findall(".//part")]
+        parts_elem = conn.find("parts")
+        parts = [p.get("name", "") for p in (parts_elem.findall("part") if parts_elem is not None else [])]
         conns.append(ConnInfo(
             name=cname,
             tags=tags,
@@ -218,7 +219,6 @@ def parse_xml(path: Path) -> tuple[str, str, str, list[ConnInfo]]:
             restriction=restriction,
             limits=limits,
             parts=parts,
-            has_animation="animation" in tags,
         ))
     return cls, name, src, conns
 
@@ -491,15 +491,14 @@ def extract_kinematics(
     muzzle_offsets = [_muzzle_from_pitch(ep) for ep in endpoint_conns]
 
     # --- Topology label ---
-    import math as _math
-    _angle = 2.0 * _math.acos(min(1.0, abs(rot_at_pitch.qw)))
-    has_fixed_rot = _angle > _math.radians(0.5)  # > ~0.5 degrees
+    _angle = 2.0 * math.acos(min(1.0, abs(rot_at_pitch.qw)))
+    has_fixed_rot = _angle > math.radians(0.5)  # > ~0.5 degrees
     if needs_ani:
         topology = "ANI_BARREL"
-    elif has_fixed_rot:
-        topology = "FIXED_ROT_YAW_PITCH"
     elif cls == "missileturret":
         topology = "MISSILE_SIMPLE"
+    elif has_fixed_rot:
+        topology = "FIXED_ROT_YAW_PITCH"
     else:
         topology = "SIMPLE_YAW_PITCH"
 
