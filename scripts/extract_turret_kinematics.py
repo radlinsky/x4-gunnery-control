@@ -105,6 +105,60 @@ class AniTransform:
     channel_counts: tuple[int, int, int, int, int]
 
 
+@dataclass
+class _AniPositionKey:
+    """Position-key fields needed to prove a static source transform."""
+    value: Vec3
+    interpolation: tuple[int, int, int]
+    time: float
+    control_points: tuple[float, ...]
+    curve_parameters: tuple[float, ...]
+    derivative_flag: int
+
+
+def _position_key_issue(keys: list[_AniPositionKey]) -> str:
+    """Return why position keys cannot be reduced to one static translation.
+
+    X4Converter writes one output frame per ANI key and maps its interpolation
+    and control points onto that frame.  A lone finite key has no interpolation
+    segment.  For multiple equal BEZIER keys, the curve is also provably static
+    only when both handle value ordinates equal the keyed value on every axis;
+    no curve evaluator is needed in either case.
+    """
+    for key in keys:
+        numeric = (
+            key.value.x, key.value.y, key.value.z, key.time,
+            *key.control_points, *key.curve_parameters,
+        )
+        if not all(math.isfinite(value) for value in numeric):
+            return "non-finite-position-key"
+
+    if len(keys) <= 1:
+        return ""
+
+    translation = keys[0].value
+    if not all(key.value == translation for key in keys[1:]):
+        # Sampling a changing curve is outside this translation-only extractor.
+        return ""
+
+    axis_values = (translation.x, translation.y, translation.z)
+    handle_value_indices = ((1, 3), (5, 7), (9, 11))
+    for key in keys:
+        for axis, mode in enumerate(key.interpolation):
+            if mode in (1, 2):  # STEP or LINEAR
+                continue
+            if mode != 5:  # source-tool enum: BEZIER
+                return "unsupported-position-interpolation"
+            if any(key.control_points[index] != axis_values[axis]
+                   for index in handle_value_indices[axis]):
+                return "unsupported-position-interpolation"
+        # The source tool rejects these curve features; do not infer that they
+        # preserve a static value even when the keyed XYZ values are identical.
+        if key.derivative_flag != 0 or any(key.curve_parameters):
+            return "unsupported-position-interpolation"
+    return ""
+
+
 def parse_ani(path: Path) -> dict[tuple[str, str], AniTransform]:
     """Parse the source-tool-backed ANI v1 descriptor and keyframe layout.
 
@@ -112,8 +166,8 @@ def parse_ani(path: Path) -> dict[tuple[str, str], AniTransform]:
     and post-scale key counts.  Each count consumes that many 128-byte keys;
     the first 12 bytes of every key are its channel's XYZ value and the rest is
     interpolation/time/tangent metadata, not additional transform channels.
-    The extractor can currently represent only a constant position channel, so
-    callers must reject required records carrying any other channel.
+    The extractor can currently represent only a source-proven static position
+    channel, so callers must reject required records carrying any other channel.
     """
     data = path.read_bytes()
     if len(data) < 16:
@@ -150,7 +204,7 @@ def parse_ani(path: Path) -> dict[tuple[str, str], AniTransform]:
     kf_offset = key_offset
     for part, anim, counts in records:
         channel_values: dict[str, list[Vec3]] = {}
-        position_issue = ""
+        position_keys: list[_AniPositionKey] = []
         for channel, count in zip(_ANI_CHANNELS, counts):
             end = kf_offset + count * _ANI_KF_BLOCK
             if end > len(data):
@@ -163,10 +217,20 @@ def parse_ani(path: Path) -> dict[tuple[str, str], AniTransform]:
                 if channel == "position":
                     interpolation = struct.unpack_from("<3I", data, key + 12)
                     time = struct.unpack_from("<f", data, key + 24)[0]
-                    if not all(math.isfinite(v) for v in (value.x, value.y, value.z, time)):
-                        position_issue = position_issue or "non-finite-position-key"
-                    elif any(mode not in (1, 2) for mode in interpolation):
-                        position_issue = position_issue or "unsupported-position-interpolation"
+                    control_points = struct.unpack_from("<12f", data, key + 28)
+                    # Tension/continuity/bias/ease, then derivative vectors.
+                    curve_parameters = (
+                        *struct.unpack_from("<5f", data, key + 76),
+                        *struct.unpack_from("<6f", data, key + 100),
+                    )
+                    position_keys.append(_AniPositionKey(
+                        value=value,
+                        interpolation=interpolation,
+                        time=time,
+                        control_points=control_points,
+                        curve_parameters=curve_parameters,
+                        derivative_flag=struct.unpack_from("<I", data, key + 96)[0],
+                    ))
             channel_values[channel] = values
             kf_offset = end
 
@@ -175,7 +239,7 @@ def parse_ani(path: Path) -> dict[tuple[str, str], AniTransform]:
         transforms[(part, anim)] = AniTransform(
             translation=translation,
             position_constant=not positions or all(key == translation for key in positions[1:]),
-            position_issue=position_issue,
+            position_issue=_position_key_issue(position_keys),
             channels=tuple(channel for channel, count in zip(_ANI_CHANNELS, counts) if count),
             channel_counts=counts,
         )

@@ -452,15 +452,56 @@ def test_active_sibling_does_not_move_muzzle_path(tmp_path: Path) -> None:
     assert _dist(r.muzzle_offsets[0], Vec3(-0.3, 0.3, 17.0)) < 1e-3, r.muzzle_offsets[0]
 
 
+def _append_last_position_key(path: Path, descriptor_index: int, value: Vec3,
+                              interpolation: tuple[int, int, int], time: float) -> None:
+    """Append a position key to the fixture's final keyed descriptor."""
+    data = bytearray(path.read_bytes())
+    count_offset = 16 + descriptor_index * 160 + 128
+    old_count = struct.unpack_from("<I", data, count_offset)[0]
+    struct.pack_into("<I", data, count_offset, old_count + 1)
+    key = bytearray(128)
+    struct.pack_into("<3f3If", key, 0, value.x, value.y, value.z,
+                     *interpolation, time)
+    path.write_bytes(bytes(data) + bytes(key))
+
+
+def _set_flat_bezier_key(path: Path, value: Vec3) -> None:
+    """Make the fixture's sole position key BEZIER with flat value handles."""
+    data = bytearray(path.read_bytes())
+    key_offset = 16 + 4 * 160
+    struct.pack_into("<3I", data, key_offset + 12, 5, 5, 5)
+    struct.pack_into(
+        "<12f", data, key_offset + 28,
+        -0.25, value.x, 0.25, value.x,
+        -0.25, value.y, 0.25, value.y,
+        -0.25, value.z, 0.25, value.z,
+    )
+    path.write_bytes(data)
+
+
+def test_single_position_key_ignores_interpolation_without_segment(tmp_path: Path) -> None:
+    """One finite key defines the same translation for supported or unknown enums."""
+    expected = Vec3(-0.3, 0.3, 37.0)
+    for mode in (1, 5, 99):
+        case = tmp_path / str(mode)
+        case.mkdir()
+        xml = _write_xml(case, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+        p = _make_synthetic_ani(case, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+        data = bytearray(p.read_bytes())
+        struct.pack_into("<3I", data, 16 + 4 * 160 + 12, mode, mode, mode)
+        # Even non-flat finite handles cannot define a segment without another key.
+        struct.pack_into("<12f", data, 16 + 4 * 160 + 28, *range(1, 13))
+        p.write_bytes(data)
+        r = extract_kinematics(xml, [case])
+        assert r.status == "RESOLVED", f"mode={mode}: {r.status}: {r.reason}"
+        assert _dist(r.muzzle_offsets[0], expected) < 1e-3, (mode, r.muzzle_offsets[0])
+
+
 def test_changing_active_keys_fail_closed(tmp_path: Path) -> None:
     """A multi-key active pose without a single source-proven transform is unsafe."""
     xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
     p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(0, 0, 20))
-    data = bytearray(p.read_bytes())
-    struct.pack_into("<I", data, 16 + 3 * 160 + 128, 2)
-    second = bytearray(128)
-    struct.pack_into("<3f3I", second, 0, 0, 0, 21, 1, 1, 1)
-    p.write_bytes(bytes(data) + bytes(second))
+    _append_last_position_key(p, 3, Vec3(0, 0, 21), (1, 1, 1), 1.0)
     r = extract_kinematics(xml, [tmp_path])
     assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
     assert "changing-position" in r.reason, r.reason
@@ -470,35 +511,72 @@ def test_identical_multi_position_keys_are_constant(tmp_path: Path) -> None:
     """STEP/LINEAR keys with one XYZ value define a stable active translation."""
     xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
     p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(0, 0, 20))
-    data = bytearray(p.read_bytes())
-    struct.pack_into("<I", data, 16 + 3 * 160 + 128, 2)
-    second = bytearray(128)
-    struct.pack_into("<3f3I", second, 0, 0, 0, 20, 2, 2, 2)
-    struct.pack_into("<f", second, 24, 1.0)
-    p.write_bytes(bytes(data) + bytes(second))
+    _append_last_position_key(p, 3, Vec3(0, 0, 20), (2, 2, 2), 1.0)
     r = extract_kinematics(xml, [tmp_path])
     assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
 
 
+def test_flat_bezier_multi_position_keys_are_constant(tmp_path: Path) -> None:
+    """Equal keys plus flat BEZIER handle ordinates prove a static curve."""
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    value = Vec3(0, 0, 20)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", value)
+    _set_flat_bezier_key(p, value)
+    _append_last_position_key(p, 3, value, (1, 1, 1), 1.0)
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
+
+
+def test_nonstatic_bezier_metadata_fails_closed(tmp_path: Path) -> None:
+    """No blanket acceptance of equal keys with an unproved BEZIER segment."""
+    for name, field_offset, fmt, value in (
+        ("nonflat-handle", 28 + 1 * 4, "<f", 3.0),
+        ("derivative", 100, "<f", 1.0),
+    ):
+        case = tmp_path / name
+        case.mkdir()
+        xml = _write_xml(case, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+        keyed = Vec3(0, 0, 20)
+        p = _make_synthetic_ani(case, "moving_barrel", "turret_active", keyed)
+        _set_flat_bezier_key(p, keyed)
+        _append_last_position_key(p, 3, keyed, (1, 1, 1), 1.0)
+        data = bytearray(p.read_bytes())
+        struct.pack_into(fmt, data, 16 + 4 * 160 + field_offset, value)
+        p.write_bytes(data)
+        r = extract_kinematics(xml, [case])
+        assert r.status == "AMBIGUOUS", f"{name}: {r.status}: {r.reason}"
+        assert "unsupported-position-interpolation" in r.reason, r.reason
+
+
 def test_unsafe_position_key_metadata_fails_closed(tmp_path: Path) -> None:
-    """Unsupported interpolation and non-finite values/times are never sampled."""
-    cases = (
-        ("interpolation", 12, "<I", 5, "unsupported-position-interpolation"),
-        ("value", 0, "<f", math.nan, "non-finite-position-key"),
-        ("time", 24, "<f", math.inf, "non-finite-position-key"),
-    )
-    for name, field_offset, fmt, value, reason in cases:
+    """Unknown multi-key interpolation and non-finite key data are not sampled."""
+    unknown = tmp_path / "interpolation"
+    unknown.mkdir()
+    xml = _write_xml(unknown, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    p = _make_synthetic_ani(unknown, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+    data = bytearray(p.read_bytes())
+    struct.pack_into("<3I", data, 16 + 4 * 160 + 12, 7, 7, 7)
+    p.write_bytes(data)
+    _append_last_position_key(p, 3, Vec3(0, 0, 20), (1, 1, 1), 1.0)
+    r = extract_kinematics(xml, [unknown])
+    assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
+    assert "unsupported-position-interpolation" in r.reason, r.reason
+
+    for name, field_offset, value in (
+        ("value", 0, math.nan),
+        ("time", 24, math.inf),
+        ("control-point", 28, math.nan),
+    ):
         case = tmp_path / name
         case.mkdir()
         xml = _write_xml(case, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
         p = _make_synthetic_ani(case, "moving_barrel", "turret_active", Vec3(0, 0, 20))
         data = bytearray(p.read_bytes())
-        key_offset = 16 + 4 * 160
-        struct.pack_into(fmt, data, key_offset + field_offset, value)
+        struct.pack_into("<f", data, 16 + 4 * 160 + field_offset, value)
         p.write_bytes(data)
         r = extract_kinematics(xml, [case])
         assert r.status == "AMBIGUOUS", f"{name}: {r.status}: {r.reason}"
-        assert reason in r.reason, r.reason
+        assert "non-finite-position-key" in r.reason, r.reason
 
 
 def _add_last_record_channel(path: Path, descriptor_index: int, channel_index: int,
@@ -811,7 +889,7 @@ def test_census_counts() -> None:
     unsupported = len(by_status.get("UNSUPPORTED", []))
 
     assert total == 79, f"expected 79 components, got {total}"
-    assert (resolved, ambiguous, unsupported) == (18, 59, 2), (
+    assert (resolved, ambiguous, unsupported) == (31, 46, 2), (
         f"unexpected census split: RESOLVED={resolved} AMBIGUOUS={ambiguous} "
         f"UNSUPPORTED={unsupported}"
     )
@@ -822,7 +900,12 @@ def test_census_counts() -> None:
         "turret_arg_m_dumbfire_02_mk1",
         "turret_arg_m_guided_01_mk1",
         "turret_arg_m_guided_02_mk1",
+        "turret_arg_m_laser_02_mk1",
+        "turret_arg_m_mining_02_mk1",
+        "turret_arg_m_plasma_02_mk1",
         "turret_gen_m_scrapbeam_01_mk1",
+        "turret_kha_l_beam_01_mk1",
+        "turret_kha_l_laser_01_mk1",
         "turret_par_l_beam_01_mk1",
         "turret_par_l_dumbfire_01_mk1",
         "turret_par_l_guided_01_mk1",
@@ -833,9 +916,17 @@ def test_census_counts() -> None:
         "turret_par_m_dumbfire_02_mk1",
         "turret_par_m_guided_01_mk1",
         "turret_par_m_guided_02_mk1",
+        "turret_par_m_laser_02_mk1",
+        "turret_par_m_mining_02_mk1",
+        "turret_par_m_plasma_02_mk1",
         "turret_tel_l_dumbfire_01_mk1",
         "turret_tel_m_guided_01_mk1",
         "turret_tel_m_guided_02_mk1",
+        "turret_tel_m_laser_02_mk1",
+        "turret_tel_m_mining_02_mk1",
+        "turret_tel_m_plasma_02_mk1",
+        "turret_xen_m_gatling_02_mk1",
+        "turret_xen_m_laser_02_mk1",
     }, resolved_components
 
     reason_counts: dict[str, int] = {}
@@ -851,11 +942,10 @@ def test_census_counts() -> None:
         "active-path-ani-unsupported-channels(detail_xl_gun:rotation,scale)": 2,
         "active-path-ani-unsupported-channels(detail_xl_gun:scale)": 1,
         "active-path-ani-unsupported-channels(detail_xl_rotator:rotation,scale)": 2,
+        "active-path-ani-unsupported-channels(detail_xl_rotator_base:rotation)": 11,
+        "active-path-ani-unsupported-channels(detail_xl_rotator_base_002:rotation)": 1,
         "active-path-ani-unsupported-channels(part_barrel:rotation,scale)": 12,
         "active-path-ani-unsupported-channels(part_gun:rotation,scale)": 2,
-        "active-path-ani-unsupported-position-interpolation(anim_base)": 12,
-        "active-path-ani-unsupported-position-interpolation(part_base)": 2,
-        "active-path-ani-unsupported-position-interpolation(part_rotator)": 11,
         "ambiguous-joints(yaw=1,pitch=2)": 1,
         "no-supported-class": 1,
     }, reason_counts
@@ -883,7 +973,7 @@ def test_census_counts() -> None:
     topo_counts: dict[str, int] = {}
     for r in by_status.get("RESOLVED", []):
         topo_counts[r.topology] = topo_counts.get(r.topology, 0) + 1
-    assert topo_counts == {"ANI_BARREL": 18}, topo_counts
+    assert topo_counts == {"ANI_BARREL": 31}, topo_counts
     print(f"Resolved topology groups: {topo_counts}")
 
     # Print non-resolved reasons
@@ -908,8 +998,11 @@ def _run_all() -> None:
         ("required_path_ani_data",         True,  test_required_path_ani_data_must_parse),
         ("missing_path_ani_record",       True,  test_missing_path_active_record_fails_closed),
         ("active_sibling_isolated",        True,  test_active_sibling_does_not_move_muzzle_path),
+        ("single_key_interpolation",       True,  test_single_position_key_ignores_interpolation_without_segment),
         ("changing_active_keys",          True,  test_changing_active_keys_fail_closed),
         ("constant_active_keys",          True,  test_identical_multi_position_keys_are_constant),
+        ("flat_bezier_active_keys",        True,  test_flat_bezier_multi_position_keys_are_constant),
+        ("nonstatic_bezier_metadata",      True,  test_nonstatic_bezier_metadata_fails_closed),
         ("unsafe_position_metadata",      True,  test_unsafe_position_key_metadata_fails_closed),
         ("active_path_channel_rejection",  True,  test_active_path_nonposition_channels_fail_closed),
         ("undeclared_active_path_channel",  True,  test_undeclared_active_path_channel_still_fails_closed),
