@@ -94,41 +94,44 @@ _ANI_DESC_RECORD = 160   # bytes per descriptor record
 _ANI_KF_BLOCK    = 128   # bytes per keyframe block
 
 def parse_ani(path: Path) -> dict[tuple[str, str], Vec3]:
-    """Parse X4 v1 ANI binary.  Returns {(part, anim): Vec3} for first keyframe."""
+    """Parse source-proven ANI v1 translation records.
+
+    The extractor only represents translation channels.  Every key of a
+    ``turret_active`` record must carry the same translation, which proves a
+    stable active pose for the narrow model.  Truncated records or changing
+    active translations are deliberately rejected rather than guessed.
+    """
     data = path.read_bytes()
     if len(data) < 16:
-        return {}
+        raise ValueError("ANI header is truncated")
     num_records, _desc_size = struct.unpack_from("<II", data, 0)
-    # Descriptor section starts at offset 16 (8-byte header + 8-byte padding)
-    DESC_START = 16
+    desc_start = 16
+    desc_end = desc_start + num_records * _ANI_DESC_RECORD
+    if desc_end > len(data):
+        raise ValueError("ANI descriptor section is truncated")
 
-    records: list[tuple[str, str, int]] = []  # (part, anim, nkeys)
+    records: list[tuple[str, str, int]] = []
     for i in range(num_records):
-        off = DESC_START + i * _ANI_DESC_RECORD
-        if off + _ANI_DESC_RECORD > len(data):
-            break
+        off = desc_start + i * _ANI_DESC_RECORD
         part = data[off: off + 64].split(b"\x00")[0].decode("ascii", errors="replace")
         anim = data[off + 64: off + 128].split(b"\x00")[0].decode("ascii", errors="replace")
-        nkeys = struct.unpack_from("<I", data, off + 128)[0]
-        records.append((part, anim, nkeys))
-
-    # Keyframe section starts right after descriptor section
-    KF_START = DESC_START + num_records * _ANI_DESC_RECORD
+        records.append((part, anim, struct.unpack_from("<I", data, off + 128)[0]))
 
     translations: dict[tuple[str, str], Vec3] = {}
     kf_offset = 0
     for part, anim, nkeys in records:
-        if nkeys == 0:
-            continue
-        abs_kf = KF_START + kf_offset
-        if abs_kf + 12 <= len(data):
-            x, y, z = struct.unpack_from("<3f", data, abs_kf)
-            v = Vec3(float(x), float(y), float(z))
-            # Only store non-zero translations; zero means no active-pose displacement.
-            if v.x != 0.0 or v.y != 0.0 or v.z != 0.0:
-                translations[(part, anim)] = v
+        end = desc_end + kf_offset + nkeys * _ANI_KF_BLOCK
+        if end > len(data):
+            raise ValueError(f"ANI keyframes truncated for {part}/{anim}")
+        if nkeys:
+            keys = [Vec3(*map(float, struct.unpack_from("<3f", data, desc_end + kf_offset + i * _ANI_KF_BLOCK))) for i in range(nkeys)]
+            if anim == "turret_active" and any(k != keys[0] for k in keys[1:]):
+                raise ValueError(f"ANI active pose is not constant for {part}")
+            translations[(part, anim)] = keys[0]
+        else:
+            # An explicit zero-key descriptor source-proves an identity transform.
+            translations[(part, anim)] = ZERO
         kf_offset += nkeys * _ANI_KF_BLOCK
-
     return translations
 
 
@@ -146,6 +149,7 @@ class ConnInfo:
     restriction: str     # "rotation_y", "rotation_x", or ""
     limits: tuple[float, float] | None
     parts: list[str]     # direct geometry part names created by this connection
+    declares_active: bool # XML explicitly declares the turret_active animation
 
 
 def _parse_quat(elem: ET.Element | None) -> Quat:
@@ -219,6 +223,7 @@ def parse_xml(path: Path) -> tuple[str, str, str, list[ConnInfo]]:
             restriction=restriction,
             limits=limits,
             parts=parts,
+            declares_active=any(a.get("name") == "turret_active" for a in conn.findall("animations/animation")),
         ))
     return cls, name, src, conns
 
@@ -248,6 +253,22 @@ def find_ani(geometry_source: str, search_dirs: list[Path]) -> Path | None:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class KinematicTransform:
+    """One source-derived connection on a root-to-endpoint path."""
+    connection: str
+    position: Vec3
+    rotation: Quat
+    joint_axis: str
+    active_translation: Vec3
+
+
+@dataclass
+class KinematicPath:
+    endpoint: str
+    transforms: list[KinematicTransform]
+
+
+@dataclass
 class TurretKinematics:
     component: str
     status: str           # RESOLVED | AMBIGUOUS | UNSUPPORTED
@@ -258,8 +279,10 @@ class TurretKinematics:
     elevation_pivot: Vec3 | None = None       # from yaw_origin, pre-yaw-rotation
     muzzle_offsets: list[Vec3] = field(default_factory=list)  # from elev_pivot, pre-pitch-rotation
     pitch_limits: tuple[float, float] | None = None
-    # net fixed rotation between yaw joint frame and pitch joint frame
+    # Frames are retained rather than lowering joints to component-space Ry/Rx.
+    yaw_joint_frame: Quat = field(default_factory=lambda: IDENTITY)
     fixed_rot_yaw_to_pitch: Quat = field(default_factory=lambda: IDENTITY)
+    paths: list[KinematicPath] = field(default_factory=list)
     muzzle_count: int = 0
 
 
@@ -353,37 +376,54 @@ def extract_kinematics(
                 reason=f"endpoint-{ep.name}-not-below-pitch", topology="",
             )
 
-    # Check whether any part between pitch and each endpoint has "anim_" prefix
-    # indicating a deployable barrel that requires ANI data
-    pitch_parts = set(pitch_c.parts)
+    # XML declares the active pose; its scope is the actual endpoint ancestor
+    # path, not a convention in a geometry part name.  ANI records then identify
+    # which of those path parts move.  A sibling ANI record is intentionally not
+    # a transform of this muzzle path.
+    endpoint_paths = {ep.name: _path for ep in endpoint_conns
+                      for _path in [_ancestors(ep.name, conn_map, part_to_conn)]}
+    active_declared_on_path = any(c.declares_active for path in endpoint_paths.values() for c in path)
 
-    def _has_anim_between_pitch_and_endpoint(ep: ConnInfo) -> bool:
-        parent_part = ep.parent
-        depth = 0
-        while parent_part and depth < 20:
-            if parent_part in pitch_parts:
-                return False  # reached pitch joint part – no anim_ found below pitch
-            if parent_part.startswith("anim_"):
-                return True
-            creator = part_to_conn.get(parent_part)
-            if not creator:
-                break
-            parent_part = conn_map[creator].parent
-            depth += 1
-        return False
-
-    needs_ani = any(_has_anim_between_pitch_and_endpoint(ep) for ep in endpoint_conns)
-
-    # Find and parse ANI if needed
+    # An ANI can attach active transforms to a path even when its XML declaration
+    # is elsewhere in the component. Parse a discoverable source unconditionally;
+    # only a declared active path makes a missing ANI ambiguous.
     ani_data: dict[tuple[str, str], Vec3] = {}
-    if needs_ani:
-        ani_path = find_ani(geo_src, search_dirs)
-        if ani_path is None:
-            return TurretKinematics(
-                component=comp_name, status="AMBIGUOUS",
-                reason="anim-barrel-needs-ani-not-found", topology="ANI_BARREL",
-            )
-        ani_data = parse_ani(ani_path)
+    ani_path = find_ani(geo_src, search_dirs)
+    if ani_path is None:
+        if active_declared_on_path:
+            return TurretKinematics(component=comp_name, status="AMBIGUOUS",
+                                    reason="active-path-ani-not-found", topology="ANI_PATH")
+    else:
+        try:
+            ani_data = parse_ani(ani_path)
+        except (OSError, ValueError) as exc:
+            return TurretKinematics(component=comp_name, status="AMBIGUOUS",
+                                    reason=f"active-path-ani-unparseable({exc})", topology="ANI_PATH")
+    needs_ani = bool(ani_data) or active_declared_on_path
+
+    def _path_part(path: list[ConnInfo], index: int) -> str | None:
+        """The exact part carrying this connection to the next path node."""
+        if index + 1 >= len(path):
+            return None
+        part = path[index + 1].parent
+        return part if part in path[index].parts else None
+
+    def _active_for(path: list[ConnInfo], index: int) -> Vec3:
+        part = _path_part(path, index)
+        return ani_data.get((part, "turret_active"), ZERO) if part else ZERO
+
+    # A declared active pose requires an explicit ANI record (including a
+    # zero-key identity record) for every carried path part. Missing data is not
+    # evidence of a zero transform.
+    if active_declared_on_path:
+        # endpoint_paths are child→root here, so each non-root connection's
+        # parent attribute names the carried part required from its creator.
+        required_parts = {c.parent for path in endpoint_paths.values() for c in path if c.parent}
+        missing_parts = sorted(part for part in required_parts if (part, "turret_active") not in ani_data)
+        if missing_parts:
+            return TurretKinematics(component=comp_name, status="AMBIGUOUS",
+                                    reason="active-path-ani-missing(" + ",".join(missing_parts) + ")",
+                                    topology="ANI_PATH")
 
     # -----------------------------------------------------------------------
     # Accumulate transforms from root to yaw, then yaw to pitch, then to each
@@ -408,15 +448,12 @@ def extract_kinematics(
         """
         pos = ZERO
         rot = IDENTITY
-        for c in path:
+        for index, c in enumerate(path):
             if stop_before and c.name == stop_before:
                 break
             pos = pos + rot.rotate(c.pos)
-            # ANI before quat: translation is in the parent's frame
-            for pname in c.parts:
-                ani_t = ani.get((pname, "turret_active"))
-                if ani_t is not None:
-                    pos = pos + rot.rotate(ani_t)
+            # The carried part is the only one on this endpoint path.
+            pos = pos + rot.rotate(_active_for(path, index))
             rot = rot * c.quat
         return pos, rot
 
@@ -436,32 +473,31 @@ def extract_kinematics(
     # _accumulate stops BEFORE yaw_c to avoid double-counting yaw_c's ANI below.
     yaw_origin, rot_at_yaw = _accumulate(path_to_yaw, stop_before=yaw_c.name, ani=ani_data)
     yaw_origin = yaw_origin + rot_at_yaw.rotate(yaw_c.pos)
-    # ANI for yaw parts: in parent frame (before yaw_c.quat), matching Lua ordering
-    for pname in yaw_c.parts:
-        ani_t = ani_data.get((pname, "turret_active"))
-        if ani_t is not None:
-            yaw_origin = yaw_origin + rot_at_yaw.rotate(ani_t)
+    yaw_index = next(i for i, c in enumerate(path_yaw_to_pitch) if c.name == yaw_c.name)
+    yaw_origin = yaw_origin + rot_at_yaw.rotate(_active_for(path_yaw_to_pitch, yaw_index))
     rot_at_yaw = rot_at_yaw * yaw_c.quat  # quat applied after ANI
 
     # --- Elevation pivot: from yaw to pitch (local to yaw frame, yaw-DOF=0) ---
     elev_local = ZERO
     rot_yaw_local = IDENTITY
-    for c in path_below_yaw[1:]:  # skip yaw_c itself; [pitch, ...] in root→pitch order
+    for index, c in enumerate(path_below_yaw[1:], start=1):  # skip yaw
         if c.name == pitch_c.name:
             break
         elev_local = elev_local + rot_yaw_local.rotate(c.pos)
-        for pname in c.parts:  # ANI before quat
-            ani_t = ani_data.get((pname, "turret_active"))
-            if ani_t is not None:
-                elev_local = elev_local + rot_yaw_local.rotate(ani_t)
+        elev_local = elev_local + rot_yaw_local.rotate(_active_for(path_below_yaw, index))
         rot_yaw_local = rot_yaw_local * c.quat
-    # Include pitch joint's own position (still in yaw-local frame)
+    # The pitch connection's carried part belongs to an endpoint path, not the
+    # truncated yaw→pitch segment.  A legacy common pivot is only valid when all
+    # endpoints carry the same pitch-created part; full paths remain canonical.
+    pitch_paths = [_path_to_root(ep.name) for ep in endpoint_conns]
+    pitch_indices = [next(i for i, c in enumerate(path) if c.name == pitch_c.name)
+                     for path in pitch_paths]
+    pitch_carriers = {_path_part(path, index) for path, index in zip(pitch_paths, pitch_indices)}
+    if len(pitch_carriers) != 1:
+        return TurretKinematics(component=comp_name, status="UNSUPPORTED",
+                                reason="endpoint-specific-pitch-carrier", topology="")
     elev_local = elev_local + rot_yaw_local.rotate(pitch_c.pos)
-    # ANI for pitch-joint parts (before pitch's quat)
-    for pname in pitch_c.parts:
-        ani_t = ani_data.get((pname, "turret_active"))
-        if ani_t is not None:
-            elev_local = elev_local + rot_yaw_local.rotate(ani_t)
+    elev_local = elev_local + rot_yaw_local.rotate(_active_for(pitch_paths[0], pitch_indices[0]))
     rot_at_pitch = rot_yaw_local * pitch_c.quat
 
     # --- Muzzle offsets: from pitch pivot to each endpoint ---
@@ -476,14 +512,11 @@ def extract_kinematics(
             return ZERO
         local_pos = ZERO
         local_rot = rot_at_pitch  # start in the pitch-fixed-rotation frame
-        for c in ep_path[pitch_idx + 1:]:  # connections between pitch and laser
+        for index, c in enumerate(ep_path[pitch_idx + 1:], start=pitch_idx + 1):
             if c.name == ep.name:
                 break
             local_pos = local_pos + local_rot.rotate(c.pos)
-            for pname in c.parts:  # ANI before quat
-                ani_t = ani_data.get((pname, "turret_active"))
-                if ani_t is not None:
-                    local_pos = local_pos + local_rot.rotate(ani_t)
+            local_pos = local_pos + local_rot.rotate(_active_for(ep_path, index))
             local_rot = local_rot * c.quat
         local_pos = local_pos + local_rot.rotate(ep.pos)
         return local_pos
@@ -502,6 +535,17 @@ def extract_kinematics(
     else:
         topology = "SIMPLE_YAW_PITCH"
 
+    model_paths = []
+    for ep in endpoint_conns:
+        path = _path_to_root(ep.name)
+        model_paths.append(KinematicPath(
+            endpoint=ep.name,
+            transforms=[KinematicTransform(
+                connection=c.name, position=c.pos, rotation=c.quat,
+                joint_axis=c.restriction, active_translation=_active_for(path, i),
+            ) for i, c in enumerate(path)],
+        ))
+
     return TurretKinematics(
         component=comp_name,
         status="RESOLVED",
@@ -511,7 +555,9 @@ def extract_kinematics(
         elevation_pivot=elev_local,
         muzzle_offsets=muzzle_offsets,
         pitch_limits=pitch_c.limits,
+        yaw_joint_frame=rot_at_yaw,
         fixed_rot_yaw_to_pitch=rot_at_pitch,
+        paths=model_paths,
         muzzle_count=len(muzzle_offsets),
     )
 

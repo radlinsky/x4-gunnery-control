@@ -21,6 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from extract_turret_kinematics import (  # noqa: E402
     IDENTITY,
+    ZERO,
     Vec3,
     Quat,
     extract_kinematics,
@@ -67,9 +68,6 @@ _SIMPLE_XML = """\
         <offset>
           <position x="0" y="2.5" z="0"/>
         </offset>
-        <animations>
-          <animation name="turret_active" start="60" end="61"/>
-        </animations>
         <parts><part name="part_socket"/></parts>
       </connection>
       <connection name="con_yaw" tags="part iklink " parent="part_socket">
@@ -142,6 +140,9 @@ _FIXED_ROT_XML = """\
         <parts><part name="part_base"/></parts>
       </connection>
       <connection name="con_yaw" tags="part iklink " parent="part_base">
+        <offset>
+          <quaternion qx="0" qy="0.3826834324" qz="0" qw="0.9238795325"/>
+        </offset>
         <restrictions>
           <restriction type="rotation_y"/>
         </restrictions>
@@ -192,6 +193,11 @@ def test_fixed_rot_two_muzzles(tmp_path: Path) -> None:
 
     # Elevation pivot = con_pivot.pos = (0, 2.0, -10.0)
     assert _dist(r.elevation_pivot, Vec3(0, 2.0, -10.0)) < 1e-4, r.elevation_pivot
+
+    # The normalized model retains the yaw joint frame: lowering this as a bare
+    # component-space Ry would be wrong for this authored 45-degree yaw frame.
+    assert _quat_angle(r.yaw_joint_frame) > 0.1, r.yaw_joint_frame
+    assert r.paths[0].transforms[1].joint_axis == "rotation_y"
 
     # Non-trivial fixed rotation at pitch joint
     angle = _quat_angle(r.fixed_rot_yaw_to_pitch)
@@ -309,6 +315,7 @@ _ANI_BARREL_XML = """\
     <connections>
       <connection name="Connection01" tags="part animation ">
         <offset><position x="0" y="2.0" z="0"/></offset>
+        <animations><animation name="turret_active" start="60" end="61"/></animations>
         <parts><part name="part_socket"/></parts>
       </connection>
       <connection name="con_yaw" tags="part " parent="part_socket">
@@ -322,13 +329,13 @@ _ANI_BARREL_XML = """\
           </restriction>
         </restrictions>
         <offset><position x="0" y="1.0" z="-8.0"/></offset>
-        <parts><part name="anim_gun"/></parts>
+        <parts><part name="moving_gun"/></parts>
       </connection>
-      <connection name="con_barrel" tags="part " parent="anim_gun">
+      <connection name="con_barrel" tags="part " parent="moving_gun">
         <offset><position x="0" y="0.1" z="10.0"/></offset>
-        <parts><part name="anim_barrel"/></parts>
+        <parts><part name="moving_barrel"/></parts>
       </connection>
-      <connection name="con_laser_01" tags="laser " parent="anim_barrel">
+      <connection name="con_laser_01" tags="laser " parent="moving_barrel">
         <offset><position x="-0.3" y="0.2" z="7.0"/></offset>
       </connection>
     </connections>
@@ -337,23 +344,27 @@ _ANI_BARREL_XML = """\
 """
 
 
-def _make_synthetic_ani(tmp: Path, part: str, anim: str, translation: Vec3) -> Path:
-    """Write a minimal single-record ANI with one keyframe for (part, anim)."""
-    num_records = 1
-    # Descriptor: 160 bytes.  part name (64), anim name (64), nkeys (uint32), padding (28)
-    desc = bytearray(160)
-    desc[0:len(part)] = part.encode()
-    desc[64:64 + len(anim)] = anim.encode()
-    struct.pack_into("<I", desc, 128, 1)  # nkeys = 1
-
-    # Keyframe block: 128 bytes.  First 12 bytes = x, y, z as float32
-    kf = bytearray(128)
-    struct.pack_into("<3f", kf, 0, translation.x, translation.y, translation.z)
-
-    header = struct.pack("<II", num_records, num_records * 160)
-    padding = b"\x00" * 8
+def _make_synthetic_ani(tmp: Path, part: str, anim: str, translation: Vec3,
+                        extra: tuple[str, Vec3] | None = None) -> Path:
+    """Write an ANI with source-proven identity entries for every path part."""
+    records = [("part_socket", 0, ZERO), ("part_rotator", 0, ZERO),
+               ("moving_gun", 0, ZERO), (part, 1, translation)]
+    if extra:
+        records.append((extra[0], 1, extra[1]))
+    descs, keys = [], []
+    for record_part, nkeys, value in records:
+        desc = bytearray(160)
+        desc[0:len(record_part)] = record_part.encode()
+        desc[64:64 + len(anim)] = anim.encode()
+        struct.pack_into("<I", desc, 128, nkeys)
+        descs.append(bytes(desc))
+        if nkeys:
+            kf = bytearray(128)
+            struct.pack_into("<3f", kf, 0, value.x, value.y, value.z)
+            keys.append(bytes(kf))
+    header = struct.pack("<II", len(records), len(records) * 160)
     ani_path = tmp / "TURRET_ANI_BARREL_TEST_DATA.ANI"
-    ani_path.write_bytes(header + padding + bytes(desc) + bytes(kf))
+    ani_path.write_bytes(header + b"\x00" * 8 + b"".join(descs) + b"".join(keys))
     return ani_path
 
 
@@ -371,7 +382,7 @@ def test_ani_barrel_resolved_with_ani(tmp_path: Path) -> None:
     """ANI_BARREL turret with ANI providing anim_barrel translation → RESOLVED."""
     xml = _write_xml(tmp, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
     # barrel moves forward 20m when active
-    ani_path = _make_synthetic_ani(tmp, "anim_barrel", "turret_active", Vec3(0, 0, 20.0))
+    ani_path = _make_synthetic_ani(tmp, "moving_barrel", "turret_active", Vec3(0, 0, 20.0))
     r = extract_kinematics(xml, [tmp])
 
     assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
@@ -385,6 +396,67 @@ def test_ani_barrel_resolved_with_ani(tmp_path: Path) -> None:
     assert _dist(r.muzzle_offsets[0], expected) < 1e-3, (
         f"muzzle_from_pitch expected {expected}, got {r.muzzle_offsets[0]}"
     )
+
+
+def test_pitch_carrier_active_transform_is_represented(tmp_path: Path) -> None:
+    """The pitch-created path part is not lost at the pivot boundary."""
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    _make_synthetic_ani(tmp_path, "moving_gun", "turret_active", Vec3(0, 2, 0),
+                        extra=("moving_barrel", ZERO))
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
+    assert _dist(r.elevation_pivot, Vec3(0, 3, -8)) < 1e-5, r.elevation_pivot
+
+
+def test_required_path_ani_data_must_parse(tmp_path: Path) -> None:
+    """A truncated active record for a path part is never an implicit zero."""
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+    p.write_bytes(p.read_bytes()[:-128])  # descriptor says one key, but it is absent
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
+    assert "ani" in r.reason.lower(), r.reason
+
+
+def test_missing_path_active_record_fails_closed(tmp_path: Path) -> None:
+    """Absent turret_active data for a carried part is not inferred as zero."""
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+    data = bytearray(p.read_bytes())
+    data[16 + 3 * 160:16 + 3 * 160 + len(b"moving_barrel")] = b"other_barrel_"
+    p.write_bytes(data)
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
+    assert "missing" in r.reason, r.reason
+
+
+def test_active_sibling_does_not_move_muzzle_path(tmp_path: Path) -> None:
+    """ANI records belonging to a sibling connection are not path transforms."""
+    xml_body = _ANI_BARREL_XML.replace(
+        '</connections>',
+        '''<connection name="con_sibling" tags="part" parent="part_socket">
+             <parts><part name="moving_sibling"/></parts>
+           </connection></connections>''',
+    )
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", xml_body)
+    _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", ZERO,
+                        extra=("moving_sibling", Vec3(99, 99, 99)))
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
+    assert _dist(r.muzzle_offsets[0], Vec3(-0.3, 0.3, 17.0)) < 1e-3, r.muzzle_offsets[0]
+
+
+def test_changing_active_keys_fail_closed(tmp_path: Path) -> None:
+    """A multi-key active pose without a single source-proven transform is unsafe."""
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+    data = bytearray(p.read_bytes())
+    struct.pack_into("<I", data, 16 + 3 * 160 + 128, 2)
+    second = bytearray(128)
+    struct.pack_into("<3f", second, 0, 0, 0, 21)
+    p.write_bytes(bytes(data) + bytes(second))
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +485,8 @@ def _make_multirecord_ani(tmp: Path) -> Path:
     struct.pack_into("<3f", kf0_block0, 0, 1.0, 2.0, 3.0)
     kf0_block1 = bytearray(128)
     kf0_block2 = bytearray(128)
+    struct.pack_into("<3f", kf0_block1, 0, 1.0, 2.0, 3.0)
+    struct.pack_into("<3f", kf0_block2, 0, 1.0, 2.0, 3.0)
 
     # Record 1: 1 keyframe block = (4,5,6)
     kf1_block0 = bytearray(128)
@@ -514,6 +588,17 @@ def test_paranid_l_beam_golden() -> None:
     assert r.status == "RESOLVED", f"Paranid L Beam must be RESOLVED, got {r.status}: {r.reason}"
     assert r.topology == "ANI_BARREL", r.topology
     assert r.muzzle_count >= 1
+
+    # Independently compose the authored inactive path from the model's XML
+    # transforms only.  No ANI data or live vector is an input to this result.
+    rest_pos, rest_rot = Vec3(0, 0, 0), IDENTITY
+    for transform in r.paths[0].transforms:
+        rest_pos = _vec3_add(rest_pos, rest_rot.rotate(transform.position))
+        rest_rot = rest_rot * transform.rotation
+    authored_rest = Vec3(-0.361774, 5.427165, 12.040031)
+    assert _dist(rest_pos, authored_rest) < 1e-5, (
+        f"authored inactive path {rest_pos} no longer reproduces rest muzzle"
+    )
 
     # --- Reproduce rest-pose muzzle from Lua test constants ---
     # observed_rest = (-0.361774, 5.427165, 12.040031)  within 0.00001 of authored
@@ -646,7 +731,12 @@ def _run_all() -> None:
         ("unsupported_no_yaw",            True,  test_unsupported_no_yaw),
         ("ani_barrel_ambiguous",          True,  test_ani_barrel_ambiguous_without_ani),
         ("ani_barrel_resolved",           True,  test_ani_barrel_resolved_with_ani),
-        ("ani_multirecord_kf_offset",     True,  test_ani_multirecord_keyframe_offset),
+        ("pitch_carrier_active",          True,  test_pitch_carrier_active_transform_is_represented),
+        ("required_path_ani_data",         True,  test_required_path_ani_data_must_parse),
+        ("missing_path_ani_record",       True,  test_missing_path_active_record_fails_closed),
+        ("active_sibling_isolated",        True,  test_active_sibling_does_not_move_muzzle_path),
+        ("changing_active_keys",          True,  test_changing_active_keys_fail_closed),
+        ("ani_multirecord_kf_offset",       True,  test_ani_multirecord_keyframe_offset),
         ("paranid_l_beam_golden",         False, test_paranid_l_beam_golden),
         ("census_counts",                 False, test_census_counts),
     ]
