@@ -90,7 +90,11 @@ if [[ "$far_handoff" =~ SetSofttarget|set_softtarget|set_weapon_mode|select_targ
 far_handlers=$(awk '/local function onFarOriginReadyTargetToken/{f=1} f{print} /local function handoffFarOriginDiscriminator/{exit}' "$ui")
 [[ "$far_handlers" == *'tostring(token or "") ~= pendingQualify.requestId'* && "$far_handlers" == *'farOriginTokenAuthorized'* && "$far_handlers" == *'farOriginComponent = component'* ]] || fail "dedicated FAR component transport is not request-token-correlated"
 geometry_handler=$(awk '/local function onGeometryQualified\(_, param\)/{f=1} f{print} /local function shipFields/{exit}' "$ui")
-[[ "$geometry_handler" == *'request.issue69Combined and qualified == 0'* && "$geometry_handler" == *'request.farOriginComponent ~= nil'* && "$geometry_handler" == *'handoffFarOriginDiscriminator(request)'* ]] || fail "fallback handoff is not restricted to failed Issue69 combined plus FAR-origin-ready"
+if [[ "$geometry_handler" == *'handoffFarOriginDiscriminator(request)'* || "$geometry_handler" == *'request.issue69Combined and qualified == 0'* ]]; then
+  fail "failed Issue69 combined qualification still enters the FAR-only handoff"
+fi
+[[ "$geometry_handler" == *'scenarioActionStatus = failDesc'* && "$geometry_handler" == *'action = "failed"'* ]] \
+  || fail "failed combined qualification does not stop closed in the ordinary failure path"
 grep -Fq 'RegisterEvent("X4GunneryTestLab.FarOriginReadyTargetToken", onFarOriginReadyTargetToken)' "$ui" || fail "FAR-origin token event is not registered"
 grep -Fq 'RegisterEvent("X4GunneryTestLab.FarOriginReadyTarget", onFarOriginReadyTarget)' "$ui" || fail "FAR-origin component event is not registered"
 
@@ -171,7 +175,26 @@ grep -Fq "\$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures
 grep -Fq "\$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75" "$scenario" || fail "FAR live-range tolerance missing"
 grep -Fq 'turret_par_l_beam_01_mk1.xml:187-192 authors rotation_x' "$scenario" || fail "Beam arc lacks shipped-source evidence"
 grep -Fq "name=\"\$FarArcPass\" exact=\"\$FarBboxLocal.pitch ge -5deg and \$FarBboxLocal.pitch le 80deg\"" "$scenario" || fail "FAR does not use the authored Beam -5..80 degree arc"
-grep -Fq "<set_value name=\"\$FarQualified\" exact=\"\$FarMayAttack and \$FarInRange and \$FarArcPass and \$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75 and (\$FarFastLosSelf or \$FarSampleClearSelf gt 0) and (\$FarFastLosEx or \$FarSampleClearEx gt 0) and \$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures == 0\"/>" "$scenario" || fail "FAR qualification expression changed"
+far_control=$(awk '/<check_line_of_sight name="\$FarFastLosSelf"/{f=1} f{print} f && /<set_value name="\$FarQualified"/{exit}' "$scenario")
+[[ "$far_control" == *"name=\"\$FarFastLosSelf\" object=\"\$Issue69Beam\" objectoffset=\"\$Issue69Beam.barrelposition\" target=\"\$FarRoleSurface\" useaimtarget=\"true\" excludeself=\"false\""* ]] || fail "FAR lost current-barrel self-inclusive fast telemetry"
+[[ "$far_control" == *"name=\"\$FarSampleLosSelf\" object=\"\$Issue69Beam\" objectoffset=\"\$Issue69Beam.barrelposition\" target=\"\$FarRoleSurface\" targetoffset=\"\$FarSample\" useaimtarget=\"false\" excludeself=\"false\""* ]] || fail "FAR lost current-barrel self-inclusive six-witness telemetry"
+[[ "$far_control" == *"not \$FarFastLosSelf and \$FarSampleClearSelf == 0 and \$Issue69Beam.macro == macro.turret_par_l_beam_01_mk1_macro"* ]] || fail "FAR production prospective path is not gated after the blocked current-origin path and exact Beam macro"
+[[ "$far_control" == *"name=\"\$FarProspectiveBearing\" orientation=\"look_at\" refobject=\"\$FarRoleSurface\" useaimtarget=\"true\""* && "$far_control" == *"<position object=\"\$Issue69Beam\" space=\"\$Issue69Beam\"/>"* ]] || fail "FAR prospective muzzle lacks the production weapon-local fast-target bearing"
+[[ "$far_control" == *"pitch=\"\$FarProspectiveBearing.pitch\""* && "$far_control" == *"yaw=\"\$FarProspectiveBearing.yaw\""* ]] || fail "FAR prospective muzzle does not apply runtime pitch then yaw"
+[[ "$far_control" == *'x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"'* ]] || fail "FAR prospective shipped downstream vector differs from production"
+[[ "$far_control" == *'x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"'* ]] || fail "FAR prospective yaw origin differs from production"
+[[ "$far_control" == *"x=\"\$FarProspectivePitchedDownstream.x - 1.730653e-6m\" y=\"\$FarProspectivePitchedDownstream.y + 2.926126m\" z=\"\$FarProspectivePitchedDownstream.z - 16.11956m\""* ]] || fail "FAR prospective elevation-pivot formula differs from production"
+[[ "$far_control" == *"name=\"\$FarProspectiveFastSelf\" object=\"\$Issue69Beam\" objectoffset=\"\$FarProspectiveMuzzle\" target=\"\$FarRoleSurface\" useaimtarget=\"true\" excludeself=\"false\""* ]] || fail "FAR prospective fast ray is not production-equivalent self-inclusive LOS"
+[[ "$far_control" == *"<do_if value=\"not \$FarProspectiveFastSelf\">"* && "$far_control" == *"in=\"\$Issue69XFracs\""* ]] || fail "FAR prospective six witnesses do not follow a blocked prospective fast ray"
+[[ "$far_control" == *"object=\"\$Issue69Beam\" objectoffset=\"\$FarProspectiveMuzzle\" target=\"\$FarRoleSurface\" targetoffset=\"\$FarProspectiveSample\" useaimtarget=\"false\" excludeself=\"false\""* ]] || fail "FAR prospective witnesses are not self-inclusive production rays"
+if [[ "$far_control" == *FarProspectiveFastEx* || "$far_control" == *FarProspectiveSampleLosEx* ]]; then fail "FAR production prospective result depends on self-excluding probes"; fi
+current_fast_line=$(grep -nF "name=\"\$FarFastLosSelf\"" <<<"$far_control" | head -1 | cut -d: -f1)
+current_six_line=$(grep -nF "name=\"\$FarSampleLosSelf\"" <<<"$far_control" | head -1 | cut -d: -f1)
+prospective_gate_line=$(grep -nF "not \$FarFastLosSelf and \$FarSampleClearSelf == 0" <<<"$far_control" | head -1 | cut -d: -f1)
+prospective_fast_line=$(grep -nF "name=\"\$FarProspectiveFastSelf\" object=\"\$Issue69Beam\"" <<<"$far_control" | head -1 | cut -d: -f1)
+prospective_six_line=$(grep -nF "name=\"\$FarProspectiveSampleLosSelf\"" <<<"$far_control" | head -1 | cut -d: -f1)
+[[ "$current_fast_line" -lt "$current_six_line" && "$current_six_line" -lt "$prospective_gate_line" && "$prospective_gate_line" -lt "$prospective_fast_line" && "$prospective_fast_line" -lt "$prospective_six_line" ]] || fail "FAR LOS order is not current fast/six then prospective fast/six"
+grep -Fq "<set_value name=\"\$FarQualified\" exact=\"\$FarMayAttack and \$FarInRange and \$FarArcPass and \$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75 and (\$FarFastLosSelf or \$FarSampleClearSelf gt 0 or \$FarProspectiveFastSelf or \$FarProspectiveSampleClearSelf gt 0) and \$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures == 0\"/>" "$scenario" || fail "FAR qualification is not the production-equivalent self-inclusive result with existing non-LOS gates"
 far_origin_ready=$(grep -F "name=\"\$FarOriginReady\" exact=\"\$Issue69Beam ==" "$scenario")
 [[ "$far_origin_ready" == *"\$Issue69Beam == ScenarioRoot.\$Issue69FarBeam"* && "$far_origin_ready" == *"\$FarRoleSurface == ScenarioRoot.\$Issue69FarSurface"* && "$far_origin_ready" == *"\$FarMayAttack and \$FarInRange and \$FarArcPass"* && "$far_origin_ready" == *"\$FarRangeRatio ge 0.65 and \$FarRangeRatio le 0.75"* && "$far_origin_ready" == *"\$FarSettledPoseValid and ScenarioRoot.\$Issue69RoleRepositionFailures == 0"* ]] || fail "FAR-origin-ready lacks its exact persisted pair and non-LOS gates"
 if [[ "$far_origin_ready" =~ Los|LOS|Near|Blocker|ClearSelf|ClearEx ]]; then fail "FAR-origin-ready depends on LOS or NEAR/blocker geometry"; fi

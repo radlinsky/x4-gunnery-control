@@ -1954,6 +1954,41 @@
                   <do_if value="$FarSampleLosSelf"><set_value name="$FarSampleClearSelf" operation="add"/></do_if>
                   <do_if value="$FarSampleLosEx"><set_value name="$FarSampleClearEx" operation="add"/></do_if>
                 </do_for_each>
+                <!-- Production-equivalent #69 fallback for the exact Paranid L
+                     Beam only. Preserve the current-barrel fast/six results above
+                     as telemetry; when all self-inclusive current-origin rays are
+                     blocked, apply the same accepted production construction:
+                     O + Ry(runtime aim yaw) * (P + Rx(-runtime aim pitch) * D). -->
+                <set_value name="$FarProspectiveMuzzle" exact="position.[0m,0m,0m]"/>
+                <set_value name="$FarProspectiveFastSelf" exact="false"/>
+                <set_value name="$FarProspectiveSampleClearSelf" exact="0"/>
+                <set_value name="$FarProspectiveWitnessSelf" exact="[]"/>
+                <do_if value="not $FarFastLosSelf and $FarSampleClearSelf == 0 and $Issue69Beam.macro == macro.turret_par_l_beam_01_mk1_macro">
+                  <create_orientation name="$FarProspectiveBearing" orientation="look_at" refobject="$FarRoleSurface" useaimtarget="true">
+                    <position object="$Issue69Beam" space="$Issue69Beam"/>
+                  </create_orientation>
+                  <create_rotation name="$FarProspectivePitchRotation" pitch="$FarProspectiveBearing.pitch"/>
+                  <transform_position name="$FarProspectivePitchedDownstream" refposition="position.[0m,0m,0m]" refrotation="$FarProspectivePitchRotation">
+                    <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
+                  </transform_position>
+                  <create_position name="$FarProspectiveYawOrigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
+                  <create_rotation name="$FarProspectiveYawRotation" yaw="$FarProspectiveBearing.yaw"/>
+                  <transform_position name="$FarProspectiveMuzzle" refposition="$FarProspectiveYawOrigin" refrotation="$FarProspectiveYawRotation">
+                    <position x="$FarProspectivePitchedDownstream.x - 1.730653e-6m" y="$FarProspectivePitchedDownstream.y + 2.926126m" z="$FarProspectivePitchedDownstream.z - 16.11956m"/>
+                  </transform_position>
+                  <check_line_of_sight name="$FarProspectiveFastSelf" object="$Issue69Beam" objectoffset="$FarProspectiveMuzzle" target="$FarRoleSurface" useaimtarget="true" excludeself="false"/>
+                  <do_if value="not $FarProspectiveFastSelf">
+                    <do_for_each name="$FarProspectiveFrac" in="$Issue69XFracs" counter="$FarProspectiveI">
+                      <create_position name="$FarProspectiveSample" object="$FarRoleSurface" space="$FarRoleSurface" x="$FarMinX + $Issue69XFracs.{$FarProspectiveI} * $FarSpanX" y="$FarMinY + $Issue69YFracs.{$FarProspectiveI} * $FarSpanY" z="$FarMinZ + $Issue69ZFracs.{$FarProspectiveI} * $FarSpanZ"/>
+                      <check_line_of_sight name="$FarProspectiveSampleLosSelf" object="$Issue69Beam" objectoffset="$FarProspectiveMuzzle" target="$FarRoleSurface" targetoffset="$FarProspectiveSample" useaimtarget="false" excludeself="false"/>
+                      <append_to_list name="$FarProspectiveWitnessSelf" exact="$FarProspectiveSampleLosSelf"/>
+                      <do_if value="$FarProspectiveSampleLosSelf">
+                        <set_value name="$FarProspectiveSampleClearSelf" operation="add"/>
+                        <break/>
+                      </do_if>
+                    </do_for_each>
+                  </do_if>
+                </do_if>
                 <!-- The settled, pre-designation source state. This is emitted
                      even if the subsequent FAR LOS gate rejects the fixture. -->
                 <!-- Tick zero is synchronous with qualification, before either
@@ -1963,7 +1998,7 @@
                 <!-- Start exactly one event-driven timer chain after tick zero.
                      A stale chain dies at its post-delay token/state guard. -->
                 <signal_cue_instantly cue="Issue69MatrixTimerA" param="table[$requestId = $RequestId]"/>
-                <set_value name="$FarQualified" exact="$FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and ($FarFastLosSelf or $FarSampleClearSelf gt 0) and ($FarFastLosEx or $FarSampleClearEx gt 0) and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
+                <set_value name="$FarQualified" exact="$FarMayAttack and $FarInRange and $FarArcPass and $FarRangeRatio ge 0.65 and $FarRangeRatio le 0.75 and ($FarFastLosSelf or $FarSampleClearSelf gt 0 or $FarProspectiveFastSelf or $FarProspectiveSampleClearSelf gt 0) and $FarSettledPoseValid and ScenarioRoot.$Issue69RoleRepositionFailures == 0"/>
                 <!-- Dedicated #69 handoff gate: the exact persisted Beam/surface
                      pair may run the origin discriminator without asking the LOS
                      predicate under investigation or the invalid NEAR role to
@@ -1984,7 +2019,7 @@
                 <create_position name="$Issue69FramePZ" object="$Issue69Beam" x="0m" y="0m" z="100m" space="ScenarioRoot.$GeometryShooter"/>
                 <create_position name="$Issue69FrameNZ" object="$Issue69Beam" x="0m" y="0m" z="-100m" space="ScenarioRoot.$GeometryShooter"/>
                 <debug_text text="'[X4GC TEST QUALIFY FAR FRAME] request_id=' + $RequestId + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' space=' + ScenarioRoot.$GeometryShooter + ' origin=' + $Issue69FrameOrigin + ' px=' + $Issue69FramePX + ' nx=' + $Issue69FrameNX + ' py=' + $Issue69FramePY + ' ny=' + $Issue69FrameNY + ' pz=' + $Issue69FramePZ + ' nz=' + $Issue69FrameNZ"/>
-                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=FAR_CLEAR_SECOND_FAMILY target=' + ScenarioRoot.$FarTarget + ' target_id=' + ScenarioRoot.$FarTarget.idcode + ' surface=' + $FarRoleSurface + ' surface_id=' + $FarRoleSurface.idcode + ' surface_macro=' + $FarRoleSurface.macro + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' maxrange=' + $Issue69Beam.maxfirerange + ' range=' + $FarRange + ' range_ratio=' + $FarRangeRatio + ' mayattack=' + $FarMayAttack + ' inrange=' + $FarInRange + ' bbox_pitch=' + $FarBboxLocal.pitch + ' arc_pass=' + $FarArcPass + ' fast_los_self=' + $FarFastLosSelf + ' fast_los_ex=' + $FarFastLosEx + ' six_clear_self=' + $FarSampleClearSelf + ' six_clear_ex=' + $FarSampleClearEx + ' settled_pose=' + $FarSettledPoseValid + ' far_origin_ready=' + $FarOriginReady + ' qualified=' + $FarQualified"/>
+                <debug_text text="'[X4GC TEST QUALIFY ROLE] request_id=' + $RequestId + ' role=FAR_CLEAR_SECOND_FAMILY target=' + ScenarioRoot.$FarTarget + ' target_id=' + ScenarioRoot.$FarTarget.idcode + ' surface=' + $FarRoleSurface + ' surface_id=' + $FarRoleSurface.idcode + ' surface_macro=' + $FarRoleSurface.macro + ' weapon=' + $Issue69Beam + ' weapon_macro=' + $Issue69Beam.macro + ' maxrange=' + $Issue69Beam.maxfirerange + ' range=' + $FarRange + ' range_ratio=' + $FarRangeRatio + ' mayattack=' + $FarMayAttack + ' inrange=' + $FarInRange + ' bbox_pitch=' + $FarBboxLocal.pitch + ' arc_pass=' + $FarArcPass + ' fast_los_self=' + $FarFastLosSelf + ' fast_los_ex=' + $FarFastLosEx + ' six_clear_self=' + $FarSampleClearSelf + ' six_clear_ex=' + $FarSampleClearEx + ' prospective_muzzle=' + $FarProspectiveMuzzle + ' prospective_fast_self=' + $FarProspectiveFastSelf + ' prospective_six_clear_self=' + $FarProspectiveSampleClearSelf + ' prospective_witness_self=' + $FarProspectiveWitnessSelf + ' settled_pose=' + $FarSettledPoseValid + ' far_origin_ready=' + $FarOriginReady + ' qualified=' + $FarQualified"/>
               </do_if>
               <do_else>
                 <debug_text text="'[X4GC TEST QUALIFY ROLE] FAILED request_id=' + $RequestId + ' reason=exact_role_census plasma=' + $Issue69PlasmaCount + ' beam=' + $Issue69BeamCount + ' shooter_turrets=' + ScenarioRoot.$GeometryShooter.turrets.operational.count + ' shooter_weapons=' + ScenarioRoot.$GeometryShooter.weapons.operational.count + ' missile_turrets=' + ScenarioRoot.$GeometryShooter.missileturrets.operational.count + ' near_surfaces=' + $NearRoleSurfaces.count + ' far_surfaces=' + $FarRoleSurfaces.count"/>

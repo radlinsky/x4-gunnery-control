@@ -1324,9 +1324,6 @@ local function onGeometryQualified(_, param)
             group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
             member_macros = request.selection.memberMacros })
         returnToGunnery("geometry_qualified")
-    elseif request.issue69Combined and qualified == 0
-            and request.farOriginComponent ~= nil then
-        handoffFarOriginDiscriminator(request)
     else
         local failDesc
         if request.geometryObjective == "engine_straddle" then

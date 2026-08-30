@@ -826,49 +826,49 @@ do
         "FAR switch must log the exact Beam macro/group and must not touch targets")
 end
 
--- A failed ordinary Issue #69 combined qualification may hand off only the
--- independently ready FAR-origin discriminator. The dedicated typed component
--- remains token-correlated, the exact Beam group is revalidated/applied, and
--- the owner still performs the normal Direct-control root/surface clicks.
+-- A failed Issue #69 combined qualification stops closed even when the old
+-- dedicated FAR-origin transport arrived first. Record both handoff and group
+-- state immediately before the terminal event so a hidden FAR-only transition
+-- cannot be mistaken for ordinary failure handling.
 do
     local harness, token = shippedTwoPhaseToQualify()
-    local suggested = {}
-    harness.fix.API.suggestTestEngagement = function(target, callback)
-        suggested[#suggested + 1] = { target = target, callback = callback }
+    local suggested = 0
+    harness.fix.API.suggestTestEngagement = function()
+        suggested = suggested + 1
         return true
     end
     harness.fix.fireEvent("X4GunneryTestLab.FarOriginReadyTargetToken", token)
     harness.fix.fireEvent("X4GunneryTestLab.FarOriginReadyTarget", 424242)
+    local session = harness.fix.API.getSession()
+    local handoffsBefore = harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu")
+    local checkedBefore = {}
+    for key in pairs(session.checkedGroupKeys or {}) do checkedBefore[key] = true end
+
     harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
         "x4gcq9:" .. token .. ":0:1:35:1:35:4:20:1:1:0:0:1")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 2,
-        "FAR-origin-ready must provide one fail-closed handoff after ordinary combined failure")
-    assert(#suggested == 1 and tonumber(suggested[1].target) == 424242,
-        "FAR-origin handoff must mark the exact token-correlated FAR component")
-    local session = harness.fix.API.getSession()
-    local checked = 0
+
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == handoffsBefore,
+        "failed combined qualification must remain in Test Lab without a FAR-only handoff")
+    assert(suggested == 0,
+        "failed combined qualification must not suggest or designate the FAR surface")
+    local checkedAfter = 0
     for key in pairs(session.checkedGroupKeys or {}) do
-        checked = checked + 1
-        assert(key:find("group_rear_down_mid", 1, true),
-            "FAR-origin handoff must leave only Rear Lower Mid Beam selected")
+        checkedAfter = checkedAfter + 1
+        assert(checkedBefore[key],
+            "failed combined qualification must not select the secondary Beam group")
     end
-    assert(checked == 1 and session.directMode ~= "direct",
-        "FAR-origin handoff must apply one Beam group without automating Direct control")
-    assert(harness.fix.logContains("event=far_origin_handoff")
-            and harness.fix.logContains("action=ready")
-            and harness.fix.logContains("group=group_rear_down_mid")
-            and harness.fix.logContains("member_macros=" .. beamSurvey)
-            and harness.fix.logContains("overall_combined_qualified=false")
-            and not harness.fix.logContains("action=qualified"),
-        "FAR-origin handoff must be distinct and must not report overall qualification")
+    local checkedBeforeCount = 0
+    for _ in pairs(checkedBefore) do checkedBeforeCount = checkedBeforeCount + 1 end
+    assert(checkedAfter == checkedBeforeCount,
+        "failed combined qualification must preserve exact checked-group state")
+    assert(not harness.fix.logContains("event=far_origin_handoff")
+            and not harness.fix.logContains("overall_combined_qualified=false")
+            and harness.fix.logContains("action=failed"),
+        "failed combined qualification must log ordinary fail-closed handling only")
     harness.testMenu.onShowMenu()
     local farButton = harness.fix.buttonByText("Select FAR test group")
     assert(farButton and farButton.active == false,
-        "FAR-origin handoff must leave combinedFixtureQualified false")
-    suggested[1].callback(true, "")
-    assert(harness.fix.logContains("action=operator_designated")
-            and harness.fix.logContains("direct_mode=manual"),
-        "only the owner's later manual surface designation may start the FAR-origin run")
+        "failed combined qualification must not expose the FAR group action")
 end
 
 -- Missing, stale, or out-of-order dedicated transport must not authorize the
@@ -896,50 +896,6 @@ do
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and suggested == 0 and harness.fix.logContains("action=failed"),
         "a stale FAR token/component pair must stop closed")
-end
-
--- The handoff re-resolves the secondary group after MD qualification and stops
--- if its exact Beam census no longer matches the same shooter.
-do
-    local harness, token = shippedTwoPhaseToQualify()
-    local suggested = 0
-    harness.fix.API.suggestTestEngagement = function() suggested = suggested + 1; return true end
-    local originalGroupInfo = harness.fix.C.GetUpgradeGroupInfo2
-    harness.fix.C.GetUpgradeGroupInfo2 = function(a, b, c, d, group)
-        if group == "group_rear_down_mid" then
-            return { count = 1, currentcomponent = 28, currentmacro = "wrong_macro",
-                slotsize = "large", total = 1, operational = 1 }
-        end
-        return originalGroupInfo(a, b, c, d, group)
-    end
-    local originalComponentData = GetComponentData
-    GetComponentData = function(component, field)
-        if tonumber(component) == 28 and field == "macro" then return "wrong_macro" end
-        return originalComponentData(component, field)
-    end
-    harness.fix.fireEvent("X4GunneryTestLab.FarOriginReadyTargetToken", token)
-    harness.fix.fireEvent("X4GunneryTestLab.FarOriginReadyTarget", 424242)
-    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":0:1:35:1:35:4:20:1:1:0:0:1")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
-            and suggested == 0 and harness.fix.logContains("event=far_origin_handoff")
-            and harness.fix.logContains("action=failed"),
-        "a changed/missing secondary Beam group must stop the FAR-origin handoff")
-end
-
--- Marking failure is terminal: do not return to Gunnery with an unmarked exact
--- component and do not describe the combined fixture as qualified.
-do
-    local harness, token = shippedTwoPhaseToQualify()
-    harness.fix.API.suggestTestEngagement = function() return false end
-    harness.fix.fireEvent("X4GunneryTestLab.FarOriginReadyTargetToken", token)
-    harness.fix.fireEvent("X4GunneryTestLab.FarOriginReadyTarget", 424242)
-    harness.fix.fireEvent("X4GunneryTestLab.GeometryQualified",
-        "x4gcq9:" .. token .. ":0:1:35:1:35:4:20:1:1:0:0:1")
-    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
-            and harness.fix.logContains("reason=manual_component_mark_failed")
-            and harness.fix.logContains("action=failed"),
-        "a FAR mark failure must stop closed in Test Lab")
 end
 
 -- Typed target components are opaque and must be authorized by the current
