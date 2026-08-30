@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
-This tool stops at component -> exact authored geometry-source identity. It does
-not discover ANI files or inspect descriptors, parts, connections, or endpoints.
+This tool stops at geometry source -> exact enumerated official ANI resource
+identity. It does not parse ANI contents or inspect descriptors, parts,
+connections, or endpoints.
 """
 from __future__ import annotations
 
@@ -92,6 +93,57 @@ def _validate_source_sets(source_sets: Mapping[str, Path]) -> dict[str, Path]:
     return normalized
 
 
+def _validate_resource_sets(resource_sets: Mapping[str, Path]) -> dict[str, Path]:
+    anomalies: list[dict[str, object]] = []
+    expected = set(REQUIRED_SOURCE_SETS)
+    supplied = set(resource_sets)
+
+    for name in sorted(expected - supplied):
+        anomalies.append(
+            _anomaly(
+                "missing_required_resource_set",
+                "required official ANI resource set was not supplied",
+                source_set=name,
+            )
+        )
+    for name in sorted(supplied - expected):
+        anomalies.append(
+            _anomaly(
+                "unexpected_resource_set",
+                "ANI resource set is outside the Issue #72 official set",
+                source_set=name,
+            )
+        )
+
+    normalized: dict[str, Path] = {}
+    for name in REQUIRED_SOURCE_SETS:
+        if name not in resource_sets:
+            continue
+        path = Path(resource_sets[name])
+        if not path.is_dir():
+            anomalies.append(
+                _anomaly(
+                    "unavailable_required_resource_set",
+                    "required official ANI resource-set directory is unavailable",
+                    source_set=name,
+                )
+            )
+        elif not _ani_files(path):
+            anomalies.append(
+                _anomaly(
+                    "empty_required_resource_set",
+                    "required official ANI resource-set directory contains no ANI resources",
+                    source_set=name,
+                )
+            )
+        else:
+            normalized[name] = path
+
+    if anomalies:
+        raise CensusError(anomalies)
+    return normalized
+
+
 def _xml_files(root: Path) -> list[Path]:
     return sorted(
         (path for path in root.rglob("*") if path.is_file() and path.suffix.lower() == ".xml"),
@@ -99,15 +151,45 @@ def _xml_files(root: Path) -> list[Path]:
     )
 
 
+def _ani_files(root: Path) -> list[Path]:
+    return sorted(
+        (path for path in root.rglob("*") if path.is_file() and path.suffix.lower() == ".ani"),
+        key=lambda path: path.relative_to(root).as_posix(),
+    )
+
+
+def _normalized_resource_identity(value: str) -> str:
+    """Normalize only separators and case for resource identity comparison."""
+
+    return value.replace("\\", "/").casefold()
+
+
 def _direct_children(element: ET.Element, tag: str) -> list[ET.Element]:
     return [child for child in element if child.tag == tag]
 
 
-def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
+def build_census(
+    source_sets: Mapping[str, Path], resource_sets: Mapping[str, Path]
+) -> dict[str, object]:
     """Return a deterministic census or raise CensusError on any unsafe input."""
 
     roots = _validate_source_sets(source_sets)
+    resource_roots = _validate_resource_sets(resource_sets)
     anomalies: list[dict[str, object]] = []
+    ani_resources_by_stem: dict[str, list[dict[str, str]]] = defaultdict(list)
+    ani_inventory_counts_by_source_set: dict[str, int] = {}
+    for source_set in REQUIRED_SOURCE_SETS:
+        resource_root = resource_roots[source_set]
+        ani_files = _ani_files(resource_root)
+        ani_inventory_counts_by_source_set[source_set] = len(ani_files)
+        for path in ani_files:
+            relative = path.relative_to(resource_root).as_posix()
+            ani_resource = (
+                relative if source_set == "base" else f"extensions/{source_set}/{relative}"
+            )
+            ani_resources_by_stem[_normalized_resource_identity(ani_resource[:-4])].append(
+                {"ani_source_set": source_set, "ani_resource": ani_resource}
+            )
     component_definitions: dict[str, list[dict[str, object]]] = defaultdict(list)
     macro_records: list[dict[str, str]] = []
 
@@ -307,6 +389,37 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
                 )
             else:
                 definition["geometry_source"] = geometry_sources[0]
+                matches = ani_resources_by_stem.get(
+                    _normalized_resource_identity(str(geometry_sources[0])), []
+                )
+                if not matches:
+                    anomalies.append(
+                        _anomaly(
+                            "unresolved_ani_resource",
+                            "geometry source matches no enumerated official ANI resource stem",
+                            component=component,
+                            geometry_source=geometry_sources[0],
+                            source_set=definition["source_set"],
+                            source_file=definition["source_file"],
+                        )
+                    )
+                elif len(matches) > 1:
+                    anomalies.append(
+                        _anomaly(
+                            "multiple_ani_resources",
+                            "geometry source matches multiple enumerated official ANI resources",
+                            component=component,
+                            geometry_source=geometry_sources[0],
+                            source_set=definition["source_set"],
+                            source_file=definition["source_file"],
+                            matches=sorted(
+                                matches,
+                                key=lambda item: (item["ani_source_set"], item["ani_resource"]),
+                            ),
+                        )
+                    )
+                else:
+                    definition.update(matches[0])
 
     if anomalies:
         raise CensusError(anomalies)
@@ -326,6 +439,8 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
                 "source_set": definition["source_set"],
                 "source_file": definition["source_file"],
                 "geometry_source": definition["geometry_source"],
+                "ani_source_set": definition["ani_source_set"],
+                "ani_resource": definition["ani_resource"],
                 "macro_count": len(macros),
                 "macros": sorted(macros),
             }
@@ -345,6 +460,44 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
     geometry_cardinalities = Counter(
         entry["component_count"] for entry in geometry_source_to_components
     )
+    ani_inverted: dict[tuple[str, str], dict[str, set[str]]] = defaultdict(
+        lambda: {"geometry_sources": set(), "components": set()}
+    )
+    for record in component_to_macros:
+        key = (str(record["ani_source_set"]), str(record["ani_resource"]))
+        ani_inverted[key]["geometry_sources"].add(str(record["geometry_source"]))
+        ani_inverted[key]["components"].add(str(record["component"]))
+    ani_resource_to_geometry_sources_components = []
+    for (ani_source_set, ani_resource), identities in sorted(ani_inverted.items()):
+        geometry_sources = sorted(identities["geometry_sources"])
+        components = sorted(identities["components"])
+        ani_resource_to_geometry_sources_components.append(
+            {
+                "ani_source_set": ani_source_set,
+                "ani_resource": ani_resource,
+                "geometry_source_count": len(geometry_sources),
+                "geometry_sources": geometry_sources,
+                "component_count": len(components),
+                "components": components,
+            }
+        )
+    ani_geometry_cardinalities = Counter(
+        entry["geometry_source_count"] for entry in ani_resource_to_geometry_sources_components
+    )
+    ani_component_cardinalities = Counter(
+        entry["component_count"] for entry in ani_resource_to_geometry_sources_components
+    )
+    cross_source_set_ani_bindings = [
+        {
+            "component": record["component"],
+            "component_source_set": record["source_set"],
+            "geometry_source": record["geometry_source"],
+            "ani_source_set": record["ani_source_set"],
+            "ani_resource": record["ani_resource"],
+        }
+        for record in component_to_macros
+        if record["source_set"] != record["ani_source_set"]
+    ]
     macro_component_class_mismatches = []
     for record in equipment_macros:
         definition = component_definitions[record["component"]][0]
@@ -371,17 +524,21 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
         }
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
+        "official_resource_sets": list(REQUIRED_SOURCE_SETS),
         "counts": {
             "equipment_macros": len(equipment_macros),
             "turret_macros": sum(record["class"] == "turret" for record in equipment_macros),
             "missileturret_macros": sum(record["class"] == "missileturret" for record in equipment_macros),
             "unique_components": len(component_to_macros),
             "unique_geometry_sources": len(geometry_source_to_components),
+            "unique_ani_resources": len(ani_resource_to_geometry_sources_components),
+            "cross_source_set_ani_bindings": len(cross_source_set_ani_bindings),
         },
         "counts_by_source_set": counts_by_source_set,
+        "ani_inventory_counts_by_source_set": ani_inventory_counts_by_source_set,
         "equipment_macros": equipment_macros,
         "component_to_macros": component_to_macros,
         "component_macro_cardinality": {str(key): cardinalities[key] for key in sorted(cardinalities)},
@@ -389,6 +546,14 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
         "geometry_source_component_cardinality": {
             str(key): geometry_cardinalities[key] for key in sorted(geometry_cardinalities)
         },
+        "ani_resource_to_geometry_sources_components": ani_resource_to_geometry_sources_components,
+        "ani_resource_geometry_source_cardinality": {
+            str(key): ani_geometry_cardinalities[key] for key in sorted(ani_geometry_cardinalities)
+        },
+        "ani_resource_component_cardinality": {
+            str(key): ani_component_cardinalities[key] for key in sorted(ani_component_cardinalities)
+        },
+        "cross_source_set_ani_bindings": cross_source_set_ani_bindings,
         "macro_component_class_mismatches": macro_component_class_mismatches,
         "anomalies": [],
     }
@@ -720,7 +885,15 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
         default=[],
         metavar="NAME=PATH",
         type=_parse_source_set,
-        help="repeat exactly once for base and each required official extension",
+        help="repeat exactly once for base and each required official extension XML root",
+    )
+    parser.add_argument(
+        "--resource-set",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        type=_parse_source_set,
+        help="repeat exactly once for each complete official ANI resource root",
     )
     parser.add_argument("--output", type=Path, help="write census JSON here instead of stdout")
     parser.add_argument("--old79-components", type=Path, help="preserved old 79-component cache")
@@ -732,6 +905,7 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _arguments(argv)
     source_sets: dict[str, Path] = {}
+    resource_sets: dict[str, Path] = {}
     duplicate_arguments: list[dict[str, object]] = []
     for name, path in args.source_set:
         if name in source_sets:
@@ -739,6 +913,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _anomaly("duplicate_source_set_argument", "source set was supplied more than once", source_set=name)
             )
         source_sets[name] = path
+    for name, path in args.resource_set:
+        if name in resource_sets:
+            duplicate_arguments.append(
+                _anomaly(
+                    "duplicate_resource_set_argument",
+                    "ANI resource set was supplied more than once",
+                    source_set=name,
+                )
+            )
+        resource_sets[name] = path
 
     try:
         if duplicate_arguments:
@@ -753,7 +937,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 ]
             )
-        report = build_census(source_sets)
+        report = build_census(source_sets, resource_sets)
         reconciliation = (
             build_reconciliation(report, args.old79_components, args.platform_sweep)
             if all(reconciliation_arguments)
