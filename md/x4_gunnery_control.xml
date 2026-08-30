@@ -312,6 +312,41 @@
                             <break/>
                           </do_if>
                         </do_for_each>
+                        <!-- The exact Paranid L Beam can still be self-masked at
+                             its resting/current barrelposition while its authored
+                             deployed muzzle has a clear ray. Only after the
+                             current-origin fast query and all six current-origin
+                             witnesses remain blocked, use the accepted per-macro
+                             prospective construction. This is not generic turret
+                             geometry: O + Ry(runtime aim yaw) *
+                             (P + Rx(-runtime aim pitch) * D). -->
+                        <do_if value="not $lineoffireclear and $weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
+                          <create_orientation name="$prospectivebearing" orientation="look_at" refobject="$target" useaimtarget="true">
+                            <position object="$weapon" space="$weapon"/>
+                          </create_orientation>
+                          <create_rotation name="$prospectivepitchrotation" pitch="$prospectivebearing.pitch"/>
+                          <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
+                            <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
+                          </transform_position>
+                          <create_position name="$prospectiveyaworigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
+                          <create_rotation name="$prospectiveyawrotation" yaw="$prospectivebearing.yaw"/>
+                          <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
+                            <position x="$prospectivepitcheddownstream.x - 1.730653e-6m" y="$prospectivepitcheddownstream.y + 2.926126m" z="$prospectivepitcheddownstream.z - 16.11956m"/>
+                          </transform_position>
+                          <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"/>
+                          <do_if value="not $lineoffireclear">
+                            <do_for_each name="$prospectivefrac" in="$surfacexfracs" counter="$prospectivei">
+                              <create_position name="$prospectivesample" object="$target" space="$target"
+                                               x="$surfaceminx + $surfacexfracs.{$prospectivei} * $surfacespanx"
+                                               y="$surfaceminy + $surfaceyfracs.{$prospectivei} * $surfacespany"
+                                               z="$surfaceminz + $surfacezfracs.{$prospectivei} * $surfacespanz"/>
+                              <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" targetoffset="$prospectivesample" useaimtarget="false" excludeself="false"/>
+                              <do_if value="$lineoffireclear">
+                                <break/>
+                              </do_if>
+                            </do_for_each>
+                          </do_if>
+                        </do_if>
                       </do_if>
                       <do_if value="$lineoffireclear">
                         <set_value name="$engageable" operation="add"/>

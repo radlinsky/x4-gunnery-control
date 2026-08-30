@@ -132,13 +132,85 @@ has "object=\"\$target\" space=\"\$target\"" \
 has "targetoffset=\"\$surfacesample\" useaimtarget=\"false\" excludeself=\"false\"" \
   || note "surface-element fallback LOS must use the interior sample offset with useaimtarget=false excludeself=false"
 
-# 8f. The scan stops on the first clear sample. That adds exactly one more break
-#     to the cue (module fallback break + surface-sample break = 2 total).
-surfacebreaks=$(printf '%s\n' "$block" | grep -Fc "<break/>")
-[ "$surfacebreaks" -eq 2 ] \
-  || note "expected exactly two breaks after the surface-element fallback (module + first-clear-sample), found $surfacebreaks"
+# 8f. The current-origin scan stops on its first clear sample. Scope the break
+#     assertion to this loop; the Beam-only prospective loop has its own break.
+current_surface_scan=$(printf '%s\n' "$block" | awk '
+  /<do_for_each name="\$surfacefrac" in="\$surfacexfracs"/ { grab = 1 }
+  grab { print }
+  grab && /<\/do_for_each>/ { exit }
+')
+[ -n "$current_surface_scan" ] || note "current-origin surface witness loop not found"
+current_surface_breaks=$(printf '%s\n' "$current_surface_scan" | grep -Fc "<break/>")
+[ "$current_surface_breaks" -eq 1 ] \
+  || note "current-origin surface witness loop must break only on its first clear sample (found $current_surface_breaks)"
 
-# 8g. The x4gce3 per-target and x4gce2c batch result protocol is unchanged.
+# 9. Issue #69 production prospective origin. It is a second, Beam-only chance
+#    after the unchanged current-barrel fast ray and all six current-barrel
+#    witnesses remain blocked. Unsupported conventional macros must never enter
+#    this asset-specific geometry.
+prospective_gate='not $lineoffireclear and $weapon.macro == macro.turret_par_l_beam_01_mk1_macro'
+has "$prospective_gate" \
+  || note "exact blocked + Paranid-L-Beam-only prospective gate is missing"
+macro_mentions=$(printf '%s\n' "$block" | grep -Fc 'macro.turret_par_l_beam_01_mk1_macro')
+[ "$macro_mentions" -eq 1 ] \
+  || note "prospective geometry must have exactly one exact Beam macro gate (found $macro_mentions mentions)"
+
+# 9a. Copy the accepted Test Lab construction exactly: a separate weapon-local
+#     fast-target bearing, shipped active downstream vector, authored yaw origin
+#     and elevation pivot, applying runtime pitch and then runtime yaw. This must
+#     not alter or reuse the production look_at_bbox arc orientation.
+has 'name="$prospectivebearing" orientation="look_at" refobject="$target" useaimtarget="true"' \
+  || note "prospective origin requires a separate weapon-local look_at + useaimtarget bearing"
+has '<position object="$weapon" space="$weapon"/>' \
+  || note "prospective bearing must be weapon-local"
+has '<create_rotation name="$prospectivepitchrotation" pitch="$prospectivebearing.pitch"/>' \
+  || note "prospective construction must apply the accepted runtime pitch"
+has 'x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"' \
+  || note "prospective construction shipped active downstream vector changed"
+has 'x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"' \
+  || note "prospective construction shipped yaw origin changed"
+has '<create_rotation name="$prospectiveyawrotation" yaw="$prospectivebearing.yaw"/>' \
+  || note "prospective construction must apply the accepted runtime yaw"
+has 'x="$prospectivepitcheddownstream.x - 1.730653e-6m" y="$prospectivepitcheddownstream.y + 2.926126m" z="$prospectivepitcheddownstream.z - 16.11956m"' \
+  || note "prospective construction authored elevation-pivot formula changed"
+
+# 9b. From that origin, retain conventional own-hull collision: fast aim-target
+#     first, then (only if blocked) the same six target-local witnesses.
+has 'objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"' \
+  || note "prospective fast LOS must use the prospective muzzle with useaimtarget=true excludeself=false"
+has '<do_if value="not $lineoffireclear">' \
+  || note "prospective six-witness retry must be gated on a blocked prospective fast ray"
+has 'name="$prospectivesample" object="$target" space="$target"' \
+  || note "prospective witnesses must remain target-local"
+has 'objectoffset="$prospectivemuzzle" target="$target" targetoffset="$prospectivesample" useaimtarget="false" excludeself="false"' \
+  || note "prospective witness LOS must use the prospective muzzle with useaimtarget=false excludeself=false"
+prospective_scan=$(printf '%s\n' "$block" | awk '
+  /<do_for_each name="\$prospectivefrac" in="\$surfacexfracs"/ { grab = 1 }
+  grab { print }
+  grab && /<\/do_for_each>/ { exit }
+')
+[ -n "$prospective_scan" ] || note "prospective six-witness loop not found"
+prospective_breaks=$(printf '%s\n' "$prospective_scan" | grep -Fc "<break/>")
+[ "$prospective_breaks" -eq 1 ] \
+  || note "prospective witness loop must break only on its first clear sample (found $prospective_breaks)"
+
+# 9c. Ordering is contractual: current fast, current six, Beam gate/construction,
+#     prospective fast, prospective six. The arrays above are shared unchanged.
+line_of() { grep -nF -- "$1" <<< "$block" | head -n 1 | cut -d: -f1; }
+current_fast_line=$(line_of 'objectoffset="$weapon.barrelposition" target="$target" excludeself="$weapon.class == class.missileturret" useaimtarget="true"')
+current_six_line=$(line_of '<do_for_each name="$surfacefrac" in="$surfacexfracs"')
+prospective_gate_line=$(line_of "$prospective_gate")
+prospective_fast_line=$(line_of 'objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"')
+prospective_six_line=$(line_of '<do_for_each name="$prospectivefrac" in="$surfacexfracs"')
+if [ -z "$current_fast_line" ] || [ -z "$current_six_line" ] || [ -z "$prospective_gate_line" ] || [ -z "$prospective_fast_line" ] || [ -z "$prospective_six_line" ] \
+   || ! [ "$current_fast_line" -lt "$current_six_line" ] \
+   || ! [ "$current_six_line" -lt "$prospective_gate_line" ] \
+   || ! [ "$prospective_gate_line" -lt "$prospective_fast_line" ] \
+   || ! [ "$prospective_fast_line" -lt "$prospective_six_line" ]; then
+  note "LOS ordering must be current fast -> current six -> Beam gate -> prospective fast -> prospective six"
+fi
+
+# 9d. The x4gce3 per-target and x4gce2c batch result protocol is unchanged.
 has "'x4gce3:' + \$nonce + ':' + EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" \
   || note "x4gce3 per-target result protocol changed"
 has "'x4gce2c:' + \$nonce + ':' + EngageabilityService.\$targets.count + ':' + \$completed" \
