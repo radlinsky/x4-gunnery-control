@@ -200,12 +200,11 @@
                        pitch limits in this fixed mount-local reference frame.
                        Bearing-reference lineage: issue #55 checked the origin
                        against the hittable surface; issue #67 (commit 4e21cd0)
-                       live-proved origin bearing vs hittable aim point; issue
-                       #69 is single sampled aim point vs the whole component
-                       box — useaimtarget samples ONE of the victim's many
-                       hittable points, while X4 may fire at a different in-arc
-                       point of the same mesh, hence the engine's bbox-aware
-                       aim (look_at_bbox, common.xsd:2616).
+                       live-proved origin bearing vs hittable aim point.
+                       look_at_bbox (common.xsd:2616) aims at the target's
+                       bounding box rather than a single sampled hittable point;
+                       it is used here as an approximation, not a proven model of
+                       X4's firing-point selection (issue #69 cause unresolved).
                        Unknown/modded macros remain UNKNOWN rather than being
                        falsely promoted by range + line of fire alone. -->
                   <do_if value="EngageabilityService.$arcknown.{$weaponindex} == 1">
