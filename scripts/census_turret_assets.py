@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
-This tool stops at geometry source -> exact enumerated official ANI resource
-identity. It does not parse ANI contents or inspect descriptors, parts,
-connections, or endpoints.
+This tool stops at exact ANI descriptor and authored component source-part
+identity inventory. It does not parse ANI keyframes/channels or interpret
+transforms, pivots, axes, joints, descriptor relevance, or endpoints.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
@@ -26,6 +27,19 @@ REQUIRED_SOURCE_SETS = (
     "ego_dlc_mini_02",
 )
 _INCLUDED_CLASSES = frozenset(("turret", "missileturret"))
+_ANI_HEADER_SIZE = 16
+_ANI_DESCRIPTOR_SIZE = 160
+_ANI_STRING_SIZE = 64
+
+
+class AniDescriptorError(Exception):
+    """A bounded ANI header/descriptor-layout failure."""
+
+    def __init__(self, code: str, message: str, **details: object):
+        self.code = code
+        self.message = message
+        self.details = details
+        super().__init__(message)
 
 
 class CensusError(Exception):
@@ -164,6 +178,117 @@ def _normalized_resource_identity(value: str) -> str:
     return value.replace("\\", "/").casefold()
 
 
+def _decode_ani_descriptor_string(
+    field: bytes, field_name: str, descriptor_index: int
+) -> str:
+    if b"\0" not in field:
+        raise AniDescriptorError(
+            "invalid_ani_descriptor_string",
+            "ANI descriptor string has no NUL terminator within its fixed field",
+            descriptor_index=descriptor_index,
+            descriptor_field=field_name,
+        )
+    encoded = field.split(b"\0", 1)[0]
+    if not encoded:
+        raise AniDescriptorError(
+            "invalid_ani_descriptor_string",
+            "ANI descriptor string is empty",
+            descriptor_index=descriptor_index,
+            descriptor_field=field_name,
+        )
+    try:
+        value = encoded.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise AniDescriptorError(
+            "invalid_ani_descriptor_string",
+            "ANI descriptor string is not ASCII",
+            descriptor_index=descriptor_index,
+            descriptor_field=field_name,
+        ) from exc
+    if any(ord(character) < 32 or ord(character) > 126 for character in value):
+        raise AniDescriptorError(
+            "invalid_ani_descriptor_string",
+            "ANI descriptor string contains a non-printable ASCII character",
+            descriptor_index=descriptor_index,
+            descriptor_field=field_name,
+        )
+    return value
+
+
+def _parse_ani_descriptors(path: Path) -> list[dict[str, str]]:
+    """Parse only the current ANI v1 header and fixed descriptor table."""
+
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise AniDescriptorError(
+            "unreadable_ani_resource", f"resolved ANI resource could not be read: {exc}"
+        ) from exc
+    if len(data) < _ANI_HEADER_SIZE:
+        raise AniDescriptorError("truncated_ani_header", "ANI header is truncated")
+
+    descriptor_count, key_offset, version, header_padding = struct.unpack_from("<4I", data)
+    if version != 1 or header_padding != 0:
+        raise AniDescriptorError(
+            "unsupported_ani_layout",
+            "ANI header version or reserved field is unsupported",
+            ani_version=version,
+            header_padding=header_padding,
+        )
+    descriptor_end = _ANI_HEADER_SIZE + descriptor_count * _ANI_DESCRIPTOR_SIZE
+    if descriptor_end > len(data):
+        raise AniDescriptorError(
+            "truncated_ani_descriptor_section",
+            "ANI descriptor section is truncated",
+            descriptor_count=descriptor_count,
+            descriptor_end=descriptor_end,
+            file_size=len(data),
+        )
+    if key_offset != descriptor_end:
+        raise AniDescriptorError(
+            "unsupported_ani_layout",
+            "ANI key-data offset does not exactly follow the fixed descriptor table",
+            descriptor_count=descriptor_count,
+            expected_key_offset=descriptor_end,
+            key_offset=key_offset,
+        )
+
+    descriptors: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for index in range(descriptor_count):
+        offset = _ANI_HEADER_SIZE + index * _ANI_DESCRIPTOR_SIZE
+        part = _decode_ani_descriptor_string(
+            data[offset : offset + _ANI_STRING_SIZE], "part", index
+        )
+        subname = _decode_ani_descriptor_string(
+            data[
+                offset + _ANI_STRING_SIZE : offset + 2 * _ANI_STRING_SIZE
+            ],
+            "subname",
+            index,
+        )
+        descriptor_padding = struct.unpack_from("<2I", data, offset + 152)
+        if descriptor_padding != (0, 0):
+            raise AniDescriptorError(
+                "unsupported_ani_layout",
+                "ANI descriptor reserved fields are non-zero",
+                descriptor_index=index,
+                descriptor_padding=list(descriptor_padding),
+            )
+        identity = (part, subname)
+        if identity in seen:
+            raise AniDescriptorError(
+                "duplicate_ani_descriptor",
+                "ANI contains a duplicate exact (part, subname) descriptor identity",
+                descriptor_index=index,
+                part=part,
+                subname=subname,
+            )
+        seen.add(identity)
+        descriptors.append({"part": part, "subname": subname})
+    return sorted(descriptors, key=lambda item: (item["part"], item["subname"]))
+
+
 def _direct_children(element: ET.Element, tag: str) -> list[ET.Element]:
     return [child for child in element if child.tag == tag]
 
@@ -176,7 +301,7 @@ def build_census(
     roots = _validate_source_sets(source_sets)
     resource_roots = _validate_resource_sets(resource_sets)
     anomalies: list[dict[str, object]] = []
-    ani_resources_by_stem: dict[str, list[dict[str, str]]] = defaultdict(list)
+    ani_resources_by_stem: dict[str, list[dict[str, object]]] = defaultdict(list)
     ani_inventory_counts_by_source_set: dict[str, int] = {}
     for source_set in REQUIRED_SOURCE_SETS:
         resource_root = resource_roots[source_set]
@@ -188,7 +313,11 @@ def build_census(
                 relative if source_set == "base" else f"extensions/{source_set}/{relative}"
             )
             ani_resources_by_stem[_normalized_resource_identity(ani_resource[:-4])].append(
-                {"ani_source_set": source_set, "ani_resource": ani_resource}
+                {
+                    "ani_source_set": source_set,
+                    "ani_resource": ani_resource,
+                    "_ani_path": path,
+                }
             )
     component_definitions: dict[str, list[dict[str, object]]] = defaultdict(list)
     macro_records: list[dict[str, str]] = []
@@ -223,6 +352,26 @@ def build_census(
                                 child.get("geometry", "")
                                 for child in _direct_children(component, "source")
                                 if "geometry" in child.attrib
+                            ],
+                            "source_part_ownerships": [
+                                {
+                                    "part": part.get("name", ""),
+                                    "connection": connection.get("name", ""),
+                                }
+                                for connections in _direct_children(component, "connections")
+                                for connection in _direct_children(connections, "connection")
+                                for parts in _direct_children(connection, "parts")
+                                for part in _direct_children(parts, "part")
+                            ],
+                            "authored_connection_animations": [
+                                {
+                                    "connection": connection.get("name", ""),
+                                    "name": animation.get("name", ""),
+                                }
+                                for connections in _direct_children(component, "connections")
+                                for connection in _direct_children(connections, "connection")
+                                for animations in _direct_children(connection, "animations")
+                                for animation in _direct_children(animations, "animation")
                             ],
                         }
                     )
@@ -355,6 +504,56 @@ def build_census(
                         source_file=definition["source_file"],
                     )
                 )
+
+            source_part_owners: dict[str, list[str]] = defaultdict(list)
+            for ownership in definition["source_part_ownerships"]:
+                part = str(ownership["part"])
+                connection = str(ownership["connection"])
+                if not part or not connection:
+                    anomalies.append(
+                        _anomaly(
+                            "invalid_source_part_ownership",
+                            "authored connection-owned part requires exact non-empty part and connection names",
+                            component=component,
+                            part=part,
+                            connection=connection,
+                            source_set=definition["source_set"],
+                            source_file=definition["source_file"],
+                        )
+                    )
+                    continue
+                source_part_owners[part].append(connection)
+            definition["source_parts"] = [
+                {
+                    "part": part,
+                    "owning_connection_count": len(owners),
+                    "owning_connections": sorted(owners),
+                }
+                for part, owners in sorted(source_part_owners.items())
+            ]
+
+            authored_animations = []
+            for animation in definition["authored_connection_animations"]:
+                connection = str(animation["connection"])
+                name = str(animation["name"])
+                if not connection or not name:
+                    anomalies.append(
+                        _anomaly(
+                            "invalid_authored_connection_animation",
+                            "authored connection animation requires exact non-empty connection and animation names",
+                            component=component,
+                            connection=connection,
+                            animation_name=name,
+                            source_set=definition["source_set"],
+                            source_file=definition["source_file"],
+                        )
+                    )
+                    continue
+                authored_animations.append({"connection": connection, "name": name})
+            definition["authored_connection_animations"] = sorted(
+                authored_animations, key=lambda item: (item["connection"], item["name"])
+            )
+
             geometry_sources = definition["geometry_sources"]
             if not geometry_sources:
                 anomalies.append(
@@ -412,14 +611,53 @@ def build_census(
                             geometry_source=geometry_sources[0],
                             source_set=definition["source_set"],
                             source_file=definition["source_file"],
-                            matches=sorted(
-                                matches,
-                                key=lambda item: (item["ani_source_set"], item["ani_resource"]),
-                            ),
+                            matches=[
+                                {
+                                    "ani_source_set": match["ani_source_set"],
+                                    "ani_resource": match["ani_resource"],
+                                }
+                                for match in sorted(
+                                    matches,
+                                    key=lambda item: (
+                                        str(item["ani_source_set"]),
+                                        str(item["ani_resource"]),
+                                    ),
+                                )
+                            ],
                         )
                     )
                 else:
-                    definition.update(matches[0])
+                    match = matches[0]
+                    definition["ani_source_set"] = match["ani_source_set"]
+                    definition["ani_resource"] = match["ani_resource"]
+                    try:
+                        definition["ani_descriptors"] = _parse_ani_descriptors(
+                            Path(match["_ani_path"])
+                        )
+                    except AniDescriptorError as exc:
+                        anomalies.append(
+                            _anomaly(
+                                exc.code,
+                                exc.message,
+                                component=component,
+                                ani_source_set=match["ani_source_set"],
+                                ani_resource=match["ani_resource"],
+                                source_set=definition["source_set"],
+                                source_file=definition["source_file"],
+                                **exc.details,
+                            )
+                        )
+                    else:
+                        source_part_names = {
+                            str(record["part"]) for record in definition["source_parts"]
+                        }
+                        definition["descriptor_parts_absent_from_source_parts"] = sorted(
+                            {
+                                str(descriptor["part"])
+                                for descriptor in definition["ani_descriptors"]
+                                if descriptor["part"] not in source_part_names
+                            }
+                        )
 
     if anomalies:
         raise CensusError(anomalies)
@@ -441,6 +679,14 @@ def build_census(
                 "geometry_source": definition["geometry_source"],
                 "ani_source_set": definition["ani_source_set"],
                 "ani_resource": definition["ani_resource"],
+                "ani_descriptors": definition["ani_descriptors"],
+                "source_parts": definition["source_parts"],
+                "authored_connection_animations": definition[
+                    "authored_connection_animations"
+                ],
+                "descriptor_parts_absent_from_source_parts": definition[
+                    "descriptor_parts_absent_from_source_parts"
+                ],
                 "macro_count": len(macros),
                 "macros": sorted(macros),
             }
@@ -498,6 +744,24 @@ def build_census(
         for record in component_to_macros
         if record["source_set"] != record["ani_source_set"]
     ]
+    descriptor_pairs = [
+        (str(descriptor["part"]), str(descriptor["subname"]))
+        for record in component_to_macros
+        for descriptor in record["ani_descriptors"]
+    ]
+    descriptor_count_cardinalities = Counter(
+        len(record["ani_descriptors"]) for record in component_to_macros
+    )
+    source_part_owning_connection_cardinalities = Counter(
+        int(source_part["owning_connection_count"])
+        for record in component_to_macros
+        for source_part in record["source_parts"]
+    )
+    descriptor_parts_absent_from_component_source_parts = [
+        {"component": record["component"], "part": part}
+        for record in component_to_macros
+        for part in record["descriptor_parts_absent_from_source_parts"]
+    ]
     macro_component_class_mismatches = []
     for record in equipment_macros:
         definition = component_definitions[record["component"]][0]
@@ -524,7 +788,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -536,12 +800,47 @@ def build_census(
             "unique_geometry_sources": len(geometry_source_to_components),
             "unique_ani_resources": len(ani_resource_to_geometry_sources_components),
             "cross_source_set_ani_bindings": len(cross_source_set_ani_bindings),
+            "ani_descriptor_pairs_total": len(descriptor_pairs),
+            "unique_ani_descriptor_pairs": len(set(descriptor_pairs)),
+            "source_part_ownerships": sum(
+                int(source_part["owning_connection_count"])
+                for record in component_to_macros
+                for source_part in record["source_parts"]
+            ),
+            "component_source_parts": sum(
+                len(record["source_parts"]) for record in component_to_macros
+            ),
+            "unique_source_part_names": len(
+                {
+                    str(source_part["part"])
+                    for record in component_to_macros
+                    for source_part in record["source_parts"]
+                }
+            ),
+            "authored_connection_animations": sum(
+                len(record["authored_connection_animations"])
+                for record in component_to_macros
+            ),
+            "descriptor_parts_absent_from_component_source_parts": len(
+                descriptor_parts_absent_from_component_source_parts
+            ),
         },
         "counts_by_source_set": counts_by_source_set,
         "ani_inventory_counts_by_source_set": ani_inventory_counts_by_source_set,
         "equipment_macros": equipment_macros,
         "component_to_macros": component_to_macros,
         "component_macro_cardinality": {str(key): cardinalities[key] for key in sorted(cardinalities)},
+        "ani_descriptor_count_cardinality": {
+            str(key): descriptor_count_cardinalities[key]
+            for key in sorted(descriptor_count_cardinalities)
+        },
+        "source_part_owning_connection_cardinality": {
+            str(key): source_part_owning_connection_cardinalities[key]
+            for key in sorted(source_part_owning_connection_cardinalities)
+        },
+        "descriptor_parts_absent_from_component_source_parts": (
+            descriptor_parts_absent_from_component_source_parts
+        ),
         "geometry_source_to_components": geometry_source_to_components,
         "geometry_source_component_cardinality": {
             str(key): geometry_cardinalities[key] for key in sorted(geometry_cardinalities)

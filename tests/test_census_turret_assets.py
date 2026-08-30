@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,36 @@ from census_turret_assets import (  # noqa: E402
 )
 
 
+def _ani_bytes(
+    *descriptors: tuple[str, str],
+    version: int = 1,
+    header_padding: int = 0,
+    key_offset: int | None = None,
+    descriptor_padding: tuple[int, int] = (0, 0),
+) -> bytes:
+    records = []
+    for part, subname in descriptors:
+        part_bytes = part.encode("ascii")
+        subname_bytes = subname.encode("ascii")
+        if len(part_bytes) > 63 or len(subname_bytes) > 63:
+            raise ValueError("synthetic ANI descriptor strings must fit with a NUL terminator")
+        records.append(
+            part_bytes.ljust(64, b"\0")
+            + subname_bytes.ljust(64, b"\0")
+            + struct.pack(
+                "<5If2I", 0, 0, 0, 0, 0, 0.0, *descriptor_padding
+            )
+        )
+    descriptor_table = b"".join(records)
+    return struct.pack(
+        "<4I",
+        len(descriptors),
+        16 + len(descriptor_table) if key_offset is None else key_offset,
+        version,
+        header_padding,
+    ) + descriptor_table
+
+
 def _source_roots(root: Path) -> dict[str, Path]:
     roots = {}
     for name in REQUIRED_SOURCE_SETS:
@@ -30,7 +61,7 @@ def _source_roots(root: Path) -> dict[str, Path]:
         (path / "source_set.xml").write_text("<source/>", encoding="utf-8")
         inventory = path / "inventory" / f"unrelated_{name}.ANI"
         inventory.parent.mkdir()
-        inventory.write_bytes(b"synthetic unrelated ANI inventory entry")
+        inventory.write_bytes(_ani_bytes())
         roots[name] = path
     for resource in (
         "geometry/shared.ANI",
@@ -46,7 +77,7 @@ def _source_roots(root: Path) -> dict[str, Path]:
     ):
         target = roots["base"] / resource
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"synthetic ANI inventory entry")
+        target.write_bytes(_ani_bytes())
     return roots
 
 
@@ -131,6 +162,10 @@ class CensusTests(unittest.TestCase):
                         "geometry_source": "geometry/missile",
                         "ani_source_set": "base",
                         "ani_resource": "geometry/missile.ANI",
+                        "ani_descriptors": [],
+                        "source_parts": [],
+                        "authored_connection_animations": [],
+                        "descriptor_parts_absent_from_source_parts": [],
                         "macro_count": 1,
                         "macros": ["missile_macro"],
                     },
@@ -142,12 +177,23 @@ class CensusTests(unittest.TestCase):
                         "geometry_source": "geometry/shared",
                         "ani_source_set": "base",
                         "ani_resource": "geometry/shared.ANI",
+                        "ani_descriptors": [],
+                        "source_parts": [],
+                        "authored_connection_animations": [],
+                        "descriptor_parts_absent_from_source_parts": [],
                         "macro_count": 2,
                         "macros": ["turret_alpha_macro", "turret_beta_macro"],
                     },
                 ],
             )
             self.assertEqual(report["component_macro_cardinality"], {"1": 1, "2": 1})
+            self.assertEqual(report["counts"]["ani_descriptor_pairs_total"], 0)
+            self.assertEqual(report["counts"]["unique_ani_descriptor_pairs"], 0)
+            self.assertEqual(report["ani_descriptor_count_cardinality"], {"0": 2})
+            self.assertEqual(report["counts"]["source_part_ownerships"], 0)
+            self.assertEqual(report["counts"]["component_source_parts"], 0)
+            self.assertEqual(report["source_part_owning_connection_cardinality"], {})
+            self.assertEqual(report["descriptor_parts_absent_from_component_source_parts"], [])
             self.assertEqual(report["counts"]["unique_geometry_sources"], 2)
             self.assertEqual(
                 report["geometry_source_to_components"],
@@ -264,6 +310,182 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(component["geometry_source"], "Assets\\Exact_CASE_Data")
             self.assertEqual(component["ani_source_set"], "base")
             self.assertEqual(component["ani_resource"], "ASSETS/Exact_CASE_Data.ANI")
+
+    def test_ani_descriptors_source_parts_orphans_and_animation_names_are_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <source geometry="geometry/component_a"/>
+                  <connections>
+                    <connection name="Conn_A">
+                      <animations><animation name="Anim_CASE"/></animations>
+                      <parts>
+                        <part name="Part_CASE"/>
+                        <part name="SharedPart"/>
+                        <part name="SharedPart"/>
+                      </parts>
+                      <metadata><parts><part name="NestedPart"/></parts></metadata>
+                    </connection>
+                    <connection name="Conn_B"><parts><part name="SharedPart"/></parts></connection>
+                  </connections>
+                  <metadata><connection name="UnrelatedConn"><parts><part name="UnrelatedPart"/></parts></connection></metadata>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(
+                    ("SharedPart", "SharedSub"),
+                    ("Part_CASE", "Sub_CASE"),
+                    ("Orphan", "OtherSub"),
+                )
+            )
+
+            report = build_census(roots)
+            component = report["component_to_macros"][0]
+            self.assertEqual(
+                component["ani_descriptors"],
+                [
+                    {"part": "Orphan", "subname": "OtherSub"},
+                    {"part": "Part_CASE", "subname": "Sub_CASE"},
+                    {"part": "SharedPart", "subname": "SharedSub"},
+                ],
+            )
+            self.assertEqual(
+                component["source_parts"],
+                [
+                    {
+                        "part": "Part_CASE",
+                        "owning_connection_count": 1,
+                        "owning_connections": ["Conn_A"],
+                    },
+                    {
+                        "part": "SharedPart",
+                        "owning_connection_count": 3,
+                        "owning_connections": ["Conn_A", "Conn_A", "Conn_B"],
+                    },
+                ],
+            )
+            self.assertEqual(
+                component["authored_connection_animations"],
+                [{"connection": "Conn_A", "name": "Anim_CASE"}],
+            )
+            self.assertEqual(
+                component["descriptor_parts_absent_from_source_parts"], ["Orphan"]
+            )
+            self.assertNotIn("NestedPart", render_json(component))
+            self.assertNotIn("UnrelatedPart", render_json(component))
+            self.assertEqual(report["counts"]["ani_descriptor_pairs_total"], 3)
+            self.assertEqual(report["counts"]["unique_ani_descriptor_pairs"], 3)
+            self.assertEqual(report["ani_descriptor_count_cardinality"], {"3": 1})
+            self.assertEqual(report["counts"]["source_part_ownerships"], 4)
+            self.assertEqual(report["counts"]["component_source_parts"], 2)
+            self.assertEqual(
+                report["source_part_owning_connection_cardinality"], {"1": 1, "3": 1}
+            )
+            self.assertEqual(
+                report["descriptor_parts_absent_from_component_source_parts"],
+                [{"component": "component_a", "part": "Orphan"}],
+            )
+
+    def test_invalid_connection_owned_part_and_animation_identities_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <source geometry="geometry/component_a"/>
+                  <connections><connection name="">
+                    <animations><animation/></animations>
+                    <parts><part/></parts>
+                  </connection></connections>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            with self.assertRaises(CensusError) as caught:
+                build_census(roots)
+            self.assertIn("invalid_source_part_ownership", caught.exception.codes)
+            self.assertIn("invalid_authored_connection_animation", caught.exception.codes)
+
+    def test_duplicate_exact_ani_descriptor_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(roots["base"], "assets/components.xml", _components("component_a"))
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(("Part", "Sub"), ("Part", "Sub"))
+            )
+            with self.assertRaises(CensusError) as caught:
+                build_census(roots)
+            self.assertIn("duplicate_ani_descriptor", caught.exception.codes)
+
+    def test_truncated_and_unsupported_ani_fail_closed(self) -> None:
+        for label, ani, code in (
+            ("truncated_header", b"short", "truncated_ani_header"),
+            ("truncated_descriptors", _ani_bytes(("Part", "Sub"))[:-1], "truncated_ani_descriptor_section"),
+            ("unsupported_version", _ani_bytes(version=2), "unsupported_ani_layout"),
+            ("header_padding", _ani_bytes(header_padding=1), "unsupported_ani_layout"),
+            ("key_offset", _ani_bytes(key_offset=17), "unsupported_ani_layout"),
+            (
+                "descriptor_padding",
+                _ani_bytes(("Part", "Sub"), descriptor_padding=(1, 0)),
+                "unsupported_ani_layout",
+            ),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(roots["base"], "assets/components.xml", _components("component_a"))
+                _write(
+                    roots["base"],
+                    "assets/macros.xml",
+                    _macros(("a_macro", "turret", "component_a")),
+                )
+                (roots["base"] / "geometry/component_a.ANI").write_bytes(ani)
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn(code, caught.exception.codes)
+
+    def test_invalid_ani_descriptor_strings_fail_closed(self) -> None:
+        valid = _ani_bytes(("Part", "Sub"))
+        no_terminator = bytearray(valid)
+        no_terminator[16:80] = b"A" * 64
+        non_ascii = bytearray(valid)
+        non_ascii[16] = 0xFF
+        non_printable = bytearray(valid)
+        non_printable[16] = 0x01
+        for label, ani in (
+            ("empty", _ani_bytes(("", "Sub"))),
+            ("unterminated", bytes(no_terminator)),
+            ("non_ascii", bytes(non_ascii)),
+            ("non_printable", bytes(non_printable)),
+        ):
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(roots["base"], "assets/components.xml", _components("component_a"))
+                _write(
+                    roots["base"],
+                    "assets/macros.xml",
+                    _macros(("a_macro", "turret", "component_a")),
+                )
+                (roots["base"] / "geometry/component_a.ANI").write_bytes(ani)
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn("invalid_ani_descriptor_string", caught.exception.codes)
 
     def test_wrong_directory_ani_basename_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -492,7 +714,7 @@ class CensusTests(unittest.TestCase):
             )
             target = resource_roots["ego_dlc_split"] / "WEAPONS/EXACT.ANI"
             target.parent.mkdir()
-            target.write_bytes(b"extension ANI")
+            target.write_bytes(_ani_bytes())
             report = _build_census(roots, resource_roots)
             component = report["component_to_macros"][0]
             self.assertEqual(component["ani_source_set"], "ego_dlc_split")
