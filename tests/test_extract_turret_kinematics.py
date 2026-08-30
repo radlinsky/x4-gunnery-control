@@ -348,23 +348,29 @@ def _make_synthetic_ani(tmp: Path, part: str, anim: str, translation: Vec3,
                         extra: tuple[str, Vec3] | None = None) -> Path:
     """Write an ANI with source-proven identity entries for every path part."""
     records = [("part_socket", 0, ZERO), ("part_rotator", 0, ZERO),
-               ("moving_gun", 0, ZERO), (part, 1, translation)]
-    if extra:
-        records.append((extra[0], 1, extra[1]))
+               ("moving_gun", 0, ZERO)]
+    for record_part, value in ((part, translation), *((extra,) if extra else ())):
+        replacement = (record_part, 1, value)
+        for index, existing in enumerate(records):
+            if existing[0] == record_part:
+                records[index] = replacement
+                break
+        else:
+            records.append(replacement)
     descs, keys = [], []
     for record_part, nkeys, value in records:
         desc = bytearray(160)
         desc[0:len(record_part)] = record_part.encode()
         desc[64:64 + len(anim)] = anim.encode()
-        struct.pack_into("<I", desc, 128, nkeys)
+        struct.pack_into("<5I", desc, 128, nkeys, 0, 0, 0, 0)
         descs.append(bytes(desc))
         if nkeys:
             kf = bytearray(128)
-            struct.pack_into("<3f", kf, 0, value.x, value.y, value.z)
+            struct.pack_into("<3f3I", kf, 0, value.x, value.y, value.z, 1, 1, 1)
             keys.append(bytes(kf))
-    header = struct.pack("<II", len(records), len(records) * 160)
+    header = struct.pack("<4I", len(records), 16 + len(records) * 160, 1, 0)
     ani_path = tmp / "TURRET_ANI_BARREL_TEST_DATA.ANI"
-    ani_path.write_bytes(header + b"\x00" * 8 + b"".join(descs) + b"".join(keys))
+    ani_path.write_bytes(header + b"".join(descs) + b"".join(keys))
     return ani_path
 
 
@@ -453,10 +459,124 @@ def test_changing_active_keys_fail_closed(tmp_path: Path) -> None:
     data = bytearray(p.read_bytes())
     struct.pack_into("<I", data, 16 + 3 * 160 + 128, 2)
     second = bytearray(128)
-    struct.pack_into("<3f", second, 0, 0, 0, 21)
+    struct.pack_into("<3f3I", second, 0, 0, 0, 21, 1, 1, 1)
     p.write_bytes(bytes(data) + bytes(second))
     r = extract_kinematics(xml, [tmp_path])
     assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
+    assert "changing-position" in r.reason, r.reason
+
+
+def test_identical_multi_position_keys_are_constant(tmp_path: Path) -> None:
+    """STEP/LINEAR keys with one XYZ value define a stable active translation."""
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+    data = bytearray(p.read_bytes())
+    struct.pack_into("<I", data, 16 + 3 * 160 + 128, 2)
+    second = bytearray(128)
+    struct.pack_into("<3f3I", second, 0, 0, 0, 20, 2, 2, 2)
+    struct.pack_into("<f", second, 24, 1.0)
+    p.write_bytes(bytes(data) + bytes(second))
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
+
+
+def test_unsafe_position_key_metadata_fails_closed(tmp_path: Path) -> None:
+    """Unsupported interpolation and non-finite values/times are never sampled."""
+    cases = (
+        ("interpolation", 12, "<I", 5, "unsupported-position-interpolation"),
+        ("value", 0, "<f", math.nan, "non-finite-position-key"),
+        ("time", 24, "<f", math.inf, "non-finite-position-key"),
+    )
+    for name, field_offset, fmt, value, reason in cases:
+        case = tmp_path / name
+        case.mkdir()
+        xml = _write_xml(case, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+        p = _make_synthetic_ani(case, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+        data = bytearray(p.read_bytes())
+        key_offset = 16 + 4 * 160
+        struct.pack_into(fmt, data, key_offset + field_offset, value)
+        p.write_bytes(data)
+        r = extract_kinematics(xml, [case])
+        assert r.status == "AMBIGUOUS", f"{name}: {r.status}: {r.reason}"
+        assert reason in r.reason, r.reason
+
+
+def _add_last_record_channel(path: Path, descriptor_index: int, channel_index: int,
+                             value: Vec3 = Vec3(1, 2, 3)) -> None:
+    """Add one non-position key to the final keyed descriptor in a fixture."""
+    data = bytearray(path.read_bytes())
+    struct.pack_into("<I", data, 16 + descriptor_index * 160 + 128 + channel_index * 4, 1)
+    key = bytearray(128)
+    struct.pack_into("<3f", key, 0, value.x, value.y, value.z)
+    path.write_bytes(bytes(data) + bytes(key))
+
+
+def test_active_path_nonposition_channels_fail_closed(tmp_path: Path) -> None:
+    """Every source-tool transform count after position is an explicit blocker."""
+    channel_names = ("rotation", "scale", "prescale", "postscale")
+    for channel_index, channel in enumerate(channel_names, start=1):
+        case = tmp_path / channel
+        case.mkdir()
+        xml = _write_xml(case, "turret_ani_barrel_test", "turret", _ANI_BARREL_XML)
+        p = _make_synthetic_ani(case, "moving_barrel", "turret_active", Vec3(0, 0, 20))
+        _add_last_record_channel(p, descriptor_index=3, channel_index=channel_index)
+        r = extract_kinematics(xml, [case])
+        assert r.status == "AMBIGUOUS", f"{channel}: {r.status}: {r.reason}"
+        assert f"moving_barrel:{channel}" in r.reason, r.reason
+
+
+def test_undeclared_active_path_channel_still_fails_closed(tmp_path: Path) -> None:
+    """ANI path data remains authoritative when the XML declaration is elsewhere."""
+    xml_body = _ANI_BARREL_XML.replace(
+        '<animations><animation name="turret_active" start="60" end="61"/></animations>',
+        '',
+    )
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", xml_body)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", ZERO)
+    _add_last_record_channel(p, descriptor_index=3, channel_index=1)
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "AMBIGUOUS", f"{r.status}: {r.reason}"
+    assert "moving_barrel:rotation" in r.reason, r.reason
+
+
+def test_active_sibling_nonposition_channel_is_path_scoped(tmp_path: Path) -> None:
+    """An unsupported transform channel on a sibling does not taint this endpoint."""
+    xml_body = _ANI_BARREL_XML.replace(
+        '</connections>',
+        '''<connection name="con_sibling" tags="part" parent="part_socket">
+             <parts><part name="moving_sibling"/></parts>
+           </connection></connections>''',
+    )
+    xml = _write_xml(tmp_path, "turret_ani_barrel_test", "turret", xml_body)
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", ZERO,
+                            extra=("moving_sibling", ZERO))
+    _add_last_record_channel(p, descriptor_index=4, channel_index=1)
+    r = extract_kinematics(xml, [tmp_path])
+    assert r.status == "RESOLVED", f"{r.status}: {r.reason}"
+
+
+def test_zero_channel_descriptor_is_identity(tmp_path: Path) -> None:
+    """No keys in any of the five channel counts means no animated transform."""
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", ZERO)
+    record = parse_ani(p)[("part_socket", "turret_active")]
+    assert record.channel_counts == (0, 0, 0, 0, 0), record.channel_counts
+    assert record.channels == (), record.channels
+    assert record.translation == ZERO, record.translation
+    assert record.position_constant
+
+
+def test_keyframe_metadata_after_xyz_is_not_a_transform_channel(tmp_path: Path) -> None:
+    """Interpolation/time/tangent/angle-key bytes do not masquerade as transforms."""
+    p = _make_synthetic_ani(tmp_path, "moving_barrel", "turret_active", Vec3(7, 8, 9))
+    data = bytearray(p.read_bytes())
+    key_offset = 16 + 4 * 160
+    struct.pack_into("<3I", data, key_offset + 12, 2, 2, 2)
+    struct.pack_into("<f", data, key_offset + 24, 1.25)
+    struct.pack_into("<I", data, key_offset + 124, 1)
+    p.write_bytes(data)
+    record = parse_ani(p)[("moving_barrel", "turret_active")]
+    assert record.channels == ("position",), record.channels
+    assert record.translation == Vec3(7, 8, 9), record.translation
 
 
 # ---------------------------------------------------------------------------
@@ -473,33 +593,36 @@ def _make_multirecord_ani(tmp: Path) -> Path:
     desc0 = bytearray(160)
     desc0[0:len(b"part_one")] = b"part_one"
     desc0[64:64 + len(b"turret_active")] = b"turret_active"
-    struct.pack_into("<I", desc0, 128, 3)  # nkeys=3
+    struct.pack_into("<5I", desc0, 128, 3, 1, 0, 0, 0)  # 3 position + 1 rotation key
 
     desc1 = bytearray(160)
     desc1[0:len(b"part_two")] = b"part_two"
     desc1[64:64 + len(b"turret_active")] = b"turret_active"
-    struct.pack_into("<I", desc1, 128, 1)  # nkeys=1
+    struct.pack_into("<5I", desc1, 128, 1, 0, 0, 0, 0)  # 1 position key
 
     # Record 0: 3 keyframe blocks, first = (1,2,3)
     kf0_block0 = bytearray(128)
-    struct.pack_into("<3f", kf0_block0, 0, 1.0, 2.0, 3.0)
+    struct.pack_into("<3f3I", kf0_block0, 0, 1.0, 2.0, 3.0, 1, 1, 1)
     kf0_block1 = bytearray(128)
     kf0_block2 = bytearray(128)
-    struct.pack_into("<3f", kf0_block1, 0, 1.0, 2.0, 3.0)
-    struct.pack_into("<3f", kf0_block2, 0, 1.0, 2.0, 3.0)
+    struct.pack_into("<3f3I", kf0_block1, 0, 1.0, 2.0, 3.0, 2, 2, 2)
+    struct.pack_into("<3f3I", kf0_block2, 0, 1.0, 2.0, 3.0, 1, 1, 1)
 
-    # Record 1: 1 keyframe block = (4,5,6)
+    # Record 0 rotation channel: must also advance the next descriptor's offset.
+    kf0_rotation = bytearray(128)
+    struct.pack_into("<3f", kf0_rotation, 0, 0.1, 0.2, 0.3)
+
+    # Record 1: 1 position keyframe block = (4,5,6)
     kf1_block0 = bytearray(128)
-    struct.pack_into("<3f", kf1_block0, 0, 4.0, 5.0, 6.0)
+    struct.pack_into("<3f3I", kf1_block0, 0, 4.0, 5.0, 6.0, 1, 1, 1)
 
-    header = struct.pack("<II", num_records, num_records * 160)
-    padding = b"\x00" * 8
+    header = struct.pack("<4I", num_records, 16 + num_records * 160, 1, 0)
     p = tmp / "MULTIRECORD.ANI"
     p.write_bytes(
-        header + padding
+        header
         + bytes(desc0) + bytes(desc1)
         + bytes(kf0_block0) + bytes(kf0_block1) + bytes(kf0_block2)
-        + bytes(kf1_block0)
+        + bytes(kf0_rotation) + bytes(kf1_block0)
     )
     return p
 
@@ -509,11 +632,14 @@ def test_ani_multirecord_keyframe_offset(tmp_path: Path) -> None:
     p = _make_multirecord_ani(tmp_path)
     ani = parse_ani(p)
 
-    t0 = ani.get(("part_one", "turret_active"))
-    t1 = ani.get(("part_two", "turret_active"))
-    assert t0 is not None, "part_one/turret_active missing"
+    r0 = ani.get(("part_one", "turret_active"))
+    r1 = ani.get(("part_two", "turret_active"))
+    assert r0 is not None, "part_one/turret_active missing"
+    assert r0.channels == ("position", "rotation"), r0.channels
+    t0 = r0.translation
     assert abs(t0.x - 1.0) < 1e-6 and abs(t0.y - 2.0) < 1e-6 and abs(t0.z - 3.0) < 1e-6, t0
-    assert t1 is not None, "part_two/turret_active missing — kf_offset not advanced correctly"
+    assert r1 is not None, "part_two/turret_active missing — kf_offset not advanced correctly"
+    t1 = r1.translation
     assert abs(t1.x - 4.0) < 1e-6 and abs(t1.y - 5.0) < 1e-6 and abs(t1.z - 6.0) < 1e-6, t1
 
 
@@ -574,12 +700,14 @@ def test_paranid_l_beam_golden() -> None:
     # Documented in test_issue69_virtual_muzzle_geometry.lua header.
     if _PAR_L_BEAM_ANI.exists():
         ani = parse_ani(_PAR_L_BEAM_ANI)
-        rotator_t = ani.get(("part_rotator", "turret_active"))
-        barrel_t = ani.get(("anim_barrel", "turret_active"))
-        assert rotator_t is not None, "parse_ani: part_rotator/turret_active missing"
+        rotator_record = ani.get(("part_rotator", "turret_active"))
+        barrel_record = ani.get(("anim_barrel", "turret_active"))
+        assert rotator_record is not None, "parse_ani: part_rotator/turret_active missing"
+        rotator_t = rotator_record.translation
         assert abs(rotator_t.y - 6.145042) < 1e-4, f"rotator y={rotator_t.y}"
         assert rotator_t.x == 0.0 and rotator_t.z == 0.0, f"rotator xz non-zero: {rotator_t}"
-        assert barrel_t is not None, "parse_ani: anim_barrel/turret_active missing"
+        assert barrel_record is not None, "parse_ani: anim_barrel/turret_active missing"
+        barrel_t = barrel_record.translation
         assert abs(barrel_t.y - (-0.23982)) < 1e-4, f"barrel y={barrel_t.y}"
         assert abs(barrel_t.z - 27.710205) < 1e-4, f"barrel z={barrel_t.z}"
 
@@ -686,7 +814,20 @@ def test_census_counts() -> None:
     unsupported = len(by_status.get("UNSUPPORTED", []))
 
     assert total == 79, f"expected 79 components, got {total}"
-    assert resolved + ambiguous + unsupported == total
+    assert (resolved, ambiguous, unsupported) == (8, 69, 2), (
+        f"unexpected census split: RESOLVED={resolved} AMBIGUOUS={ambiguous} "
+        f"UNSUPPORTED={unsupported}"
+    )
+
+    reason_counts: dict[str, int] = {}
+    for status in ("AMBIGUOUS", "UNSUPPORTED"):
+        for result in by_status.get(status, []):
+            reason_counts[result.reason] = reason_counts.get(result.reason, 0) + 1
+    assert reason_counts == {
+        "active-path-ani-not-found": 69,
+        "ambiguous-joints(yaw=1,pitch=2)": 1,
+        "no-supported-class": 1,
+    }, reason_counts
 
     # Paranid L Beam must be RESOLVED
     par_l_beam = next(
@@ -711,6 +852,7 @@ def test_census_counts() -> None:
     topo_counts: dict[str, int] = {}
     for r in by_status.get("RESOLVED", []):
         topo_counts[r.topology] = topo_counts.get(r.topology, 0) + 1
+    assert topo_counts == {"ANI_BARREL": 8}, topo_counts
     print(f"Resolved topology groups: {topo_counts}")
 
     # Print non-resolved reasons
@@ -736,7 +878,14 @@ def _run_all() -> None:
         ("missing_path_ani_record",       True,  test_missing_path_active_record_fails_closed),
         ("active_sibling_isolated",        True,  test_active_sibling_does_not_move_muzzle_path),
         ("changing_active_keys",          True,  test_changing_active_keys_fail_closed),
-        ("ani_multirecord_kf_offset",       True,  test_ani_multirecord_keyframe_offset),
+        ("constant_active_keys",          True,  test_identical_multi_position_keys_are_constant),
+        ("unsafe_position_metadata",      True,  test_unsafe_position_key_metadata_fails_closed),
+        ("active_path_channel_rejection",  True,  test_active_path_nonposition_channels_fail_closed),
+        ("undeclared_active_path_channel",  True,  test_undeclared_active_path_channel_still_fails_closed),
+        ("active_sibling_channel_scoped",  True,  test_active_sibling_nonposition_channel_is_path_scoped),
+        ("zero_channel_identity",          True,  test_zero_channel_descriptor_is_identity),
+        ("keyframe_metadata",              True,  test_keyframe_metadata_after_xyz_is_not_a_transform_channel),
+        ("ani_multirecord_kf_offset",      True,  test_ani_multirecord_keyframe_offset),
         ("paranid_l_beam_golden",         False, test_paranid_l_beam_golden),
         ("census_counts",                 False, test_census_counts),
     ]

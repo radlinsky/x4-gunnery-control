@@ -91,48 +91,95 @@ IDENTITY = Quat(0.0, 0.0, 0.0, 1.0)
 # ---------------------------------------------------------------------------
 
 _ANI_DESC_RECORD = 160   # bytes per descriptor record
-_ANI_KF_BLOCK    = 128   # bytes per keyframe block
+_ANI_KF_BLOCK    = 128   # bytes per channel keyframe block
+_ANI_CHANNELS = ("position", "rotation", "scale", "prescale", "postscale")
 
-def parse_ani(path: Path) -> dict[tuple[str, str], Vec3]:
-    """Parse source-proven ANI v1 translation records.
 
-    The extractor only represents translation channels.  Every key of a
-    ``turret_active`` record must carry the same translation, which proves a
-    stable active pose for the narrow model.  Truncated records or changing
-    active translations are deliberately rejected rather than guessed.
+@dataclass
+class AniTransform:
+    """Transform-channel inventory for one ANI part/animation descriptor."""
+    translation: Vec3
+    position_constant: bool
+    position_issue: str
+    channels: tuple[str, ...]
+    channel_counts: tuple[int, int, int, int, int]
+
+
+def parse_ani(path: Path) -> dict[tuple[str, str], AniTransform]:
+    """Parse the source-tool-backed ANI v1 descriptor and keyframe layout.
+
+    A descriptor has independent position, Euler-rotation, scale, pre-scale,
+    and post-scale key counts.  Each count consumes that many 128-byte keys;
+    the first 12 bytes of every key are its channel's XYZ value and the rest is
+    interpolation/time/tangent metadata, not additional transform channels.
+    The extractor can currently represent only a constant position channel, so
+    callers must reject required records carrying any other channel.
     """
     data = path.read_bytes()
     if len(data) < 16:
         raise ValueError("ANI header is truncated")
-    num_records, _desc_size = struct.unpack_from("<II", data, 0)
+    num_records, key_offset, version, padding = struct.unpack_from("<4I", data, 0)
+    if version != 1:
+        raise ValueError(f"unsupported ANI version {version}")
+    if padding != 0:
+        raise ValueError("ANI header padding is non-zero")
     desc_start = 16
     desc_end = desc_start + num_records * _ANI_DESC_RECORD
     if desc_end > len(data):
         raise ValueError("ANI descriptor section is truncated")
+    if key_offset != desc_end:
+        raise ValueError(f"ANI key offset {key_offset} does not match descriptor end {desc_end}")
 
-    records: list[tuple[str, str, int]] = []
+    records: list[tuple[str, str, tuple[int, int, int, int, int]]] = []
     for i in range(num_records):
         off = desc_start + i * _ANI_DESC_RECORD
         part = data[off: off + 64].split(b"\x00")[0].decode("ascii", errors="replace")
         anim = data[off + 64: off + 128].split(b"\x00")[0].decode("ascii", errors="replace")
-        records.append((part, anim, struct.unpack_from("<I", data, off + 128)[0]))
+        counts = struct.unpack_from("<5I", data, off + 128)
+        duration, desc_pad_1, desc_pad_2 = struct.unpack_from("<f2I", data, off + 148)
+        if not math.isfinite(duration):
+            raise ValueError(f"ANI descriptor duration is non-finite for {part}/{anim}")
+        if desc_pad_1 != 0 or desc_pad_2 != 0:
+            raise ValueError(f"ANI descriptor padding is non-zero for {part}/{anim}")
+        if any(existing_part == part and existing_anim == anim
+               for existing_part, existing_anim, _counts in records):
+            raise ValueError(f"duplicate ANI descriptor for {part}/{anim}")
+        records.append((part, anim, counts))
 
-    translations: dict[tuple[str, str], Vec3] = {}
-    kf_offset = 0
-    for part, anim, nkeys in records:
-        end = desc_end + kf_offset + nkeys * _ANI_KF_BLOCK
-        if end > len(data):
-            raise ValueError(f"ANI keyframes truncated for {part}/{anim}")
-        if nkeys:
-            keys = [Vec3(*map(float, struct.unpack_from("<3f", data, desc_end + kf_offset + i * _ANI_KF_BLOCK))) for i in range(nkeys)]
-            if anim == "turret_active" and any(k != keys[0] for k in keys[1:]):
-                raise ValueError(f"ANI active pose is not constant for {part}")
-            translations[(part, anim)] = keys[0]
-        else:
-            # An explicit zero-key descriptor source-proves an identity transform.
-            translations[(part, anim)] = ZERO
-        kf_offset += nkeys * _ANI_KF_BLOCK
-    return translations
+    transforms: dict[tuple[str, str], AniTransform] = {}
+    kf_offset = key_offset
+    for part, anim, counts in records:
+        channel_values: dict[str, list[Vec3]] = {}
+        position_issue = ""
+        for channel, count in zip(_ANI_CHANNELS, counts):
+            end = kf_offset + count * _ANI_KF_BLOCK
+            if end > len(data):
+                raise ValueError(f"ANI {channel} keyframes truncated for {part}/{anim}")
+            values = []
+            for i in range(count):
+                key = kf_offset + i * _ANI_KF_BLOCK
+                value = Vec3(*map(float, struct.unpack_from("<3f", data, key)))
+                values.append(value)
+                if channel == "position":
+                    interpolation = struct.unpack_from("<3I", data, key + 12)
+                    time = struct.unpack_from("<f", data, key + 24)[0]
+                    if not all(math.isfinite(v) for v in (value.x, value.y, value.z, time)):
+                        position_issue = position_issue or "non-finite-position-key"
+                    elif any(mode not in (1, 2) for mode in interpolation):
+                        position_issue = position_issue or "unsupported-position-interpolation"
+            channel_values[channel] = values
+            kf_offset = end
+
+        positions = channel_values["position"]
+        translation = positions[0] if positions else ZERO
+        transforms[(part, anim)] = AniTransform(
+            translation=translation,
+            position_constant=not positions or all(key == translation for key in positions[1:]),
+            position_issue=position_issue,
+            channels=tuple(channel for channel, count in zip(_ANI_CHANNELS, counts) if count),
+            channel_counts=counts,
+        )
+    return transforms
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +434,7 @@ def extract_kinematics(
     # An ANI can attach active transforms to a path even when its XML declaration
     # is elsewhere in the component. Parse a discoverable source unconditionally;
     # only a declared active path makes a missing ANI ambiguous.
-    ani_data: dict[tuple[str, str], Vec3] = {}
+    ani_data: dict[tuple[str, str], AniTransform] = {}
     ani_path = find_ani(geo_src, search_dirs)
     if ani_path is None:
         if active_declared_on_path:
@@ -410,20 +457,47 @@ def extract_kinematics(
 
     def _active_for(path: list[ConnInfo], index: int) -> Vec3:
         part = _path_part(path, index)
-        return ani_data.get((part, "turret_active"), ZERO) if part else ZERO
+        record = ani_data.get((part, "turret_active")) if part else None
+        return record.translation if record else ZERO
 
     # A declared active pose requires an explicit ANI record (including a
-    # zero-key identity record) for every carried path part. Missing data is not
-    # evidence of a zero transform.
+    # channel-free identity record) for every carried path part. Missing data is
+    # not evidence of an identity transform. A discoverable active record is
+    # still authoritative when the XML declaration is elsewhere, so validate
+    # every present record on this path even when this path declares nothing.
+    # The source-tool format identifies transform channels with five independent
+    # descriptor counts; fail closed on non-position channels until the model
+    # represents their ordering and semantics.
+    path_parts = {c.parent for path in endpoint_paths.values() for c in path if c.parent}
     if active_declared_on_path:
-        # endpoint_paths are child→root here, so each non-root connection's
-        # parent attribute names the carried part required from its creator.
-        required_parts = {c.parent for path in endpoint_paths.values() for c in path if c.parent}
-        missing_parts = sorted(part for part in required_parts if (part, "turret_active") not in ani_data)
+        missing_parts = sorted(part for part in path_parts if (part, "turret_active") not in ani_data)
         if missing_parts:
             return TurretKinematics(component=comp_name, status="AMBIGUOUS",
                                     reason="active-path-ani-missing(" + ",".join(missing_parts) + ")",
                                     topology="ANI_PATH")
+    for part in sorted(path_parts):
+        record = ani_data.get((part, "turret_active"))
+        if record is None:
+            continue
+        unsupported = tuple(channel for channel in record.channels if channel != "position")
+        if unsupported:
+            return TurretKinematics(
+                component=comp_name, status="AMBIGUOUS",
+                reason=f"active-path-ani-unsupported-channels({part}:{','.join(unsupported)})",
+                topology="ANI_PATH",
+            )
+        if record.position_issue:
+            return TurretKinematics(
+                component=comp_name, status="AMBIGUOUS",
+                reason=f"active-path-ani-{record.position_issue}({part})",
+                topology="ANI_PATH",
+            )
+        if not record.position_constant:
+            return TurretKinematics(
+                component=comp_name, status="AMBIGUOUS",
+                reason=f"active-path-ani-changing-position({part})",
+                topology="ANI_PATH",
+            )
 
     # -----------------------------------------------------------------------
     # Accumulate transforms from root to yaw, then yaw to pitch, then to each
@@ -437,7 +511,7 @@ def extract_kinematics(
     def _accumulate(
         path: list[ConnInfo],
         stop_before: str | None,
-        ani: dict[tuple[str, str], Vec3],
+        ani: dict[tuple[str, str], AniTransform],
     ) -> tuple[Vec3, Quat]:
         """Accumulate transforms along path, stopping before stop_before.
 
