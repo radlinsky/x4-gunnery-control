@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build the Issue #72 A2.1 macro-driven X4 9.00 turret asset census.
+"""Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
-This tool intentionally stops at equipment macro -> referenced component asset.
-It does not inspect geometry, ANI data, parts, connections, or muzzle endpoints.
+This tool stops at component -> exact authored geometry-source identity. It does
+not discover ANI files or inspect descriptors, parts, connections, or endpoints.
 """
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
 
     roots = _validate_source_sets(source_sets)
     anomalies: list[dict[str, object]] = []
-    component_definitions: dict[str, list[dict[str, str]]] = defaultdict(list)
+    component_definitions: dict[str, list[dict[str, object]]] = defaultdict(list)
     macro_records: list[dict[str, str]] = []
 
     for source_set in REQUIRED_SOURCE_SETS:
@@ -137,6 +137,11 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
                             "component_class": component.get("class", "").strip(),
                             "source_set": source_set,
                             "source_file": relative,
+                            "geometry_sources": [
+                                child.get("geometry", "")
+                                for child in _direct_children(component, "source")
+                                if "geometry" in child.attrib
+                            ],
                         }
                     )
 
@@ -248,20 +253,60 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
                     component=component,
                     definitions=sorted(
                         definitions,
-                        key=lambda item: (item["source_set"], item["source_file"], item["component_class"]),
+                        key=lambda item: (
+                            str(item["source_set"]),
+                            str(item["source_file"]),
+                            str(item["component_class"]),
+                        ),
                     ),
                 )
             )
-        elif not definitions[0]["component_class"]:
-            anomalies.append(
-                _anomaly(
-                    "malformed_component_definition",
-                    "referenced component definition has no non-empty class",
-                    component=component,
-                    source_set=definitions[0]["source_set"],
-                    source_file=definitions[0]["source_file"],
+        else:
+            definition = definitions[0]
+            if not definition["component_class"]:
+                anomalies.append(
+                    _anomaly(
+                        "malformed_component_definition",
+                        "referenced component definition has no non-empty class",
+                        component=component,
+                        source_set=definition["source_set"],
+                        source_file=definition["source_file"],
+                    )
                 )
-            )
+            geometry_sources = definition["geometry_sources"]
+            if not geometry_sources:
+                anomalies.append(
+                    _anomaly(
+                        "missing_geometry_source",
+                        "referenced component has no direct source carrying a geometry attribute",
+                        component=component,
+                        source_set=definition["source_set"],
+                        source_file=definition["source_file"],
+                    )
+                )
+            elif len(geometry_sources) > 1:
+                anomalies.append(
+                    _anomaly(
+                        "multiple_geometry_sources",
+                        "referenced component has multiple direct geometry-source candidates",
+                        component=component,
+                        source_set=definition["source_set"],
+                        source_file=definition["source_file"],
+                        geometry_sources=geometry_sources,
+                    )
+                )
+            elif not str(geometry_sources[0]).strip():
+                anomalies.append(
+                    _anomaly(
+                        "empty_geometry_source",
+                        "referenced component direct geometry attribute is empty",
+                        component=component,
+                        source_set=definition["source_set"],
+                        source_file=definition["source_file"],
+                    )
+                )
+            else:
+                definition["geometry_source"] = geometry_sources[0]
 
     if anomalies:
         raise CensusError(anomalies)
@@ -280,11 +325,42 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
                 "component_class": definition["component_class"],
                 "source_set": definition["source_set"],
                 "source_file": definition["source_file"],
+                "geometry_source": definition["geometry_source"],
                 "macro_count": len(macros),
                 "macros": sorted(macros),
             }
         )
     cardinalities = Counter(entry["macro_count"] for entry in component_to_macros)
+    geometry_inverted: dict[str, list[str]] = defaultdict(list)
+    for record in component_to_macros:
+        geometry_inverted[str(record["geometry_source"])].append(str(record["component"]))
+    geometry_source_to_components = [
+        {
+            "geometry_source": geometry_source,
+            "component_count": len(components),
+            "components": sorted(components),
+        }
+        for geometry_source, components in sorted(geometry_inverted.items())
+    ]
+    geometry_cardinalities = Counter(
+        entry["component_count"] for entry in geometry_source_to_components
+    )
+    macro_component_class_mismatches = []
+    for record in equipment_macros:
+        definition = component_definitions[record["component"]][0]
+        if record["class"] != definition["component_class"]:
+            macro_component_class_mismatches.append(
+                {
+                    "macro": record["name"],
+                    "macro_class": record["class"],
+                    "macro_source_set": record["source_set"],
+                    "macro_source_file": record["source_file"],
+                    "component": record["component"],
+                    "component_class": definition["component_class"],
+                    "component_source_set": definition["source_set"],
+                    "component_source_file": definition["source_file"],
+                }
+            )
     counts_by_source_set = {}
     for source_set in REQUIRED_SOURCE_SETS:
         records = [record for record in equipment_macros if record["source_set"] == source_set]
@@ -295,7 +371,7 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
         }
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "counts": {
@@ -303,11 +379,17 @@ def build_census(source_sets: Mapping[str, Path]) -> dict[str, object]:
             "turret_macros": sum(record["class"] == "turret" for record in equipment_macros),
             "missileturret_macros": sum(record["class"] == "missileturret" for record in equipment_macros),
             "unique_components": len(component_to_macros),
+            "unique_geometry_sources": len(geometry_source_to_components),
         },
         "counts_by_source_set": counts_by_source_set,
         "equipment_macros": equipment_macros,
         "component_to_macros": component_to_macros,
         "component_macro_cardinality": {str(key): cardinalities[key] for key in sorted(cardinalities)},
+        "geometry_source_to_components": geometry_source_to_components,
+        "geometry_source_component_cardinality": {
+            str(key): geometry_cardinalities[key] for key in sorted(geometry_cardinalities)
+        },
+        "macro_component_class_mismatches": macro_component_class_mismatches,
         "anomalies": [],
     }
 

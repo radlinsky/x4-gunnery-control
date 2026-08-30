@@ -39,7 +39,10 @@ def _write(path: Path, relative: str, text: str) -> None:
 
 
 def _components(*names: str) -> str:
-    body = "".join(f'<component name="{name}" class="turret"/>' for name in names)
+    body = "".join(
+        f'<component name="{name}" class="turret"><source geometry="geometry/{name}"/></component>'
+        for name in names
+    )
     return f"<components>{body}</components>"
 
 
@@ -59,8 +62,12 @@ class CensusTests(unittest.TestCase):
                 roots["base"],
                 "assets/components.xml",
                 """<components>
-                  <component name="shared_component" class="turret"/>
-                  <component name="missile_component" class="missileturret"/>
+                  <component name="shared_component" class="turret">
+                    <source geometry="geometry/shared"/>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/missile"/>
+                  </component>
                   <component name="unrelated_component" class="engine"/>
                 </components>""",
             )
@@ -99,6 +106,7 @@ class CensusTests(unittest.TestCase):
                         "component_class": "missileturret",
                         "source_set": "base",
                         "source_file": "assets/components.xml",
+                        "geometry_source": "geometry/missile",
                         "macro_count": 1,
                         "macros": ["missile_macro"],
                     },
@@ -107,12 +115,31 @@ class CensusTests(unittest.TestCase):
                         "component_class": "turret",
                         "source_set": "base",
                         "source_file": "assets/components.xml",
+                        "geometry_source": "geometry/shared",
                         "macro_count": 2,
                         "macros": ["turret_alpha_macro", "turret_beta_macro"],
                     },
                 ],
             )
             self.assertEqual(report["component_macro_cardinality"], {"1": 1, "2": 1})
+            self.assertEqual(report["counts"]["unique_geometry_sources"], 2)
+            self.assertEqual(
+                report["geometry_source_to_components"],
+                [
+                    {
+                        "geometry_source": "geometry/missile",
+                        "component_count": 1,
+                        "components": ["missile_component"],
+                    },
+                    {
+                        "geometry_source": "geometry/shared",
+                        "component_count": 1,
+                        "components": ["shared_component"],
+                    },
+                ],
+            )
+            self.assertEqual(report["geometry_source_component_cardinality"], {"1": 2})
+            self.assertEqual(report["macro_component_class_mismatches"], [])
             self.assertEqual(
                 report["counts_by_source_set"]["base"],
                 {"equipment_macros": 1, "turret_macros": 1, "missileturret_macros": 0},
@@ -163,6 +190,138 @@ class CensusTests(unittest.TestCase):
             with self.assertRaises(CensusError) as caught:
                 build_census(roots)
             self.assertIn("multiple_component_definitions", caught.exception.codes)
+
+    def test_exact_direct_geometry_source_is_preserved_and_nested_source_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <source geometry="Assets\\Exact_CASE_Data"/>
+                  <metadata><source geometry="nested/misleading"/></metadata>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            report = build_census(roots)
+            self.assertEqual(report["component_to_macros"][0]["geometry_source"], "Assets\\Exact_CASE_Data")
+
+    def test_missing_direct_geometry_source_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <metadata><source geometry="nested/misleading"/></metadata>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            with self.assertRaises(CensusError) as caught:
+                build_census(roots)
+            self.assertIn("missing_geometry_source", caught.exception.codes)
+
+    def test_empty_direct_geometry_source_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                '<components><component name="component_a" class="turret"><source geometry="  "/></component></components>',
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            with self.assertRaises(CensusError) as caught:
+                build_census(roots)
+            self.assertIn("empty_geometry_source", caught.exception.codes)
+
+    def test_multiple_direct_geometry_sources_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <source geometry="geometry/a"/><source geometry="geometry/b"/>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            with self.assertRaises(CensusError) as caught:
+                build_census(roots)
+            self.assertIn("multiple_geometry_sources", caught.exception.codes)
+
+    def test_shared_geometry_source_is_inverted_with_cardinality(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="component_a" class="turret"><source geometry="geometry/shared"/></component>
+                  <component name="component_b" class="turret"><source geometry="geometry/shared"/></component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("a_macro", "turret", "component_a"),
+                    ("b_macro", "turret", "component_b"),
+                ),
+            )
+            report = build_census(roots)
+            self.assertEqual(
+                report["geometry_source_to_components"],
+                [
+                    {
+                        "geometry_source": "geometry/shared",
+                        "component_count": 2,
+                        "components": ["component_a", "component_b"],
+                    }
+                ],
+            )
+            self.assertEqual(report["geometry_source_component_cardinality"], {"2": 1})
+
+    def test_macro_component_class_mismatch_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(roots["base"], "assets/components.xml", _components("component_a"))
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "missileturret", "component_a")),
+            )
+            report = build_census(roots)
+            self.assertEqual(
+                report["macro_component_class_mismatches"],
+                [
+                    {
+                        "macro": "a_macro",
+                        "macro_class": "missileturret",
+                        "macro_source_set": "base",
+                        "macro_source_file": "assets/macros.xml",
+                        "component": "component_a",
+                        "component_class": "turret",
+                        "component_source_set": "base",
+                        "component_source_file": "assets/components.xml",
+                    }
+                ],
+            )
 
     def test_missing_required_source_set_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,14 +377,14 @@ class CensusTests(unittest.TestCase):
             _write(
                 roots["base"],
                 "assets/base_components.xml",
-                '<components><component name="current_a" class="turret"/></components>',
+                '<components><component name="current_a" class="turret"><source geometry="geometry/current_a"/></component></components>',
             )
             _write(
                 roots["ego_dlc_boron"],
                 "assets/boron_components.xml",
                 """<components>
-                  <component name="current_b" class="turret"/>
-                  <component name="current_c" class="missileturret"/>
+                  <component name="current_b" class="turret"><source geometry="geometry/current_b"/></component>
+                  <component name="current_c" class="missileturret"><source geometry="geometry/current_c"/></component>
                 </components>""",
             )
             _write(
