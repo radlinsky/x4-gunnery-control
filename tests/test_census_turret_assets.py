@@ -1385,6 +1385,211 @@ class CensusTests(unittest.TestCase):
             ),
         )
 
+    def test_ancestry_covered_turret_active_candidate_channels_are_cohorted_and_bounded(self) -> None:
+        def record(
+            main: tuple[float, float, float],
+            enums: tuple[int, int, int],
+            slot_024: float,
+            *,
+            slot_028: int = 0,
+            slot_076: int = 0,
+        ) -> bytes:
+            values: list[float | int] = [0] * 32
+            values[0:3] = main
+            values[3:6] = enums
+            values[6] = slot_024
+            values[7] = slot_028
+            values[19] = slot_076
+            return _candidate_key_record(tuple(values))
+
+        included_records = (
+            record((1.0, 1.0, 1.0), (1, 2, 3), 1.0)
+            + record((2.0, 2.0, 2.0), (4, 5, 6), 1.0, slot_028=10)
+            + record((2.0, 2.0, 2.0), (4, 5, 6), 2.0, slot_028=11)
+            + record((3.0, 3.0, 3.0), (7, 8, 9), 1.0, slot_028=12)
+            + record((4.0, 3.0, 3.0), (7, 8, 9), 2.0, slot_028=12)
+            + record((5.0, 5.0, 5.0), (10, 11, 12), 1.0)
+            + record((6.0, 6.0, 6.0), (13, 14, 15), 1.0)
+            + record((7.0, 6.0, 6.0), (13, 14, 15), 2.0, slot_076=4)
+        )
+        excluded_records = b"".join(
+            record((float(index), 0.0, 0.0), (20, 21, 22), 1.0)
+            for index in range(5)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional" class="turret">
+                    <source geometry="geometry/conventional"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="turret_active"/></animations><parts><part name="SamePart"/></parts></connection>
+                      <connection name="Child" parent="SamePart"><parts><part name="AncestorPart"/></parts></connection>
+                      <connection name="EndpointA" tags="laser" parent="AncestorPart"/>
+                      <connection name="EndpointB" tags="laser" parent="AncestorPart"/>
+                      <connection name="Sibling"><parts><part name="UnrelatedPart"/></parts></connection>
+                      <connection name="EndpointC" tags="laser" parent="UnrelatedPart"/>
+                    </connections>
+                  </component>
+                  <component name="missile" class="missileturret">
+                    <source geometry="geometry/missile"/>
+                    <connections><connection name="Root"><animations><animation name="turret_active"/></animations><parts><part name="MissilePart"/></parts></connection><connection name="Endpoint" tags="rocket" parent="MissilePart"/></connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_macro", "turret", "conventional"),
+                    ("missile_macro", "missileturret", "missile"),
+                ),
+            )
+            (roots["base"] / "geometry/conventional.ANI").write_bytes(
+                _ani_bytes(
+                    ("SamePart", "turret_active", 1, 2, 2, 1, 2),
+                    ("AncestorPart", "turret_active", 0, 0, 0, 0, 0),
+                    ("UnrelatedPart", "turret_active", 1, 1, 1, 1, 1),
+                    key_data=included_records + excluded_records,
+                )
+            )
+            (roots["base"] / "geometry/missile.ANI").write_bytes(
+                _ani_bytes(
+                    ("MissilePart", "turret_active", 1, 1, 1, 1, 1),
+                    key_data=excluded_records,
+                )
+            )
+
+            inventory = build_census(roots)[
+                "ancestry_covered_literal_turret_active_candidate_channel_inventory"
+            ]
+            repeated_inventory = build_census(roots)[
+                "ancestry_covered_literal_turret_active_candidate_channel_inventory"
+            ]
+
+        self.assertEqual(inventory["evidence_classification"], "inference")
+        self.assertEqual(
+            inventory["raw_ani_subname_path_evidence_classification"],
+            "shipped-source",
+        )
+        self.assertEqual(
+            inventory["candidate_channel_field_layout_evidence_classification"],
+            "third-party-technique",
+        )
+        self.assertEqual(inventory["semantic_claim"], "none")
+        self.assertEqual(inventory["unique_descriptor_count"], 2)
+        self.assertEqual(inventory["endpoint_membership_count"], 4)
+        self.assertEqual(
+            [
+                (descriptor["descriptor_index"], descriptor["structural_relation"])
+                for descriptor in inventory["descriptors"]
+            ],
+            [(0, "same_connection"), (1, "strict_ancestor_distance_1")],
+        )
+        self.assertNotIn("missile", {item["component"] for item in inventory["descriptors"]})
+        self.assertEqual(
+            inventory["channel_count_families"],
+            [
+                {
+                    "candidate_channel_key_counts": [0, 0, 0, 0, 0],
+                    "unique_descriptor_count": 1,
+                    "endpoint_membership_count": 2,
+                },
+                {
+                    "candidate_channel_key_counts": [1, 2, 2, 1, 2],
+                    "unique_descriptor_count": 1,
+                    "endpoint_membership_count": 2,
+                },
+            ],
+        )
+        channels = {
+            channel["candidate_channel_id"]: channel
+            for channel in inventory["candidate_channels"]
+        }
+        self.assertEqual(
+            channels["candidate_channel_0"]["classifications"],
+            {
+                "zero_keys": {"descriptor_count": 1, "key_record_count": 0},
+                "one_key": {"descriptor_count": 1, "key_record_count": 1},
+                "multiple_keys_identical_raw_bit_triples": {"descriptor_count": 0, "key_record_count": 0},
+                "multiple_keys_changing_raw_bit_triples": {"descriptor_count": 0, "key_record_count": 0},
+            },
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["classifications"][
+                "multiple_keys_identical_raw_bit_triples"
+            ],
+            {"descriptor_count": 1, "key_record_count": 2},
+        )
+        self.assertEqual(
+            channels["candidate_channel_2"]["classifications"][
+                "multiple_keys_changing_raw_bit_triples"
+            ],
+            {"descriptor_count": 1, "key_record_count": 2},
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["multi_key_metadata"]["slots_028_072"][0][
+                "descriptors_with_differing_raw_bits"
+            ],
+            1,
+        )
+        self.assertEqual(
+            channels["candidate_channel_2"]["multi_key_metadata"]["slots_028_072"][0][
+                "descriptors_with_constant_raw_bits"
+            ],
+            1,
+        )
+        self.assertEqual(
+            channels["candidate_channel_3"]["classifications"]["one_key"],
+            {"descriptor_count": 1, "key_record_count": 1},
+        )
+        self.assertEqual(
+            channels["candidate_channel_4"]["multi_key_metadata"]["slots_076_124"][0][
+                "raw_bit_nonzero_count"
+            ],
+            1,
+        )
+        self.assertEqual(
+            {channel["candidate_channel_id"] for channel in inventory["candidate_channels"]},
+            {f"candidate_channel_{index}" for index in range(5)},
+        )
+        self.assertEqual(
+            inventory["structural_relation_channel_family_cross_tab"],
+            [
+                {
+                    "same_connection_selector": True,
+                    "nearest_strict_ancestor_distance": None,
+                    "candidate_channel_key_counts": [1, 2, 2, 1, 2],
+                    "unique_descriptor_count": 1,
+                    "endpoint_membership_count": 2,
+                },
+                {
+                    "same_connection_selector": False,
+                    "nearest_strict_ancestor_distance": 1,
+                    "candidate_channel_key_counts": [0, 0, 0, 0, 0],
+                    "unique_descriptor_count": 1,
+                    "endpoint_membership_count": 2,
+                },
+            ],
+        )
+        self.assertTrue(
+            channels["candidate_channel_1"]["proof_scope"][
+                "multi_key_metadata_varies"
+            ]
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["proof_scope"]["enum_raw_values"],
+            {
+                "slot_012": ["0x00000004"],
+                "slot_016": ["0x00000005"],
+                "slot_020": ["0x00000006"],
+            },
+        )
+        self.assertTrue(inventory["missileturrets_excluded_from_cohort"])
+        self.assertEqual(render_json(inventory), render_json(repeated_inventory))
+
     def test_ani_key_ranges_follow_descriptor_table_and_channel_count_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mixed.ANI"
@@ -2543,6 +2748,24 @@ class CensusTests(unittest.TestCase):
             if descriptor["descriptor_index"] == 1
         )
         self.assertEqual(rotator["candidate_channel_counts"], [2, 0, 0, 0, 0])
+        broadened_inventory = census[
+            "ancestry_covered_literal_turret_active_candidate_channel_inventory"
+        ]
+        self.assertEqual(
+            [
+                (
+                    descriptor["descriptor_index"],
+                    descriptor["candidate_channel_key_counts"],
+                    descriptor["structural_relation"],
+                )
+                for descriptor in broadened_inventory["descriptors"]
+                if descriptor["descriptor_index"] in (1, 3)
+            ],
+            [
+                (1, [2, 0, 0, 0, 0], "strict_ancestor_distance_1"),
+                (3, [2, 0, 0, 0, 0], "strict_ancestor_distance_3"),
+            ],
+        )
         relationships = anchor["same_subname_structural_relationship_coverage"]
         self.assertEqual(
             relationships["exact_matching_selector_connections"], ["Connection01"]
