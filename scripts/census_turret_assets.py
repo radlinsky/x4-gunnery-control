@@ -1890,17 +1890,16 @@ def build_census(
             for key in sorted(selected_descriptor_counts_by_endpoint)
         },
         "ani_key_data_framing": {
-            "record_size_bytes": _ANI_KEY_RECORD_SIZE,
-            "descriptor_order": "descriptor table index order",
-            "channel_order": list(_ANI_CHANNEL_COUNT_FIELDS),
-            "key_section_termination": "exactly at end of file",
-            "third_party_lead": {
-                "evidence_classification": "third-party-technique",
-                "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
-            },
-            "shipped_source_corroboration": {
+            "structural_framing": {
                 "evidence_classification": "shipped-source",
                 "x4_version": "9.00",
+                "record_size_bytes": _ANI_KEY_RECORD_SIZE,
+                "key_section_termination": "exactly at end of file",
+                "invariant": (
+                    "descriptor-table end offset"
+                    " + sum(all descriptor channel counts) * record_size_bytes"
+                    " == file size"
+                ),
                 "linked_ani_resources": len(
                     ani_resource_to_geometry_sources_components
                 ),
@@ -1908,6 +1907,24 @@ def build_census(
                     ani_resource_to_geometry_sources_components
                 ),
                 "exceptions": [],
+                # The invariant is a sum over all channel counts, so it is
+                # blind to how those records are ordered on disk. It cannot
+                # corroborate descriptor or channel byte order.
+                "does_not_discriminate": ["descriptor_order", "channel_order"],
+            },
+            "key_ownership_order": {
+                "evidence_classification": "third-party-technique",
+                "descriptor_order": "descriptor table index order",
+                "channel_order": list(_ANI_CHANNEL_COUNT_FIELDS),
+                "note": (
+                    "byte order of descriptor and channel key records is not"
+                    " discriminated by the shipped-source structural invariant;"
+                    " the parser assigns key-record ranges in this order per the"
+                    " third-party lead only"
+                ),
+                "third_party_lead": {
+                    "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
+                },
             },
         },
         "selected_endpoint_path_descriptor_channel_count_families": {

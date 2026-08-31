@@ -1297,6 +1297,87 @@ class CensusTests(unittest.TestCase):
                     _parse_ani_descriptors(path)
                 self.assertEqual(caught.exception.code, code)
 
+    def test_framing_evidence_boundary_separates_shipped_source_from_order_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components>
+                  <component name="conventional_component" class="turret">
+                    <source geometry="geometry/component_a"/>
+                    <connections>
+                      <connection name="Root">
+                        <animations><animation name="Selector"/></animations>
+                        <parts><part name="RootPart"/></parts>
+                      </connection>
+                      <connection name="Endpoint" tags="laser" parent="RootPart"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("conventional_macro", "turret", "conventional_component")),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(("RootPart", "Selector", 1, 2, 0, 0, 0))
+            )
+
+            framing = build_census(roots)["ani_key_data_framing"]
+
+            # Structural facts a file-size invariant can actually prove.
+            structural = framing["structural_framing"]
+            self.assertEqual(structural["evidence_classification"], "shipped-source")
+            self.assertEqual(structural["record_size_bytes"], 128)
+            self.assertEqual(
+                structural["key_section_termination"], "exactly at end of file"
+            )
+            # The shipped invariant must not claim to prove byte ordering.
+            self.assertEqual(
+                structural["does_not_discriminate"],
+                ["descriptor_order", "channel_order"],
+            )
+            self.assertNotIn("descriptor_order", structural)
+            self.assertNotIn("channel_order", structural)
+
+            # Ordering is inference only; it never carries a shipped-source label.
+            ownership = framing["key_ownership_order"]
+            self.assertEqual(
+                ownership["evidence_classification"], "third-party-technique"
+            )
+            self.assertEqual(ownership["descriptor_order"], "descriptor table index order")
+            self.assertEqual(
+                ownership["channel_order"],
+                ["position", "rotation", "scale", "pre_scale", "post_scale"],
+            )
+
+    def test_file_size_invariant_is_blind_to_key_order(self) -> None:
+        # Two ANIs with the same total key-record count but different descriptor
+        # and channel orderings occupy identical file sizes and both satisfy the
+        # structural parser. That is exactly why the invariant cannot corroborate
+        # order: it is a sum, and a sum does not see permutation.
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "first.ANI"
+            second = Path(tmp) / "second.ANI"
+            first.write_bytes(
+                _ani_bytes(
+                    ("Alpha", "One", 3, 0, 0, 0, 0),
+                    ("Bravo", "Two", 0, 0, 2, 0, 0),
+                )
+            )
+            second.write_bytes(
+                _ani_bytes(
+                    ("Bravo", "Two", 0, 0, 0, 0, 2),
+                    ("Alpha", "One", 0, 3, 0, 0, 0),
+                )
+            )
+            self.assertEqual(first.stat().st_size, second.stat().st_size)
+            # Both parse cleanly; the invariant alone cannot tell them apart.
+            self.assertEqual(len(_parse_ani_descriptors(first)), 2)
+            self.assertEqual(len(_parse_ani_descriptors(second)), 2)
+
     def test_selected_descriptor_channel_count_families_are_preserved_and_separated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             roots = _source_roots(Path(tmp))
@@ -1404,26 +1485,43 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(
                 report["ani_key_data_framing"],
                 {
-                    "record_size_bytes": 128,
-                    "descriptor_order": "descriptor table index order",
-                    "channel_order": [
-                        "position",
-                        "rotation",
-                        "scale",
-                        "pre_scale",
-                        "post_scale",
-                    ],
-                    "key_section_termination": "exactly at end of file",
-                    "third_party_lead": {
-                        "evidence_classification": "third-party-technique",
-                        "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
-                    },
-                    "shipped_source_corroboration": {
+                    "structural_framing": {
                         "evidence_classification": "shipped-source",
                         "x4_version": "9.00",
+                        "record_size_bytes": 128,
+                        "key_section_termination": "exactly at end of file",
+                        "invariant": (
+                            "descriptor-table end offset"
+                            " + sum(all descriptor channel counts) * record_size_bytes"
+                            " == file size"
+                        ),
                         "linked_ani_resources": 2,
                         "resources_with_exact_framing": 2,
                         "exceptions": [],
+                        "does_not_discriminate": [
+                            "descriptor_order",
+                            "channel_order",
+                        ],
+                    },
+                    "key_ownership_order": {
+                        "evidence_classification": "third-party-technique",
+                        "descriptor_order": "descriptor table index order",
+                        "channel_order": [
+                            "position",
+                            "rotation",
+                            "scale",
+                            "pre_scale",
+                            "post_scale",
+                        ],
+                        "note": (
+                            "byte order of descriptor and channel key records is not"
+                            " discriminated by the shipped-source structural invariant;"
+                            " the parser assigns key-record ranges in this order per the"
+                            " third-party lead only"
+                        ),
+                        "third_party_lead": {
+                            "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
+                        },
                     },
                 },
             )
