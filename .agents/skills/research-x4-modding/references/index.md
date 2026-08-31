@@ -13,6 +13,7 @@ before relying on any claim.
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
 | Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
+| Turret macros with no equipment ware | [turret-no-ware-macros.md](turret-no-ware-macros.md) | X4 9.00 shipped-source COMBAT_CANDIDATE evidence for `turret_xen_l_laser_01_mk1_scenario_macro` |
 | Live tests and observations | [testing-experiments.md](testing-experiments.md) | Promotion rules and regression matrix |
 
 Search these references before adding a record. Keep one primary source per
