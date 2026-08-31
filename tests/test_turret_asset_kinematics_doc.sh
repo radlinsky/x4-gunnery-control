@@ -24,6 +24,38 @@ for term in \
 done
 
 grep -Fq '(part, subname)' "$doc" || fail 'ANI descriptor tuple is not explicit'
+
+# A3's recurring ANI inventory terms must remain defined here without turning
+# structural and stored-data observations into engine-behavior claims.
+for term in \
+  'ANI key record' \
+  'candidate channel' \
+  'byte slot' \
+  'authored animation selector' \
+  'same-name ancestor coverage' \
+  'key-count family'; do
+  grep -Eiq "^- \\*\\*${term}\\*\\* —" "$doc" \
+    || fail "ANI inventory definition is missing: $term"
+done
+grep -Fq 'one fixed-size stored animation-data entry' "$doc" \
+  || fail 'ANI key record is not defined in plain English'
+grep -Fq 'five ordered groups of ANI key records' "$doc" \
+  || fail 'candidate channel count/order is not explicit'
+grep -Fq 'why it is called a candidate channel' "$doc" \
+  || fail 'candidate channel uncertainty is not explained'
+grep -Fq 'one fixed byte position or byte range' "$doc" \
+  || fail 'byte slot is not defined without semantics'
+grep -Fq '<animation name="...">' "$doc" \
+  || fail 'authored animation selector XML form is missing'
+grep -Fq 'Exact-name matching is a source fact' "$doc" \
+  || fail 'selector exact-name source boundary is missing'
+grep -Fq 'does not prove runtime propagation' "$doc" \
+  || fail 'same-name ancestor coverage runtime boundary is missing'
+grep -Fq 'five-number list' "$doc" \
+  || fail 'key-count family shape is not explicit'
+grep -Fq '[2, 0, 0, 0, 0]' "$doc" \
+  || fail 'Paranid L Beam ANI terminology example is missing'
+
 grep -Eq '^## .*Identity chain' "$doc" || fail 'identity-chain section is missing'
 for identity_class in 'Source identity' 'Runtime identity' 'Descriptive/display label'; do
   grep -Fq "$identity_class" "$doc" || fail "identity class is missing: $identity_class"
