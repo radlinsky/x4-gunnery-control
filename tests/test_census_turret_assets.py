@@ -1987,6 +1987,253 @@ class CensusTests(unittest.TestCase):
             },
         )
 
+    def test_selected_subname_candidate_channel_inventory_is_exact_case_deduplicated_and_metadata_bounded(self) -> None:
+        def record(
+            main: tuple[float, float, float],
+            enums: tuple[int, int, int],
+            slot_024: float,
+        ) -> bytes:
+            values: list[float | int] = [0] * 32
+            values[0:3] = main
+            values[3:6] = enums
+            values[6] = slot_024
+            return _candidate_key_record(tuple(values))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional_a" class="turret">
+                    <source geometry="geometry/conventional_a"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="turret_active"/><animation name="Turret_Active"/></animations><parts><part name="ActiveA"/><part name="CaseA"/></parts></connection>
+                      <connection name="EndpointA" tags="laser" parent="ActiveA"/>
+                      <connection name="EndpointB" tags="laser" parent="ActiveA"/>
+                      <connection name="EndpointCase" tags="laser" parent="CaseA"/>
+                    </connections>
+                  </component>
+                  <component name="conventional_b" class="turret">
+                    <source geometry="geometry/conventional_b"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="turret_active"/></animations><parts><part name="ActiveB"/></parts></connection>
+                      <connection name="Endpoint" tags="laser" parent="ActiveB"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/missile"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="turret_active"/></animations><parts><part name="MissilePart"/></parts></connection>
+                      <connection name="Endpoint" tags="rocket" parent="MissilePart"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_a_macro", "turret", "conventional_a"),
+                    ("conventional_b_macro", "turret", "conventional_b"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+            (roots["base"] / "geometry/conventional_a.ANI").write_bytes(
+                _ani_bytes(
+                    ("ActiveA", "turret_active", 2, 1, 0, 0, 0),
+                    ("CaseA", "Turret_Active", 0, 0, 2, 0, 0),
+                    key_data=(
+                        record((1.0, 2.0, 3.0), (1, 2, 3), 1.0)
+                        + record((1.0, 2.0, 3.0), (1, 2, 4), 2.0)
+                        + record((4.0, 5.0, 6.0), (5, 6, 7), 8.0)
+                        + record((0.0, 0.0, 0.0), (8, 9, 10), 3.0)
+                        + record((0.0, 1.0, 0.0), (8, 9, 10), 3.0)
+                    ),
+                )
+            )
+            (roots["base"] / "geometry/conventional_b.ANI").write_bytes(
+                _ani_bytes(
+                    ("ActiveB", "turret_active", 0, 0, 2, 0, 0),
+                    key_data=(
+                        record((7.0, 8.0, 9.0), (11, 12, 13), 4.0)
+                        + record((8.0, 8.0, 9.0), (11, 12, 13), 2.0)
+                    ),
+                )
+            )
+            (roots["base"] / "geometry/missile.ANI").write_bytes(
+                _ani_bytes(
+                    ("MissilePart", "turret_active", 0, 0, 0, 0, 1),
+                    key_data=record((9.0, 9.0, 9.0), (14, 15, 16), 5.0),
+                )
+            )
+            inventory = build_census(roots)[
+                "selected_descriptor_subname_candidate_channel_inventory"
+            ]
+
+        self.assertEqual(inventory["evidence_classification"], "inference")
+        self.assertEqual(
+            inventory["raw_subname_counts_and_bits_evidence_classification"],
+            "shipped-source",
+        )
+        self.assertEqual(
+            inventory["candidate_channel_ownership_and_layout_evidence_classification"],
+            "third-party-technique",
+        )
+        conventional = inventory["conventional"]
+        missile = inventory["missileturret_accounting"]
+        self.assertEqual(conventional["selected_endpoint_memberships"], 4)
+        self.assertEqual(conventional["unique_descriptor_count"], 3)
+        self.assertEqual(missile["selected_endpoint_memberships"], 1)
+        self.assertTrue(missile["non_decision_driving"])
+
+        by_subname = {entry["subname"]: entry for entry in conventional["subnames"]}
+        self.assertEqual(list(by_subname), ["Turret_Active", "turret_active"])
+        exact = by_subname["turret_active"]
+        self.assertEqual(exact["selected_endpoint_memberships"], 3)
+        self.assertEqual(exact["unique_descriptor_count"], 2)
+        self.assertEqual(exact["unique_component_count"], 2)
+        self.assertEqual(exact["components"], ["conventional_a", "conventional_b"])
+        self.assertEqual(exact["unique_source_connection_count"], 2)
+        self.assertEqual(
+            exact["source_connections"],
+            [
+                {"component": "conventional_a", "source_connection": "Root"},
+                {"component": "conventional_b", "source_connection": "Root"},
+            ],
+        )
+        self.assertEqual(
+            exact["channel_count_families"],
+            [
+                {
+                    "candidate_channel_key_counts": [0, 0, 2, 0, 0],
+                    "unique_descriptor_count": 1,
+                    "selected_endpoint_memberships": 1,
+                },
+                {
+                    "candidate_channel_key_counts": [2, 1, 0, 0, 0],
+                    "unique_descriptor_count": 1,
+                    "selected_endpoint_memberships": 2,
+                },
+            ],
+        )
+        channels = {
+            channel["candidate_channel_id"]: channel
+            for channel in exact["candidate_channels"]
+        }
+        self.assertEqual(
+            channels["candidate_channel_0"]["classifications"],
+            {
+                "zero_keys": {"descriptor_count": 1, "key_record_count": 0},
+                "one_key": {"descriptor_count": 0, "key_record_count": 0},
+                "multiple_keys_identical_raw_bit_triples": {
+                    "descriptor_count": 1,
+                    "key_record_count": 2,
+                },
+                "multiple_keys_changing_raw_bit_triples": {
+                    "descriptor_count": 0,
+                    "key_record_count": 0,
+                },
+            },
+        )
+        self.assertEqual(
+            channels["candidate_channel_0"]["multi_key_main_triple_masks"],
+            [
+                {
+                    "changing_mask_slots_000_004_008": "000",
+                    "descriptor_count": 1,
+                    "key_record_count": 2,
+                }
+            ],
+        )
+        self.assertEqual(
+            channels["candidate_channel_2"]["multi_key_main_triple_masks"],
+            [
+                {
+                    "changing_mask_slots_000_004_008": "100",
+                    "descriptor_count": 1,
+                    "key_record_count": 2,
+                }
+            ],
+        )
+        self.assertEqual(
+            channels["candidate_channel_0"]["observed_candidate_metadata"][
+                "slot_024_ordering_shapes"
+            ],
+            {
+                "all_equal": {"descriptor_count": 0, "key_record_count": 0},
+                "strictly_increasing": {"descriptor_count": 1, "key_record_count": 2},
+                "nondecreasing": {"descriptor_count": 0, "key_record_count": 0},
+                "other": {"descriptor_count": 0, "key_record_count": 0},
+            },
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["observed_candidate_metadata"][
+                "candidate_enum_triplet_distribution"
+            ],
+            [
+                {
+                    "raw_bits": ["0x00000005", "0x00000006", "0x00000007"],
+                    "candidate_values": [5, 6, 7],
+                    "record_count": 1,
+                }
+            ],
+        )
+        self.assertEqual(by_subname["Turret_Active"]["unique_descriptor_count"], 1)
+        self.assertEqual(
+            by_subname["Turret_Active"]["candidate_channels"][2][
+                "multi_key_main_triple_masks"
+            ][0]["changing_mask_slots_000_004_008"],
+            "010",
+        )
+
+        focused = inventory["focused_literal_turret_active"]
+        self.assertTrue(focused["present"])
+        self.assertEqual(
+            focused["present_candidate_channels"],
+            ["candidate_channel_0", "candidate_channel_1", "candidate_channel_2"],
+        )
+        self.assertEqual(
+            focused["absent_candidate_channels"],
+            ["candidate_channel_3", "candidate_channel_4"],
+        )
+        self.assertEqual(
+            focused["absent_metadata_forms"][
+                "candidate_channels_without_enum_triplet_values"
+            ],
+            ["candidate_channel_3", "candidate_channel_4"],
+        )
+        self.assertEqual(
+            focused["absent_metadata_forms"][
+                "candidate_channels_without_slot_024_values"
+            ],
+            ["candidate_channel_3", "candidate_channel_4"],
+        )
+        channel_2_absence = next(
+            entry
+            for entry in focused["absent_metadata_forms"][
+                "by_present_candidate_channel"
+            ]
+            if entry["candidate_channel_id"] == "candidate_channel_2"
+        )
+        self.assertEqual(
+            channel_2_absence["absent_multi_key_classifications"],
+            ["multiple_keys_identical_raw_bit_triples"],
+        )
+        self.assertEqual(focused["literal_token_semantic_claim"], "none")
+        rendered_inventory = render_json(inventory).lower()
+        for unsupported_name in (
+            "position",
+            "rotation",
+            "scale",
+            "axis",
+            "interpolation",
+            "timing",
+            "pivot",
+            "transform",
+        ):
+            self.assertNotIn(unsupported_name, rendered_inventory)
+
     def test_candidate_channel_dynamics_are_deduplicated_separate_and_raw_bit_exact(self) -> None:
         def record(
             first: float, second: float, third: float, later_slot: int = 0

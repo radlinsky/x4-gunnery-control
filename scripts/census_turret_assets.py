@@ -821,6 +821,294 @@ def _inventory_candidate_multi_key_metadata(
     }
 
 
+def _candidate_main_triple_changing_mask(
+    records: list[dict[str, object]],
+) -> str:
+    return "".join(
+        "1"
+        if len(
+            {
+                str(record["raw_bits"][slot_index])
+                for record in records
+            }
+        )
+        > 1
+        else "0"
+        for slot_index in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES
+    )
+
+
+def _subname_candidate_channel_summary(
+    descriptors: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    candidate_channels = []
+    for channel_index, field in enumerate(_ANI_CHANNEL_COUNT_FIELDS):
+        classifications = {
+            classification: {"descriptor_count": 0, "key_record_count": 0}
+            for classification in _CANDIDATE_CHANNEL_DYNAMICS_CLASSIFICATIONS
+        }
+        multi_key_masks: Counter[str] = Counter()
+        multi_key_mask_records: Counter[str] = Counter()
+        descriptor_records = []
+        for descriptor in descriptors:
+            records = _candidate_channel_records(descriptor, field)
+            key_count = len(records)
+            if key_count == 0:
+                classification = "zero_keys"
+            elif key_count == 1:
+                classification = "one_key"
+            else:
+                classification = "multiple_keys_" + (
+                    _classify_candidate_multi_key_triples(records)
+                )
+                mask = _candidate_main_triple_changing_mask(records)
+                multi_key_masks[mask] += 1
+                multi_key_mask_records[mask] += key_count
+            classifications[classification]["descriptor_count"] += 1
+            classifications[classification]["key_record_count"] += key_count
+            if records:
+                descriptor_records.append((descriptor, records))
+
+        metadata = _summarize_candidate_channel_metadata(descriptor_records)
+        candidate_channels.append(
+            {
+                "candidate_channel_id": f"candidate_channel_{channel_index}",
+                "candidate_channel_count_field_index": channel_index,
+                "classifications": classifications,
+                "multi_key_main_triple_masks": [
+                    {
+                        "changing_mask_slots_000_004_008": mask,
+                        "descriptor_count": multi_key_masks[mask],
+                        "key_record_count": multi_key_mask_records[mask],
+                    }
+                    for mask in sorted(multi_key_masks)
+                ],
+                "observed_candidate_metadata": {
+                    "candidate_enum_triplet_distribution": metadata[
+                        "candidate_enum_triplet_distribution"
+                    ],
+                    "slot_024_raw_bit_pattern_distribution": metadata[
+                        "slot_024"
+                    ]["raw_bit_pattern_distribution"],
+                    "slot_024_ordering_shapes": metadata["slot_024"][
+                        "descriptor_numeric_ordering_shapes"
+                    ],
+                },
+            }
+        )
+    return candidate_channels
+
+
+def _subname_inventory_for_class(
+    unique_descriptors: dict[tuple[str, int], dict[str, object]],
+    membership_counts: Counter[tuple[str, int]],
+) -> dict[str, object]:
+    descriptors_by_subname: dict[
+        str, list[tuple[tuple[str, int], dict[str, object]]]
+    ] = defaultdict(list)
+    for identity, descriptor in unique_descriptors.items():
+        descriptors_by_subname[str(descriptor["subname"])].append(
+            (identity, descriptor)
+        )
+
+    subnames = []
+    for subname in sorted(descriptors_by_subname):
+        identity_descriptors = sorted(descriptors_by_subname[subname])
+        descriptors = [descriptor for _, descriptor in identity_descriptors]
+        components = sorted({identity[0] for identity, _ in identity_descriptors})
+        source_connections = sorted(
+            {
+                (identity[0], str(descriptor["source_connection"]))
+                for identity, descriptor in identity_descriptors
+            }
+        )
+        family_descriptors: dict[tuple[int, ...], list[tuple[str, int]]] = (
+            defaultdict(list)
+        )
+        for identity, descriptor in identity_descriptors:
+            family = tuple(
+                int(descriptor["channel_counts"][field])
+                for field in _ANI_CHANNEL_COUNT_FIELDS
+            )
+            family_descriptors[family].append(identity)
+        subnames.append(
+            {
+                "subname": subname,
+                "subname_evidence_classification": "shipped-source",
+                "selected_endpoint_memberships": sum(
+                    membership_counts[identity]
+                    for identity, _ in identity_descriptors
+                ),
+                "unique_descriptor_count": len(identity_descriptors),
+                "unique_component_count": len(components),
+                "components": components,
+                "unique_source_connection_count": len(source_connections),
+                "source_connections": [
+                    {
+                        "component": component,
+                        "source_connection": source_connection,
+                    }
+                    for component, source_connection in source_connections
+                ],
+                "channel_count_families": [
+                    {
+                        "candidate_channel_key_counts": list(family),
+                        "unique_descriptor_count": len(
+                            family_descriptors[family]
+                        ),
+                        "selected_endpoint_memberships": sum(
+                            membership_counts[identity]
+                            for identity in family_descriptors[family]
+                        ),
+                    }
+                    for family in sorted(family_descriptors)
+                ],
+                "candidate_channels": _subname_candidate_channel_summary(
+                    descriptors
+                ),
+            }
+        )
+    return {
+        "selected_endpoint_memberships": sum(membership_counts.values()),
+        "unique_descriptor_count": len(unique_descriptors),
+        "exact_case_sensitive_subname_count": len(subnames),
+        "subnames": subnames,
+    }
+
+
+def _focused_literal_turret_active(
+    conventional_inventory: dict[str, object],
+) -> dict[str, object]:
+    active = next(
+        (
+            entry
+            for entry in conventional_inventory["subnames"]
+            if entry["subname"] == "turret_active"
+        ),
+        None,
+    )
+    channel_ids = [
+        f"candidate_channel_{index}"
+        for index in range(len(_ANI_CHANNEL_COUNT_FIELDS))
+    ]
+    if active is None:
+        present_channel_ids = []
+        absent_by_present_channel = []
+    else:
+        present_channel_ids = [
+            channel["candidate_channel_id"]
+            for channel in active["candidate_channels"]
+            if sum(
+                classification["key_record_count"]
+                for classification in channel["classifications"].values()
+            )
+            > 0
+        ]
+        absent_by_present_channel = []
+        for channel in active["candidate_channels"]:
+            channel_id = channel["candidate_channel_id"]
+            if channel_id not in present_channel_ids:
+                continue
+            absent_multi_key_classifications = [
+                classification
+                for classification in (
+                    "multiple_keys_identical_raw_bit_triples",
+                    "multiple_keys_changing_raw_bit_triples",
+                )
+                if channel["classifications"][classification][
+                    "descriptor_count"
+                ]
+                == 0
+            ]
+            absent_ordering_shapes = [
+                shape
+                for shape in _CANDIDATE_NUMERIC_ORDERING_SHAPES
+                if channel["observed_candidate_metadata"][
+                    "slot_024_ordering_shapes"
+                ][shape]["descriptor_count"]
+                == 0
+            ]
+            absent_by_present_channel.append(
+                {
+                    "candidate_channel_id": channel_id,
+                    "absent_multi_key_classifications": (
+                        absent_multi_key_classifications
+                    ),
+                    "absent_slot_024_ordering_shapes": absent_ordering_shapes,
+                }
+            )
+    absent_channel_ids = [
+        channel_id
+        for channel_id in channel_ids
+        if channel_id not in present_channel_ids
+    ]
+    return {
+        "literal_subname": "turret_active",
+        "present": active is not None,
+        "conventional_inventory": active,
+        "present_candidate_channels": present_channel_ids,
+        "absent_candidate_channels": absent_channel_ids,
+        "absent_metadata_forms": {
+            "candidate_channels_without_enum_triplet_values": absent_channel_ids,
+            "candidate_channels_without_slot_024_values": absent_channel_ids,
+            "by_present_candidate_channel": absent_by_present_channel,
+        },
+        "absence_scope_statement": {
+            "evidence_classification": "inference",
+            "finding": (
+                "absence can narrow later proof scope but does not prove"
+                " runtime irrelevance"
+            ),
+        },
+        "literal_token_semantic_claim": "none",
+    }
+
+
+def _build_subname_candidate_channel_inventory(
+    selected_unique_descriptors_by_class: dict[
+        str, dict[tuple[str, int], dict[str, object]]
+    ],
+    selected_endpoint_path_descriptor_memberships: list[
+        tuple[dict[str, object], dict[str, object]]
+    ],
+) -> dict[str, object]:
+    membership_counts_by_class = {
+        component_class: Counter(
+            (
+                str(endpoint["component"]),
+                int(descriptor["descriptor_index"]),
+            )
+            for endpoint, descriptor in selected_endpoint_path_descriptor_memberships
+            if endpoint["component_class"] == component_class
+        )
+        for component_class in sorted(_INCLUDED_CLASSES)
+    }
+    conventional = _subname_inventory_for_class(
+        selected_unique_descriptors_by_class["turret"],
+        membership_counts_by_class["turret"],
+    )
+    missile = _subname_inventory_for_class(
+        selected_unique_descriptors_by_class["missileturret"],
+        membership_counts_by_class["missileturret"],
+    )
+    missile["non_decision_driving"] = True
+    return {
+        "evidence_classification": "inference",
+        "raw_subname_counts_and_bits_evidence_classification": "shipped-source",
+        "candidate_channel_ownership_and_layout_evidence_classification": (
+            "third-party-technique"
+        ),
+        "descriptor_identity": ["component", "descriptor_index"],
+        "subname_grouping_rule": "exact case-sensitive equality",
+        "candidate_channel_semantic_claim": "none",
+        "conventional": conventional,
+        "focused_literal_turret_active": _focused_literal_turret_active(
+            conventional
+        ),
+        "missileturret_accounting": missile,
+    }
+
+
 def _descriptor_offset_148_raw_uint(descriptor: dict[str, object]) -> int:
     field = descriptor["descriptor_offset_148"]
     return int(str(field["raw_bits"]), 16)
@@ -3411,6 +3699,12 @@ def build_census(
             component_to_macros,
         )
     )
+    subname_candidate_channel_inventory = (
+        _build_subname_candidate_channel_inventory(
+            selected_unique_descriptors_by_class,
+            selected_endpoint_path_descriptor_memberships,
+        )
+    )
 
     # Raw per-record values are needed only to produce the aggregate inventory;
     # keep the public census structural and bounded.
@@ -3487,7 +3781,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 17,
+        "schema_version": 18,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -3755,6 +4049,9 @@ def build_census(
         },
         "candidate_channel_1_authored_restriction_correlation": (
             channel_1_authored_restriction_correlation
+        ),
+        "selected_descriptor_subname_candidate_channel_inventory": (
+            subname_candidate_channel_inventory
         ),
         "selected_descriptor_offset_148_inventory_and_slot_024_relationships": {
             "evidence_classification": "inference",
