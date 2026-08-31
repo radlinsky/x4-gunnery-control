@@ -1385,6 +1385,148 @@ class CensusTests(unittest.TestCase):
             ),
         )
 
+    def test_changing_turret_active_cases_preserve_raw_numeric_and_endpoint_identities(self) -> None:
+        def record(
+            main: tuple[float, float, float],
+            enums: tuple[int, int, int],
+            slot_024: float,
+        ) -> bytes:
+            values: list[float | int] = [0] * 32
+            values[0:3] = main
+            values[3:6] = enums
+            values[6] = slot_024
+            return _candidate_key_record(tuple(values))
+
+        key_data = (
+            record((0.0, 1.0, 2.0), (1, 2, 3), 0.0)
+            + record((-0.0, 1.0, 2.0), (4, 5, 6), 1.0)
+            + record((3.0, 4.0, 5.0), (7, 8, 9), 2.0)
+            + record((3.0, 6.0, 5.0), (10, 11, 12), 3.0)
+            + record((7.0, 8.0, 9.0), (13, 14, 15), 4.0)
+            + record((10.0, 8.0, 9.0), (16, 17, 18), 5.0)
+            + record((11.0, 12.0, 13.0), (19, 20, 21), 6.0)
+            + record((11.0, 12.0, 14.0), (22, 23, 24), 7.0)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="changing_component" class="turret">
+                    <source geometry="geometry/changing"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="turret_active"/></animations><parts><part name="Channel0Part"/><part name="Channel1Part"/><part name="BothPart"/></parts></connection>
+                      <connection name="C0" parent="Channel0Part"><parts><part name="C0Tip"/></parts></connection>
+                      <connection name="C0A" tags="laser" parent="C0Tip"/>
+                      <connection name="C0B" tags="laser" parent="C0Tip"/>
+                      <connection name="C1" parent="Channel1Part"><parts><part name="C1Tip"/></parts></connection>
+                      <connection name="C1A" tags="laser" parent="C1Tip"/>
+                      <connection name="C1B" tags="laser" parent="C1Tip"/>
+                      <connection name="Both" parent="BothPart"><parts><part name="BothTip"/></parts></connection>
+                      <connection name="BothA" tags="laser" parent="BothTip"/>
+                      <connection name="BothB" tags="laser" parent="BothTip"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("changing_alpha_macro", "turret", "changing_component"),
+                    ("changing_beta_macro", "turret", "changing_component"),
+                ),
+            )
+            (roots["base"] / "geometry/changing.ANI").write_bytes(
+                _ani_bytes(
+                    ("Channel0Part", "turret_active", 2, 0, 0, 0, 0),
+                    ("Channel1Part", "turret_active", 0, 2, 0, 0, 0),
+                    ("BothPart", "turret_active", 2, 2, 0, 0, 0),
+                    key_data=key_data,
+                )
+            )
+            report = _build_census(
+                roots,
+                roots,
+                expected_turret_active_changing_case_baseline=(3, 2, 2),
+            )[
+                "ancestry_covered_literal_turret_active_candidate_channel_inventory"
+            ]["changing_first_three_stored_values_inventory"]
+            with self.assertRaises(CensusError) as mismatch:
+                _build_census(
+                    roots,
+                    roots,
+                    expected_turret_active_changing_case_baseline=(4, 2, 2),
+                )
+
+        self.assertIn(
+            "accepted_turret_active_changing_case_baseline_mismatch",
+            mismatch.exception.codes,
+        )
+        self.assertEqual(report["cohort_unique_descriptor_count"], 3)
+        self.assertEqual(
+            report["accepted_changing_descriptor_counts"],
+            {"candidate_channel_0": 2, "candidate_channel_1": 2},
+        )
+        self.assertEqual(report["reconciliation_status"], "pass")
+        by_channel = {
+            row["candidate_channel_id"]: row["changing_descriptors"]
+            for row in report["candidate_channels"]
+        }
+        self.assertEqual(
+            [[case["ani_descriptor"]["part"] for case in by_channel[channel]] for channel in by_channel],
+            [["Channel0Part", "BothPart"], ["Channel1Part", "BothPart"]],
+        )
+        self.assertEqual(
+            report["descriptors_changing_in_both_candidate_channels_0_and_1"],
+            [{"component": "changing_component", "descriptor_index": 2, "part": "BothPart", "subname": "turret_active"}],
+        )
+        channel_0_only = next(
+            case for case in by_channel["candidate_channel_0"]
+            if case["ani_descriptor"]["part"] == "Channel0Part"
+        )
+        self.assertEqual(
+            channel_0_only["equipment_macros"],
+            ["changing_alpha_macro", "changing_beta_macro"],
+        )
+        self.assertEqual(channel_0_only["component_connection"], "Root")
+        self.assertEqual(channel_0_only["same_name_ancestor_coverage_relationship"], "same_connection")
+        self.assertEqual(channel_0_only["key_count_family"], [2, 0, 0, 0, 0])
+        self.assertEqual(
+            [item["connection"] for item in channel_0_only["muzzle_endpoint_memberships"]],
+            ["C0A", "C0B"],
+        )
+        self.assertEqual(channel_0_only["muzzle_endpoint_membership_count"], 2)
+        slot_000 = channel_0_only["first_three_slot_changes"][0]
+        self.assertEqual(slot_000["raw_bits_change"], True)
+        self.assertEqual(slot_000["candidate_numeric_values_change"], False)
+        self.assertEqual(slot_000["change_classification"], "stored_representation_only")
+        self.assertEqual(
+            [record["slots"]["slot_000"] for record in channel_0_only["key_records"]],
+            [
+                {"raw_bits": "0x00000000", "candidate_type": "float32_le", "candidate_value": 0.0},
+                {"raw_bits": "0x80000000", "candidate_type": "float32_le", "candidate_value": -0.0},
+            ],
+        )
+        self.assertEqual(
+            list(channel_0_only["key_records"][0]["slots"]),
+            ["slot_000", "slot_004", "slot_008", "slot_012", "slot_016", "slot_020", "slot_024"],
+        )
+        both = next(
+            case for case in by_channel["candidate_channel_0"]
+            if case["ani_descriptor"]["part"] == "BothPart"
+        )
+        self.assertTrue(both["numerically_different_change_occurs"])
+        self.assertEqual(
+            both["first_three_slot_changes"][0]["change_classification"],
+            "numerically_different",
+        )
+        self.assertEqual(
+            len({(case["turret_component_asset"], case["descriptor_index"]) for case in by_channel["candidate_channel_0"]}),
+            2,
+        )
+
     def test_ancestry_covered_turret_active_candidate_channels_are_cohorted_and_bounded(self) -> None:
         def record(
             main: tuple[float, float, float],

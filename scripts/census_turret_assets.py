@@ -68,6 +68,7 @@ _ANI_KEY_RECORD_CANDIDATE_SLOTS = tuple(
     )
 )
 _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES = (0, 1, 2)
+_ACCEPTED_TURRET_ACTIVE_CHANGING_CASE_BASELINE = (444, 2, 2)
 _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS = tuple(
     _ANI_KEY_RECORD_CANDIDATE_SLOTS[index]
     for index in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES
@@ -1109,6 +1110,205 @@ def _build_subname_candidate_channel_inventory(
     }
 
 
+def _candidate_first_three_change_case(
+    descriptor: dict[str, object],
+    relationship: dict[str, object],
+    channel_index: int,
+) -> dict[str, object]:
+    field = _ANI_CHANNEL_COUNT_FIELDS[channel_index]
+    records = _candidate_channel_records(descriptor, field)
+    reported_slot_indexes = tuple(range(7))
+    first_three_slot_changes = []
+    for slot_index in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES:
+        raw_bits = [str(record["raw_bits"][slot_index]) for record in records]
+        candidate_values = [
+            float(record["raw_values"][slot_index]) for record in records
+        ]
+        raw_bits_change = len(set(raw_bits)) > 1
+        candidate_numeric_values_change = any(
+            value != candidate_values[0] for value in candidate_values[1:]
+        )
+        if candidate_numeric_values_change:
+            classification = "numerically_different"
+        elif raw_bits_change:
+            classification = "stored_representation_only"
+        else:
+            classification = "unchanged"
+        first_three_slot_changes.append(
+            {
+                "slot_id": _ANI_KEY_RECORD_CANDIDATE_SLOTS[slot_index]["slot_id"],
+                "raw_bits_change": raw_bits_change,
+                "candidate_numeric_values_change": candidate_numeric_values_change,
+                "change_classification": classification,
+            }
+        )
+
+    return {
+        "evidence_classification": "inference",
+        "semantic_claim": "none",
+        "candidate_channel_id": f"candidate_channel_{channel_index}",
+        "equipment_macros": list(relationship["equipment_macros"]),
+        "turret_component_asset": relationship["component"],
+        "descriptor_index": relationship["descriptor_index"],
+        "ani_descriptor": {
+            "part": relationship["part"],
+            "subname": relationship["literal_subname"],
+        },
+        "component_connection": relationship["source_connection"],
+        "root_to_component_connection_path": list(
+            relationship["root_to_source_connection_path"]
+        ),
+        "same_name_ancestor_coverage_relationship": (
+            "same_connection"
+            if relationship["same_connection_selector"]
+            else "strict_ancestor_distance_"
+            + str(relationship["nearest_ancestor_same_subname_selector_distance"])
+        ),
+        "same_name_selector_relationships": list(
+            relationship["same_subname_selector_relationships"]
+        ),
+        "key_count_family": [
+            int(descriptor["channel_counts"][count_field])
+            for count_field in _ANI_CHANNEL_COUNT_FIELDS
+        ],
+        "muzzle_endpoint_membership_count": relationship[
+            "endpoint_membership_count"
+        ],
+        "muzzle_endpoint_memberships": list(
+            relationship["muzzle_endpoint_memberships"]
+        ),
+        "first_three_slot_changes": first_three_slot_changes,
+        "numerically_different_change_occurs": any(
+            item["change_classification"] == "numerically_different"
+            for item in first_three_slot_changes
+        ),
+        "stored_representation_only_change_occurs": any(
+            item["change_classification"] == "stored_representation_only"
+            for item in first_three_slot_changes
+        ),
+        "key_records": [
+            {
+                "candidate_channel_record_index": local_index,
+                "ani_record_index": record["record_index"],
+                "slots": {
+                    str(_ANI_KEY_RECORD_CANDIDATE_SLOTS[slot_index]["slot_id"]): {
+                        "raw_bits": record["raw_bits"][slot_index],
+                        "candidate_type": _ANI_KEY_RECORD_CANDIDATE_SLOTS[
+                            slot_index
+                        ]["candidate_type"],
+                        "candidate_value": record["raw_values"][slot_index],
+                    }
+                    for slot_index in reported_slot_indexes
+                },
+            }
+            for local_index, record in enumerate(records)
+        ],
+    }
+
+
+def _build_changing_turret_active_case_inventory(
+    cohort: list[
+        tuple[
+            tuple[str, int],
+            dict[str, object],
+            dict[str, object],
+            int,
+        ]
+    ],
+    expected_baseline: tuple[int, int, int] | None,
+) -> dict[str, object]:
+    cases_by_channel: dict[int, list[dict[str, object]]] = {0: [], 1: []}
+    changing_channels_by_identity: dict[tuple[str, int], set[int]] = defaultdict(set)
+    identity_details: dict[tuple[str, int], dict[str, object]] = {}
+    for identity, descriptor, relationship, _ in cohort:
+        identity_details[identity] = relationship
+        for channel_index in (0, 1):
+            records = _candidate_channel_records(
+                descriptor, _ANI_CHANNEL_COUNT_FIELDS[channel_index]
+            )
+            if len(records) <= 1 or _classify_candidate_multi_key_triples(
+                records
+            ) != "changing_raw_bit_triples":
+                continue
+            cases_by_channel[channel_index].append(
+                _candidate_first_three_change_case(
+                    descriptor, relationship, channel_index
+                )
+            )
+            changing_channels_by_identity[identity].add(channel_index)
+
+    for cases in cases_by_channel.values():
+        cases.sort(
+            key=lambda case: (
+                str(case["turret_component_asset"]),
+                int(case["descriptor_index"]),
+            )
+        )
+    actual_counts = tuple(len(cases_by_channel[index]) for index in (0, 1))
+    if expected_baseline is None:
+        reconciliation_status = "not_enforced"
+    else:
+        expected_cohort, expected_channel_0, expected_channel_1 = expected_baseline
+        expected_counts = (expected_channel_0, expected_channel_1)
+        if len(cohort) != expected_cohort or actual_counts != expected_counts:
+            raise CensusError(
+                [
+                    _anomaly(
+                        "accepted_turret_active_changing_case_baseline_mismatch",
+                        "current source does not match the required accepted turret_active changing-case baseline",
+                        expected_cohort_unique_descriptors=expected_cohort,
+                        actual_cohort_unique_descriptors=len(cohort),
+                        expected_candidate_channel_0_descriptors=expected_channel_0,
+                        actual_candidate_channel_0_descriptors=actual_counts[0],
+                        expected_candidate_channel_1_descriptors=expected_channel_1,
+                        actual_candidate_channel_1_descriptors=actual_counts[1],
+                    )
+                ]
+            )
+        reconciliation_status = "pass"
+
+    both_identities = sorted(
+        identity
+        for identity, channels in changing_channels_by_identity.items()
+        if channels == {0, 1}
+    )
+    return {
+        "evidence_classification": "inference",
+        "raw_stored_values_evidence_classification": "shipped-source",
+        "candidate_numeric_decode_evidence_classification": (
+            "third-party-technique"
+        ),
+        "semantic_claim": "none",
+        "cohort_unique_descriptor_count": len(cohort),
+        "accepted_changing_descriptor_counts": {
+            "candidate_channel_0": actual_counts[0],
+            "candidate_channel_1": actual_counts[1],
+        },
+        "reconciliation_status": reconciliation_status,
+        "candidate_channels": [
+            {
+                "candidate_channel_id": f"candidate_channel_{channel_index}",
+                "changing_descriptor_count": len(cases_by_channel[channel_index]),
+                "changing_descriptors": cases_by_channel[channel_index],
+            }
+            for channel_index in (0, 1)
+        ],
+        "descriptors_changing_in_both_candidate_channels_0_and_1": [
+            {
+                "component": identity[0],
+                "descriptor_index": identity[1],
+                "part": identity_details[identity]["part"],
+                "subname": identity_details[identity]["literal_subname"],
+            }
+            for identity in both_identities
+        ],
+        "meaning_boundary": (
+            "stored-value differences and candidate numeric decodes identify"
+            " cases only; their X4 meanings remain unresolved"
+        ),
+    }
+
+
 def _build_ancestry_covered_turret_active_candidate_channel_inventory(
     cohort: list[
         tuple[
@@ -1118,6 +1318,7 @@ def _build_ancestry_covered_turret_active_candidate_channel_inventory(
             int,
         ]
     ],
+    expected_changing_case_baseline: tuple[int, int, int] | None = None,
 ) -> dict[str, object]:
     family_counts: Counter[tuple[int, ...]] = Counter()
     family_memberships: Counter[tuple[int, ...]] = Counter()
@@ -1288,6 +1489,11 @@ def _build_ancestry_covered_turret_active_candidate_channel_inventory(
         ],
         "candidate_channels_3_or_4_occurrence": channel_3_or_4,
         "paranid_l_beam_descriptors_12_and_22": paranid_descriptors,
+        "changing_first_three_stored_values_inventory": (
+            _build_changing_turret_active_case_inventory(
+                cohort, expected_changing_case_baseline
+            )
+        ),
         "proof_scope_boundary": (
             "absence may narrow later proof scope but does not establish runtime"
             " irrelevance; structural coverage does not establish runtime use"
@@ -1298,6 +1504,9 @@ def _build_ancestry_covered_turret_active_candidate_channel_inventory(
 def _build_same_subname_structural_relationship_coverage(
     component_to_macros: list[dict[str, object]],
     firing_endpoints: list[dict[str, object]],
+    expected_turret_active_changing_case_baseline: (
+        tuple[int, int, int] | None
+    ) = None,
 ) -> dict[str, object]:
     """Inventory exact-name selector locations relative to conventional path descriptors."""
 
@@ -1308,6 +1517,9 @@ def _build_same_subname_structural_relationship_coverage(
     }
     membership_counts: Counter[tuple[str, int]] = Counter()
     endpoints_by_descriptor: dict[tuple[str, int], list[str]] = defaultdict(list)
+    endpoint_memberships_by_descriptor: dict[
+        tuple[str, int], list[dict[str, object]]
+    ] = defaultdict(list)
     descriptors: dict[tuple[str, int], dict[str, object]] = {}
     for endpoint in firing_endpoints:
         if endpoint["component_class"] != "turret":
@@ -1317,6 +1529,20 @@ def _build_same_subname_structural_relationship_coverage(
             identity = (component, int(descriptor["descriptor_index"]))
             membership_counts[identity] += 1
             endpoints_by_descriptor[identity].append(str(endpoint["connection"]))
+            endpoint_memberships_by_descriptor[identity].append(
+                {
+                    "connection": str(endpoint["connection"]),
+                    "root_to_endpoint_connection_path": list(
+                        endpoint.get(
+                            "root_to_endpoint_connection_path",
+                            [str(endpoint["connection"])],
+                        )
+                    ),
+                    "descriptor_endpoint_path_edge_index": descriptor.get(
+                        "endpoint_path_edge_index"
+                    ),
+                }
+            )
             descriptors.setdefault(identity, descriptor)
 
     inventory = []
@@ -1434,7 +1660,16 @@ def _build_same_subname_structural_relationship_coverage(
                 (
                     identity,
                     descriptor,
-                    inventory_record,
+                    {
+                        **inventory_record,
+                        "equipment_macros": list(
+                            component_record.get("macros", [])
+                        ),
+                        "muzzle_endpoint_memberships": sorted(
+                            endpoint_memberships_by_descriptor[identity],
+                            key=lambda item: str(item["connection"]),
+                        ),
+                    },
                     membership_counts[identity],
                 )
             )
@@ -1506,7 +1741,8 @@ def _build_same_subname_structural_relationship_coverage(
         },
         "ancestry_covered_literal_turret_active_candidate_channel_inventory": (
             _build_ancestry_covered_turret_active_candidate_channel_inventory(
-                ancestry_covered_turret_active_cohort
+                ancestry_covered_turret_active_cohort,
+                expected_turret_active_changing_case_baseline,
             )
         ),
         "hypothesis_assessment": {
@@ -4113,6 +4349,9 @@ def build_census(
     *,
     anchor_production_formula: dict[str, object] | None = None,
     anchor_trace_spec: dict[str, object] | None = None,
+    expected_turret_active_changing_case_baseline: (
+        tuple[int, int, int] | None
+    ) = None,
 ) -> dict[str, object]:
     """Return a deterministic census or raise CensusError on any unsafe input."""
 
@@ -4910,7 +5149,9 @@ def build_census(
     )
     same_subname_structural_relationship_coverage = (
         _build_same_subname_structural_relationship_coverage(
-            component_to_macros, firing_endpoints
+            component_to_macros,
+            firing_endpoints,
+            expected_turret_active_changing_case_baseline,
         )
     )
     ancestry_covered_turret_active_candidate_channel_inventory = (
@@ -5040,7 +5281,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 21,
+        "schema_version": 22,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -5892,6 +6133,14 @@ def _arguments(argv: Sequence[str] | None) -> argparse.Namespace:
         help="repeat exactly once for each complete official ANI resource root",
     )
     parser.add_argument("--output", type=Path, help="write census JSON here instead of stdout")
+    parser.add_argument(
+        "--require-accepted-turret-active-changing-case-baseline",
+        action="store_true",
+        help=(
+            "fail unless the 444-descriptor turret_active cohort has exactly"
+            " two changing cases in each of candidate channels 0 and 1"
+        ),
+    )
     parser.add_argument("--old79-components", type=Path, help="preserved old 79-component cache")
     parser.add_argument("--platform-sweep", type=Path, help="preserved platform-sweep cache")
     parser.add_argument("--reconciliation-output", type=Path, help="write historical reconciliation JSON here")
@@ -5933,7 +6182,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                 ]
             )
-        report = build_census(source_sets, resource_sets)
+        report = build_census(
+            source_sets,
+            resource_sets,
+            expected_turret_active_changing_case_baseline=(
+                _ACCEPTED_TURRET_ACTIVE_CHANGING_CASE_BASELINE
+                if args.require_accepted_turret_active_changing_case_baseline
+                else None
+            ),
+        )
         reconciliation = (
             build_reconciliation(report, args.old79_components, args.platform_sweep)
             if all(reconciliation_arguments)
