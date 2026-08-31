@@ -141,32 +141,6 @@ def _build_combat_conventional_turret_eligibility(
     ware_records: Sequence[dict[str, object]],
 ) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
     anomalies: list[dict[str, object]] = []
-    if not ware_records:
-        return {
-            "evidence_classification": "shipped-source",
-            "mapping_rule": "exact direct ware/component ref identity equals exact included equipment macro name identity",
-            "purpose_rule": {
-                "no_purpose_token": "COMBAT_CANDIDATE",
-                "exactly_mine_or_salvage": "NONCOMBAT_UTILITY",
-                "missileturret": "MISSILETURRET_EXCLUDED",
-                "other": "UNRESOLVED_FAIL_CLOSED",
-            },
-            "counts": {
-                "combat_candidate_macros": 0,
-                "combat_candidate_unique_components": 0,
-                "noncombat_utility_macros": 0,
-                "noncombat_utility_unique_components": 0,
-                "missileturret_excluded_macros": 0,
-                "missileturret_excluded_unique_components": 0,
-                "unresolved_macros": 0,
-                "unresolved_unique_components": 0,
-            },
-            "observed_conventional_turret_purpose_token_inventory": [],
-            "utility_macros": [],
-            "nonware_macro_exclusions": [],
-            "macro_classifications": [],
-            "required_macro_local_classifications": [],
-        }, []
     included_macros = {record["name"] for record in equipment_macros}
     records_by_macro = {record["name"]: record for record in equipment_macros}
     wares_by_macro: dict[str, list[dict[str, object]]] = defaultdict(list)
@@ -175,29 +149,26 @@ def _build_combat_conventional_turret_eligibility(
             wares_by_macro[str(record["component"])].append(record)
 
     resolved_by_macro: dict[str, dict[str, object]] = {}
-    nonware_macro_exclusions: list[dict[str, object]] = []
-    any_effective_ware_mapping = bool(wares_by_macro)
+    no_ware_by_macro: dict[str, dict[str, object]] = {}
     for macro in sorted(included_macros):
         matches = wares_by_macro.get(macro, [])
         macro_record = records_by_macro[macro]
         if not matches:
-            if not any_effective_ware_mapping:
-                anomalies.append(
-                    _anomaly(
-                        "missing_effective_equipment_ware",
-                        "included equipment macro has no exact effective equipment ware mapping",
-                        macro=macro,
-                        component=macro_record["component"],
-                    )
-                )
-            else:
-                nonware_macro_exclusions.append(
-                    {
-                        "macro": macro,
-                        "macro_class": macro_record["class"],
-                        "component": macro_record["component"],
-                    }
-                )
+            no_ware_by_macro[macro] = {
+                "macro": macro,
+                "macro_class": macro_record["class"],
+                "component": macro_record["component"],
+                "macro_source_set": macro_record["source_set"],
+                "macro_source_file": macro_record["source_file"],
+                "eligibility": "UNRESOLVED",
+                "unresolved_reason": "NO_EXACT_EFFECTIVE_WARE_MAPPING",
+                "evidence": {
+                    "macro_source_set": macro_record["source_set"],
+                    "macro_source_file": macro_record["source_file"],
+                    "component": macro_record["component"],
+                    "macro_class": macro_record["class"],
+                },
+            }
             continue
         malformed = [
             record
@@ -262,31 +233,27 @@ def _build_combat_conventional_turret_eligibility(
         lambda: {"macros": set(), "components": set()}
     )
     for record in sorted(equipment_macros, key=lambda item: item["name"]):
-        if record["name"] not in resolved_by_macro:
+        if record["name"] in no_ware_by_macro:
+            entry = no_ware_by_macro[record["name"]]
+            macro_classifications.append(entry)
+            unresolved_components.add(record["component"])
             continue
         ware = resolved_by_macro[record["name"]]
         tokens = _purpose_tokens(ware["purpose_attributes"])
         if record["class"] == "missileturret":
             eligibility = "MISSILETURRET_EXCLUDED"
+        elif int(ware.get("use_count", 0)) > 1:
+            eligibility = "UNRESOLVED"
+            unresolved_reason = "MULTIPLE_DIRECT_USE_ELEMENTS"
+            unresolved_components.add(record["component"])
         elif not tokens:
             eligibility = "COMBAT_CANDIDATE"
         elif tokens in (["mine"], ["salvage"]):
             eligibility = "NONCOMBAT_UTILITY"
         else:
             eligibility = "UNRESOLVED"
+            unresolved_reason = "UNSUPPORTED_OR_COMBINED_WARE_PURPOSES"
             unresolved_components.add(record["component"])
-            anomalies.append(
-                _anomaly(
-                    "unresolved_conventional_turret_ware_purposes",
-                    "conventional turret effective ware has unsupported, combined, or ambiguous direct purposes",
-                    macro=record["name"],
-                    component=record["component"],
-                    ware=ware["ware"],
-                    purpose_tokens=tokens,
-                    ware_source_set=ware["source_set"],
-                    ware_source_file=ware["source_file"],
-                )
-            )
         if record["class"] == "turret":
             for token in tokens:
                 purpose_inventory[token]["macros"].add(record["name"])
@@ -295,12 +262,19 @@ def _build_combat_conventional_turret_eligibility(
             "macro": record["name"],
             "macro_class": record["class"],
             "component": record["component"],
+            "macro_source_set": record["source_set"],
+            "macro_source_file": record["source_file"],
             "ware": ware["ware"],
             "purpose_tokens": tokens,
+            "direct_use_count": ware["use_count"],
+            "direct_use_records": ware.get("use_records", []),
             "eligibility": eligibility,
             "ware_source_set": ware["source_set"],
             "ware_source_file": ware["source_file"],
         }
+        if eligibility == "UNRESOLVED":
+            entry["unresolved_reason"] = unresolved_reason
+
         macro_classifications.append(entry)
         if eligibility == "NONCOMBAT_UTILITY":
             utility_macros.append(entry)
@@ -320,6 +294,7 @@ def _build_combat_conventional_turret_eligibility(
     combat_macros, combat_components = counted("COMBAT_CANDIDATE", "turret")
     utility_count, utility_components = counted("NONCOMBAT_UTILITY", "turret")
     missile_macros, missile_components = counted("MISSILETURRET_EXCLUDED", "missileturret")
+    unresolved_macros, unresolved_unique_components = counted("UNRESOLVED")
     return {
         "evidence_classification": "shipped-source",
         "mapping_rule": "exact direct ware/component ref identity equals exact included equipment macro name identity",
@@ -336,8 +311,8 @@ def _build_combat_conventional_turret_eligibility(
             "noncombat_utility_unique_components": utility_components,
             "missileturret_excluded_macros": missile_macros,
             "missileturret_excluded_unique_components": missile_components,
-            "unresolved_macros": 0,
-            "unresolved_unique_components": len(unresolved_components),
+            "unresolved_macros": unresolved_macros,
+            "unresolved_unique_components": unresolved_unique_components,
         },
         "observed_conventional_turret_purpose_token_inventory": [
             {
@@ -348,7 +323,15 @@ def _build_combat_conventional_turret_eligibility(
             for token in sorted(purpose_inventory)
         ],
         "utility_macros": utility_macros,
-        "nonware_macro_exclusions": nonware_macro_exclusions,
+        "nonware_macro_exclusions": [],
+        "unresolved_macros": [
+            item for item in macro_classifications if item["eligibility"] == "UNRESOLVED"
+        ],
+        "unresolved_no_ware_macros": [
+            item
+            for item in macro_classifications
+            if item.get("unresolved_reason") == "NO_EXACT_EFFECTIVE_WARE_MAPPING"
+        ],
         "macro_classifications": macro_classifications,
         "required_macro_local_classifications": [
             item
@@ -4714,6 +4697,13 @@ def build_census(
                             "purpose_attributes": [
                                 use.get("purposes") for use in use_children
                             ],
+                            "use_records": [
+                                {
+                                    "purposes": use.get("purposes"),
+                                    "attributes": dict(use.attrib),
+                                }
+                                for use in use_children
+                            ],
                         }
                     )
 
@@ -5553,7 +5543,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 22,
+        "schema_version": 23,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),

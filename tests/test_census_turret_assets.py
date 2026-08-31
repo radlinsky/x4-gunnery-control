@@ -236,13 +236,126 @@ class CensusTests(unittest.TestCase):
                 _write(roots["base"], "assets/components.xml", _components("component_a"))
                 _write(roots["base"], "assets/macros.xml", _macros(("macro_a", "turret", "component_a")))
                 _write(roots["base"], "libraries/wares.xml", _wares(("ware_a", "macro_a", purposes)))
-                with self.assertRaises(CensusError) as caught:
-                    build_census(roots)
-                self.assertIn("unresolved_conventional_turret_ware_purposes", caught.exception.codes)
+
+                report = build_census(roots)
+
+                eligibility = report["combat_conventional_turret_eligibility"]
+                self.assertEqual(eligibility["counts"]["unresolved_macros"], 1)
+                self.assertEqual(
+                    eligibility["unresolved_macros"][0]["unresolved_reason"],
+                    "UNSUPPORTED_OR_COMBINED_WARE_PURPOSES",
+                )
+
+    def test_partial_ware_coverage_accounts_for_unmapped_macros_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(roots["base"], "assets/components.xml", _components("component_a", "component_b"))
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("macro_a", "turret", "component_a"), ("macro_b", "turret", "component_b")),
+            )
+            _write(roots["base"], "libraries/wares.xml", _wares(("ware_a", "macro_a", None)))
+
+            report = build_census(roots)
+
+            eligibility = report["combat_conventional_turret_eligibility"]
+            self.assertEqual(eligibility["counts"]["combat_candidate_macros"], 1)
+            self.assertEqual(eligibility["counts"]["unresolved_macros"], 1)
+            self.assertEqual(len(eligibility["macro_classifications"]), report["counts"]["equipment_macros"])
+            self.assertEqual(eligibility["nonware_macro_exclusions"], [])
+            self.assertEqual(
+                eligibility["unresolved_no_ware_macros"],
+                [
+                    {
+                        "macro": "macro_b",
+                        "macro_class": "turret",
+                        "component": "component_b",
+                        "macro_source_set": "base",
+                        "macro_source_file": "assets/macros.xml",
+                        "eligibility": "UNRESOLVED",
+                        "unresolved_reason": "NO_EXACT_EFFECTIVE_WARE_MAPPING",
+                        "evidence": {
+                            "macro_source_set": "base",
+                            "macro_source_file": "assets/macros.xml",
+                            "component": "component_b",
+                            "macro_class": "turret",
+                        },
+                    }
+                ],
+            )
+
+    def test_multiple_direct_use_elements_are_ambiguous_fail_closed(self) -> None:
+        cases = (
+            (
+                "mixed_restricted_unrestricted",
+                "<wares><ware id='ware_a'><component ref='macro_a'/><use purposes='mine'/><use/></ware></wares>",
+                ["mine"],
+            ),
+            (
+                "all_unrestricted",
+                "<wares><ware id='ware_a'><component ref='macro_a'/><use/><use/></ware></wares>",
+                [],
+            ),
+        )
+        for label, wares_xml, tokens in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(roots["base"], "assets/components.xml", _components("component_a"))
+                _write(roots["base"], "assets/macros.xml", _macros(("macro_a", "turret", "component_a")))
+                _write(roots["base"], "libraries/wares.xml", wares_xml)
+
+                report = build_census(roots)
+
+                entry = report["combat_conventional_turret_eligibility"]["macro_classifications"][0]
+                self.assertEqual(entry["eligibility"], "UNRESOLVED")
+                self.assertEqual(entry["unresolved_reason"], "MULTIPLE_DIRECT_USE_ELEMENTS")
+                self.assertEqual(entry["purpose_tokens"], tokens)
+                self.assertEqual(entry["direct_use_count"], 2)
+
+    def test_total_eligibility_classifications_equal_included_macros(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="component_a" class="turret"><source geometry="geometry/component_a"/><connections><connection name="Endpoint" tags="laser"/></connections></component>
+                  <component name="component_b" class="turret"><source geometry="geometry/component_b"/><connections><connection name="Endpoint" tags="laser"/></connections></component>
+                  <component name="component_z" class="missileturret"><source geometry="geometry/component_z"/><connections><connection name="Endpoint" tags="rocket"/></connections></component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("macro_a", "turret", "component_a"),
+                    ("macro_b", "turret", "component_b"),
+                    ("macro_z", "missileturret", "component_z"),
+                ),
+            )
+            _write(
+                roots["base"],
+                "libraries/wares.xml",
+                _wares(("ware_a", "macro_a", None), ("ware_z", "macro_z", "missile")),
+            )
+
+            report = build_census(roots)
+
+            classifications = report["combat_conventional_turret_eligibility"]["macro_classifications"]
+            self.assertEqual(len(classifications), report["counts"]["equipment_macros"])
+            self.assertEqual(
+                sum(report["combat_conventional_turret_eligibility"]["counts"][key] for key in (
+                    "combat_candidate_macros",
+                    "noncombat_utility_macros",
+                    "missileturret_excluded_macros",
+                    "unresolved_macros",
+                )),
+                report["counts"]["equipment_macros"],
+            )
 
     def test_effective_ware_mapping_failures_are_closed(self) -> None:
         cases = (
-            ("missing", _wares(("ware_other", "other_macro", None)), "missing_effective_equipment_ware"),
             ("duplicate", _wares(("ware_a", "macro_a", None), ("ware_a", "macro_a", None)), "duplicate_effective_equipment_ware_mapping"),
             ("conflicting", _wares(("ware_a", "macro_a", None), ("ware_b", "macro_a", "mine")), "conflicting_effective_equipment_ware_mapping"),
             ("malformed", "<wares><ware><component ref='macro_a'/></ware></wares>", "malformed_effective_equipment_ware"),
