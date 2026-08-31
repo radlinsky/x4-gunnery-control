@@ -12,6 +12,7 @@ before relying on any claim.
 | MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
+| Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
 | Live tests and observations | [testing-experiments.md](testing-experiments.md) | Promotion rules and regression matrix |
 
 Search these references before adding a record. Keep one primary source per
