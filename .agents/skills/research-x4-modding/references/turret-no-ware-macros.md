@@ -11,8 +11,8 @@ spelling is never used as evidence.
 ## `turret_xen_l_laser_01_mk1_scenario_macro` — COMBAT_CANDIDATE
 
 Identity: macro `turret_xen_l_laser_01_mk1_scenario_macro`; component
-`turret_xen_l_laser_01_mk1`; source set `base`; A3 census reason
-`no_exact_equipment_ware`.
+`turret_xen_l_laser_01_mk1`; source set `base`; A3 census reason as emitted by the current classifier
+(at commit `a9f215f`): `no_exact_equipment_ware`.
 
 Result: **COMBAT_CANDIDATE** — the macro's own authored records identify it
 as a conventional weapon turret declaring a damaging long-range weapon, and
@@ -66,8 +66,10 @@ nothing in its authored context expresses a non-combat purpose.
 - Source: `base/assets/props/WeaponSystems/standard/macros/turret_xen_l_laser_01_mk1_macro.xml`; `base/libraries/wares.xml`
 - Live test: no — untested as of 2026-08-31
 - Finding: The standard macro on the same component is a COMBAT_CANDIDATE in
-  the A3 census through its ware's no-`purposes` dual-`<use>` entries. Shared
-  component identity corroborates the result only; it is not its basis.
+  the current A3 census (as of commit `a9f215f`, after the multi-`<use>`
+  no-`purposes` rule) through its ware's no-`purposes` dual-`<use>` entries.
+  Shared component identity corroborates the result only; it is not its
+  basis.
 
 ### Limitations
 - COMBAT_CANDIDATE is a kind-level eligibility statement from the macro's and
@@ -80,6 +82,11 @@ nothing in its authored context expresses a non-combat purpose.
   this macro because the purpose channel it reads is the equipment ware; this
   entry records that the macro's own authored records supply kind-level
   evidence the ware channel cannot reach.
+- The cached A3 baseline artifact
+  `.x4-research-cache/issue72-a3-correction-census.json` predates the
+  multi-`<use>` rule (it records the standard macro UNRESOLVED) and spells
+  the no-ware reason `NO_EXACT_EFFECTIVE_WARE_MAPPING`; the current
+  classifier at `a9f215f` emits `no_exact_equipment_ware`.
 
 ### Candidate rule (inference; not applied to any other macro)
 - X4: 9.00
