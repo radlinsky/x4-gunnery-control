@@ -14,8 +14,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from census_turret_assets import (  # noqa: E402
+    AniDescriptorError,
     CensusError,
     REQUIRED_SOURCE_SETS,
+    _parse_ani_descriptors,
     _derive_endpoint_source_paths,
     build_census as _build_census,
     build_reconciliation,
@@ -30,11 +32,14 @@ def _ani_bytes(
     header_padding: int = 0,
     key_offset: int | None = None,
     descriptor_padding: tuple[int, int] = (0, 0),
+    key_data: bytes | None = None,
 ) -> bytes:
     records = []
+    total_key_records = 0
     for descriptor in descriptors:
         part, subname = descriptor[:2]
         channel_counts = descriptor[2:] or (0, 0, 0, 0, 0)
+        total_key_records += sum(channel_counts)
         part_bytes = part.encode("ascii")
         subname_bytes = subname.encode("ascii")
         if len(part_bytes) > 63 or len(subname_bytes) > 63:
@@ -47,13 +52,22 @@ def _ani_bytes(
             )
         )
     descriptor_table = b"".join(records)
-    return struct.pack(
-        "<4I",
-        len(descriptors),
-        16 + len(descriptor_table) if key_offset is None else key_offset,
-        version,
-        header_padding,
-    ) + descriptor_table
+    if key_data is None:
+        key_data = b"".join(
+            bytes([(record_index % 251) + 1]) * 128
+            for record_index in range(total_key_records)
+        )
+    return (
+        struct.pack(
+            "<4I",
+            len(descriptors),
+            16 + len(descriptor_table) if key_offset is None else key_offset,
+            version,
+            header_padding,
+        )
+        + descriptor_table
+        + key_data
+    )
 
 
 def _source_roots(root: Path) -> dict[str, Path]:
@@ -417,19 +431,31 @@ class CensusTests(unittest.TestCase):
             report = build_census(roots)
             component = report["component_to_macros"][0]
             self.assertEqual(
-                component["ani_descriptors"],
                 [
                     {
-                        "part": "Part_CASE",
-                        "subname": "Sub_CASE",
-                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
+                        key: descriptor[key]
+                        for key in (
+                            "descriptor_index",
+                            "part",
+                            "subname",
+                            "source_connection",
+                            "root_to_source_connection_path",
+                        )
+                    }
+                    for descriptor in component["ani_descriptors"]
+                ],
+                [
+                    {
+                        "descriptor_index": 0,
+                        "part": "SharedPart",
+                        "subname": "SharedSub",
                         "source_connection": "Conn_A",
                         "root_to_source_connection_path": ["Conn_A"],
                     },
                     {
-                        "part": "SharedPart",
-                        "subname": "SharedSub",
-                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
+                        "descriptor_index": 1,
+                        "part": "Part_CASE",
+                        "subname": "Sub_CASE",
                         "source_connection": "Conn_A",
                         "root_to_source_connection_path": ["Conn_A"],
                     },
@@ -590,19 +616,31 @@ class CensusTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(
-                component["ani_descriptors"],
                 [
                     {
+                        key: descriptor[key]
+                        for key in (
+                            "descriptor_index",
+                            "part",
+                            "subname",
+                            "source_connection",
+                            "root_to_source_connection_path",
+                        )
+                    }
+                    for descriptor in component["ani_descriptors"]
+                ],
+                [
+                    {
+                        "descriptor_index": 0,
                         "part": "BarrelPart",
                         "subname": "Sub_CASE",
-                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Grand",
                         "root_to_source_connection_path": ["Root", "Child", "Grand"],
                     },
                     {
+                        "descriptor_index": 1,
                         "part": "BasePart",
                         "subname": "RootSub",
-                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Root",
                         "root_to_source_connection_path": ["Root"],
                     },
@@ -958,24 +996,27 @@ class CensusTests(unittest.TestCase):
             )
             self.assertEqual(endpoint_a["source_part_path"], ["SharedPart", "BranchAPart"])
             self.assertEqual(
-                endpoint_a["ani_descriptor_memberships"],
                 [
-                    {
-                        "part": "SharedPart",
-                        "subname": "SharedSub",
-                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
-                        "source_connection": "Root",
-                        "root_to_source_connection_path": ["Root"],
-                        "endpoint_path_edge_index": 0,
-                    },
-                    {
-                        "part": "BranchAPart",
-                        "subname": "SameSub",
-                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
-                        "source_connection": "SharedNode",
-                        "root_to_source_connection_path": ["Root", "SharedNode"],
-                        "endpoint_path_edge_index": 1,
-                    },
+                    (
+                        descriptor["descriptor_index"],
+                        descriptor["part"],
+                        descriptor["subname"],
+                        descriptor["source_connection"],
+                        descriptor["root_to_source_connection_path"],
+                        descriptor["endpoint_path_edge_index"],
+                    )
+                    for descriptor in endpoint_a["ani_descriptor_memberships"]
+                ],
+                [
+                    (0, "SharedPart", "SharedSub", "Root", ["Root"], 0),
+                    (
+                        1,
+                        "BranchAPart",
+                        "SameSub",
+                        "SharedNode",
+                        ["Root", "SharedNode"],
+                        1,
+                    ),
                 ],
             )
             self.assertEqual(
@@ -1095,8 +1136,8 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(
                 [(item["part"], item["subname"]) for item in endpoint["unselected_ani_descriptor_memberships"]],
                 [
-                    ("PathPart", "NoSelector"),
                     ("PathPart", "exactselector"),
+                    ("PathPart", "NoSelector"),
                 ],
             )
             self.assertNotIn(
@@ -1144,6 +1185,117 @@ class CensusTests(unittest.TestCase):
             )
             self.assertEqual(report["unresolved_endpoint_path_animation_selectors"], [])
             self.assertEqual(render_json(report), render_json(build_census(roots)))
+
+    def test_ani_key_ranges_follow_descriptor_table_and_channel_count_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mixed.ANI"
+            path.write_bytes(
+                _ani_bytes(
+                    ("ZuluPart", "Second", 1, 0, 1, 0, 0),
+                    ("AlphaPart", "First", 0, 2, 0, 0, 1),
+                )
+            )
+
+            descriptors = _parse_ani_descriptors(path)
+
+            self.assertEqual(
+                [(item["descriptor_index"], item["part"]) for item in descriptors],
+                [(0, "ZuluPart"), (1, "AlphaPart")],
+            )
+            self.assertEqual(
+                descriptors[0]["key_data"],
+                {
+                    "record_range": {"start": 0, "end_exclusive": 2},
+                    "byte_range": {"start": 336, "end_exclusive": 592},
+                    "channels": {
+                        "position": {
+                            "record_count": 1,
+                            "record_range": {"start": 0, "end_exclusive": 1},
+                            "byte_range": {"start": 336, "end_exclusive": 464},
+                        },
+                        "rotation": {
+                            "record_count": 0,
+                            "record_range": {"start": 1, "end_exclusive": 1},
+                            "byte_range": {"start": 464, "end_exclusive": 464},
+                        },
+                        "scale": {
+                            "record_count": 1,
+                            "record_range": {"start": 1, "end_exclusive": 2},
+                            "byte_range": {"start": 464, "end_exclusive": 592},
+                        },
+                        "pre_scale": {
+                            "record_count": 0,
+                            "record_range": {"start": 2, "end_exclusive": 2},
+                            "byte_range": {"start": 592, "end_exclusive": 592},
+                        },
+                        "post_scale": {
+                            "record_count": 0,
+                            "record_range": {"start": 2, "end_exclusive": 2},
+                            "byte_range": {"start": 592, "end_exclusive": 592},
+                        },
+                    },
+                },
+            )
+            self.assertEqual(
+                descriptors[1]["key_data"],
+                {
+                    "record_range": {"start": 2, "end_exclusive": 5},
+                    "byte_range": {"start": 592, "end_exclusive": 976},
+                    "channels": {
+                        "position": {
+                            "record_count": 0,
+                            "record_range": {"start": 2, "end_exclusive": 2},
+                            "byte_range": {"start": 592, "end_exclusive": 592},
+                        },
+                        "rotation": {
+                            "record_count": 2,
+                            "record_range": {"start": 2, "end_exclusive": 4},
+                            "byte_range": {"start": 592, "end_exclusive": 848},
+                        },
+                        "scale": {
+                            "record_count": 0,
+                            "record_range": {"start": 4, "end_exclusive": 4},
+                            "byte_range": {"start": 848, "end_exclusive": 848},
+                        },
+                        "pre_scale": {
+                            "record_count": 0,
+                            "record_range": {"start": 4, "end_exclusive": 4},
+                            "byte_range": {"start": 848, "end_exclusive": 848},
+                        },
+                        "post_scale": {
+                            "record_count": 1,
+                            "record_range": {"start": 4, "end_exclusive": 5},
+                            "byte_range": {"start": 848, "end_exclusive": 976},
+                        },
+                    },
+                },
+            )
+
+    def test_ani_key_section_wrong_width_truncation_and_extra_bytes_fail_closed(self) -> None:
+        cases = (
+            (
+                "truncated_record",
+                _ani_bytes(("Part", "Sub", 1, 0, 0, 0, 0), key_data=b"x" * 127),
+                "truncated_ani_key_section",
+            ),
+            (
+                "impossible_count",
+                _ani_bytes(("Part", "Sub", 0xFFFFFFFF, 0, 0, 0, 0), key_data=b""),
+                "truncated_ani_key_section",
+            ),
+            (
+                "unconsumed_byte",
+                _ani_bytes(("Part", "Sub"), key_data=b"x"),
+                "unconsumed_ani_key_section",
+            ),
+        )
+        for label, data, code in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "invalid.ANI"
+                path.write_bytes(data)
+                with self.assertRaises(AniDescriptorError) as caught:
+                    _parse_ani_descriptors(path)
+                self.assertEqual(caught.exception.code, code)
 
     def test_selected_descriptor_channel_count_families_are_preserved_and_separated(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1202,8 +1354,8 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(
                 [descriptor["channel_counts"] for descriptor in conventional["ani_descriptors"]],
                 [
-                    {"position": 0, "rotation": 1, "scale": 2, "pre_scale": 3, "post_scale": 4},
                     {"position": 3, "rotation": 4, "scale": 0, "pre_scale": 0, "post_scale": 0},
+                    {"position": 0, "rotation": 1, "scale": 2, "pre_scale": 3, "post_scale": 4},
                 ],
             )
             self.assertEqual(
@@ -1223,6 +1375,57 @@ class CensusTests(unittest.TestCase):
                     "channel_counts"
                 ],
                 {"position": 8, "rotation": 7, "scale": 6, "pre_scale": 5, "post_scale": 4},
+            )
+            self.assertEqual(
+                [descriptor["descriptor_index"] for descriptor in conventional["ani_descriptors"]],
+                [0, 1],
+            )
+            self.assertEqual(
+                conventional["firing_endpoints"][0]["selected_ani_descriptor_memberships"][0][
+                    "key_data"
+                ],
+                conventional["ani_descriptors"][0]["key_data"],
+            )
+            self.assertEqual(
+                report["selected_endpoint_path_descriptor_key_data_accounting"],
+                {
+                    "conventional": {
+                        "selected_descriptor_memberships": 4,
+                        "opaque_key_records": 34,
+                        "opaque_key_bytes": 4352,
+                    },
+                    "missileturret": {
+                        "selected_descriptor_memberships": 1,
+                        "opaque_key_records": 30,
+                        "opaque_key_bytes": 3840,
+                    },
+                },
+            )
+            self.assertEqual(
+                report["ani_key_data_framing"],
+                {
+                    "record_size_bytes": 128,
+                    "descriptor_order": "descriptor table index order",
+                    "channel_order": [
+                        "position",
+                        "rotation",
+                        "scale",
+                        "pre_scale",
+                        "post_scale",
+                    ],
+                    "key_section_termination": "exactly at end of file",
+                    "third_party_lead": {
+                        "evidence_classification": "third-party-technique",
+                        "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
+                    },
+                    "shipped_source_corroboration": {
+                        "evidence_classification": "shipped-source",
+                        "x4_version": "9.00",
+                        "linked_ani_resources": 2,
+                        "resources_with_exact_framing": 2,
+                        "exceptions": [],
+                    },
+                },
             )
             self.assertEqual(
                 report["selected_endpoint_path_descriptor_channel_count_families"],

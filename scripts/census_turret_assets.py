@@ -2,10 +2,10 @@
 """Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
 This tool stops at exact authored connection paths, firing-endpoint connection
-identities, ANI descriptor/source-part identity, and descriptor channel counts.
-It does not parse ANI keyframes or channel values, or interpret transforms,
-pivots, axes, joints, descriptor relevance, active pose, or prospective muzzle
-position.
+identities, ANI descriptor/source-part identity, descriptor channel counts, and
+opaque ANI key-record byte ownership. It does not parse key-record payloads or
+interpret transforms, timing, interpolation, pivots, axes, joints, descriptor
+relevance, active pose, or prospective muzzle position.
 """
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ _INCLUDED_CLASSES = frozenset(("turret", "missileturret"))
 _ANI_HEADER_SIZE = 16
 _ANI_DESCRIPTOR_SIZE = 160
 _ANI_STRING_SIZE = 64
+_ANI_KEY_RECORD_SIZE = 128
 _ANI_CHANNEL_COUNT_FIELDS = (
     "position",
     "rotation",
@@ -225,7 +226,7 @@ def _decode_ani_descriptor_string(
 
 
 def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
-    """Parse only the current ANI v1 header and fixed descriptor table."""
+    """Parse ANI v1 descriptors and assign opaque fixed key-record ranges."""
 
     try:
         data = path.read_bytes()
@@ -297,9 +298,87 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
             )
         seen.add(identity)
         descriptors.append(
-            {"part": part, "subname": subname, "channel_counts": channel_counts}
+            {
+                "descriptor_index": index,
+                "part": part,
+                "subname": subname,
+                "channel_counts": channel_counts,
+            }
         )
-    return sorted(descriptors, key=lambda item: (item["part"], item["subname"]))
+
+    total_key_records = sum(
+        int(descriptor["channel_counts"][field])
+        for descriptor in descriptors
+        for field in _ANI_CHANNEL_COUNT_FIELDS
+    )
+    expected_file_size = key_offset + total_key_records * _ANI_KEY_RECORD_SIZE
+    if expected_file_size > len(data):
+        raise AniDescriptorError(
+            "truncated_ani_key_section",
+            "ANI key section is shorter than its descriptor channel counts require",
+            key_offset=key_offset,
+            key_record_size=_ANI_KEY_RECORD_SIZE,
+            expected_key_records=total_key_records,
+            expected_file_size=expected_file_size,
+            file_size=len(data),
+        )
+    if expected_file_size < len(data):
+        raise AniDescriptorError(
+            "unconsumed_ani_key_section",
+            "ANI contains bytes outside the uniquely framed descriptor key records",
+            key_offset=key_offset,
+            key_record_size=_ANI_KEY_RECORD_SIZE,
+            expected_key_records=total_key_records,
+            expected_file_size=expected_file_size,
+            file_size=len(data),
+            unconsumed_bytes=len(data) - expected_file_size,
+        )
+
+    key_record_cursor = 0
+    byte_cursor = key_offset
+    for descriptor in descriptors:
+        descriptor_record_start = key_record_cursor
+        descriptor_byte_start = byte_cursor
+        channels: dict[str, object] = {}
+        for field in _ANI_CHANNEL_COUNT_FIELDS:
+            record_count = int(descriptor["channel_counts"][field])
+            record_start = key_record_cursor
+            byte_start = byte_cursor
+            key_record_cursor += record_count
+            byte_cursor += record_count * _ANI_KEY_RECORD_SIZE
+            channels[field] = {
+                "record_count": record_count,
+                "record_range": {
+                    "start": record_start,
+                    "end_exclusive": key_record_cursor,
+                },
+                "byte_range": {
+                    "start": byte_start,
+                    "end_exclusive": byte_cursor,
+                },
+            }
+        descriptor["key_data"] = {
+            "record_range": {
+                "start": descriptor_record_start,
+                "end_exclusive": key_record_cursor,
+            },
+            "byte_range": {
+                "start": descriptor_byte_start,
+                "end_exclusive": byte_cursor,
+            },
+            "channels": channels,
+        }
+
+    if key_record_cursor != total_key_records or byte_cursor != len(data):
+        raise AniDescriptorError(
+            "unsupported_ani_key_framing",
+            "ANI key-record ranges do not form one exact non-overlapping file span",
+            assigned_key_records=key_record_cursor,
+            expected_key_records=total_key_records,
+            assigned_file_end=byte_cursor,
+            file_size=len(data),
+        )
+    return descriptors
 
 
 def _direct_children(element: ET.Element, tag: str) -> list[ET.Element]:
@@ -766,9 +845,11 @@ def _derive_endpoint_source_paths(
                     continue
                 memberships.append(
                     {
+                        "descriptor_index": descriptor["descriptor_index"],
                         "part": descriptor["part"],
                         "subname": descriptor["subname"],
                         "channel_counts": descriptor["channel_counts"],
+                        "key_data": descriptor["key_data"],
                         "source_connection": descriptor["source_connection"],
                         "root_to_source_connection_path": descriptor[
                             "root_to_source_connection_path"
@@ -1343,9 +1424,11 @@ def build_census(
                                 continue
                             joined_descriptors.append(
                                 {
+                                    "descriptor_index": descriptor["descriptor_index"],
                                     "part": part,
                                     "subname": descriptor["subname"],
                                     "channel_counts": descriptor["channel_counts"],
+                                    "key_data": descriptor["key_data"],
                                     "source_connection": owner,
                                     "root_to_source_connection_path": connection_paths[owner],
                                 }
@@ -1571,6 +1654,23 @@ def build_census(
         )
         for component_class in sorted(_INCLUDED_CLASSES)
     }
+    selected_key_data_accounting_by_class = {}
+    for component_class in sorted(_INCLUDED_CLASSES):
+        memberships = [
+            descriptor
+            for endpoint, descriptor in selected_endpoint_path_descriptor_memberships
+            if endpoint["component_class"] == component_class
+        ]
+        key_records = sum(
+            int(descriptor["key_data"]["record_range"]["end_exclusive"])
+            - int(descriptor["key_data"]["record_range"]["start"])
+            for descriptor in memberships
+        )
+        selected_key_data_accounting_by_class[component_class] = {
+            "selected_descriptor_memberships": len(memberships),
+            "opaque_key_records": key_records,
+            "opaque_key_bytes": key_records * _ANI_KEY_RECORD_SIZE,
+        }
 
     def render_channel_count_families(
         families: Counter[tuple[int, ...]],
@@ -1643,7 +1743,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 10,
+        "schema_version": 11,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -1789,6 +1889,27 @@ def build_census(
             str(key): selected_descriptor_counts_by_endpoint[key]
             for key in sorted(selected_descriptor_counts_by_endpoint)
         },
+        "ani_key_data_framing": {
+            "record_size_bytes": _ANI_KEY_RECORD_SIZE,
+            "descriptor_order": "descriptor table index order",
+            "channel_order": list(_ANI_CHANNEL_COUNT_FIELDS),
+            "key_section_termination": "exactly at end of file",
+            "third_party_lead": {
+                "evidence_classification": "third-party-technique",
+                "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
+            },
+            "shipped_source_corroboration": {
+                "evidence_classification": "shipped-source",
+                "x4_version": "9.00",
+                "linked_ani_resources": len(
+                    ani_resource_to_geometry_sources_components
+                ),
+                "resources_with_exact_framing": len(
+                    ani_resource_to_geometry_sources_components
+                ),
+                "exceptions": [],
+            },
+        },
         "selected_endpoint_path_descriptor_channel_count_families": {
             "conventional": render_channel_count_families(
                 selected_channel_count_families_by_class["turret"]
@@ -1796,6 +1917,12 @@ def build_census(
             "missileturret": render_channel_count_families(
                 selected_channel_count_families_by_class["missileturret"]
             ),
+        },
+        "selected_endpoint_path_descriptor_key_data_accounting": {
+            "conventional": selected_key_data_accounting_by_class["turret"],
+            "missileturret": selected_key_data_accounting_by_class[
+                "missileturret"
+            ],
         },
         "endpoint_paths_by_selected_descriptor_cardinality": {
             "zero": selected_descriptor_counts_by_endpoint[0],
