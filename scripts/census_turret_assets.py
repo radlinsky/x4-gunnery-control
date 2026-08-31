@@ -243,9 +243,12 @@ def _build_combat_conventional_turret_eligibility(
         if record["class"] == "missileturret":
             eligibility = "MISSILETURRET_EXCLUDED"
         elif int(ware.get("use_count", 0)) > 1:
-            eligibility = "UNRESOLVED"
-            unresolved_reason = "MULTIPLE_DIRECT_USE_ELEMENTS"
-            unresolved_components.add(record["component"])
+            if not tokens:
+                eligibility = "COMBAT_CANDIDATE"
+            else:
+                eligibility = "UNRESOLVED"
+                unresolved_reason = "MULTIPLE_DIRECT_USE_ELEMENTS"
+                unresolved_components.add(record["component"])
         elif not tokens:
             eligibility = "COMBAT_CANDIDATE"
         elif tokens in (["mine"], ["salvage"]):

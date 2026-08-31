@@ -285,20 +285,31 @@ class CensusTests(unittest.TestCase):
                 ],
             )
 
-    def test_multiple_direct_use_elements_are_ambiguous_fail_closed(self) -> None:
+    def test_multiple_direct_use_elements_resolve_by_purposes_attribute(self) -> None:
         cases = (
             (
                 "mixed_restricted_unrestricted",
                 "<wares><ware id='ware_a'><component ref='macro_a'/><use purposes='mine'/><use/></ware></wares>",
+                "UNRESOLVED",
                 ["mine"],
+                "MULTIPLE_DIRECT_USE_ELEMENTS",
             ),
             (
                 "all_unrestricted",
                 "<wares><ware id='ware_a'><component ref='macro_a'/><use/><use/></ware></wares>",
+                "COMBAT_CANDIDATE",
                 [],
+                None,
+            ),
+            (
+                "factions_only_entries",
+                "<wares><ware id='ware_a'><component ref='macro_a'/><use threshold='0' factions='xenon'/><use threshold='0' factions='player'/></ware></wares>",
+                "COMBAT_CANDIDATE",
+                [],
+                None,
             ),
         )
-        for label, wares_xml, tokens in cases:
+        for label, wares_xml, eligibility, tokens, reason in cases:
             with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
                 roots = _source_roots(Path(tmp))
                 _write(roots["base"], "assets/components.xml", _components("component_a"))
@@ -308,10 +319,13 @@ class CensusTests(unittest.TestCase):
                 report = build_census(roots)
 
                 entry = report["combat_conventional_turret_eligibility"]["macro_classifications"][0]
-                self.assertEqual(entry["eligibility"], "UNRESOLVED")
-                self.assertEqual(entry["unresolved_reason"], "MULTIPLE_DIRECT_USE_ELEMENTS")
+                self.assertEqual(entry["eligibility"], eligibility)
                 self.assertEqual(entry["purpose_tokens"], tokens)
                 self.assertEqual(entry["direct_use_count"], 2)
+                if reason is None:
+                    self.assertNotIn("unresolved_reason", entry)
+                else:
+                    self.assertEqual(entry["unresolved_reason"], reason)
 
     def test_total_eligibility_classifications_equal_included_macros(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
