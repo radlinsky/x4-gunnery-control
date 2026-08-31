@@ -295,6 +295,13 @@ class CensusTests(unittest.TestCase):
                 "MULTIPLE_DIRECT_USE_ELEMENTS",
             ),
             (
+                "empty_purposes_attribute",
+                "<wares><ware id='ware_a'><component ref='macro_a'/><use purposes=''/><use/></ware></wares>",
+                "UNRESOLVED",
+                [],
+                "MULTIPLE_DIRECT_USE_ELEMENTS",
+            ),
+            (
                 "all_unrestricted",
                 "<wares><ware id='ware_a'><component ref='macro_a'/><use/><use/></ware></wares>",
                 "COMBAT_CANDIDATE",

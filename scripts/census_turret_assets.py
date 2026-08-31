@@ -243,7 +243,7 @@ def _build_combat_conventional_turret_eligibility(
         if record["class"] == "missileturret":
             eligibility = "MISSILETURRET_EXCLUDED"
         elif int(ware.get("use_count", 0)) > 1:
-            if not tokens:
+            if not any(value is not None for value in ware["purpose_attributes"]):
                 eligibility = "COMBAT_CANDIDATE"
             else:
                 eligibility = "UNRESOLVED"
