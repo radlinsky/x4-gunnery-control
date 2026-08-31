@@ -17,6 +17,7 @@ from census_turret_assets import (  # noqa: E402
     AniDescriptorError,
     CensusError,
     REQUIRED_SOURCE_SETS,
+    _ANI_KEY_RECORD_CANDIDATE_SLOTS,
     _parse_ani_descriptors,
     _derive_endpoint_source_paths,
     build_census as _build_census,
@@ -68,6 +69,12 @@ def _ani_bytes(
         + descriptor_table
         + key_data
     )
+
+
+def _candidate_key_record(values: tuple[float | int, ...]) -> bytes:
+    if len(values) != 32:
+        raise ValueError("candidate ANI key record requires exactly 32 typed slots")
+    return struct.pack("<3f3if17fi6fI", *values)
 
 
 def _source_roots(root: Path) -> dict[str, Path]:
@@ -1270,6 +1277,213 @@ class CensusTests(unittest.TestCase):
                     },
                 },
             )
+
+    def test_candidate_key_record_slot_map_covers_all_128_bytes_and_parses_raw_values(self) -> None:
+        expected_types = (
+            ["float32_le"] * 3
+            + ["enum32_le"] * 3
+            + ["float32_le"] * 18
+            + ["int32_le"]
+            + ["float32_le"] * 6
+            + ["uint32_le"]
+        )
+        self.assertEqual(len(_ANI_KEY_RECORD_CANDIDATE_SLOTS), 32)
+        self.assertEqual(
+            [slot["byte_offset"] for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS],
+            list(range(0, 128, 4)),
+        )
+        self.assertEqual(
+            [slot["width_bytes"] for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS],
+            [4] * 32,
+        )
+        self.assertEqual(
+            [slot["candidate_type"] for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS],
+            expected_types,
+        )
+        self.assertEqual(
+            sum(int(slot["width_bytes"]) for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS),
+            128,
+        )
+
+        values = tuple(
+            float(index) if candidate_type == "float32_le" else index
+            for index, candidate_type in enumerate(expected_types)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "typed.ANI"
+            path.write_bytes(
+                _ani_bytes(
+                    ("Part", "Sub", 1, 0, 0, 0, 0),
+                    key_data=_candidate_key_record(values),
+                )
+            )
+            descriptor = _parse_ani_descriptors(path)[0]
+
+        raw_record = descriptor["_candidate_raw_key_records"][0]
+        self.assertEqual(raw_record["record_index"], 0)
+        self.assertEqual(raw_record["byte_offset"], 176)
+        self.assertEqual(raw_record["raw_values"], list(values))
+
+    def test_selected_raw_slot_distributions_are_unique_separate_and_nonsemantic(self) -> None:
+        conventional_first = [0] * 32
+        conventional_second = [0] * 32
+        conventional_second[0] = -0.0
+        conventional_second[1] = 2.5
+        conventional_second[3] = 7
+        conventional_second[24] = -2
+        conventional_second[31] = 9
+        missile_values = [0] * 32
+        missile_values[0] = float("nan")
+        missile_values[1] = float("inf")
+        missile_values[3] = -4
+        missile_values[31] = 0xFFFFFFFF
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional_component" class="turret">
+                    <source geometry="geometry/component_a"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="PathPart"/></parts></connection>
+                      <connection name="EndpointA" tags="laser" parent="PathPart"/>
+                      <connection name="EndpointB" tags="laser" parent="PathPart"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/component_b"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="MissilePart"/></parts></connection>
+                      <connection name="Endpoint" tags="rocket" parent="MissilePart"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_macro", "turret", "conventional_component"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(
+                    ("PathPart", "Selected", 2, 0, 0, 0, 0),
+                    key_data=(
+                        _candidate_key_record(tuple(conventional_first))
+                        + _candidate_key_record(tuple(conventional_second))
+                    ),
+                )
+            )
+            (roots["base"] / "geometry/component_b.ANI").write_bytes(
+                _ani_bytes(
+                    ("MissilePart", "Selected", 0, 1, 0, 0, 0),
+                    key_data=_candidate_key_record(tuple(missile_values)),
+                )
+            )
+            inventory = build_census(roots)["ani_key_record_field_inventory"]
+
+        layout = inventory["candidate_slot_layout"]
+        self.assertEqual(layout["evidence_classification"], "third-party-technique")
+        self.assertEqual(layout["record_size_bytes"], 128)
+        self.assertEqual(layout["covered_byte_range"], {"start": 0, "end_exclusive": 128})
+        self.assertEqual(layout["unaccounted_bytes"], [])
+        self.assertEqual(layout["overlapping_bytes"], [])
+        self.assertNotIn("time", render_json(inventory).lower())
+        self.assertNotIn("interpolation", render_json(inventory).lower())
+        self.assertNotIn("tangent", render_json(inventory).lower())
+        self.assertNotIn("derivative", render_json(inventory).lower())
+
+        distributions = inventory["candidate_assigned_shipped_value_distributions"]
+        self.assertEqual(distributions["evidence_classification"], "inference")
+        self.assertEqual(
+            distributions["shipped_source_basis"]["evidence_classification"],
+            "shipped-source",
+        )
+        self.assertEqual(
+            distributions["candidate_decode_basis"]["evidence_classification"],
+            "third-party-technique",
+        )
+        conventional = distributions["conventional"]
+        missile = distributions["missileturret"]
+        self.assertEqual(conventional["selected_descriptor_memberships"], 2)
+        self.assertEqual(conventional["unique_selected_descriptors"], 1)
+        self.assertEqual(conventional["candidate_assigned_key_records"], 2)
+        self.assertEqual(missile["selected_descriptor_memberships"], 1)
+        self.assertEqual(missile["unique_selected_descriptors"], 1)
+        self.assertEqual(missile["candidate_assigned_key_records"], 1)
+
+        conventional_slots = {slot["slot_id"]: slot for slot in conventional["slots"]}
+        self.assertEqual(
+            conventional_slots["slot_004"],
+            {
+                "slot_id": "slot_004",
+                "byte_offset": 4,
+                "width_bytes": 4,
+                "candidate_type": "float32_le",
+                "value_count": 2,
+                "finite_count": 2,
+                "non_finite_count": 0,
+                "zero_count": 1,
+                "nonzero_count": 1,
+                "distinct_raw_bit_patterns": 2,
+                "constant_raw_bits": None,
+            },
+        )
+        self.assertEqual(
+            conventional_slots["slot_012"]["integer_value_distribution"],
+            [{"value": 0, "count": 1}, {"value": 7, "count": 1}],
+        )
+        self.assertEqual(
+            conventional_slots["slot_096"]["integer_value_distribution"],
+            [{"value": -2, "count": 1}, {"value": 0, "count": 1}],
+        )
+        self.assertEqual(
+            conventional_slots["slot_124"]["integer_value_distribution"],
+            [{"value": 0, "count": 1}, {"value": 9, "count": 1}],
+        )
+        self.assertIn("slot_008", conventional["constant_slots"])
+        self.assertIn("slot_008", conventional["reserved_looking_zero_constant_slot_candidates"])
+        self.assertEqual(
+            conventional["distinct_candidate_typed_structural_anomalies"], []
+        )
+
+        missile_slots = {slot["slot_id"]: slot for slot in missile["slots"]}
+        self.assertEqual(missile_slots["slot_000"]["finite_count"], 0)
+        self.assertEqual(missile_slots["slot_000"]["non_finite_count"], 1)
+        self.assertEqual(missile_slots["slot_004"]["non_finite_count"], 1)
+        self.assertEqual(
+            missile_slots["slot_124"]["integer_value_distribution"],
+            [{"value": 0xFFFFFFFF, "count": 1}],
+        )
+        self.assertEqual(
+            missile["distinct_candidate_typed_structural_anomalies"],
+            [
+                {
+                    "code": "candidate_non_finite_float_values",
+                    "slot_id": "slot_000",
+                    "count": 1,
+                    "evidence_classification": "inference",
+                },
+                {
+                    "code": "candidate_non_finite_float_values",
+                    "slot_id": "slot_004",
+                    "count": 1,
+                    "evidence_classification": "inference",
+                },
+            ],
+        )
+        self.assertEqual(
+            inventory["reserved_looking_classification"],
+            {
+                "evidence_classification": "inference",
+                "criterion": "slot is raw-bit constant and its raw numeric values all compare equal to zero",
+                "semantic_claim": "none",
+            },
+        )
 
     def test_ani_key_section_wrong_width_truncation_and_extra_bytes_fail_closed(self) -> None:
         cases = (

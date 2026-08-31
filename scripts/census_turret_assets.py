@@ -2,15 +2,17 @@
 """Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
 This tool stops at exact authored connection paths, firing-endpoint connection
-identities, ANI descriptor/source-part identity, descriptor channel counts, and
-opaque ANI key-record byte ownership. It does not parse key-record payloads or
-interpret transforms, timing, interpolation, pivots, axes, joints, descriptor
-relevance, active pose, or prospective muzzle position.
+identities, ANI descriptor/source-part identity, descriptor channel counts,
+candidate key-record byte ownership, and raw candidate typed-slot patterns. It
+does not assign key-record field semantics or interpret transforms, timing,
+interpolation, pivots, axes, joints, descriptor relevance, active pose, or
+prospective muzzle position.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -39,6 +41,47 @@ _ANI_CHANNEL_COUNT_FIELDS = (
     "scale",
     "pre_scale",
     "post_scale",
+)
+
+# Candidate types and order only. The slot names deliberately encode byte
+# offsets rather than meanings. X4Converter supplies the third-party layout
+# lead; shipped ANI values do not establish field semantics.
+_ANI_KEY_RECORD_CANDIDATE_TYPES = (
+    ("float32_le",) * 3
+    + ("enum32_le",) * 3
+    + ("float32_le",) * 18
+    + ("int32_le",)
+    + ("float32_le",) * 6
+    + ("uint32_le",)
+)
+_ANI_KEY_RECORD_CANDIDATE_SLOTS = tuple(
+    {
+        "slot_id": f"slot_{byte_offset:03d}",
+        "byte_offset": byte_offset,
+        "width_bytes": 4,
+        "candidate_type": candidate_type,
+    }
+    for byte_offset, candidate_type in zip(
+        range(0, _ANI_KEY_RECORD_SIZE, 4), _ANI_KEY_RECORD_CANDIDATE_TYPES
+    )
+)
+_ANI_KEY_RECORD_CANDIDATE_BYTE_COUNTS = Counter(
+    byte_index
+    for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS
+    for byte_index in range(
+        int(slot["byte_offset"]),
+        int(slot["byte_offset"]) + int(slot["width_bytes"]),
+    )
+)
+_ANI_KEY_RECORD_CANDIDATE_UNACCOUNTED_BYTES = tuple(
+    byte_index
+    for byte_index in range(_ANI_KEY_RECORD_SIZE)
+    if _ANI_KEY_RECORD_CANDIDATE_BYTE_COUNTS[byte_index] == 0
+)
+_ANI_KEY_RECORD_CANDIDATE_OVERLAPPING_BYTES = tuple(
+    byte_index
+    for byte_index in range(_ANI_KEY_RECORD_SIZE)
+    if _ANI_KEY_RECORD_CANDIDATE_BYTE_COUNTS[byte_index] > 1
 )
 
 
@@ -225,8 +268,43 @@ def _decode_ani_descriptor_string(
     return value
 
 
+def _parse_candidate_key_record(record: bytes) -> tuple[list[float | int], list[str]]:
+    """Parse one complete candidate record as raw typed slots only."""
+
+    if (
+        _ANI_KEY_RECORD_CANDIDATE_UNACCOUNTED_BYTES
+        or _ANI_KEY_RECORD_CANDIDATE_OVERLAPPING_BYTES
+    ):
+        raise AniDescriptorError(
+            "unsupported_candidate_ani_key_layout",
+            "candidate ANI key slot map does not account for every byte exactly once",
+            unaccounted_bytes=list(_ANI_KEY_RECORD_CANDIDATE_UNACCOUNTED_BYTES),
+            overlapping_bytes=list(_ANI_KEY_RECORD_CANDIDATE_OVERLAPPING_BYTES),
+        )
+    if len(record) != _ANI_KEY_RECORD_SIZE:
+        raise AniDescriptorError(
+            "unsupported_ani_key_framing",
+            "candidate ANI key record is not exactly 128 bytes",
+            candidate_record_size=len(record),
+        )
+    values: list[float | int] = []
+    raw_bits: list[str] = []
+    for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS:
+        offset = int(slot["byte_offset"])
+        candidate_type = str(slot["candidate_type"])
+        format_character = {
+            "float32_le": "f",
+            "enum32_le": "i",
+            "int32_le": "i",
+            "uint32_le": "I",
+        }[candidate_type]
+        values.append(struct.unpack_from("<" + format_character, record, offset)[0])
+        raw_bits.append(f"0x{struct.unpack_from('<I', record, offset)[0]:08x}")
+    return values, raw_bits
+
+
 def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
-    """Parse ANI v1 descriptors and assign opaque fixed key-record ranges."""
+    """Parse ANI v1 descriptors and assign candidate fixed key-record ranges."""
 
     try:
         data = path.read_bytes()
@@ -378,7 +456,102 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
             assigned_file_end=byte_cursor,
             file_size=len(data),
         )
+
+    for descriptor in descriptors:
+        record_range = descriptor["key_data"]["record_range"]
+        raw_records = []
+        for record_index in range(
+            int(record_range["start"]), int(record_range["end_exclusive"])
+        ):
+            record_offset = key_offset + record_index * _ANI_KEY_RECORD_SIZE
+            raw_values, raw_bits = _parse_candidate_key_record(
+                data[record_offset : record_offset + _ANI_KEY_RECORD_SIZE]
+            )
+            raw_records.append(
+                {
+                    "record_index": record_index,
+                    "byte_offset": record_offset,
+                    "raw_values": raw_values,
+                    "raw_bits": raw_bits,
+                }
+            )
+        descriptor["_candidate_raw_key_records"] = raw_records
     return descriptors
+
+
+def _summarize_candidate_raw_key_records(
+    records: list[dict[str, object]],
+) -> dict[str, object]:
+    slot_distributions: list[dict[str, object]] = []
+    constant_slots: list[str] = []
+    zero_constant_slots: list[str] = []
+    anomalies: list[dict[str, object]] = []
+    for slot_index, slot in enumerate(_ANI_KEY_RECORD_CANDIDATE_SLOTS):
+        values = [record["raw_values"][slot_index] for record in records]
+        raw_bits = [str(record["raw_bits"][slot_index]) for record in records]
+        distinct_raw_bits = sorted(set(raw_bits))
+        constant_raw_bits = (
+            distinct_raw_bits[0] if len(distinct_raw_bits) == 1 and records else None
+        )
+        zero_count = sum(value == 0 for value in values)
+        distribution: dict[str, object] = {
+            **slot,
+            "value_count": len(values),
+        }
+        if slot["candidate_type"] == "float32_le":
+            finite_count = sum(math.isfinite(float(value)) for value in values)
+            non_finite_count = len(values) - finite_count
+            distribution.update(
+                {
+                    "finite_count": finite_count,
+                    "non_finite_count": non_finite_count,
+                }
+            )
+            if non_finite_count:
+                anomalies.append(
+                    {
+                        "code": "candidate_non_finite_float_values",
+                        "slot_id": slot["slot_id"],
+                        "count": non_finite_count,
+                        "evidence_classification": "inference",
+                    }
+                )
+        distribution.update(
+            {
+                "zero_count": zero_count,
+                "nonzero_count": len(values) - zero_count,
+                "distinct_raw_bit_patterns": len(distinct_raw_bits),
+                "constant_raw_bits": constant_raw_bits,
+            }
+        )
+        if slot["candidate_type"] != "float32_le":
+            value_counts = Counter(int(value) for value in values)
+            distribution["integer_value_distribution"] = [
+                {"value": value, "count": value_counts[value]}
+                for value in sorted(value_counts)
+            ]
+        if constant_raw_bits is not None:
+            constant_slots.append(str(slot["slot_id"]))
+            if zero_count == len(values):
+                zero_constant_slots.append(str(slot["slot_id"]))
+        slot_distributions.append(distribution)
+    return {
+        "candidate_assigned_key_records": len(records),
+        "slots": slot_distributions,
+        "constant_slots": constant_slots,
+        "reserved_looking_zero_constant_slot_candidates": zero_constant_slots,
+        "distinct_candidate_typed_structural_anomalies": anomalies,
+    }
+
+
+def _strip_candidate_raw_key_records(value: object) -> None:
+    if isinstance(value, dict):
+        value.pop("_candidate_raw_key_records", None)
+        for child in value.values():
+            _strip_candidate_raw_key_records(child)
+    elif isinstance(value, list):
+        for child in value:
+            _strip_candidate_raw_key_records(child)
 
 
 def _direct_children(element: ET.Element, tag: str) -> list[ET.Element]:
@@ -850,6 +1023,9 @@ def _derive_endpoint_source_paths(
                         "subname": descriptor["subname"],
                         "channel_counts": descriptor["channel_counts"],
                         "key_data": descriptor["key_data"],
+                        "_candidate_raw_key_records": descriptor[
+                            "_candidate_raw_key_records"
+                        ],
                         "source_connection": descriptor["source_connection"],
                         "root_to_source_connection_path": descriptor[
                             "root_to_source_connection_path"
@@ -1429,6 +1605,9 @@ def build_census(
                                     "subname": descriptor["subname"],
                                     "channel_counts": descriptor["channel_counts"],
                                     "key_data": descriptor["key_data"],
+                                    "_candidate_raw_key_records": descriptor[
+                                        "_candidate_raw_key_records"
+                                    ],
                                     "source_connection": owner,
                                     "root_to_source_connection_path": connection_paths[owner],
                                 }
@@ -1655,6 +1834,7 @@ def build_census(
         for component_class in sorted(_INCLUDED_CLASSES)
     }
     selected_key_data_accounting_by_class = {}
+    selected_candidate_slot_distributions_by_class = {}
     for component_class in sorted(_INCLUDED_CLASSES):
         memberships = [
             descriptor
@@ -1671,6 +1851,28 @@ def build_census(
             "opaque_key_records": key_records,
             "opaque_key_bytes": key_records * _ANI_KEY_RECORD_SIZE,
         }
+        unique_descriptors: dict[tuple[str, int], dict[str, object]] = {}
+        for endpoint, descriptor in selected_endpoint_path_descriptor_memberships:
+            if endpoint["component_class"] != component_class:
+                continue
+            identity = (
+                str(endpoint["component"]), int(descriptor["descriptor_index"])
+            )
+            unique_descriptors.setdefault(identity, descriptor)
+        raw_records = [
+            raw_record
+            for descriptor in unique_descriptors.values()
+            for raw_record in descriptor["_candidate_raw_key_records"]
+        ]
+        selected_candidate_slot_distributions_by_class[component_class] = {
+            "selected_descriptor_memberships": len(memberships),
+            "unique_selected_descriptors": len(unique_descriptors),
+            **_summarize_candidate_raw_key_records(raw_records),
+        }
+
+    # Raw per-record values are needed only to produce the aggregate inventory;
+    # keep the public census structural and bounded.
+    _strip_candidate_raw_key_records(component_to_macros)
 
     def render_channel_count_families(
         families: Counter[tuple[int, ...]],
@@ -1743,7 +1945,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 11,
+        "schema_version": 12,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -1925,6 +2127,54 @@ def build_census(
                 "third_party_lead": {
                     "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp, and Keyframe.h",
                 },
+            },
+        },
+        "ani_key_record_field_inventory": {
+            "candidate_slot_layout": {
+                "evidence_classification": "third-party-technique",
+                "source": (
+                    "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5"
+                    " X4ConverterTools/include/X4ConverterTools/ani/Keyframe.h"
+                    " and X4ConverterTools/src/ani/Keyframe.cpp"
+                ),
+                "record_size_bytes": _ANI_KEY_RECORD_SIZE,
+                "covered_byte_range": {"start": 0, "end_exclusive": 128},
+                "unaccounted_bytes": list(
+                    _ANI_KEY_RECORD_CANDIDATE_UNACCOUNTED_BYTES
+                ),
+                "overlapping_bytes": list(
+                    _ANI_KEY_RECORD_CANDIDATE_OVERLAPPING_BYTES
+                ),
+                "slots": list(_ANI_KEY_RECORD_CANDIDATE_SLOTS),
+                "semantic_claim": "none",
+            },
+            "candidate_assigned_shipped_value_distributions": {
+                "evidence_classification": "inference",
+                "shipped_source_basis": {
+                    "evidence_classification": "shipped-source",
+                    "finding": "raw 128-byte records and their bit patterns",
+                },
+                "candidate_decode_basis": {
+                    "evidence_classification": "third-party-technique",
+                    "finding": (
+                        "record assignment, slot order, and candidate scalar types"
+                    ),
+                },
+                "semantic_claim": "none",
+                "conventional": selected_candidate_slot_distributions_by_class[
+                    "turret"
+                ],
+                "missileturret": selected_candidate_slot_distributions_by_class[
+                    "missileturret"
+                ],
+            },
+            "reserved_looking_classification": {
+                "evidence_classification": "inference",
+                "criterion": (
+                    "slot is raw-bit constant and its raw numeric values all"
+                    " compare equal to zero"
+                ),
+                "semantic_claim": "none",
             },
         },
         "selected_endpoint_path_descriptor_channel_count_families": {
