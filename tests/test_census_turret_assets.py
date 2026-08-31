@@ -1861,6 +1861,145 @@ class CensusTests(unittest.TestCase):
         ):
             self.assertNotIn(unsupported_name, rendered_inventory)
 
+    def test_x4converter_semantic_lead_is_complete_and_requires_corroboration(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            lead = build_census(_source_roots(Path(tmp)))[
+                "x4converter_candidate_key_record_semantic_lead"
+            ]
+
+        self.assertEqual(lead["evidence_classification"], "third-party-technique")
+        self.assertEqual(
+            lead["source_revision"]["commit"],
+            "0be4b494089ba7719d4c5d351e63160ef3843ef5",
+        )
+        self.assertEqual(lead["record_size_bytes"], 128)
+        self.assertEqual(lead["decision_driving_component_class"], "conventional")
+        self.assertEqual(lead["missileturret_semantic_analysis"], "excluded")
+
+        fields = lead["field_map"]
+        self.assertEqual([field["byte_offset"] for field in fields], list(range(0, 128, 4)))
+        self.assertEqual(
+            [field["x4converter_member"] for field in fields],
+            [
+                "ValueX", "ValueY", "ValueZ",
+                "InterpolationX", "InterpolationY", "InterpolationZ",
+                "Time",
+                "CPX1x", "CPX1y", "CPX2x", "CPX2y",
+                "CPY1x", "CPY1y", "CPY2x", "CPY2y",
+                "CPZ1x", "CPZ1y", "CPZ2x", "CPZ2y",
+                "Tens", "Cont", "Bias", "EaseIn", "EaseOut",
+                "Deriv",
+                "DerivInX", "DerivInY", "DerivInZ",
+                "DerivOutX", "DerivOutY", "DerivOutZ",
+                "AngleKey",
+            ],
+        )
+        self.assertEqual(
+            [group["group_id"] for group in lead["record_field_groups"]],
+            [
+                "candidate_vector",
+                "per_axis_mode",
+                "record_order_scalar",
+                "control_parameters",
+                "curve_parameters",
+                "flags",
+                "derived_vectors",
+                "unused_or_reserved",
+            ],
+        )
+        for field in fields:
+            self.assertEqual(field["evidence_classification"], "third-party-technique")
+            self.assertTrue(field["independent_corroboration_required"])
+            self.assertTrue(field["x4converter_read_site"]["expression"])
+            self.assertTrue(field["x4converter_use_sites"])
+
+        self.assertEqual(
+            [
+                (
+                    group["candidate_channel_count_field_index"],
+                    group["x4converter_count_member"],
+                    group["x4converter_record_vector_member"],
+                    group["intermediate_output_label"],
+                )
+                for group in lead["candidate_channel_grouping"]
+            ],
+            [
+                (0, "NumPosKeys", "posKeys", "location"),
+                (1, "NumRotKeys", "rotKeys", "rotation_euler"),
+                (2, "NumScaleKeys", "scaleKeys", "scale"),
+                (3, "NumPreScaleKeys", "preScaleKeys", None),
+                (4, "NumPostScaleKeys", "postScaleKeys", None),
+            ],
+        )
+        self.assertEqual(
+            lead["x4converter_control_parameter_routing"]["routes"],
+            [
+                {
+                    "right_argument": False,
+                    "output_node": "handle_right",
+                    "selected_member_suffix": "1",
+                },
+                {
+                    "right_argument": True,
+                    "output_node": "handle_left",
+                    "selected_member_suffix": "2",
+                },
+            ],
+        )
+
+        enum_mapping = {
+            mapping["raw_value"]: mapping for mapping in lead["observed_enum_mapping"]
+        }
+        self.assertEqual(
+            {value: mapping["x4converter_identifier"] for value, mapping in enum_mapping.items()},
+            {
+                1: "INTERPOLATION_STEP",
+                2: "INTERPOLATION_LINEAR",
+                5: "INTERPOLATION_BEZIER",
+            },
+        )
+        self.assertIn("Keyframe::checkInterpolationType", enum_mapping[1]["branch_sites"][0]["function"])
+        self.assertTrue(
+            any(
+                "InterpolationX == 2" in site["expression"]
+                for site in enum_mapping[2]["branch_sites"]
+            )
+        )
+        self.assertIn("Keyframe::checkInterpolationType", enum_mapping[5]["branch_sites"][0]["function"])
+
+        matrix = lead["independent_corroboration_required"]
+        self.assertEqual(
+            {row["current_observation_assessment"] for row in matrix},
+            {"merely_consistent", "no_semantic_evidence"},
+        )
+        self.assertTrue(all(row["required"] for row in matrix))
+        self.assertIn(
+            "record_order_scalar_identity",
+            {row["candidate_semantic"] for row in matrix},
+        )
+        self.assertIn(
+            "zero_tail_member_identities",
+            {row["candidate_semantic"] for row in matrix},
+        )
+
+        string_values: list[str] = []
+        evidence_labels: list[str] = []
+        pending: list[object] = [lead]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, dict):
+                if "evidence_classification" in value:
+                    evidence_labels.append(str(value["evidence_classification"]))
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+            elif isinstance(value, str):
+                string_values.append(value.lower())
+        self.assertEqual(set(evidence_labels), {"third-party-technique"})
+        self.assertNotIn("shipped-source", string_values)
+        self.assertNotIn("live-tested", string_values)
+        self.assertFalse(any(value in {"final", "resolved"} for value in string_values))
+
     def test_ani_key_section_wrong_width_truncation_and_extra_bytes_fail_closed(self) -> None:
         cases = (
             (
