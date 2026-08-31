@@ -301,3 +301,103 @@ nothing in its authored context expresses a non-combat purpose.
   this macro because the purpose channel it reads is the equipment ware;
   this entry records that the macro's own authored records supply kind-level
   evidence the ware channel cannot reach.
+
+## `turret_kha_l_beam_01_mk1_scenario_macro` — COMBAT_CANDIDATE
+
+Identity: macro `turret_kha_l_beam_01_mk1_scenario_macro`; component
+`turret_kha_l_beam_01_mk1`; source set `ego_dlc_timelines`; A3 census reason
+as emitted by the current classifier (at commit `a9f215f`):
+`no_exact_equipment_ware`.
+
+Result: **COMBAT_CANDIDATE** — the macro's own authored records identify it
+as a conventional weapon turret declaring a damaging beam weapon; nothing in
+its authored records expresses a non-combat purpose.
+
+### The macro is an authored conventional weapon-turret prop
+- X4: 9.00
+- Status: shipped-source
+- Source: `ego_dlc_timelines/assets/props/weaponsystems/energy/macros/turret_kha_l_beam_01_mk1_scenario_macro.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: The file defines one `<macro>` of that name with
+  `class="turret"` (conventional, not `missileturret`), referencing
+  component `turret_kha_l_beam_01_mk1`, carrying rotation speed and
+  acceleration limits, a hull value, and an authored `<weapon angle="20" />`
+  fire-control property. It carries an authored `ref` attribute pointing at
+  the base-set standard macro `turret_kha_l_beam_01_mk1_macro`, whose
+  runtime semantics are not verified offline and are recorded here as an
+  authored fact only. It declares its own dedicated bullet class
+  `bullet_kha_turret_l_beam_01_mk1_scenario_macro`. It sits in the
+  `weaponsystems/energy/` macro set of the `ego_dlc_timelines` source set;
+  the mining utility turrets are authored in the separate
+  `weaponsystems/mining/` set. The file's export header credits the same
+  author as the base-set standard macro's header, moments later (2026-06-01
+  11:08:05 vs 11:07:30) — an authored fact, not an asserted override
+  relationship.
+
+### The macro's declared bullet is a damaging beam weapon
+- X4: 9.00
+- Status: shipped-source
+- Source: `ego_dlc_timelines/assets/fx/weaponfx/macros/bullet_kha_turret_l_beam_01_mk1_scenario_macro.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: The bullet macro the turret declares references component
+  `bullet_kha_l_beam_01_mk1` — the same beam-bullet component the base-set
+  standard macro's bullet declares — and carries a damaging profile with
+  damage value 300 and the beam-style `attach="1"` bullet modeling. That
+  modeling is shared with the family's own standard combat beam bullet,
+  whose damage value is 2000, so `attach` here is a beam-modeling trait,
+  not a utility marker. It carries an authored `ref` attribute pointing at
+  `bullet_kha_turret_l_beam_01_mk1_macro`, recorded as an authored fact
+  only. Neither this bullet nor the standard beam bullet declares a
+  `<weapon system=...>` element, so no weapon-system-channel claim is made
+  here. Nothing in its authored properties expresses a non-combat purpose
+  (no `weapon_mining`, no mining multiplier, no utility effect).
+
+### The macro has no other shipped references and no equipment ware
+- X4: 9.00
+- Status: shipped-source
+- Source: all 8 shipped X4 9.00 catalogs extracted to `.x4-research-cache/issue72-a2-sources/`
+- Live test: no — untested as of 2026-08-31
+- Finding: The macro name occurs exactly once across all 8 shipped source
+  sets (every file type, binary-aware search): in its own definition file.
+  No ship, structure, loadout, ware, or ANI references it, and the name
+  occurs zero times under any `libraries/` directory. The equipment channel
+  for this weapon system is ware `turret_kha_l_beam_01_mk1` in
+  `base/libraries/wares.xml`, which carries `noblueprint` and
+  `noplayerblueprint` tags, zero price, a `militaryequipment` license
+  restriction, a single faction-restricted `<use>` entry for the khaak
+  faction with no `purposes`, and a `<component ref>` pointing at the
+  standard macro `turret_kha_l_beam_01_mk1_macro`, not the scenario macro.
+  The scenario macro therefore has no authored ware access channel — the A3
+  `no_exact_equipment_ware` condition.
+
+### Corroboration (not proof)
+- X4: 9.00
+- Status: shipped-source
+- Source: `base/assets/props/WeaponSystems/energy/macros/turret_kha_l_beam_01_mk1_macro.xml`; `base/assets/fx/weaponFx/macros/bullet_kha_turret_l_beam_01_mk1_macro.xml`; `base/libraries/wares.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: The base-set standard macro on the same component
+  (`turret_kha_l_beam_01_mk1_macro`, the `ref` target) is a
+  COMBAT_CANDIDATE in the current A3 census (as of commit `a9f215f`), and
+  its bullet declares damage 2000 on the same beam-bullet component with
+  the same `attach="1"` modeling. Shared component identity and the `ref`
+  linkage corroborate the result only; they are not its basis.
+
+### Limitations
+- COMBAT_CANDIDATE is a kind-level eligibility statement from the macro's
+  and its declared bullet's own shipped-source records: a conventional
+  (non-missile) turret with a `<weapon angle>` fire-control property
+  declaring a damaging beam bullet, with no authored non-combat purpose in
+  either record. It does not establish engine-side behavior; no live-test
+  claim is made.
+- The scenario macro has no shipped reference site at all — no ship,
+  structure, loadout, ware, or ANI mount — so no authored use context
+  exists in the shipped corpus; the kind-level statement rests on the
+  macro's and bullet's own property records alone.
+- The `ref` attributes and the faction-restricted ware `<use>` entry are
+  recorded as authored facts; their runtime semantics (for example, whether
+  the scenario macro supersedes the standard macro in a scenario) are not
+  verified offline and play no part in the result.
+- The A3 classifier still reports UNRESOLVED/`no_exact_equipment_ware` for
+  this macro because the purpose channel it reads is the equipment ware;
+  this entry records that the macro's own authored records supply kind-level
+  evidence the ware channel cannot reach.
