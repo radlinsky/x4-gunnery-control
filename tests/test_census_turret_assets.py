@@ -1485,6 +1485,183 @@ class CensusTests(unittest.TestCase):
             },
         )
 
+    def test_candidate_channel_dynamics_are_deduplicated_separate_and_raw_bit_exact(self) -> None:
+        def record(
+            first: float, second: float, third: float, later_slot: int = 0
+        ) -> bytes:
+            values: list[float | int] = [0] * 32
+            values[0:4] = [first, second, third, later_slot]
+            return _candidate_key_record(tuple(values))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional_component" class="turret">
+                    <source geometry="geometry/conventional"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="ConventionalPart"/></parts></connection>
+                      <connection name="EndpointA" tags="laser" parent="ConventionalPart"/>
+                      <connection name="EndpointB" tags="laser" parent="ConventionalPart"/>
+                    </connections>
+                  </component>
+                  <component name="conventional_component_b" class="turret">
+                    <source geometry="geometry/conventional_b"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="ConventionalPartB"/></parts></connection>
+                      <connection name="Endpoint" tags="laser" parent="ConventionalPartB"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/missile"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="MissilePart"/></parts></connection>
+                      <connection name="Endpoint" tags="rocket" parent="MissilePart"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_macro", "turret", "conventional_component"),
+                    ("conventional_macro_b", "turret", "conventional_component_b"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+            (roots["base"] / "geometry/conventional.ANI").write_bytes(
+                _ani_bytes(
+                    ("ConventionalPart", "Selected", 0, 1, 2, 2, 0),
+                    key_data=(
+                        record(9.0, 8.0, 7.0)
+                        + record(1.0, 2.0, 3.0, 1)
+                        + record(1.0, 2.0, 3.0, 2)
+                        + record(+0.0, 4.0, 5.0)
+                        + record(-0.0, 4.0, 5.0)
+                    ),
+                )
+            )
+            (roots["base"] / "geometry/conventional_b.ANI").write_bytes(
+                _ani_bytes(("ConventionalPartB", "Selected", 0, 0, 0, 0, 0))
+            )
+            (roots["base"] / "geometry/missile.ANI").write_bytes(
+                _ani_bytes(
+                    ("MissilePart", "Selected", 1, 0, 0, 0, 0),
+                    key_data=record(6.0, 5.0, 4.0),
+                )
+            )
+            dynamics = build_census(roots)[
+                "selected_descriptor_candidate_channel_dynamics"
+            ]
+
+        self.assertEqual(dynamics["evidence_classification"], "inference")
+        self.assertEqual(
+            dynamics["candidate_channel_ownership_order"][
+                "evidence_classification"
+            ],
+            "third-party-technique",
+        )
+        conventional = dynamics["conventional"]
+        missile = dynamics["missileturret"]
+        self.assertEqual(conventional["selected_descriptor_memberships"], 3)
+        self.assertEqual(conventional["unique_selected_descriptors"], 2)
+        self.assertEqual(conventional["candidate_assigned_key_records"], 5)
+        self.assertEqual(missile["selected_descriptor_memberships"], 1)
+        self.assertEqual(missile["unique_selected_descriptors"], 1)
+        self.assertEqual(missile["candidate_assigned_key_records"], 1)
+
+        zero = {"descriptor_count": 0, "key_record_count": 0}
+        self.assertEqual(
+            conventional["candidate_channels"],
+            [
+                {
+                    "candidate_channel_id": "candidate_channel_0",
+                    "candidate_channel_count_field_index": 0,
+                    "classifications": {
+                        "zero_keys": {"descriptor_count": 2, "key_record_count": 0},
+                        "one_key": zero,
+                        "multiple_keys_identical_raw_bit_triples": zero,
+                        "multiple_keys_changing_raw_bit_triples": zero,
+                    },
+                },
+                {
+                    "candidate_channel_id": "candidate_channel_1",
+                    "candidate_channel_count_field_index": 1,
+                    "classifications": {
+                        "zero_keys": {"descriptor_count": 1, "key_record_count": 0},
+                        "one_key": {"descriptor_count": 1, "key_record_count": 1},
+                        "multiple_keys_identical_raw_bit_triples": zero,
+                        "multiple_keys_changing_raw_bit_triples": zero,
+                    },
+                },
+                {
+                    "candidate_channel_id": "candidate_channel_2",
+                    "candidate_channel_count_field_index": 2,
+                    "classifications": {
+                        "zero_keys": {"descriptor_count": 1, "key_record_count": 0},
+                        "one_key": zero,
+                        "multiple_keys_identical_raw_bit_triples": {
+                            "descriptor_count": 1,
+                            "key_record_count": 2,
+                        },
+                        "multiple_keys_changing_raw_bit_triples": zero,
+                    },
+                },
+                {
+                    "candidate_channel_id": "candidate_channel_3",
+                    "candidate_channel_count_field_index": 3,
+                    "classifications": {
+                        "zero_keys": {"descriptor_count": 1, "key_record_count": 0},
+                        "one_key": zero,
+                        "multiple_keys_identical_raw_bit_triples": zero,
+                        "multiple_keys_changing_raw_bit_triples": {
+                            "descriptor_count": 1,
+                            "key_record_count": 2,
+                        },
+                    },
+                },
+                {
+                    "candidate_channel_id": "candidate_channel_4",
+                    "candidate_channel_count_field_index": 4,
+                    "classifications": {
+                        "zero_keys": {"descriptor_count": 2, "key_record_count": 0},
+                        "one_key": zero,
+                        "multiple_keys_identical_raw_bit_triples": zero,
+                        "multiple_keys_changing_raw_bit_triples": zero,
+                    },
+                },
+            ],
+        )
+        self.assertEqual(
+            missile["candidate_channels"][0]["classifications"],
+            {
+                "zero_keys": zero,
+                "one_key": {"descriptor_count": 1, "key_record_count": 1},
+                "multiple_keys_identical_raw_bit_triples": zero,
+                "multiple_keys_changing_raw_bit_triples": zero,
+            },
+        )
+        for candidate_channel in missile["candidate_channels"][1:]:
+            self.assertEqual(
+                candidate_channel["classifications"]["zero_keys"],
+                {"descriptor_count": 1, "key_record_count": 0},
+            )
+        rendered_dynamics = render_json(dynamics).lower()
+        for unsupported_name in (
+            "time",
+            "interpolation",
+            "transform",
+            "position",
+            "rotation",
+            "scale",
+            "pre_scale",
+            "post_scale",
+        ):
+            self.assertNotIn(unsupported_name, rendered_dynamics)
+
     def test_ani_key_section_wrong_width_truncation_and_extra_bytes_fail_closed(self) -> None:
         cases = (
             (

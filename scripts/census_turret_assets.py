@@ -65,6 +65,9 @@ _ANI_KEY_RECORD_CANDIDATE_SLOTS = tuple(
         range(0, _ANI_KEY_RECORD_SIZE, 4), _ANI_KEY_RECORD_CANDIDATE_TYPES
     )
 )
+_ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS = (
+    _ANI_KEY_RECORD_CANDIDATE_SLOTS[:3]
+)
 _ANI_KEY_RECORD_CANDIDATE_BYTE_COUNTS = Counter(
     byte_index
     for slot in _ANI_KEY_RECORD_CANDIDATE_SLOTS
@@ -541,6 +544,76 @@ def _summarize_candidate_raw_key_records(
         "constant_slots": constant_slots,
         "reserved_looking_zero_constant_slot_candidates": zero_constant_slots,
         "distinct_candidate_typed_structural_anomalies": anomalies,
+    }
+
+
+_CANDIDATE_CHANNEL_DYNAMICS_CLASSIFICATIONS = (
+    "zero_keys",
+    "one_key",
+    "multiple_keys_identical_raw_bit_triples",
+    "multiple_keys_changing_raw_bit_triples",
+)
+
+
+def _summarize_candidate_channel_dynamics(
+    unique_descriptors: dict[tuple[str, int], dict[str, object]],
+    selected_descriptor_memberships: int,
+) -> dict[str, object]:
+    candidate_channels = [
+        {
+            "candidate_channel_id": f"candidate_channel_{channel_index}",
+            "candidate_channel_count_field_index": channel_index,
+            "classifications": {
+                classification: {"descriptor_count": 0, "key_record_count": 0}
+                for classification in _CANDIDATE_CHANNEL_DYNAMICS_CLASSIFICATIONS
+            },
+        }
+        for channel_index in range(len(_ANI_CHANNEL_COUNT_FIELDS))
+    ]
+    candidate_assigned_key_records = 0
+    for descriptor in unique_descriptors.values():
+        records = descriptor["_candidate_raw_key_records"]
+        candidate_assigned_key_records += len(records)
+        for channel_index, field in enumerate(_ANI_CHANNEL_COUNT_FIELDS):
+            candidate_channel = descriptor["key_data"]["channels"][field]
+            record_range = candidate_channel["record_range"]
+            channel_records = [
+                record
+                for record in records
+                if int(record_range["start"])
+                <= int(record["record_index"])
+                < int(record_range["end_exclusive"])
+            ]
+            key_count = int(candidate_channel["record_count"])
+            if key_count == 0:
+                classification = "zero_keys"
+            elif key_count == 1:
+                classification = "one_key"
+            else:
+                raw_bit_triples = {
+                    tuple(
+                        str(record["raw_bits"][slot_index])
+                        for slot_index in range(
+                            len(_ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS)
+                        )
+                    )
+                    for record in channel_records
+                }
+                classification = (
+                    "multiple_keys_identical_raw_bit_triples"
+                    if len(raw_bit_triples) == 1
+                    else "multiple_keys_changing_raw_bit_triples"
+                )
+            bucket = candidate_channels[channel_index]["classifications"][
+                classification
+            ]
+            bucket["descriptor_count"] += 1
+            bucket["key_record_count"] += key_count
+    return {
+        "selected_descriptor_memberships": selected_descriptor_memberships,
+        "unique_selected_descriptors": len(unique_descriptors),
+        "candidate_assigned_key_records": candidate_assigned_key_records,
+        "candidate_channels": candidate_channels,
     }
 
 
@@ -1835,6 +1908,7 @@ def build_census(
     }
     selected_key_data_accounting_by_class = {}
     selected_candidate_slot_distributions_by_class = {}
+    selected_candidate_channel_dynamics_by_class = {}
     for component_class in sorted(_INCLUDED_CLASSES):
         memberships = [
             descriptor
@@ -1869,6 +1943,11 @@ def build_census(
             "unique_selected_descriptors": len(unique_descriptors),
             **_summarize_candidate_raw_key_records(raw_records),
         }
+        selected_candidate_channel_dynamics_by_class[component_class] = (
+            _summarize_candidate_channel_dynamics(
+                unique_descriptors, len(memberships)
+            )
+        )
 
     # Raw per-record values are needed only to produce the aggregate inventory;
     # keep the public census structural and bounded.
@@ -1945,7 +2024,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 12,
+        "schema_version": 13,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -2176,6 +2255,40 @@ def build_census(
                 ),
                 "semantic_claim": "none",
             },
+        },
+        "selected_descriptor_candidate_channel_dynamics": {
+            "evidence_classification": "inference",
+            "candidate_channel_ownership_order": {
+                "evidence_classification": "third-party-technique",
+                "source": (
+                    "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5"
+                    " X4ConverterTools/src/ani/AnimFile.cpp, AnimDesc.cpp,"
+                    " and Keyframe.h"
+                ),
+                "candidate_channel_count_field_indexes": list(
+                    range(len(_ANI_CHANNEL_COUNT_FIELDS))
+                ),
+            },
+            "candidate_raw_bit_triple": {
+                "evidence_classification": "third-party-technique",
+                "source": (
+                    "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5"
+                    " X4ConverterTools/include/X4ConverterTools/ani/Keyframe.h"
+                    " and X4ConverterTools/src/ani/Keyframe.cpp"
+                ),
+                "slot_ids": [
+                    str(slot["slot_id"])
+                    for slot in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS
+                ],
+                "equality_rule": "exact ordered raw-bit triple equality",
+            },
+            "semantic_claim": "none",
+            "conventional": selected_candidate_channel_dynamics_by_class[
+                "turret"
+            ],
+            "missileturret": selected_candidate_channel_dynamics_by_class[
+                "missileturret"
+            ],
         },
         "selected_endpoint_path_descriptor_channel_count_families": {
             "conventional": render_channel_count_families(
