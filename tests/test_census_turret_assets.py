@@ -134,6 +134,14 @@ def _components(*names: str) -> str:
     return f"<components>{body}</components>"
 
 
+def _wares(*records: tuple[str, str, str | None]) -> str:
+    body = []
+    for ware, component, purposes in records:
+        use = "" if purposes is None else f'<use purposes="{purposes}"/>'
+        body.append(f'<ware id="{ware}"><component ref="{component}"/>{use}</ware>')
+    return "<wares>" + "".join(body) + "</wares>"
+
+
 def _macros(*records: tuple[str, str, str | None]) -> str:
     body = []
     for name, macro_class, component in records:
@@ -143,6 +151,113 @@ def _macros(*records: tuple[str, str, str | None]) -> str:
 
 
 class CensusTests(unittest.TestCase):
+    def test_combat_conventional_turret_eligibility_uses_exact_effective_ware_purposes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="combat_component" class="turret"><source geometry="geometry/component_a"/><connections><connection name="Endpoint" tags="laser"/></connections></component>
+                  <component name="mine_named_combat_component" class="turret"><source geometry="geometry/component_b"/><connections><connection name="Endpoint" tags="laser"/></connections></component>
+                  <component name="mining_component" class="turret"><source geometry="geometry/current_a"/><connections><connection name="Endpoint" tags="laser"/></connections></component>
+                  <component name="salvage_component" class="turret"><source geometry="geometry/current_b"/><connections><connection name="Endpoint" tags="laser"/></connections></component>
+                  <component name="missile_component" class="missileturret"><source geometry="geometry/missile"/><connections><connection name="Endpoint" tags="rocket"/></connections></component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("macro_combat", "turret", "combat_component"),
+                    ("macro_misleading_mining_name", "turret", "mine_named_combat_component"),
+                    ("macro_mining", "turret", "mining_component"),
+                    ("macro_salvage", "turret", "salvage_component"),
+                    ("macro_missile", "missileturret", "missile_component"),
+                ),
+            )
+            _write(
+                roots["base"],
+                "libraries/wares.xml",
+                _wares(
+                    ("ware_combat", "macro_combat", None),
+                    ("ware_misleading", "macro_misleading_mining_name", None),
+                    ("ware_mining", "macro_mining", "mine"),
+                    ("ware_salvage", "macro_salvage", "salvage"),
+                    ("ware_missile", "macro_missile", "missile"),
+                    ("ware_unrelated_unknown", "unreferenced_macro", "survey"),
+                ),
+            )
+
+            report = build_census(roots)
+
+            self.assertEqual(
+                report["combat_conventional_turret_eligibility"]["counts"],
+                {
+                    "combat_candidate_macros": 2,
+                    "combat_candidate_unique_components": 2,
+                    "noncombat_utility_macros": 2,
+                    "noncombat_utility_unique_components": 2,
+                    "missileturret_excluded_macros": 1,
+                    "missileturret_excluded_unique_components": 1,
+                    "unresolved_macros": 0,
+                    "unresolved_unique_components": 0,
+                },
+            )
+            self.assertEqual(
+                report["combat_conventional_turret_eligibility"]["observed_conventional_turret_purpose_token_inventory"],
+                [
+                    {"purpose_token": "mine", "macro_count": 1, "unique_component_count": 1},
+                    {"purpose_token": "salvage", "macro_count": 1, "unique_component_count": 1},
+                ],
+            )
+            self.assertEqual(
+                [item["macro"] for item in report["combat_conventional_turret_eligibility"]["utility_macros"]],
+                ["macro_mining", "macro_salvage"],
+            )
+            by_macro = {
+                item["macro"]: item
+                for item in report["combat_conventional_turret_eligibility"]["macro_classifications"]
+            }
+            self.assertEqual(by_macro["macro_combat"]["eligibility"], "COMBAT_CANDIDATE")
+            self.assertEqual(
+                by_macro["macro_misleading_mining_name"]["eligibility"],
+                "COMBAT_CANDIDATE",
+            )
+            self.assertEqual(by_macro["macro_mining"]["purpose_tokens"], ["mine"])
+            self.assertEqual(by_macro["macro_salvage"]["purpose_tokens"], ["salvage"])
+            self.assertEqual(by_macro["macro_missile"]["eligibility"], "MISSILETURRET_EXCLUDED")
+
+    def test_unknown_or_combined_conventional_turret_ware_purposes_fail_closed(self) -> None:
+        cases = (("unknown", "survey"), ("combined", "mine salvage"))
+        for label, purposes in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(roots["base"], "assets/components.xml", _components("component_a"))
+                _write(roots["base"], "assets/macros.xml", _macros(("macro_a", "turret", "component_a")))
+                _write(roots["base"], "libraries/wares.xml", _wares(("ware_a", "macro_a", purposes)))
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn("unresolved_conventional_turret_ware_purposes", caught.exception.codes)
+
+    def test_effective_ware_mapping_failures_are_closed(self) -> None:
+        cases = (
+            ("missing", _wares(("ware_other", "other_macro", None)), "missing_effective_equipment_ware"),
+            ("duplicate", _wares(("ware_a", "macro_a", None), ("ware_a", "macro_a", None)), "duplicate_effective_equipment_ware_mapping"),
+            ("conflicting", _wares(("ware_a", "macro_a", None), ("ware_b", "macro_a", "mine")), "conflicting_effective_equipment_ware_mapping"),
+            ("malformed", "<wares><ware><component ref='macro_a'/></ware></wares>", "malformed_effective_equipment_ware"),
+        )
+        for label, wares_xml, code in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(roots["base"], "assets/components.xml", _components("component_a"))
+                _write(roots["base"], "assets/macros.xml", _macros(("macro_a", "turret", "component_a")))
+                if wares_xml:
+                    _write(roots["base"], "libraries/wares.xml", wares_xml)
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn(code, caught.exception.codes)
+
     def test_macro_driven_inclusion_deduplication_and_inversion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             roots = _source_roots(Path(tmp))

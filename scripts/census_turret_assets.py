@@ -125,6 +125,244 @@ def _anomaly(code: str, message: str, **details: object) -> dict[str, object]:
     return {"code": code, "message": message, **details}
 
 
+def _purpose_tokens(attributes: Sequence[object]) -> list[str]:
+    return sorted(
+        {
+            token
+            for value in attributes
+            if value is not None
+            for token in str(value).split()
+        }
+    )
+
+
+def _build_combat_conventional_turret_eligibility(
+    equipment_macros: Sequence[dict[str, str]],
+    ware_records: Sequence[dict[str, object]],
+) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+    anomalies: list[dict[str, object]] = []
+    if not ware_records:
+        return {
+            "evidence_classification": "shipped-source",
+            "mapping_rule": "exact direct ware/component ref identity equals exact included equipment macro name identity",
+            "purpose_rule": {
+                "no_purpose_token": "COMBAT_CANDIDATE",
+                "exactly_mine_or_salvage": "NONCOMBAT_UTILITY",
+                "missileturret": "MISSILETURRET_EXCLUDED",
+                "other": "UNRESOLVED_FAIL_CLOSED",
+            },
+            "counts": {
+                "combat_candidate_macros": 0,
+                "combat_candidate_unique_components": 0,
+                "noncombat_utility_macros": 0,
+                "noncombat_utility_unique_components": 0,
+                "missileturret_excluded_macros": 0,
+                "missileturret_excluded_unique_components": 0,
+                "unresolved_macros": 0,
+                "unresolved_unique_components": 0,
+            },
+            "observed_conventional_turret_purpose_token_inventory": [],
+            "utility_macros": [],
+            "nonware_macro_exclusions": [],
+            "macro_classifications": [],
+            "required_macro_local_classifications": [],
+        }, []
+    included_macros = {record["name"] for record in equipment_macros}
+    records_by_macro = {record["name"]: record for record in equipment_macros}
+    wares_by_macro: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in ware_records:
+        if str(record["component"]) in included_macros:
+            wares_by_macro[str(record["component"])].append(record)
+
+    resolved_by_macro: dict[str, dict[str, object]] = {}
+    nonware_macro_exclusions: list[dict[str, object]] = []
+    any_effective_ware_mapping = bool(wares_by_macro)
+    for macro in sorted(included_macros):
+        matches = wares_by_macro.get(macro, [])
+        macro_record = records_by_macro[macro]
+        if not matches:
+            if not any_effective_ware_mapping:
+                anomalies.append(
+                    _anomaly(
+                        "missing_effective_equipment_ware",
+                        "included equipment macro has no exact effective equipment ware mapping",
+                        macro=macro,
+                        component=macro_record["component"],
+                    )
+                )
+            else:
+                nonware_macro_exclusions.append(
+                    {
+                        "macro": macro,
+                        "macro_class": macro_record["class"],
+                        "component": macro_record["component"],
+                    }
+                )
+            continue
+        malformed = [
+            record
+            for record in matches
+            if not str(record.get("ware", ""))
+            or int(record.get("component_reference_count", 0)) != 1
+        ]
+        if malformed:
+            anomalies.append(
+                _anomaly(
+                    "malformed_effective_equipment_ware",
+                    "effective equipment ware mapping is missing required exact identity data or has ambiguous direct use data",
+                    macro=macro,
+                    component=macro_record["component"],
+                    definitions=sorted(
+                        malformed,
+                        key=lambda item: (
+                            str(item.get("source_set", "")),
+                            str(item.get("source_file", "")),
+                            str(item.get("ware", "")),
+                        ),
+                    ),
+                )
+            )
+            continue
+        if len(matches) > 1:
+            signatures = {
+                (
+                    str(record["ware"]),
+                    tuple(_purpose_tokens(record["purpose_attributes"])),
+                )
+                for record in matches
+            }
+            anomalies.append(
+                _anomaly(
+                    "conflicting_effective_equipment_ware_mapping"
+                    if len(signatures) > 1
+                    else "duplicate_effective_equipment_ware_mapping",
+                    "included macro resolves to more than one effective equipment ware mapping",
+                    macro=macro,
+                    component=macro_record["component"],
+                    definitions=sorted(
+                        matches,
+                        key=lambda item: (
+                            str(item.get("source_set", "")),
+                            str(item.get("source_file", "")),
+                            str(item.get("ware", "")),
+                        ),
+                    ),
+                )
+            )
+            continue
+        resolved_by_macro[macro] = matches[0]
+
+    if anomalies:
+        return None, anomalies
+
+    macro_classifications: list[dict[str, object]] = []
+    utility_macros: list[dict[str, object]] = []
+    unresolved_components: set[str] = set()
+    purpose_inventory: dict[str, dict[str, set[str]]] = defaultdict(
+        lambda: {"macros": set(), "components": set()}
+    )
+    for record in sorted(equipment_macros, key=lambda item: item["name"]):
+        if record["name"] not in resolved_by_macro:
+            continue
+        ware = resolved_by_macro[record["name"]]
+        tokens = _purpose_tokens(ware["purpose_attributes"])
+        if record["class"] == "missileturret":
+            eligibility = "MISSILETURRET_EXCLUDED"
+        elif not tokens:
+            eligibility = "COMBAT_CANDIDATE"
+        elif tokens in (["mine"], ["salvage"]):
+            eligibility = "NONCOMBAT_UTILITY"
+        else:
+            eligibility = "UNRESOLVED"
+            unresolved_components.add(record["component"])
+            anomalies.append(
+                _anomaly(
+                    "unresolved_conventional_turret_ware_purposes",
+                    "conventional turret effective ware has unsupported, combined, or ambiguous direct purposes",
+                    macro=record["name"],
+                    component=record["component"],
+                    ware=ware["ware"],
+                    purpose_tokens=tokens,
+                    ware_source_set=ware["source_set"],
+                    ware_source_file=ware["source_file"],
+                )
+            )
+        if record["class"] == "turret":
+            for token in tokens:
+                purpose_inventory[token]["macros"].add(record["name"])
+                purpose_inventory[token]["components"].add(record["component"])
+        entry = {
+            "macro": record["name"],
+            "macro_class": record["class"],
+            "component": record["component"],
+            "ware": ware["ware"],
+            "purpose_tokens": tokens,
+            "eligibility": eligibility,
+            "ware_source_set": ware["source_set"],
+            "ware_source_file": ware["source_file"],
+        }
+        macro_classifications.append(entry)
+        if eligibility == "NONCOMBAT_UTILITY":
+            utility_macros.append(entry)
+
+    if anomalies:
+        return None, anomalies
+
+    def counted(eligibility: str, macro_class: str | None = None) -> tuple[int, int]:
+        selected = [
+            item
+            for item in macro_classifications
+            if item["eligibility"] == eligibility
+            and (macro_class is None or item["macro_class"] == macro_class)
+        ]
+        return len(selected), len({str(item["component"]) for item in selected})
+
+    combat_macros, combat_components = counted("COMBAT_CANDIDATE", "turret")
+    utility_count, utility_components = counted("NONCOMBAT_UTILITY", "turret")
+    missile_macros, missile_components = counted("MISSILETURRET_EXCLUDED", "missileturret")
+    return {
+        "evidence_classification": "shipped-source",
+        "mapping_rule": "exact direct ware/component ref identity equals exact included equipment macro name identity",
+        "purpose_rule": {
+            "no_purpose_token": "COMBAT_CANDIDATE",
+            "exactly_mine_or_salvage": "NONCOMBAT_UTILITY",
+            "missileturret": "MISSILETURRET_EXCLUDED",
+            "other": "UNRESOLVED_FAIL_CLOSED",
+        },
+        "counts": {
+            "combat_candidate_macros": combat_macros,
+            "combat_candidate_unique_components": combat_components,
+            "noncombat_utility_macros": utility_count,
+            "noncombat_utility_unique_components": utility_components,
+            "missileturret_excluded_macros": missile_macros,
+            "missileturret_excluded_unique_components": missile_components,
+            "unresolved_macros": 0,
+            "unresolved_unique_components": len(unresolved_components),
+        },
+        "observed_conventional_turret_purpose_token_inventory": [
+            {
+                "purpose_token": token,
+                "macro_count": len(purpose_inventory[token]["macros"]),
+                "unique_component_count": len(purpose_inventory[token]["components"]),
+            }
+            for token in sorted(purpose_inventory)
+        ],
+        "utility_macros": utility_macros,
+        "nonware_macro_exclusions": nonware_macro_exclusions,
+        "macro_classifications": macro_classifications,
+        "required_macro_local_classifications": [
+            item
+            for item in macro_classifications
+            if item["macro"]
+            in {
+                "turret_bor_m_mining_01_mk1_macro",
+                "turret_gen_m_scrapbeam_01_mk1_macro",
+                "turret_gen_m_disabler_01_mk1_macro",
+            }
+        ],
+    }, []
+
+
 def _validate_source_sets(source_sets: Mapping[str, Path]) -> dict[str, Path]:
     anomalies: list[dict[str, object]] = []
     expected = set(REQUIRED_SOURCE_SETS)
@@ -4378,6 +4616,7 @@ def build_census(
             )
     component_definitions: dict[str, list[dict[str, object]]] = defaultdict(list)
     macro_records: list[dict[str, str]] = []
+    ware_records: list[dict[str, object]] = []
 
     for source_set in REQUIRED_SOURCE_SETS:
         root = roots[source_set]
@@ -4447,6 +4686,33 @@ def build_census(
                                 for connection in _direct_children(connections, "connection")
                                 for animations in _direct_children(connection, "animations")
                                 for animation in _direct_children(animations, "animation")
+                            ],
+                        }
+                    )
+
+            for ware in xml_root.iter("ware"):
+                component_children = _direct_children(ware, "component")
+                use_children = _direct_children(ware, "use")
+                component_refs = [
+                    child.get("ref", "").strip()
+                    for child in component_children
+                    if child.get("ref", "").strip()
+                ]
+                if len(component_children) == 1:
+                    mapped_refs = component_refs
+                else:
+                    mapped_refs = sorted(set(component_refs))
+                for component_ref in mapped_refs:
+                    ware_records.append(
+                        {
+                            "ware": ware.get("id", "").strip(),
+                            "component": component_ref,
+                            "source_set": source_set,
+                            "source_file": relative,
+                            "component_reference_count": len(component_children),
+                            "use_count": len(use_children),
+                            "purpose_attributes": [
+                                use.get("purposes") for use in use_children
                             ],
                         }
                     )
@@ -5271,6 +5537,12 @@ def build_census(
                     "component_source_file": definition["source_file"],
                 }
             )
+    combat_eligibility, combat_eligibility_anomalies = (
+        _build_combat_conventional_turret_eligibility(equipment_macros, ware_records)
+    )
+    if combat_eligibility_anomalies:
+        raise CensusError(combat_eligibility_anomalies)
+
     counts_by_source_set = {}
     for source_set in REQUIRED_SOURCE_SETS:
         records = [record for record in equipment_macros if record["source_set"] == source_set]
@@ -5389,6 +5661,7 @@ def build_census(
         "ani_inventory_counts_by_source_set": ani_inventory_counts_by_source_set,
         "equipment_macros": equipment_macros,
         "component_to_macros": component_to_macros,
+        "combat_conventional_turret_eligibility": combat_eligibility,
         "component_macro_cardinality": {str(key): cardinalities[key] for key in sorted(cardinalities)},
         "ani_descriptor_count_cardinality": {
             str(key): descriptor_count_cardinalities[key]
