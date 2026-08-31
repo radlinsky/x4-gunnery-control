@@ -200,3 +200,104 @@ authored context expresses a non-combat purpose.
   this macro because the purpose channel it reads is the equipment ware;
   this entry records that the macro's own authored records supply kind-level
   evidence the ware channel cannot reach.
+
+## `turret_ter_m_laser_story_mk1_macro` — COMBAT_CANDIDATE
+
+Identity: macro `turret_ter_m_laser_story_mk1_macro`; component
+`turret_ter_m_laser_02_mk1`; source set `ego_dlc_terran`; A3 census reason
+as emitted by the current classifier (at commit `a9f215f`):
+`no_exact_equipment_ware`.
+
+Result: **COMBAT_CANDIDATE** — the macro's own authored records identify it
+as a conventional weapon turret declaring a damaging mid-range turret
+weapon, and its authored use context is defense-module turret loadouts;
+nothing in its authored context expresses a non-combat purpose.
+
+### The macro is an authored conventional weapon-turret prop
+- X4: 9.00
+- Status: shipped-source
+- Source: `ego_dlc_terran/assets/props/weaponsystems/standard/macros/turret_ter_m_laser_story_mk1_macro.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: The file defines one `<macro>` of that name with
+  `class="turret"`, referencing component `turret_ter_m_laser_02_mk1`,
+  carrying a terran turret identification with `mk="1"`, rotation speed
+  and acceleration limits, a hull value, and an authored `alias` attribute
+  pointing at the standard macro `turret_ter_m_laser_02_mk1_macro` whose
+  runtime semantics are not verified offline and are recorded here as an
+  authored fact only. It declares its own dedicated bullet class
+  `bullet_gen_turret_m_laser_story_mk1_macro`. It sits in the
+  `weaponsystems/standard/` macro set of the `ego_dlc_terran` source set,
+  alongside the standard macro for the same component; the mining utility
+  turrets are authored in the separate `weaponsystems/mining/` set.
+
+### The macro's declared bullet is a damaging mid-range turret weapon
+- X4: 9.00
+- Status: shipped-source
+- Source: `ego_dlc_terran/assets/fx/weaponfx/macros/bullet_gen_turret_m_laser_story_mk1_macro.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: The bullet macro the turret declares references its own
+  component `bullet_gen_turret_m_laser_story_mk1` and carries a damaging
+  weapon profile: damage value 63, two barrels, ammunition 3 with reload
+  0.5, projectile speed 342, and the laser impact and muzzle effects. It
+  carries the authored declaration `<weapon system="turret_midrange" />`
+  itself — unlike the corpus's utility channel, the Argon mining turret
+  bullet that declares `<weapon system="weapon_mining" />` with base
+  damage 50, a mining damage multiplier of 30, and attach-on-impact
+  behavior. Nothing in its authored properties expresses a non-combat
+  purpose.
+
+### The macro is authored into landmark defense-module turret loadouts
+- X4: 9.00
+- Status: shipped-source
+- Source: `ego_dlc_terran/assets/structures/landmarks/macros/torus_turretbase_macro.xml`; `ego_dlc_terran/assets/structures/landmarks/macros/torus_turretbase_v2_macro.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: Both are `class="defencemodule"` landmark macros whose default
+  loadout mounts the macro in a turret group (`group01` and `group02`
+  respectively, with `exact="1"` and `optional="1"`). These are authored
+  turret-defense loadouts on hidden landmark structures in the
+  `ego_dlc_terran` source set.
+
+### The macro has no equipment ware
+- X4: 9.00
+- Status: shipped-source
+- Source: all 8 shipped X4 9.00 catalogs extracted to `.x4-research-cache/issue72-a2-sources/`
+- Live test: no — untested as of 2026-08-31
+- Finding: The macro name occurs exactly three times across all 8 shipped
+  source sets: once in its own definition file and twice in the landmark
+  defense modules above; under `libraries/` the name occurs zero times in
+  every set. The equipment channel for this weapon system is ware
+  `turret_ter_m_laser_02_mk1` in `ego_dlc_terran/libraries/wares.xml`,
+  whose `<component ref>` points at the standard macro
+  `turret_ter_m_laser_02_mk1_macro`, not at the story macro; the ware
+  carries a single no-`purposes` `<use>` entry. The story macro therefore
+  has no authored ware access channel — the A3 `no_exact_equipment_ware`
+  condition. The corpus's utility-purpose channel is authored differently
+  in the same file: ware `turret_ter_m_mining_01_mk1` directly below it
+  declares `<use threshold="0" purposes="mine" />`.
+
+### Corroboration (not proof)
+- X4: 9.00
+- Status: shipped-source
+- Source: `ego_dlc_terran/assets/props/weaponsystems/standard/macros/turret_ter_m_laser_02_mk1_macro.xml`; `ego_dlc_terran/assets/fx/weaponfx/macros/bullet_ter_turret_m_laser_01_mk1_macro.xml`; `ego_dlc_terran/libraries/wares.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: The standard macro on the same component
+  (`turret_ter_m_laser_02_mk1_macro`, the alias target) is a
+  COMBAT_CANDIDATE in the current A3 census (as of commit `a9f215f`), and
+  its bullet declares `<weapon system="turret_shortrange" />`. Shared
+  component identity and the `alias` linkage corroborate the result only;
+  they are not its basis.
+
+### Limitations
+- COMBAT_CANDIDATE is a kind-level eligibility statement from the macro's,
+  its declared bullet's, and its landmark loadout records' own
+  shipped-source records: a conventional (non-missile) turret declaring a
+  damaging mid-range turret weapon, authored into defense-module turret
+  loadouts. It does not establish engine-side behavior; no live-test claim
+  is made.
+- The `alias` attribute and the loadout `turrets`/`path` attributes are
+  recorded as authored facts; their runtime semantics are not verified
+  offline and play no part in the result.
+- The A3 classifier still reports UNRESOLVED/`no_exact_equipment_ware` for
+  this macro because the purpose channel it reads is the equipment ware;
+  this entry records that the macro's own authored records supply kind-level
+  evidence the ware channel cannot reach.
