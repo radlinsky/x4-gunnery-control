@@ -401,3 +401,118 @@ its authored records expresses a non-combat purpose.
   this macro because the purpose channel it reads is the equipment ware;
   this entry records that the macro's own authored records supply kind-level
   evidence the ware channel cannot reach.
+
+## General rule for `no_exact_equipment_ware` macros — GENERAL_RULE_SUPPORTED
+
+Identity: corpus-level predicate, not a macro entry. It covers the four
+`no_exact_equipment_ware` macros recorded above (and any future macro in
+the same gap). Determined from the complete conventional-turret corpus of
+all 8 shipped X4 9.00 source sets, evaluated against the current A3 census
+(classifier at commit `a9f215f`; census output verified 2026-08-31).
+
+Result: **GENERAL_RULE_SUPPORTED** — one general, content-based, fail-closed
+predicate exists and is recorded below. On the full X4 9.00 corpus it
+includes all four no-ware COMBAT_CANDIDATE macros, classifies no known
+utility turret as combat, uses no macro or component names, source sets,
+file paths, factions, or display names, and fails closed on missing or
+ambiguous required records. The predicate is not implemented; the
+classifier is unchanged and no census classification was altered by this
+research.
+
+### The general predicate (P)
+- X4: 9.00
+- Status: inference
+- Source: corpus-wide derivation over all 8 shipped source sets extracted to `.x4-research-cache/issue72-a2-sources/`, evaluated against the A3 census output; each referenced field-level fact is shipped-source
+- Live test: no — untested as of 2026-08-31
+- Finding: Let M be a conventional turret macro — its own record carries
+  `class="turret"` — that has no equipment ware whose `<component ref>`
+  exactly equals M's macro name (the A3 `no_exact_equipment_ware` gap).
+  Let B be the non-empty bullet class M's own record declares via a
+  `<bullet class="B" />` property. M is a COMBAT_CANDIDATE under P if and
+  only if all of the following hold:
+  1. M declares exactly one such bullet class;
+  2. exactly one shipped macro named B with `class="bullet"` exists across
+     all 8 source sets — zero, or two or more, definitions is ambiguous
+     and fails closed to UNRESOLVED;
+  3. B's record carries an authored `<damage value="v" />` with numeric
+     v > 0 — absent, non-numeric, or non-positive fails closed to
+     UNRESOLVED;
+  4. B's record declares no `<multiplier mining="m" />` child of
+     `<damage>` and no `<weapon system="V" />` with V in the utility
+     weapon-system vocabulary — the set of `<weapon system>` values
+     authored on bullet records of census NONCOMBAT_UTILITY-classified
+     macros, derived from the ware purpose channel alone (in the X4 9.00
+     corpus exactly {`weapon_mining`}); a marker present means
+     NONCOMBAT_UTILITY, never combat;
+  5. otherwise COMBAT_CANDIDATE.
+  No step reads macro names, component identities, source sets, file
+  paths, factions, or display names. Because the utility vocabulary is
+  derived from the ware channel only, P is not circular: P's own output
+  never feeds its vocabulary.
+
+### Corpus results for P (exhaustive, X4 9.00)
+- X4: 9.00
+- Status: shipped-source
+- Source: all 8 shipped source sets extracted to `.x4-research-cache/issue72-a2-sources/`; A3 census output at classifier commit `a9f215f` — 147 equipment macros: 115 conventional `turret` (92 ware-backed COMBAT_CANDIDATE, 19 NONCOMBAT_UTILITY, 4 no-ware) and 32 `missileturret`
+- Live test: no — untested as of 2026-08-31
+- Finding: Applied to all 115 conventional turret macros:
+  - The 4 no-ware macros: 4/4 COMBAT_CANDIDATE.
+    `turret_kha_l_beam_01_mk1_scenario_macro` (damage 300, no weapon-system
+    declaration), `turret_ter_m_laser_story_mk1_macro` (damage 63,
+    `turret_midrange`), `turret_xen_l_laser_01_mk1_scenario_macro`
+    (damage 3229, `turret_longrange`),
+    `turret_xen_l_plasma_01_mk1_story_macro` (damage 2100, no
+    weapon-system declaration); each with exactly one shipped bullet
+    definition and no utility marker.
+  - The 19 NONCOMBAT_UTILITY macros: 0 classified as combat. All 18 mining
+    macros' bullet records carry a `<multiplier mining="..." />` child of
+    `<damage>` (and declare `weapon_mining`), so P returns
+    NONCOMBAT_UTILITY for them; the single salvage macro
+    `turret_gen_m_scrapbeam_01_mk1_macro` fails closed to UNRESOLVED
+    because its bullet declares `<damage repair="0" />` with no value.
+  - The 92 ware-backed COMBAT_CANDIDATE macros: 82 agree
+    (COMBAT_CANDIDATE) and 10 fail closed to UNRESOLVED — 8 with no
+    positive direct damage value (5 flak, 2 shotgun, 1 disruptor; those
+    bullets carry their damage in a separate `<areadamage>` channel, e.g.
+    value 210, while the `<damage>` element has no value) and 2 whose
+    declared bullet `bullet_ter_turret_m_laser_01_mk1_macro` is defined by
+    two shipped files in `ego_dlc_terran` (one of them the file authored
+    for the s-size bullet) and is therefore ambiguous. These 10 keep
+    their ware-channel classification; P's UNRESOLVED there is
+    abstention, not a conflicting verdict.
+  - The 32 `missileturret` macros remain out of scope under the existing
+    MISSILETURRET_EXCLUDED rule.
+
+### Damage alone is not a discriminator
+- X4: 9.00
+- Status: shipped-source
+- Source: `base/assets/fx/weaponFx/macros/bullet_arg_turret_l_mining_01_mk1_macro.xml`; `base/assets/fx/weaponFx/macros/bullet_gen_m_flak_01_mk1_macro.xml`; `base/assets/fx/weaponFx/macros/bullet_gen_m_scrapbeam_01_mk1_macro.xml`
+- Live test: no — untested as of 2026-08-31
+- Finding: Positive direct damage is necessary but not sufficient, in both
+  directions. Mining bullets carry positive direct damage (value 50, plus
+  `<multiplier mining="30" />` and
+  `<weapon system="weapon_mining" />`), so damage presence cannot separate
+  combat from utility; and some combat bullets carry zero direct damage
+  (flak: `<damage repair="0" />` alongside a separate
+  `<areadamage value="210" />` channel, with
+  `<weapon system="turret_shortrange" />`). Requiring positive direct
+  damage is therefore the conservative, fail-closed choice: it never
+  licenses combat from a utility record, and it abstains on
+  area-damage-shaped records. The salvage scrapbeam carries no damage
+  value at all (tug-beam profile with `tug="1"`).
+
+### Limitations
+- P is an inference promoted from the per-macro records in this file; the
+  underlying field facts are shipped-source. GENERAL_RULE_SUPPORTED is a
+  corpus-level statement for X4 9.00, not a proof for other versions or
+  for records outside the shipped corpus.
+- P is recorded for the classifier's future use only: it is not
+  implemented, the classifier is unchanged, and no macro's census
+  classification was altered by this research. The candidate-rule note in
+  the first entry therefore remains accurate: no macro is classified by
+  the rule today. This section is the corpus-level verification of that
+  candidate.
+- P's abstention set is non-empty on real corpus shapes (the 8
+  area-damage macros and the 2 ambiguous-definition macros). If a future
+  no-ware macro had such a shape, the correct outcome under P is
+  UNRESOLVED, not a default to combat.
