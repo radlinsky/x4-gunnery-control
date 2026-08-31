@@ -161,7 +161,7 @@ def _build_combat_conventional_turret_eligibility(
                 "macro_source_set": macro_record["source_set"],
                 "macro_source_file": macro_record["source_file"],
                 "eligibility": "UNRESOLVED",
-                "unresolved_reason": "NO_EXACT_EFFECTIVE_WARE_MAPPING",
+                "unresolved_reason": "no_exact_equipment_ware",
                 "evidence": {
                     "macro_source_set": macro_record["source_set"],
                     "macro_source_file": macro_record["source_file"],
@@ -279,9 +279,6 @@ def _build_combat_conventional_turret_eligibility(
         if eligibility == "NONCOMBAT_UTILITY":
             utility_macros.append(entry)
 
-    if anomalies:
-        return None, anomalies
-
     def counted(eligibility: str, macro_class: str | None = None) -> tuple[int, int]:
         selected = [
             item
@@ -330,7 +327,7 @@ def _build_combat_conventional_turret_eligibility(
         "unresolved_no_ware_macros": [
             item
             for item in macro_classifications
-            if item.get("unresolved_reason") == "NO_EXACT_EFFECTIVE_WARE_MAPPING"
+            if item.get("unresolved_reason") == "no_exact_equipment_ware"
         ],
         "macro_classifications": macro_classifications,
         "required_macro_local_classifications": [

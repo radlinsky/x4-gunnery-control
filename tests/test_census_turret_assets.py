@@ -274,7 +274,7 @@ class CensusTests(unittest.TestCase):
                         "macro_source_set": "base",
                         "macro_source_file": "assets/macros.xml",
                         "eligibility": "UNRESOLVED",
-                        "unresolved_reason": "NO_EXACT_EFFECTIVE_WARE_MAPPING",
+                        "unresolved_reason": "no_exact_equipment_ware",
                         "evidence": {
                             "macro_source_set": "base",
                             "macro_source_file": "assets/macros.xml",
