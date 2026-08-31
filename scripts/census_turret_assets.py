@@ -1109,6 +1109,224 @@ def _build_subname_candidate_channel_inventory(
     }
 
 
+def _build_same_subname_structural_relationship_coverage(
+    component_to_macros: list[dict[str, object]],
+    firing_endpoints: list[dict[str, object]],
+) -> dict[str, object]:
+    """Inventory exact-name selector locations relative to conventional path descriptors."""
+
+    components = {
+        str(record["component"]): record
+        for record in component_to_macros
+        if record["component_class"] == "turret"
+    }
+    membership_counts: Counter[tuple[str, int]] = Counter()
+    endpoints_by_descriptor: dict[tuple[str, int], list[str]] = defaultdict(list)
+    descriptors: dict[tuple[str, int], dict[str, object]] = {}
+    for endpoint in firing_endpoints:
+        if endpoint["component_class"] != "turret":
+            continue
+        component = str(endpoint["component"])
+        for descriptor in endpoint["ani_descriptor_memberships"]:
+            identity = (component, int(descriptor["descriptor_index"]))
+            membership_counts[identity] += 1
+            endpoints_by_descriptor[identity].append(str(endpoint["connection"]))
+            descriptors.setdefault(identity, descriptor)
+
+    inventory = []
+    relationship_counts: Counter[str] = Counter()
+    cross_tab_counts: Counter[tuple[object, ...]] = Counter()
+    cross_tab_memberships: Counter[tuple[object, ...]] = Counter()
+    covered_descriptors = 0
+    for identity in sorted(descriptors):
+        component, descriptor_index = identity
+        descriptor = descriptors[identity]
+        source_connection = str(descriptor["source_connection"])
+        source_path = [
+            str(connection)
+            for connection in descriptor["root_to_source_connection_path"]
+        ]
+        subname = str(descriptor["subname"])
+        component_record = components[component]
+        paths_by_connection = {
+            str(connection["name"]): [
+                str(item) for item in connection["root_to_connection_path"]
+            ]
+            for connection in component_record["connections"]
+        }
+        matching_selectors = sorted(
+            (
+                selector
+                for selector in component_record["authored_connection_animations"]
+                if str(selector["name"]) == subname
+            ),
+            key=lambda selector: str(selector["connection"]),
+        )
+        relationships = []
+        for selector in matching_selectors:
+            selector_connection = str(selector["connection"])
+            selector_path = paths_by_connection[selector_connection]
+            if selector_connection == source_connection:
+                relation = "same_source_connection"
+                distance = 0
+            elif (
+                len(selector_path) < len(source_path)
+                and source_path[: len(selector_path)] == selector_path
+            ):
+                relation = "strict_ancestor_connection"
+                distance = len(source_path) - len(selector_path)
+            elif (
+                len(source_path) < len(selector_path)
+                and selector_path[: len(source_path)] == source_path
+            ):
+                relation = "descendant_connection"
+                distance = len(selector_path) - len(source_path)
+            else:
+                relation = "unrelated_connection"
+                distance = None
+            relationship_counts[relation] += 1
+            relationships.append(
+                {
+                    "selector_connection": selector_connection,
+                    "root_to_selector_connection_path": selector_path,
+                    "relation": relation,
+                    "distance": distance,
+                }
+            )
+        if not relationships:
+            relationship_counts["none"] += 1
+
+        ancestor_distances = sorted(
+            int(relationship["distance"])
+            for relationship in relationships
+            if relationship["relation"] == "strict_ancestor_connection"
+        )
+        same_connection = any(
+            relationship["relation"] == "same_source_connection"
+            for relationship in relationships
+        )
+        no_selector_on_ancestry = not same_connection and not ancestor_distances
+        if not no_selector_on_ancestry:
+            covered_descriptors += 1
+        has_keys = any(
+            int(descriptor["channel_counts"][field]) > 0
+            for field in _ANI_CHANNEL_COUNT_FIELDS
+        )
+        row_key = (
+            subname,
+            "has_keys" if has_keys else "zero_keys",
+            same_connection,
+            ancestor_distances[0] if ancestor_distances else None,
+            no_selector_on_ancestry,
+            len(ancestor_distances) > 1,
+        )
+        cross_tab_counts[row_key] += 1
+        cross_tab_memberships[row_key] += membership_counts[identity]
+        inventory.append(
+            {
+                "component": component,
+                "descriptor_index": descriptor_index,
+                "part": str(descriptor["part"]),
+                "literal_subname": subname,
+                "source_connection": source_connection,
+                "root_to_source_connection_path": source_path,
+                "descriptor_has_keys": has_keys,
+                "endpoint_membership_count": membership_counts[identity],
+                "endpoint_connections": sorted(endpoints_by_descriptor[identity]),
+                "same_subname_selector_relationships": relationships,
+                "same_connection_selector": same_connection,
+                "strict_ancestor_selector_distances": ancestor_distances,
+                "nearest_ancestor_same_subname_selector_distance": (
+                    ancestor_distances[0] if ancestor_distances else None
+                ),
+                "no_same_subname_selector_on_ancestry": no_selector_on_ancestry,
+                "multiple_matching_ancestors": len(ancestor_distances) > 1,
+            }
+        )
+
+    full_cross_tab = [
+        {
+            "literal_subname": key[0],
+            "descriptor_key_class": key[1],
+            "same_connection_selector": key[2],
+            "nearest_ancestor_same_subname_selector_distance": key[3],
+            "no_same_subname_selector_on_ancestry": key[4],
+            "multiple_matching_ancestors": key[5],
+            "unique_descriptor_count": cross_tab_counts[key],
+            "endpoint_membership_count": cross_tab_memberships[key],
+        }
+        for key in sorted(
+            cross_tab_counts,
+            key=lambda item: (
+                str(item[0]), str(item[1]), bool(item[2]),
+                -1 if item[3] is None else int(item[3]),
+                bool(item[4]), bool(item[5]),
+            ),
+        )
+    ]
+    unique_descriptor_count = len(inventory)
+    if unique_descriptor_count == 0:
+        assessment = "ambiguous"
+    elif covered_descriptors == unique_descriptor_count:
+        assessment = "structurally complete across candidate conventional paths"
+    else:
+        assessment = "structurally incomplete"
+    focused_descriptors = [
+        descriptor
+        for descriptor in inventory
+        if descriptor["literal_subname"] == "turret_active"
+    ]
+    return {
+        "evidence_classification": "inference",
+        "relationship_basis_evidence_classification": "shipped-source",
+        "literal_name_match_rule": "exact case-sensitive equality",
+        "descriptor_identity": ["component", "descriptor_index"],
+        "semantic_claim": "none",
+        "descriptor_memberships": sum(membership_counts.values()),
+        "unique_descriptors": unique_descriptor_count,
+        "descriptors": inventory,
+        "relationship_occurrence_counts": {
+            relation: relationship_counts[relation]
+            for relation in (
+                "same_source_connection",
+                "strict_ancestor_connection",
+                "descendant_connection",
+                "unrelated_connection",
+                "none",
+            )
+        },
+        "full_cross_tab": full_cross_tab,
+        "focused_literal_turret_active": {
+            "literal_subname": "turret_active",
+            "unique_descriptor_count": len(focused_descriptors),
+            "endpoint_membership_count": sum(
+                int(descriptor["endpoint_membership_count"])
+                for descriptor in focused_descriptors
+            ),
+            "descriptors": focused_descriptors,
+            "full_cross_tab": [
+                row for row in full_cross_tab
+                if row["literal_subname"] == "turret_active"
+            ],
+        },
+        "hypothesis_assessment": {
+            "evidence_classification": "inference",
+            "assessment": assessment,
+            "descriptors_with_same_connection_or_ancestor_selector": (
+                covered_descriptors
+            ),
+            "descriptors_without_same_connection_or_ancestor_selector": (
+                unique_descriptor_count - covered_descriptors
+            ),
+            "boundary": (
+                "structural same-subname coverage does not establish that an"
+                " engine selector or trigger propagates to descendant"
+                " connections"
+            ),
+        },
+    }
+
+
 _PARANID_L_BEAM_ACCEPTED_PRODUCTION_FORMULA = {
     "production_sha": "0d8780da74e49838d3f14408fe5c8c27ee151871",
     "production_source_file": "md/x4_gunnery_control.xml",
@@ -4490,6 +4708,16 @@ def build_census(
             selected_endpoint_path_descriptor_memberships,
         )
     )
+    same_subname_structural_relationship_coverage = (
+        _build_same_subname_structural_relationship_coverage(
+            component_to_macros, firing_endpoints
+        )
+    )
+    effective_anchor_trace_spec = (
+        anchor_trace_spec
+        if anchor_trace_spec is not None
+        else _PARANID_L_BEAM_TRACE_SPEC
+    )
     paranid_l_beam_live_anchor = _build_paranid_l_beam_live_anchor(
         equipment_macros,
         component_to_macros,
@@ -4499,12 +4727,38 @@ def build_census(
             if anchor_production_formula is not None
             else _PARANID_L_BEAM_ACCEPTED_PRODUCTION_FORMULA
         ),
-        trace_spec=(
-            anchor_trace_spec
-            if anchor_trace_spec is not None
-            else _PARANID_L_BEAM_TRACE_SPEC
-        ),
+        trace_spec=effective_anchor_trace_spec,
     )
+
+    anchor_relationship_descriptor_indexes = {
+        int(effective_anchor_trace_spec[name]["descriptor_index"])
+        for name in ("rotator_active_descriptor", "barrel_active_descriptor")
+    }
+    anchor_relationship_descriptors = [
+        descriptor
+        for descriptor in same_subname_structural_relationship_coverage[
+            "focused_literal_turret_active"
+        ]["descriptors"]
+        if descriptor["component"] == "turret_par_l_beam_01_mk1"
+        and descriptor["descriptor_index"] in anchor_relationship_descriptor_indexes
+    ]
+    paranid_l_beam_live_anchor[
+        "same_subname_structural_relationship_coverage"
+    ] = {
+        "literal_subname": "turret_active",
+        "descriptor_relationships": anchor_relationship_descriptors,
+        "exact_matching_selector_connections": sorted(
+            {
+                relationship["selector_connection"]
+                for descriptor in anchor_relationship_descriptors
+                for relationship in descriptor[
+                    "same_subname_selector_relationships"
+                ]
+            }
+        ),
+        "evidence_classification": "inference",
+        "semantic_claim": "none",
+    }
 
     # Raw per-record values are needed only to produce the aggregate inventory;
     # keep the public census structural and bounded.
@@ -4581,7 +4835,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 19,
+        "schema_version": 20,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -4852,6 +5106,9 @@ def build_census(
         ),
         "selected_descriptor_subname_candidate_channel_inventory": (
             subname_candidate_channel_inventory
+        ),
+        "conventional_endpoint_path_descriptor_same_subname_structural_relationship_coverage": (
+            same_subname_structural_relationship_coverage
         ),
         "paranid_l_beam_accepted_live_anchor": paranid_l_beam_live_anchor,
         "selected_descriptor_offset_148_inventory_and_slot_024_relationships": {

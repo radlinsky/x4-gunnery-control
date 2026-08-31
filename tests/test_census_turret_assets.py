@@ -19,6 +19,7 @@ from census_turret_assets import (  # noqa: E402
     CensusError,
     REQUIRED_SOURCE_SETS,
     _ANI_KEY_RECORD_CANDIDATE_SLOTS,
+    _build_same_subname_structural_relationship_coverage,
     _parse_ani_descriptors,
     _derive_endpoint_source_paths,
     _evaluate_paranid_l_beam_trace,
@@ -1210,6 +1211,180 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(report["unresolved_endpoint_path_animation_selectors"], [])
             self.assertEqual(render_json(report), render_json(build_census(roots)))
 
+    def test_conventional_same_subname_structural_relationships_are_exact_and_deduplicated(self) -> None:
+        paths = {
+            "Root": ["Root"],
+            "Child": ["Root", "Child"],
+            "Grand": ["Root", "Child", "Grand"],
+            "Sibling": ["Sibling"],
+        }
+        selectors = [
+            ("Root", "Same"),
+            ("Root", "Ancestor"),
+            ("Root", "Multi"),
+            ("Root", "CaseName"),
+            ("Child", "Multi"),
+            ("Grand", "DescendantOnly"),
+            ("Sibling", "SiblingOnly"),
+        ]
+        descriptors = [
+            (0, "RootPart", "Same", "Root", (1, 0, 0, 0, 0)),
+            (1, "RootPart", "DescendantOnly", "Root", (0, 0, 0, 0, 0)),
+            (2, "RootPart", "casename", "Root", (0, 0, 0, 0, 0)),
+            (3, "RootPart", "NoSelector", "Root", (0, 0, 0, 0, 0)),
+            (4, "ChildPart", "Ancestor", "Child", (0, 0, 0, 0, 0)),
+            (5, "GrandPart", "Multi", "Grand", (0, 1, 0, 0, 0)),
+            (6, "GrandPart", "SiblingOnly", "Grand", (0, 0, 0, 0, 0)),
+        ]
+        memberships = [
+            {
+                "descriptor_index": index,
+                "part": part,
+                "subname": subname,
+                "source_connection": connection,
+                "root_to_source_connection_path": paths[connection],
+                "channel_counts": dict(
+                    zip(("position", "rotation", "scale", "pre_scale", "post_scale"), counts)
+                ),
+            }
+            for index, part, subname, connection, counts in descriptors
+        ]
+        component_to_macros = [
+            {
+                "component": "component_a",
+                "component_class": "turret",
+                "connections": [
+                    {"name": connection, "root_to_connection_path": path}
+                    for connection, path in paths.items()
+                ],
+                "authored_connection_animations": [
+                    {"connection": connection, "name": name}
+                    for connection, name in selectors
+                ],
+            }
+        ]
+        firing_endpoints = [
+            {
+                "component": "component_a",
+                "component_class": "turret",
+                "connection": endpoint,
+                "ani_descriptor_memberships": copy.deepcopy(memberships),
+            }
+            for endpoint in ("EndpointA", "EndpointB")
+        ]
+
+        coverage = _build_same_subname_structural_relationship_coverage(
+            component_to_macros, firing_endpoints
+        )
+
+        self.assertEqual(coverage["evidence_classification"], "inference")
+        with self.subTest("relationship inventory"):
+            self.assertEqual(coverage["semantic_claim"], "none")
+            self.assertEqual(coverage["descriptor_memberships"], 14)
+            self.assertEqual(coverage["unique_descriptors"], 7)
+            inventory = {
+                descriptor["literal_subname"]: descriptor
+                for descriptor in coverage["descriptors"]
+            }
+            self.assertEqual(
+                inventory["Same"]["root_to_source_connection_path"], ["Root"]
+            )
+            self.assertEqual(inventory["Same"]["source_connection"], "Root")
+            self.assertEqual(inventory["Same"]["endpoint_membership_count"], 2)
+            self.assertTrue(inventory["Same"]["descriptor_has_keys"])
+            self.assertEqual(
+                inventory["Same"]["same_subname_selector_relationships"],
+                [
+                    {
+                        "selector_connection": "Root",
+                        "root_to_selector_connection_path": ["Root"],
+                        "relation": "same_source_connection",
+                        "distance": 0,
+                    }
+                ],
+            )
+            self.assertEqual(
+                inventory["Ancestor"]["same_subname_selector_relationships"],
+                [
+                    {
+                        "selector_connection": "Root",
+                        "root_to_selector_connection_path": ["Root"],
+                        "relation": "strict_ancestor_connection",
+                        "distance": 1,
+                    }
+                ],
+            )
+            self.assertEqual(
+                inventory["Multi"]["strict_ancestor_selector_distances"], [1, 2]
+            )
+            self.assertEqual(
+                [
+                    relationship["relation"]
+                    for relationship in inventory["DescendantOnly"][
+                        "same_subname_selector_relationships"
+                    ]
+                ],
+                ["descendant_connection"],
+            )
+            self.assertEqual(
+                [
+                    relationship["relation"]
+                    for relationship in inventory["SiblingOnly"][
+                        "same_subname_selector_relationships"
+                    ]
+                ],
+                ["unrelated_connection"],
+            )
+            self.assertEqual(
+                inventory["casename"]["same_subname_selector_relationships"], []
+            )
+            self.assertEqual(
+                inventory["NoSelector"]["same_subname_selector_relationships"], []
+            )
+            self.assertTrue(
+                inventory["NoSelector"]["no_same_subname_selector_on_ancestry"]
+            )
+            self.assertEqual(
+                coverage["relationship_occurrence_counts"],
+                {
+                    "same_source_connection": 1,
+                    "strict_ancestor_connection": 3,
+                    "descendant_connection": 1,
+                    "unrelated_connection": 1,
+                    "none": 2,
+                },
+            )
+            multi_row = next(
+                row
+                for row in coverage["full_cross_tab"]
+                if row["literal_subname"] == "Multi"
+            )
+            self.assertEqual(
+                multi_row,
+                {
+                    "literal_subname": "Multi",
+                    "descriptor_key_class": "has_keys",
+                    "same_connection_selector": False,
+                    "nearest_ancestor_same_subname_selector_distance": 1,
+                    "no_same_subname_selector_on_ancestry": False,
+                    "multiple_matching_ancestors": True,
+                    "unique_descriptor_count": 1,
+                    "endpoint_membership_count": 2,
+                },
+            )
+            self.assertEqual(
+                coverage["hypothesis_assessment"]["assessment"],
+                "structurally incomplete",
+            )
+        self.assertEqual(
+            render_json(coverage),
+            render_json(
+                _build_same_subname_structural_relationship_coverage(
+                    component_to_macros, firing_endpoints
+                )
+            ),
+        )
+
     def test_ani_key_ranges_follow_descriptor_table_and_channel_count_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mixed.ANI"
@@ -2368,6 +2543,30 @@ class CensusTests(unittest.TestCase):
             if descriptor["descriptor_index"] == 1
         )
         self.assertEqual(rotator["candidate_channel_counts"], [2, 0, 0, 0, 0])
+        relationships = anchor["same_subname_structural_relationship_coverage"]
+        self.assertEqual(
+            relationships["exact_matching_selector_connections"], ["Connection01"]
+        )
+        self.assertEqual(
+            [
+                (
+                    descriptor["descriptor_index"],
+                    descriptor["source_connection"],
+                    descriptor["root_to_source_connection_path"],
+                    descriptor["strict_ancestor_selector_distances"],
+                )
+                for descriptor in relationships["descriptor_relationships"]
+            ],
+            [
+                (1, "Connection03", ["Connection01", "Connection03"], [1]),
+                (
+                    3,
+                    "Connection05",
+                    ["Connection01", "Connection03", "Connection04", "Connection05"],
+                    [3],
+                ),
+            ],
+        )
         self.assertEqual(
             rotator["candidate_channels"][0]["records"][0]["raw_bits"][1],
             "0x41a00000",
