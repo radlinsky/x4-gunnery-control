@@ -28,7 +28,11 @@ from census_turret_assets import (  # noqa: E402
 
 
 def _ani_bytes(
-    *descriptors: tuple[str, str] | tuple[str, str, int, int, int, int, int],
+    *descriptors: (
+        tuple[str, str]
+        | tuple[str, str, int, int, int, int, int]
+        | tuple[str, str, int, int, int, int, int, int]
+    ),
     version: int = 1,
     header_padding: int = 0,
     key_offset: int | None = None,
@@ -39,7 +43,8 @@ def _ani_bytes(
     total_key_records = 0
     for descriptor in descriptors:
         part, subname = descriptor[:2]
-        channel_counts = descriptor[2:] or (0, 0, 0, 0, 0)
+        channel_counts = descriptor[2:7] or (0, 0, 0, 0, 0)
+        descriptor_offset_148_raw_bits = descriptor[7] if len(descriptor) == 8 else 0
         total_key_records += sum(channel_counts)
         part_bytes = part.encode("ascii")
         subname_bytes = subname.encode("ascii")
@@ -49,7 +54,10 @@ def _ani_bytes(
             part_bytes.ljust(64, b"\0")
             + subname_bytes.ljust(64, b"\0")
             + struct.pack(
-                "<5If2I", *channel_counts, 0.0, *descriptor_padding
+                "<8I",
+                *channel_counts,
+                descriptor_offset_148_raw_bits,
+                *descriptor_padding,
             )
         )
     descriptor_table = b"".join(records)
@@ -1323,6 +1331,267 @@ class CensusTests(unittest.TestCase):
         self.assertEqual(raw_record["record_index"], 0)
         self.assertEqual(raw_record["byte_offset"], 176)
         self.assertEqual(raw_record["raw_values"], list(values))
+
+    def test_descriptor_offset_148_inventory_and_slot_024_relationships_are_exact(self) -> None:
+        def record(slot_024: float) -> bytes:
+            values: list[float | int] = [0] * 32
+            values[6] = slot_024
+            return _candidate_key_record(tuple(values))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            signed_zero_path = Path(tmp) / "descriptor_signed_zero.ANI"
+            signed_zero_path.write_bytes(
+                _ani_bytes(
+                    ("PlusZero", "Selected", 0, 0, 0, 0, 0, 0x00000000),
+                    ("MinusZero", "Selected", 0, 0, 0, 0, 0, 0x80000000),
+                )
+            )
+            signed_zero_descriptors = _parse_ani_descriptors(signed_zero_path)
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional_a" class="turret">
+                    <source geometry="geometry/offset_a"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="PartA"/></parts></connection>
+                      <connection name="EndpointA" tags="laser" parent="PartA"/>
+                      <connection name="EndpointB" tags="laser" parent="PartA"/>
+                    </connections>
+                  </component>
+                  <component name="conventional_b" class="turret">
+                    <source geometry="geometry/offset_b"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="PartB"/></parts></connection>
+                      <connection name="Endpoint" tags="laser" parent="PartB"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/offset_missile"/>
+                    <connections>
+                      <connection name="Root"><animations><animation name="Selected"/></animations><parts><part name="MissilePart"/></parts></connection>
+                      <connection name="Endpoint" tags="rocket" parent="MissilePart"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_a_macro", "turret", "conventional_a"),
+                    ("conventional_b_macro", "turret", "conventional_b"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+            (roots["base"] / "geometry/offset_a.ANI").write_bytes(
+                _ani_bytes(
+                    ("PartA", "Selected", 0, 1, 2, 2, 2, 0x80000000),
+                    key_data=b"".join(
+                        record(value)
+                        for value in (+0.0, -1.0, -0.0, -0.0, 1.0, -1.0, 1.0)
+                    ),
+                )
+            )
+            (roots["base"] / "geometry/offset_b.ANI").write_bytes(
+                _ani_bytes(
+                    ("PartB", "Selected", 2, 2, 2, 2, 0, 0x40400000),
+                    key_data=b"".join(
+                        record(value)
+                        for value in (1.0, 2.0, 4.0, 5.0, 3.0, 3.0, 1.0, 3.0)
+                    ),
+                )
+            )
+            (roots["base"] / "geometry/offset_missile.ANI").write_bytes(
+                _ani_bytes(
+                    ("MissilePart", "Selected", 0, 0, 0, 0, 0, 0x7FC00001)
+                )
+            )
+            report = build_census(roots)
+
+        self.assertEqual(
+            [
+                descriptor["descriptor_offset_148"]["raw_bits"]
+                for descriptor in signed_zero_descriptors
+            ],
+            ["0x00000000", "0x80000000"],
+        )
+        self.assertEqual(
+            [
+                descriptor["descriptor_offset_148"]["candidate_float32_decode"][
+                    "value"
+                ]
+                for descriptor in signed_zero_descriptors
+            ],
+            [+0.0, -0.0],
+        )
+        self.assertEqual(
+            len(
+                {
+                    descriptor["descriptor_offset_148"]["raw_bits"]
+                    for descriptor in signed_zero_descriptors
+                }
+            ),
+            2,
+        )
+
+        component_a = next(
+            record
+            for record in report["component_to_macros"]
+            if record["component"] == "conventional_a"
+        )
+        descriptor_field = component_a["ani_descriptors"][0]["descriptor_offset_148"]
+        self.assertEqual(descriptor_field["byte_offset_within_descriptor"], 148)
+        self.assertEqual(descriptor_field["width_bytes"], 4)
+        self.assertEqual(descriptor_field["raw_bits"], "0x80000000")
+        self.assertEqual(
+            descriptor_field["candidate_float32_decode"],
+            {"kind": "finite", "value": -0.0},
+        )
+        self.assertEqual(
+            descriptor_field["raw_bits_evidence_classification"], "shipped-source"
+        )
+        self.assertEqual(
+            descriptor_field["candidate_decode_evidence_classification"],
+            "third-party-technique",
+        )
+        self.assertNotIn("duration", descriptor_field)
+
+        inventory = report[
+            "selected_descriptor_offset_148_inventory_and_slot_024_relationships"
+        ]
+        self.assertEqual(inventory["evidence_classification"], "inference")
+        self.assertEqual(inventory["engine_requiredness"], "unresolved")
+        lead = inventory["x4converter_lead"]
+        self.assertEqual(lead["evidence_classification"], "third-party-technique")
+        self.assertEqual(lead["x4converter_member"], "Duration")
+        self.assertEqual(lead["read_site"]["line_range_at_pinned_commit"], [21, 26])
+        self.assertEqual(lead["write_site"]["line_range_at_pinned_commit"], [79, 84])
+        self.assertEqual(lead["validation_report_site"]["line_range_at_pinned_commit"], [205, 207])
+        self.assertEqual(lead["other_actual_use_sites"], [])
+        self.assertEqual(lead["engine_requiredness"], "unresolved")
+
+        conventional = inventory["conventional"]
+        missile = inventory["missileturret"]
+        self.assertEqual(conventional["selected_descriptor_memberships"], 3)
+        self.assertEqual(conventional["unique_selected_descriptors"], 2)
+        self.assertEqual(missile["selected_descriptor_memberships"], 1)
+        self.assertEqual(missile["unique_selected_descriptors"], 1)
+        self.assertEqual(
+            conventional["offset_148_value_inventory"],
+            {
+                "descriptor_count": 2,
+                "finite_count": 2,
+                "non_finite_count": 0,
+                "numeric_zero_count": 1,
+                "numeric_nonzero_count": 1,
+                "positive_zero_raw_bit_count": 0,
+                "negative_zero_raw_bit_count": 1,
+                "distinct_raw_bit_pattern_count": 2,
+                "raw_bit_pattern_distribution_limit": 256,
+                "raw_bit_pattern_distribution_is_complete": True,
+                "raw_bit_pattern_distribution": [
+                    {
+                        "raw_bits": "0x40400000",
+                        "candidate_float32_decode": {"kind": "finite", "value": 3.0},
+                        "descriptor_count": 1,
+                    },
+                    {
+                        "raw_bits": "0x80000000",
+                        "candidate_float32_decode": {"kind": "finite", "value": -0.0},
+                        "descriptor_count": 1,
+                    },
+                ],
+            },
+        )
+        self.assertEqual(missile["offset_148_value_inventory"]["finite_count"], 0)
+        self.assertEqual(missile["offset_148_value_inventory"]["non_finite_count"], 1)
+        self.assertEqual(
+            missile["offset_148_value_inventory"]["raw_bit_pattern_distribution"],
+            [
+                {
+                    "raw_bits": "0x7fc00001",
+                    "candidate_float32_decode": {"kind": "nan", "value": None},
+                    "descriptor_count": 1,
+                }
+            ],
+        )
+
+        channels = {
+            channel["candidate_channel_id"]: channel
+            for channel in conventional["candidate_channel_slot_024_relationships"]
+        }
+        self.assertEqual(
+            channels["candidate_channel_0"]["key_count_distribution"],
+            {"no_keys": 1, "one_key": 0, "multiple_keys": 1},
+        )
+        self.assertEqual(
+            channels["candidate_channel_0"]["numeric_relationship_distribution"],
+            {
+                "no_keys": 1,
+                "non_finite": 0,
+                "equals_both": 0,
+                "equals_first": 0,
+                "equals_last": 0,
+                "greater_than_sequence_maximum": 1,
+                "less_than_sequence_minimum": 0,
+                "other": 0,
+            },
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["key_count_distribution"],
+            {"no_keys": 0, "one_key": 1, "multiple_keys": 1},
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["raw_bit_relationship_distribution"]["other"],
+            2,
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["numeric_relationship_distribution"]["equals_both"],
+            1,
+        )
+        self.assertEqual(
+            channels["candidate_channel_1"]["numeric_relationship_distribution"]["less_than_sequence_minimum"],
+            1,
+        )
+        self.assertEqual(
+            channels["candidate_channel_2"]["raw_bit_relationship_distribution"],
+            {
+                "no_keys": 0,
+                "equals_both": 1,
+                "equals_first": 0,
+                "equals_last": 1,
+                "other": 0,
+            },
+        )
+        self.assertEqual(
+            channels["candidate_channel_3"]["numeric_relationship_distribution"],
+            {
+                "no_keys": 0,
+                "non_finite": 0,
+                "equals_both": 0,
+                "equals_first": 1,
+                "equals_last": 1,
+                "greater_than_sequence_maximum": 0,
+                "less_than_sequence_minimum": 0,
+                "other": 0,
+            },
+        )
+        self.assertEqual(
+            channels["candidate_channel_4"]["numeric_relationship_distribution"]["other"],
+            1,
+        )
+        self.assertEqual(
+            channels["candidate_channel_4"]["numeric_relationship_distribution"]["no_keys"],
+            1,
+        )
+
+        rendered = render_json(inventory).lower()
+        self.assertNotIn('"evidence_classification": "live-tested"', rendered)
+        self.assertNotIn('"semantic_status": "resolved"', rendered)
+        self.assertNotIn('"semantic_status": "final"', rendered)
+        self.assertEqual(inventory["semantic_claim"], "none")
 
     def test_selected_raw_slot_distributions_are_unique_separate_and_nonsemantic(self) -> None:
         conventional_first = [0] * 32

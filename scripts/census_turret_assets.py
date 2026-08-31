@@ -34,6 +34,8 @@ _INCLUDED_CLASSES = frozenset(("turret", "missileturret"))
 _ANI_HEADER_SIZE = 16
 _ANI_DESCRIPTOR_SIZE = 160
 _ANI_STRING_SIZE = 64
+_ANI_DESCRIPTOR_OFFSET_148 = 148
+_DESCRIPTOR_RAW_BIT_DISTRIBUTION_LIMIT = 256
 _ANI_KEY_RECORD_SIZE = 128
 _ANI_CHANNEL_COUNT_FIELDS = (
     "position",
@@ -308,6 +310,18 @@ def _parse_candidate_key_record(record: bytes) -> tuple[list[float | int], list[
     return values, raw_bits
 
 
+def _candidate_float32_decode(raw_bits: int) -> dict[str, object]:
+    value = struct.unpack("<f", struct.pack("<I", raw_bits))[0]
+    if math.isnan(value):
+        return {"kind": "nan", "value": None}
+    if math.isinf(value):
+        return {
+            "kind": "positive_infinity" if value > 0 else "negative_infinity",
+            "value": None,
+        }
+    return {"kind": "finite", "value": value}
+
+
 def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
     """Parse ANI v1 descriptors and assign candidate fixed key-record ranges."""
 
@@ -362,6 +376,9 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
         )
         channel_count_values = struct.unpack_from("<5I", data, offset + 128)
         channel_counts = dict(zip(_ANI_CHANNEL_COUNT_FIELDS, channel_count_values))
+        descriptor_offset_148_raw_bits = struct.unpack_from(
+            "<I", data, offset + _ANI_DESCRIPTOR_OFFSET_148
+        )[0]
         descriptor_padding = struct.unpack_from("<2I", data, offset + 152)
         if descriptor_padding != (0, 0):
             raise AniDescriptorError(
@@ -386,6 +403,18 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
                 "part": part,
                 "subname": subname,
                 "channel_counts": channel_counts,
+                "descriptor_offset_148": {
+                    "byte_offset_within_descriptor": _ANI_DESCRIPTOR_OFFSET_148,
+                    "width_bytes": 4,
+                    "raw_bits": f"0x{descriptor_offset_148_raw_bits:08x}",
+                    "candidate_float32_decode": _candidate_float32_decode(
+                        descriptor_offset_148_raw_bits
+                    ),
+                    "raw_bits_evidence_classification": "shipped-source",
+                    "candidate_decode_evidence_classification": (
+                        "third-party-technique"
+                    ),
+                },
             }
         )
 
@@ -792,6 +821,173 @@ def _inventory_candidate_multi_key_metadata(
     }
 
 
+def _descriptor_offset_148_raw_uint(descriptor: dict[str, object]) -> int:
+    field = descriptor["descriptor_offset_148"]
+    return int(str(field["raw_bits"]), 16)
+
+
+def _descriptor_offset_148_float(descriptor: dict[str, object]) -> float:
+    return struct.unpack(
+        "<f", struct.pack("<I", _descriptor_offset_148_raw_uint(descriptor))
+    )[0]
+
+
+def _summarize_descriptor_offset_148_values(
+    unique_descriptors: dict[tuple[str, int], dict[str, object]],
+) -> dict[str, object]:
+    raw_bit_counts = Counter(
+        str(descriptor["descriptor_offset_148"]["raw_bits"])
+        for descriptor in unique_descriptors.values()
+    )
+    values = [
+        _descriptor_offset_148_float(descriptor)
+        for descriptor in unique_descriptors.values()
+    ]
+    finite_count = sum(math.isfinite(value) for value in values)
+    numeric_zero_count = sum(math.isfinite(value) and value == 0 for value in values)
+    numeric_nonzero_count = sum(
+        math.isfinite(value) and value != 0 for value in values
+    )
+    distribution_is_complete = (
+        len(raw_bit_counts) <= _DESCRIPTOR_RAW_BIT_DISTRIBUTION_LIMIT
+    )
+    distribution = None
+    if distribution_is_complete:
+        distribution = [
+            {
+                "raw_bits": raw_bits,
+                "candidate_float32_decode": _candidate_float32_decode(
+                    int(raw_bits, 16)
+                ),
+                "descriptor_count": raw_bit_counts[raw_bits],
+            }
+            for raw_bits in sorted(raw_bit_counts)
+        ]
+    return {
+        "descriptor_count": len(values),
+        "finite_count": finite_count,
+        "non_finite_count": len(values) - finite_count,
+        "numeric_zero_count": numeric_zero_count,
+        "numeric_nonzero_count": numeric_nonzero_count,
+        "positive_zero_raw_bit_count": raw_bit_counts["0x00000000"],
+        "negative_zero_raw_bit_count": raw_bit_counts["0x80000000"],
+        "distinct_raw_bit_pattern_count": len(raw_bit_counts),
+        "raw_bit_pattern_distribution_limit": (
+            _DESCRIPTOR_RAW_BIT_DISTRIBUTION_LIMIT
+        ),
+        "raw_bit_pattern_distribution_is_complete": distribution_is_complete,
+        "raw_bit_pattern_distribution": distribution,
+    }
+
+
+_DESCRIPTOR_SLOT_024_RAW_RELATIONSHIPS = (
+    "no_keys",
+    "equals_both",
+    "equals_first",
+    "equals_last",
+    "other",
+)
+_DESCRIPTOR_SLOT_024_NUMERIC_RELATIONSHIPS = (
+    "no_keys",
+    "non_finite",
+    "equals_both",
+    "equals_first",
+    "equals_last",
+    "greater_than_sequence_maximum",
+    "less_than_sequence_minimum",
+    "other",
+)
+
+
+def _classify_descriptor_slot_024_raw_relationship(
+    descriptor_raw_bits: str, records: list[dict[str, object]]
+) -> str:
+    if not records:
+        return "no_keys"
+    first_equal = descriptor_raw_bits == str(records[0]["raw_bits"][6])
+    last_equal = descriptor_raw_bits == str(records[-1]["raw_bits"][6])
+    if first_equal and last_equal:
+        return "equals_both"
+    if first_equal:
+        return "equals_first"
+    if last_equal:
+        return "equals_last"
+    return "other"
+
+
+def _classify_descriptor_slot_024_numeric_relationship(
+    descriptor_value: float, records: list[dict[str, object]]
+) -> str:
+    if not records:
+        return "no_keys"
+    values = [float(record["raw_values"][6]) for record in records]
+    if not math.isfinite(descriptor_value) or not all(
+        math.isfinite(value) for value in values
+    ):
+        return "non_finite"
+    first_equal = descriptor_value == values[0]
+    last_equal = descriptor_value == values[-1]
+    if first_equal and last_equal:
+        return "equals_both"
+    if first_equal:
+        return "equals_first"
+    if last_equal:
+        return "equals_last"
+    if descriptor_value > max(values):
+        return "greater_than_sequence_maximum"
+    if descriptor_value < min(values):
+        return "less_than_sequence_minimum"
+    return "other"
+
+
+def _summarize_descriptor_slot_024_relationships(
+    unique_descriptors: dict[tuple[str, int], dict[str, object]],
+) -> list[dict[str, object]]:
+    candidate_channels = []
+    for channel_index, field in enumerate(_ANI_CHANNEL_COUNT_FIELDS):
+        key_count_distribution = {
+            "no_keys": 0,
+            "one_key": 0,
+            "multiple_keys": 0,
+        }
+        raw_relationships = {
+            relationship: 0
+            for relationship in _DESCRIPTOR_SLOT_024_RAW_RELATIONSHIPS
+        }
+        numeric_relationships = {
+            relationship: 0
+            for relationship in _DESCRIPTOR_SLOT_024_NUMERIC_RELATIONSHIPS
+        }
+        for descriptor in unique_descriptors.values():
+            records = _candidate_channel_records(descriptor, field)
+            if not records:
+                key_count_distribution["no_keys"] += 1
+            elif len(records) == 1:
+                key_count_distribution["one_key"] += 1
+            else:
+                key_count_distribution["multiple_keys"] += 1
+            raw_relationships[
+                _classify_descriptor_slot_024_raw_relationship(
+                    str(descriptor["descriptor_offset_148"]["raw_bits"]), records
+                )
+            ] += 1
+            numeric_relationships[
+                _classify_descriptor_slot_024_numeric_relationship(
+                    _descriptor_offset_148_float(descriptor), records
+                )
+            ] += 1
+        candidate_channels.append(
+            {
+                "candidate_channel_id": f"candidate_channel_{channel_index}",
+                "candidate_channel_count_field_index": channel_index,
+                "key_count_distribution": key_count_distribution,
+                "raw_bit_relationship_distribution": raw_relationships,
+                "numeric_relationship_distribution": numeric_relationships,
+            }
+        )
+    return candidate_channels
+
+
 _X4CONVERTER_COMMIT = "0be4b494089ba7719d4c5d351e63160ef3843ef5"
 _X4CONVERTER_KEYFRAME_HEADER = (
     "X4ConverterTools/include/X4ConverterTools/ani/Keyframe.h"
@@ -812,6 +1008,56 @@ def _x4converter_site(
         "function": function,
         "line_range_at_pinned_commit": [line_start, line_end],
         "expression": expression,
+    }
+
+
+def _x4converter_descriptor_offset_148_lead() -> dict[str, object]:
+    return {
+        "evidence_classification": "third-party-technique",
+        "source_revision": {
+            "repository": "https://github.com/Cgettys/X4Converter.git",
+            "commit": _X4CONVERTER_COMMIT,
+            "inspection": "direct pinned checkout",
+        },
+        "x4converter_member": "Duration",
+        "member_declaration_site": _x4converter_site(
+            "X4ConverterTools/include/X4ConverterTools/ani/AnimDesc.h",
+            "ani::AnimDesc member declaration",
+            43,
+            43,
+            "float Duration = 0",
+        ),
+        "read_site": _x4converter_site(
+            _X4CONVERTER_ANIMDESC_SOURCE,
+            "AnimDesc::AnimDesc(StreamReaderLE &reader)",
+            21,
+            26,
+            "NumPostScaleKeys is read before Duration",
+        ),
+        "write_site": _x4converter_site(
+            _X4CONVERTER_ANIMDESC_SOURCE,
+            "AnimDesc::WriteToGameFiles",
+            79,
+            84,
+            "NumPostScaleKeys is written before Duration",
+        ),
+        "validation_report_site": _x4converter_site(
+            _X4CONVERTER_ANIMDESC_SOURCE,
+            "AnimDesc::validate",
+            205,
+            207,
+            "Duration is included in human-readable validation output",
+        ),
+        "other_actual_use_sites": [],
+        "search_scope": (
+            "pinned X4Converter commit C/C++ headers and sources; exact member"
+            " search found declaration, read, write, and validation report only"
+        ),
+        "engine_requiredness": "unresolved",
+        "absence_interpretation": (
+            "X4Converter use or non-use does not establish X4 engine requiredness"
+        ),
+        "semantic_promotion": "not_permitted_by_this_inventory",
     }
 
 
@@ -1849,6 +2095,9 @@ def _derive_endpoint_source_paths(
                         "part": descriptor["part"],
                         "subname": descriptor["subname"],
                         "channel_counts": descriptor["channel_counts"],
+                        "descriptor_offset_148": descriptor[
+                            "descriptor_offset_148"
+                        ],
                         "key_data": descriptor["key_data"],
                         "_candidate_raw_key_records": descriptor[
                             "_candidate_raw_key_records"
@@ -2431,6 +2680,9 @@ def build_census(
                                     "part": part,
                                     "subname": descriptor["subname"],
                                     "channel_counts": descriptor["channel_counts"],
+                                    "descriptor_offset_148": descriptor[
+                                        "descriptor_offset_148"
+                                    ],
                                     "key_data": descriptor["key_data"],
                                     "_candidate_raw_key_records": descriptor[
                                         "_candidate_raw_key_records"
@@ -2664,6 +2916,7 @@ def build_census(
     selected_candidate_slot_distributions_by_class = {}
     selected_candidate_channel_dynamics_by_class = {}
     selected_candidate_channel_metadata_by_class = {}
+    selected_unique_descriptors_by_class = {}
     for component_class in sorted(_INCLUDED_CLASSES):
         memberships = [
             descriptor
@@ -2688,6 +2941,7 @@ def build_census(
                 str(endpoint["component"]), int(descriptor["descriptor_index"])
             )
             unique_descriptors.setdefault(identity, descriptor)
+        selected_unique_descriptors_by_class[component_class] = unique_descriptors
         raw_records = [
             raw_record
             for descriptor in unique_descriptors.values()
@@ -2710,6 +2964,31 @@ def build_census(
                 include_patterns=component_class == "turret",
             )
         )
+
+    selected_descriptor_offset_148_by_class = {}
+    for component_class in sorted(_INCLUDED_CLASSES):
+        unique_descriptors = selected_unique_descriptors_by_class[component_class]
+        memberships = [
+            descriptor
+            for endpoint, descriptor in selected_endpoint_path_descriptor_memberships
+            if endpoint["component_class"] == component_class
+        ]
+        selected_descriptor_offset_148_by_class[component_class] = {
+            "selected_descriptor_memberships": len(memberships),
+            "unique_selected_descriptors": len(unique_descriptors),
+            "offset_148_raw_bits_evidence_classification": "shipped-source",
+            "offset_148_candidate_decode_evidence_classification": (
+                "third-party-technique"
+            ),
+            "offset_148_value_inventory": (
+                _summarize_descriptor_offset_148_values(unique_descriptors)
+            ),
+        }
+    selected_descriptor_offset_148_by_class["turret"][
+        "candidate_channel_slot_024_relationships"
+    ] = _summarize_descriptor_slot_024_relationships(
+        selected_unique_descriptors_by_class["turret"]
+    )
 
     # Raw per-record values are needed only to produce the aggregate inventory;
     # keep the public census structural and bounded.
@@ -2786,7 +3065,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 15,
+        "schema_version": 16,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -3049,6 +3328,58 @@ def build_census(
                 "turret"
             ],
             "missileturret": selected_candidate_channel_dynamics_by_class[
+                "missileturret"
+            ],
+        },
+        "selected_descriptor_offset_148_inventory_and_slot_024_relationships": {
+            "evidence_classification": "inference",
+            "descriptor_identity": ["component", "descriptor_index"],
+            "descriptor_field_identity": {
+                "field_name": "descriptor_offset_148",
+                "byte_offset_within_descriptor": _ANI_DESCRIPTOR_OFFSET_148,
+                "width_bytes": 4,
+                "raw_bits_evidence_classification": "shipped-source",
+                "candidate_float32_decode_evidence_classification": (
+                    "third-party-technique"
+                ),
+            },
+            "x4converter_lead": _x4converter_descriptor_offset_148_lead(),
+            "value_inventory_rules": {
+                "finite_nonzero_rule": (
+                    "finite candidate float32 decode compares unequal to zero"
+                ),
+                "non_finite_rule": (
+                    "non-finite candidate float32 decodes are separate from"
+                    " numeric zero and numeric nonzero counts"
+                ),
+                "signed_zero_rule": (
+                    "+0.0 and -0.0 compare numerically equal but remain distinct"
+                    " raw-bit patterns"
+                ),
+                "raw_bit_distribution_bound": (
+                    _DESCRIPTOR_RAW_BIT_DISTRIBUTION_LIMIT
+                ),
+            },
+            "relationship_rules": {
+                "evidence_classification": "inference",
+                "candidate_channel_ownership_evidence_classification": (
+                    "third-party-technique"
+                ),
+                "slot_024_identity": "slot_024",
+                "raw_bit_equality": "exact 32-bit pattern equality",
+                "numeric_equality": (
+                    "candidate float32 equality; non-finite values are separate"
+                ),
+                "numeric_extrema": (
+                    "minimum and maximum of finite candidate-decoded channel"
+                    " slot_024 sequence"
+                ),
+                "key_count_scope": "zero-key, one-key, and multi-key descriptors",
+            },
+            "engine_requiredness": "unresolved",
+            "semantic_claim": "none",
+            "conventional": selected_descriptor_offset_148_by_class["turret"],
+            "missileturret": selected_descriptor_offset_148_by_class[
                 "missileturret"
             ],
         },
