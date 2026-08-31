@@ -162,6 +162,7 @@ class CensusTests(unittest.TestCase):
                         "geometry_source": "geometry/missile",
                         "ani_source_set": "base",
                         "ani_resource": "geometry/missile.ANI",
+                        "connections": [],
                         "ani_descriptors": [],
                         "source_parts": [],
                         "authored_connection_animations": [],
@@ -177,6 +178,7 @@ class CensusTests(unittest.TestCase):
                         "geometry_source": "geometry/shared",
                         "ani_source_set": "base",
                         "ani_resource": "geometry/shared.ANI",
+                        "connections": [],
                         "ani_descriptors": [],
                         "source_parts": [],
                         "authored_connection_animations": [],
@@ -311,7 +313,7 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(component["ani_source_set"], "base")
             self.assertEqual(component["ani_resource"], "ASSETS/Exact_CASE_Data.ANI")
 
-    def test_ani_descriptors_source_parts_orphans_and_animation_names_are_exact(self) -> None:
+    def test_ani_descriptors_source_parts_and_animation_names_are_exact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             roots = _source_roots(Path(tmp))
             _write(
@@ -325,11 +327,12 @@ class CensusTests(unittest.TestCase):
                       <parts>
                         <part name="Part_CASE"/>
                         <part name="SharedPart"/>
-                        <part name="SharedPart"/>
+                        <part name="DuplicateUnused"/>
+                        <part name="DuplicateUnused"/>
                       </parts>
                       <metadata><parts><part name="NestedPart"/></parts></metadata>
                     </connection>
-                    <connection name="Conn_B"><parts><part name="SharedPart"/></parts></connection>
+                    <connection name="Conn_B"><parts><part name="DuplicateUnused"/></parts></connection>
                   </connections>
                   <metadata><connection name="UnrelatedConn"><parts><part name="UnrelatedPart"/></parts></connection></metadata>
                 </component></components>""",
@@ -343,7 +346,6 @@ class CensusTests(unittest.TestCase):
                 _ani_bytes(
                     ("SharedPart", "SharedSub"),
                     ("Part_CASE", "Sub_CASE"),
-                    ("Orphan", "OtherSub"),
                 )
             )
 
@@ -352,23 +354,40 @@ class CensusTests(unittest.TestCase):
             self.assertEqual(
                 component["ani_descriptors"],
                 [
-                    {"part": "Orphan", "subname": "OtherSub"},
-                    {"part": "Part_CASE", "subname": "Sub_CASE"},
-                    {"part": "SharedPart", "subname": "SharedSub"},
+                    {
+                        "part": "Part_CASE",
+                        "subname": "Sub_CASE",
+                        "source_connection": "Conn_A",
+                        "root_to_source_connection_path": ["Conn_A"],
+                    },
+                    {
+                        "part": "SharedPart",
+                        "subname": "SharedSub",
+                        "source_connection": "Conn_A",
+                        "root_to_source_connection_path": ["Conn_A"],
+                    },
                 ],
             )
             self.assertEqual(
                 component["source_parts"],
                 [
                     {
+                        "part": "DuplicateUnused",
+                        "owning_connection_count": 3,
+                        "distinct_owning_connection_count": 2,
+                        "owning_connections": ["Conn_A", "Conn_A", "Conn_B"],
+                    },
+                    {
                         "part": "Part_CASE",
                         "owning_connection_count": 1,
+                        "distinct_owning_connection_count": 1,
                         "owning_connections": ["Conn_A"],
                     },
                     {
                         "part": "SharedPart",
-                        "owning_connection_count": 3,
-                        "owning_connections": ["Conn_A", "Conn_A", "Conn_B"],
+                        "owning_connection_count": 1,
+                        "distinct_owning_connection_count": 1,
+                        "owning_connections": ["Conn_A"],
                     },
                 ],
             )
@@ -377,22 +396,212 @@ class CensusTests(unittest.TestCase):
                 [{"connection": "Conn_A", "name": "Anim_CASE"}],
             )
             self.assertEqual(
-                component["descriptor_parts_absent_from_source_parts"], ["Orphan"]
+                component["descriptor_parts_absent_from_source_parts"], []
             )
             self.assertNotIn("NestedPart", render_json(component))
             self.assertNotIn("UnrelatedPart", render_json(component))
-            self.assertEqual(report["counts"]["ani_descriptor_pairs_total"], 3)
-            self.assertEqual(report["counts"]["unique_ani_descriptor_pairs"], 3)
-            self.assertEqual(report["ani_descriptor_count_cardinality"], {"3": 1})
-            self.assertEqual(report["counts"]["source_part_ownerships"], 4)
-            self.assertEqual(report["counts"]["component_source_parts"], 2)
+            self.assertEqual(report["counts"]["ani_descriptor_pairs_total"], 2)
+            self.assertEqual(report["counts"]["unique_ani_descriptor_pairs"], 2)
+            self.assertEqual(report["ani_descriptor_count_cardinality"], {"2": 1})
+            self.assertEqual(report["counts"]["source_part_ownerships"], 5)
+            self.assertEqual(report["counts"]["component_source_parts"], 3)
             self.assertEqual(
-                report["source_part_owning_connection_cardinality"], {"1": 1, "3": 1}
+                report["source_part_owning_connection_cardinality"], {"1": 2, "3": 1}
             )
             self.assertEqual(
-                report["descriptor_parts_absent_from_component_source_parts"],
-                [{"component": "component_a", "part": "Orphan"}],
+                report["source_part_distinct_owning_connection_cardinality"],
+                {"1": 2, "2": 1},
             )
+            self.assertEqual(
+                report["descriptor_parts_absent_from_component_source_parts"], []
+            )
+
+    def test_connection_graph_and_descriptor_source_paths_are_exact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <source geometry="geometry/component_a"/>
+                  <connections>
+                    <connection name="Root"><parts><part name="BasePart"/><part name="BasePart"/></parts></connection>
+                    <connection name="Child" parent="BasePart"><parts><part name="ArmPart"/></parts></connection>
+                    <connection name="Grand" parent="ArmPart"><parts><part name="BarrelPart"/></parts></connection>
+                    <connection name="Branch" parent="BasePart"><parts><part name="BranchPart"/></parts></connection>
+                    <connection name="EmptyParentRoot" parent=""/>
+                  </connections>
+                  <metadata><connections><connection name="Nested" parent="BarrelPart"><parts><part name="NestedPart"/></parts></connection></connections></metadata>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(("BarrelPart", "Sub_CASE"), ("BasePart", "RootSub"))
+            )
+
+            report = build_census(roots)
+            component = report["component_to_macros"][0]
+            self.assertEqual(
+                component["connections"],
+                [
+                    {
+                        "name": "Branch",
+                        "parent_part": "BasePart",
+                        "parent_connection": "Root",
+                        "direct_owned_parts": ["BranchPart"],
+                        "root_to_connection_path": ["Root", "Branch"],
+                        "depth": 1,
+                    },
+                    {
+                        "name": "Child",
+                        "parent_part": "BasePart",
+                        "parent_connection": "Root",
+                        "direct_owned_parts": ["ArmPart"],
+                        "root_to_connection_path": ["Root", "Child"],
+                        "depth": 1,
+                    },
+                    {
+                        "name": "EmptyParentRoot",
+                        "parent_part": None,
+                        "parent_connection": None,
+                        "direct_owned_parts": [],
+                        "root_to_connection_path": ["EmptyParentRoot"],
+                        "depth": 0,
+                    },
+                    {
+                        "name": "Grand",
+                        "parent_part": "ArmPart",
+                        "parent_connection": "Child",
+                        "direct_owned_parts": ["BarrelPart"],
+                        "root_to_connection_path": ["Root", "Child", "Grand"],
+                        "depth": 2,
+                    },
+                    {
+                        "name": "Root",
+                        "parent_part": None,
+                        "parent_connection": None,
+                        "direct_owned_parts": ["BasePart", "BasePart"],
+                        "root_to_connection_path": ["Root"],
+                        "depth": 0,
+                    },
+                ],
+            )
+            self.assertEqual(
+                component["ani_descriptors"],
+                [
+                    {
+                        "part": "BarrelPart",
+                        "subname": "Sub_CASE",
+                        "source_connection": "Grand",
+                        "root_to_source_connection_path": ["Root", "Child", "Grand"],
+                    },
+                    {
+                        "part": "BasePart",
+                        "subname": "RootSub",
+                        "source_connection": "Root",
+                        "root_to_source_connection_path": ["Root"],
+                    },
+                ],
+            )
+            self.assertNotIn("Nested", render_json(component))
+            base_part = next(
+                source_part
+                for source_part in component["source_parts"]
+                if source_part["part"] == "BasePart"
+            )
+            self.assertEqual(base_part["owning_connection_count"], 2)
+            self.assertEqual(base_part["distinct_owning_connection_count"], 1)
+            self.assertEqual(base_part["owning_connections"], ["Root", "Root"])
+            self.assertEqual(report["counts"]["connection_identities"], 5)
+            self.assertEqual(report["component_root_count_distribution"], {"2": 1})
+            self.assertEqual(report["connection_depth_distribution"], {"0": 2, "1": 2, "2": 1})
+            self.assertEqual(report["counts"]["descriptor_source_path_joins"], 2)
+            self.assertEqual(report["unresolved_or_ambiguous_parent_identities"], [])
+            self.assertEqual(
+                report["unresolved_or_ambiguous_descriptor_path_identities"], []
+            )
+
+    def test_connection_identity_resolution_failures_are_closed(self) -> None:
+        cases = (
+            (
+                "missing_parent",
+                '<connection name="Root"><parts><part name="Base"/></parts></connection><connection name="Child" parent="Missing"/>',
+                "unresolved_parent_part_reference",
+            ),
+            (
+                "ambiguous_parent",
+                '<connection name="A"><parts><part name="Shared"/></parts></connection><connection name="B"><parts><part name="Shared"/></parts></connection><connection name="Child" parent="Shared"/>',
+                "ambiguous_parent_part_reference",
+            ),
+            (
+                "duplicate_connection",
+                '<connection name="Same"/><connection name="Same"/>',
+                "duplicate_connection_identity",
+            ),
+            (
+                "cycle",
+                '<connection name="A" parent="PartB"><parts><part name="PartA"/></parts></connection><connection name="B" parent="PartA"><parts><part name="PartB"/></parts></connection>',
+                "connection_cycle",
+            ),
+            (
+                "self_cycle",
+                '<connection name="A" parent="PartA"><parts><part name="PartA"/></parts></connection>',
+                "self_parenting_connection",
+            ),
+        )
+        for label, connections, code in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(
+                    roots["base"],
+                    "assets/component.xml",
+                    f'<components><component name="component_a" class="turret"><source geometry="geometry/component_a"/><connections>{connections}</connections></component></components>',
+                )
+                _write(
+                    roots["base"],
+                    "assets/macros.xml",
+                    _macros(("a_macro", "turret", "component_a")),
+                )
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn(code, caught.exception.codes)
+
+    def test_descriptor_source_path_missing_or_ambiguous_ownership_fails_closed(self) -> None:
+        cases = (
+            (
+                "missing",
+                '<connection name="Root"><parts><part name="Other"/></parts></connection>',
+                "unresolved_descriptor_source_path",
+            ),
+            (
+                "ambiguous",
+                '<connection name="A"><parts><part name="Target"/></parts></connection><connection name="B"><parts><part name="Target"/></parts></connection>',
+                "ambiguous_descriptor_source_path",
+            ),
+        )
+        for label, connections, code in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(
+                    roots["base"],
+                    "assets/component.xml",
+                    f'<components><component name="component_a" class="turret"><source geometry="geometry/component_a"/><connections>{connections}</connections></component></components>',
+                )
+                _write(
+                    roots["base"],
+                    "assets/macros.xml",
+                    _macros(("a_macro", "turret", "component_a")),
+                )
+                (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                    _ani_bytes(("Target", "Sub"))
+                )
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn(code, caught.exception.codes)
 
     def test_invalid_connection_owned_part_and_animation_identities_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -415,6 +624,7 @@ class CensusTests(unittest.TestCase):
             )
             with self.assertRaises(CensusError) as caught:
                 build_census(roots)
+            self.assertIn("malformed_connection_identity", caught.exception.codes)
             self.assertIn("invalid_source_part_ownership", caught.exception.codes)
             self.assertIn("invalid_authored_connection_animation", caught.exception.codes)
 
@@ -994,7 +1204,23 @@ class CensusTests(unittest.TestCase):
     def test_output_is_deterministic_across_input_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             roots = _source_roots(Path(tmp))
-            _write(roots["base"], "z/components.xml", _components("component_z", "component_a"))
+            _write(
+                roots["base"],
+                "z/components.xml",
+                """<components>
+                  <component name="component_z" class="turret">
+                    <source geometry="geometry/component_z"/>
+                    <connections>
+                      <connection name="Z_Child" parent="Z_Part"/>
+                      <connection name="Z_Root"><parts><part name="Z_Part"/></parts></connection>
+                    </connections>
+                  </component>
+                  <component name="component_a" class="turret">
+                    <source geometry="geometry/component_a"/>
+                    <connections><connection name="A_Root"/></connections>
+                  </component>
+                </components>""",
+            )
             _write(
                 roots["ego_dlc_boron"],
                 "z/macros.xml",

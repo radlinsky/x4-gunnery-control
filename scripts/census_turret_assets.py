@@ -293,6 +293,204 @@ def _direct_children(element: ET.Element, tag: str) -> list[ET.Element]:
     return [child for child in element if child.tag == tag]
 
 
+def _resolve_connection_hierarchy(
+    records: list[dict[str, object]],
+    *,
+    component: str,
+    source_set: object,
+    source_file: object,
+) -> tuple[list[dict[str, object]], dict[str, list[str]], list[dict[str, object]]]:
+    """Resolve explicit connection-parent joins without interpreting their semantics."""
+
+    anomalies: list[dict[str, object]] = []
+    records_by_name: dict[str, list[dict[str, object]]] = defaultdict(list)
+    source_part_owners: dict[str, list[str]] = defaultdict(list)
+    for record in records:
+        name = str(record["name"])
+        valid_name = bool(name)
+        if not valid_name:
+            anomalies.append(
+                _anomaly(
+                    "malformed_connection_identity",
+                    "authored component connection has no non-empty exact name",
+                    component=component,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+        else:
+            records_by_name[name].append(record)
+        for part_value in record["direct_owned_parts"]:
+            part = str(part_value)
+            if not part:
+                anomalies.append(
+                    _anomaly(
+                        "invalid_source_part_ownership",
+                        "authored connection-owned part requires an exact non-empty part name",
+                        component=component,
+                        connection=name,
+                        part=part,
+                        source_set=source_set,
+                        source_file=source_file,
+                    )
+                )
+                continue
+            if valid_name:
+                source_part_owners[part].append(name)
+
+    for name, definitions in sorted(records_by_name.items()):
+        if len(definitions) > 1:
+            anomalies.append(
+                _anomaly(
+                    "duplicate_connection_identity",
+                    "component connection identity is authored more than once",
+                    component=component,
+                    connection=name,
+                    definition_count=len(definitions),
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+    if anomalies:
+        return [], source_part_owners, anomalies
+
+    parent_by_connection: dict[str, str | None] = {}
+    parent_part_by_connection: dict[str, str | None] = {}
+    for name, definitions in sorted(records_by_name.items()):
+        record = definitions[0]
+        parent_value = record["parent_part"]
+        parent_part = None if parent_value is None or parent_value == "" else str(parent_value)
+        parent_part_by_connection[name] = parent_part
+        if parent_part is None:
+            parent_by_connection[name] = None
+            continue
+        owners = source_part_owners.get(parent_part, [])
+        distinct_owners = sorted(set(owners))
+        if not distinct_owners:
+            anomalies.append(
+                _anomaly(
+                    "unresolved_parent_part_reference",
+                    "connection parent-part reference has no owning connection",
+                    component=component,
+                    connection=name,
+                    parent_part=parent_part,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+        elif len(distinct_owners) > 1:
+            anomalies.append(
+                _anomaly(
+                    "ambiguous_parent_part_reference",
+                    "connection parent-part reference has multiple owning connections",
+                    component=component,
+                    connection=name,
+                    parent_part=parent_part,
+                    owning_connections=distinct_owners,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+        elif distinct_owners[0] == name:
+            anomalies.append(
+                _anomaly(
+                    "self_parenting_connection",
+                    "connection resolves its parent-part reference to itself",
+                    component=component,
+                    connection=name,
+                    parent_part=parent_part,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+        else:
+            parent_by_connection[name] = distinct_owners[0]
+    if anomalies:
+        return [], source_part_owners, anomalies
+
+    paths: dict[str, list[str]] = {}
+    reported_cycles: set[frozenset[str]] = set()
+    for start in sorted(records_by_name):
+        if start in paths:
+            continue
+        trail: list[str] = []
+        positions: dict[str, int] = {}
+        current = start
+        while current not in paths:
+            if current in positions:
+                cycle = trail[positions[current] :]
+                identity = frozenset(cycle)
+                if identity not in reported_cycles:
+                    reported_cycles.add(identity)
+                    anomalies.append(
+                        _anomaly(
+                            "connection_cycle",
+                            "connection parent graph contains a cycle",
+                            component=component,
+                            connections=sorted(cycle),
+                            source_set=source_set,
+                            source_file=source_file,
+                        )
+                    )
+                break
+            positions[current] = len(trail)
+            trail.append(current)
+            parent = parent_by_connection[current]
+            if parent is None:
+                root_to_leaf = list(reversed(trail))
+                for index, name in enumerate(root_to_leaf):
+                    paths[name] = root_to_leaf[: index + 1]
+                break
+            if parent not in records_by_name:
+                anomalies.append(
+                    _anomaly(
+                        "unresolvable_connection_graph",
+                        "resolved parent connection is absent from the component graph",
+                        component=component,
+                        connection=current,
+                        parent_connection=parent,
+                        source_set=source_set,
+                        source_file=source_file,
+                    )
+                )
+                break
+            current = parent
+        else:
+            path = list(paths[current])
+            for name in reversed(trail):
+                path = path + [name]
+                paths[name] = path
+
+    if anomalies or len(paths) != len(records_by_name):
+        if not anomalies:
+            anomalies.append(
+                _anomaly(
+                    "unresolvable_connection_graph",
+                    "not every component connection resolves to an authored root",
+                    component=component,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+        return [], source_part_owners, anomalies
+
+    connections = []
+    for name, definitions in sorted(records_by_name.items()):
+        record = definitions[0]
+        path = paths[name]
+        connections.append(
+            {
+                "name": name,
+                "parent_part": parent_part_by_connection[name],
+                "parent_connection": parent_by_connection[name],
+                "direct_owned_parts": sorted(str(part) for part in record["direct_owned_parts"]),
+                "root_to_connection_path": path,
+                "depth": len(path) - 1,
+            }
+        )
+    return connections, source_part_owners, anomalies
+
+
 def build_census(
     source_sets: Mapping[str, Path], resource_sets: Mapping[str, Path]
 ) -> dict[str, object]:
@@ -353,15 +551,18 @@ def build_census(
                                 for child in _direct_children(component, "source")
                                 if "geometry" in child.attrib
                             ],
-                            "source_part_ownerships": [
+                            "connection_records": [
                                 {
-                                    "part": part.get("name", ""),
-                                    "connection": connection.get("name", ""),
+                                    "name": connection.get("name", ""),
+                                    "parent_part": connection.get("parent"),
+                                    "direct_owned_parts": [
+                                        part.get("name", "")
+                                        for parts in _direct_children(connection, "parts")
+                                        for part in _direct_children(parts, "part")
+                                    ],
                                 }
                                 for connections in _direct_children(component, "connections")
                                 for connection in _direct_children(connections, "connection")
-                                for parts in _direct_children(connection, "parts")
-                                for part in _direct_children(parts, "part")
                             ],
                             "authored_connection_animations": [
                                 {
@@ -505,28 +706,21 @@ def build_census(
                     )
                 )
 
-            source_part_owners: dict[str, list[str]] = defaultdict(list)
-            for ownership in definition["source_part_ownerships"]:
-                part = str(ownership["part"])
-                connection = str(ownership["connection"])
-                if not part or not connection:
-                    anomalies.append(
-                        _anomaly(
-                            "invalid_source_part_ownership",
-                            "authored connection-owned part requires exact non-empty part and connection names",
-                            component=component,
-                            part=part,
-                            connection=connection,
-                            source_set=definition["source_set"],
-                            source_file=definition["source_file"],
-                        )
-                    )
-                    continue
-                source_part_owners[part].append(connection)
+            connections, source_part_owners, connection_anomalies = (
+                _resolve_connection_hierarchy(
+                    definition["connection_records"],
+                    component=component,
+                    source_set=definition["source_set"],
+                    source_file=definition["source_file"],
+                )
+            )
+            anomalies.extend(connection_anomalies)
+            definition["connections"] = connections
             definition["source_parts"] = [
                 {
                     "part": part,
                     "owning_connection_count": len(owners),
+                    "distinct_owning_connection_count": len(set(owners)),
                     "owning_connections": sorted(owners),
                 }
                 for part, owners in sorted(source_part_owners.items())
@@ -553,6 +747,8 @@ def build_census(
             definition["authored_connection_animations"] = sorted(
                 authored_animations, key=lambda item: (item["connection"], item["name"])
             )
+            if connection_anomalies:
+                continue
 
             geometry_sources = definition["geometry_sources"]
             if not geometry_sources:
@@ -648,15 +844,70 @@ def build_census(
                             )
                         )
                     else:
-                        source_part_names = {
-                            str(record["part"]) for record in definition["source_parts"]
+                        connection_paths = {
+                            str(record["name"]): record["root_to_connection_path"]
+                            for record in definition["connections"]
                         }
+                        joined_descriptors = []
+                        absent_parts = set()
+                        for descriptor in definition["ani_descriptors"]:
+                            part = str(descriptor["part"])
+                            owners = source_part_owners.get(part, [])
+                            distinct_owners = sorted(set(owners))
+                            if not distinct_owners:
+                                absent_parts.add(part)
+                                anomalies.append(
+                                    _anomaly(
+                                        "unresolved_descriptor_source_path",
+                                        "ANI descriptor part has no owning component connection",
+                                        component=component,
+                                        part=part,
+                                        subname=descriptor["subname"],
+                                        source_set=definition["source_set"],
+                                        source_file=definition["source_file"],
+                                    )
+                                )
+                                continue
+                            if len(distinct_owners) > 1:
+                                anomalies.append(
+                                    _anomaly(
+                                        "ambiguous_descriptor_source_path",
+                                        "ANI descriptor part has multiple owning component connections",
+                                        component=component,
+                                        part=part,
+                                        subname=descriptor["subname"],
+                                        owning_connections=distinct_owners,
+                                        source_set=definition["source_set"],
+                                        source_file=definition["source_file"],
+                                    )
+                                )
+                                continue
+                            owner = distinct_owners[0]
+                            if owner not in connection_paths:
+                                anomalies.append(
+                                    _anomaly(
+                                        "unresolvable_descriptor_source_path",
+                                        "ANI descriptor owner has no resolved root connection path",
+                                        component=component,
+                                        part=part,
+                                        subname=descriptor["subname"],
+                                        owning_connection=owner,
+                                        source_set=definition["source_set"],
+                                        source_file=definition["source_file"],
+                                    )
+                                )
+                                continue
+                            joined_descriptors.append(
+                                {
+                                    "part": part,
+                                    "subname": descriptor["subname"],
+                                    "source_connection": owner,
+                                    "root_to_source_connection_path": connection_paths[owner],
+                                }
+                            )
+                        definition["ani_descriptors"] = joined_descriptors
                         definition["descriptor_parts_absent_from_source_parts"] = sorted(
-                            {
-                                str(descriptor["part"])
-                                for descriptor in definition["ani_descriptors"]
-                                if descriptor["part"] not in source_part_names
-                            }
+                            absent_parts
                         )
 
     if anomalies:
@@ -679,6 +930,7 @@ def build_census(
                 "geometry_source": definition["geometry_source"],
                 "ani_source_set": definition["ani_source_set"],
                 "ani_resource": definition["ani_resource"],
+                "connections": definition["connections"],
                 "ani_descriptors": definition["ani_descriptors"],
                 "source_parts": definition["source_parts"],
                 "authored_connection_animations": definition[
@@ -744,6 +996,18 @@ def build_census(
         for record in component_to_macros
         if record["source_set"] != record["ani_source_set"]
     ]
+    connection_depths = Counter(
+        int(connection["depth"])
+        for record in component_to_macros
+        for connection in record["connections"]
+    )
+    root_counts = Counter(
+        sum(connection["parent_connection"] is None for connection in record["connections"])
+        for record in component_to_macros
+    )
+    descriptor_source_path_joins = sum(
+        len(record["ani_descriptors"]) for record in component_to_macros
+    )
     descriptor_pairs = [
         (str(descriptor["part"]), str(descriptor["subname"]))
         for record in component_to_macros
@@ -754,6 +1018,11 @@ def build_census(
     )
     source_part_owning_connection_cardinalities = Counter(
         int(source_part["owning_connection_count"])
+        for record in component_to_macros
+        for source_part in record["source_parts"]
+    )
+    source_part_distinct_owning_connection_cardinalities = Counter(
+        int(source_part["distinct_owning_connection_count"])
         for record in component_to_macros
         for source_part in record["source_parts"]
     )
@@ -788,7 +1057,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 5,
+        "schema_version": 6,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -821,6 +1090,12 @@ def build_census(
                 len(record["authored_connection_animations"])
                 for record in component_to_macros
             ),
+            "connection_identities": sum(
+                len(record["connections"]) for record in component_to_macros
+            ),
+            "descriptor_source_path_joins": descriptor_source_path_joins,
+            "unresolved_or_ambiguous_parent_identities": 0,
+            "unresolved_or_ambiguous_descriptor_path_identities": 0,
             "descriptor_parts_absent_from_component_source_parts": len(
                 descriptor_parts_absent_from_component_source_parts
             ),
@@ -834,9 +1109,21 @@ def build_census(
             str(key): descriptor_count_cardinalities[key]
             for key in sorted(descriptor_count_cardinalities)
         },
+        "component_root_count_distribution": {
+            str(key): root_counts[key] for key in sorted(root_counts)
+        },
+        "connection_depth_distribution": {
+            str(key): connection_depths[key] for key in sorted(connection_depths)
+        },
+        "unresolved_or_ambiguous_parent_identities": [],
+        "unresolved_or_ambiguous_descriptor_path_identities": [],
         "source_part_owning_connection_cardinality": {
             str(key): source_part_owning_connection_cardinalities[key]
             for key in sorted(source_part_owning_connection_cardinalities)
+        },
+        "source_part_distinct_owning_connection_cardinality": {
+            str(key): source_part_distinct_owning_connection_cardinalities[key]
+            for key in sorted(source_part_distinct_owning_connection_cardinalities)
         },
         "descriptor_parts_absent_from_component_source_parts": (
             descriptor_parts_absent_from_component_source_parts
