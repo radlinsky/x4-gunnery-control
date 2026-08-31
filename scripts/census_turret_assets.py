@@ -988,6 +988,360 @@ def _summarize_descriptor_slot_024_relationships(
     return candidate_channels
 
 
+_CANDIDATE_MAIN_SLOT_INDEXES = (0, 1, 2)
+_CANDIDATE_MAIN_SLOT_IDS = tuple(
+    str(_ANI_KEY_RECORD_CANDIDATE_SLOTS[index]["slot_id"])
+    for index in _CANDIDATE_MAIN_SLOT_INDEXES
+)
+
+
+def _candidate_main_component_observations(
+    records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    observations = []
+    for slot_index in _CANDIDATE_MAIN_SLOT_INDEXES:
+        raw_bits = [str(record["raw_bits"][slot_index]) for record in records]
+        values = [float(record["raw_values"][slot_index]) for record in records]
+        finite_values = [value for value in values if math.isfinite(value)]
+        observations.append(
+            {
+                "slot_id": str(
+                    _ANI_KEY_RECORD_CANDIDATE_SLOTS[slot_index]["slot_id"]
+                ),
+                "changes_by_exact_raw_bits": len(set(raw_bits)) > 1,
+                "distinct_raw_bit_pattern_count": len(set(raw_bits)),
+                "raw_bit_sequence": raw_bits,
+                "candidate_numeric_extrema": {
+                    "finite_count": len(finite_values),
+                    "non_finite_count": len(values) - len(finite_values),
+                    "minimum": min(finite_values) if finite_values else None,
+                    "maximum": max(finite_values) if finite_values else None,
+                },
+            }
+        )
+    return observations
+
+
+def _restriction_correlation_descriptor_record(
+    component: str,
+    descriptor: dict[str, object],
+    restrictions: list[dict[str, object]],
+    membership_count: int,
+) -> dict[str, object]:
+    records = _candidate_channel_records(
+        descriptor, _ANI_CHANNEL_COUNT_FIELDS[1]
+    )
+    component_observations = _candidate_main_component_observations(records)
+    mask = "".join(
+        "1" if observation["changes_by_exact_raw_bits"] else "0"
+        for observation in component_observations
+    )
+    return {
+        "component": component,
+        "descriptor_index": int(descriptor["descriptor_index"]),
+        "part": descriptor["part"],
+        "subname": descriptor["subname"],
+        "source_connection": descriptor["source_connection"],
+        "selected_endpoint_membership_count": membership_count,
+        "candidate_channel_1_key_count": len(records),
+        "changing_component_mask": mask,
+        "candidate_main_components": component_observations,
+        "restriction_count": len(restrictions),
+        "restriction_type_tokens": [
+            restriction["type_token"] for restriction in restrictions
+        ],
+        "authored_restrictions": restrictions,
+        "raw_and_authored_evidence_classification": "shipped-source",
+        "identity_join_evidence_classification": "shipped-source",
+    }
+
+
+def _restriction_cohort_summary(
+    descriptors: list[dict[str, object]],
+) -> dict[str, object]:
+    cross_tab = Counter()
+    source_connections: dict[tuple[str, str], bool] = {}
+    ambiguous_cases = []
+    for descriptor in descriptors:
+        restrictions = descriptor["authored_restrictions"]
+        source_connections[
+            (str(descriptor["component"]), str(descriptor["source_connection"]))
+        ] = bool(restrictions)
+        if restrictions:
+            for restriction in restrictions:
+                cross_tab[
+                    (
+                        restriction["type_token"],
+                        descriptor["changing_component_mask"],
+                    )
+                ] += 1
+        else:
+            cross_tab[(None, descriptor["changing_component_mask"])] += 1
+
+        reasons = []
+        if len(restrictions) > 1:
+            reasons.append("multiple_authored_restrictions")
+        elif len(restrictions) == 1:
+            token = restrictions[0]["type_token"]
+            if token is None:
+                reasons.append("missing_restriction_type_token")
+            elif token not in ("rotation_x", "rotation_y"):
+                reasons.append("single_other_restriction_type_token")
+        if reasons:
+            ambiguous_cases.append(
+                {
+                    "component": descriptor["component"],
+                    "descriptor_index": descriptor["descriptor_index"],
+                    "source_connection": descriptor["source_connection"],
+                    "restriction_count": len(restrictions),
+                    "restriction_type_tokens": descriptor[
+                        "restriction_type_tokens"
+                    ],
+                    "reasons": reasons,
+                }
+            )
+
+    def cross_tab_sort_key(item: tuple[tuple[object, str], int]) -> tuple[str, str]:
+        (token, mask), _ = item
+        return ("" if token is None else str(token), mask)
+
+    return {
+        "evidence_classification": "shipped-source",
+        "selected_descriptor_memberships": sum(
+            int(descriptor["selected_endpoint_membership_count"])
+            for descriptor in descriptors
+        ),
+        "unique_descriptor_count": len(descriptors),
+        "descriptors": descriptors,
+        "restriction_type_token_by_changing_component_mask": [
+            {
+                "restriction_type_token": token,
+                "changing_component_mask": mask,
+                "restriction_record_or_unrestricted_descriptor_count": count,
+            }
+            for (token, mask), count in sorted(
+                cross_tab.items(), key=cross_tab_sort_key
+            )
+        ],
+        "cross_tab_counting_rule": (
+            "one count per authored restriction record; an unrestricted"
+            " descriptor contributes one null-token count"
+        ),
+        "unique_source_connection_restriction_counts": {
+            "restricted": sum(source_connections.values()),
+            "unrestricted": len(source_connections)
+            - sum(source_connections.values()),
+        },
+        "ambiguous_or_multiple_restriction_cases": ambiguous_cases,
+    }
+
+
+def _single_restriction_comparison(
+    token: str,
+    primary: list[dict[str, object]],
+    control: list[dict[str, object]],
+) -> dict[str, object]:
+    corresponding_index = 0 if token == "rotation_x" else 1
+    matching_primary = [
+        descriptor
+        for descriptor in primary
+        if descriptor["restriction_type_tokens"] == [token]
+    ]
+    matching_control = [
+        descriptor
+        for descriptor in control
+        if descriptor["restriction_type_tokens"] == [token]
+    ]
+    other_indexes = [
+        index for index in _CANDIDATE_MAIN_SLOT_INDEXES if index != corresponding_index
+    ]
+    observations = []
+    for descriptor in matching_primary + matching_control:
+        components = descriptor["candidate_main_components"]
+        restriction = descriptor["authored_restrictions"][0]
+        observations.append(
+            {
+                "cohort": (
+                    "primary_changing_main_triple"
+                    if descriptor in matching_primary
+                    else "identical_main_triple_control"
+                ),
+                "component": descriptor["component"],
+                "descriptor_index": descriptor["descriptor_index"],
+                "source_connection": descriptor["source_connection"],
+                "changing_component_mask": descriptor[
+                    "changing_component_mask"
+                ],
+                "authored_min": restriction["authored_min"],
+                "authored_max": restriction["authored_max"],
+                "corresponding_candidate_component": components[
+                    corresponding_index
+                ],
+                "other_candidate_components": [
+                    components[index] for index in other_indexes
+                ],
+            }
+        )
+    return {
+        "evidence_classification": "inference",
+        "observation_values_evidence_classification": "shipped-source",
+        "coordinate_name_correspondence_only": (
+            "rotation_x token to slot_000; rotation_y token to slot_004;"
+            " no axis, unit, or sign semantics assigned"
+        ),
+        "corresponding_candidate_component": _CANDIDATE_MAIN_SLOT_IDS[
+            corresponding_index
+        ],
+        "primary_descriptor_count": len(matching_primary),
+        "control_descriptor_count": len(matching_control),
+        "corresponding_component_changed_count": sum(
+            descriptor["candidate_main_components"][corresponding_index][
+                "changes_by_exact_raw_bits"
+            ]
+            for descriptor in matching_primary
+        ),
+        "other_component_changed_counts": {
+            _CANDIDATE_MAIN_SLOT_IDS[index]: sum(
+                descriptor["candidate_main_components"][index][
+                    "changes_by_exact_raw_bits"
+                ]
+                for descriptor in matching_primary
+            )
+            for index in other_indexes
+        },
+        "observations": observations,
+    }
+
+
+def _build_channel_1_restriction_correlation(
+    unique_descriptors: dict[tuple[str, int], dict[str, object]],
+    membership_counts: Counter[tuple[str, int]],
+    component_to_macros: list[dict[str, object]],
+) -> dict[str, object]:
+    restrictions_by_connection = {
+        (str(component["component"]), str(connection["name"])): connection[
+            "authored_restrictions"
+        ]
+        for component in component_to_macros
+        if component["component_class"] == "turret"
+        for connection in component["connections"]
+    }
+    primary = []
+    control = []
+    for identity, descriptor in sorted(unique_descriptors.items()):
+        channel_records = _candidate_channel_records(
+            descriptor, _ANI_CHANNEL_COUNT_FIELDS[1]
+        )
+        if len(channel_records) <= 1:
+            continue
+        record = _restriction_correlation_descriptor_record(
+            identity[0],
+            descriptor,
+            restrictions_by_connection[
+                (identity[0], str(descriptor["source_connection"]))
+            ],
+            membership_counts[identity],
+        )
+        if record["changing_component_mask"] == "000":
+            control.append(record)
+        else:
+            primary.append(record)
+
+    single_comparisons = {
+        token: _single_restriction_comparison(token, primary, control)
+        for token in ("rotation_x", "rotation_y")
+    }
+    primary_single_xy = [
+        descriptor
+        for descriptor in primary
+        if descriptor["restriction_type_tokens"]
+        in (["rotation_x"], ["rotation_y"])
+    ]
+    control_single_xy = [
+        descriptor
+        for descriptor in control
+        if descriptor["restriction_type_tokens"]
+        in (["rotation_x"], ["rotation_y"])
+    ]
+    expected_masks = {"rotation_x": "100", "rotation_y": "010"}
+    represented_tokens = {
+        descriptor["restriction_type_tokens"][0]
+        for descriptor in primary_single_xy
+    }
+    strong = (
+        bool(primary)
+        and len(primary_single_xy) == len(primary)
+        and represented_tokens == set(expected_masks)
+        and all(
+            descriptor["changing_component_mask"]
+            == expected_masks[descriptor["restriction_type_tokens"][0]]
+            for descriptor in primary_single_xy
+        )
+        and not control_single_xy
+    )
+    reasons = []
+    if len(primary_single_xy) != len(primary):
+        reasons.append("primary_contains_non_single_rotation_x_or_y_cases")
+    if represented_tokens != set(expected_masks):
+        reasons.append("both_rotation_x_and_rotation_y_not_represented_in_primary")
+    if any(
+        descriptor["changing_component_mask"]
+        != expected_masks[descriptor["restriction_type_tokens"][0]]
+        for descriptor in primary_single_xy
+    ):
+        reasons.append("single_restriction_primary_masks_are_not_one_to_one")
+    if control_single_xy:
+        reasons.append("same_single_restriction_tokens_occur_in_identical_triple_controls")
+    return {
+        "evidence_classification": "inference",
+        "raw_ani_and_authored_restriction_evidence_classification": (
+            "shipped-source"
+        ),
+        "identity_join_evidence_classification": "shipped-source",
+        "x4converter_label_lead": {
+            "label": "rotation_euler",
+            "evidence_classification": "third-party-technique",
+            "semantic_promotion": "not_permitted_by_this_study",
+        },
+        "candidate_channel_identity": "candidate_channel_1",
+        "candidate_main_slot_ids": list(_CANDIDATE_MAIN_SLOT_IDS),
+        "primary_cohort_rule": (
+            "more than one candidate channel 1 key and at least one of"
+            " slots 000/004/008 changes by exact raw bits"
+        ),
+        "control_cohort_rule": (
+            "more than one candidate channel 1 key and slots 000/004/008"
+            " are all identical by exact raw bits"
+        ),
+        "primary_changing_main_triple_cohort": _restriction_cohort_summary(
+            primary
+        ),
+        "identical_main_triple_control_cohort": _restriction_cohort_summary(
+            control
+        ),
+        "single_rotation_x_or_y_restriction_comparisons": single_comparisons,
+        "semantic_discriminator_assessment": {
+            "evidence_classification": "inference",
+            "status": (
+                "strong_one_to_one_observed"
+                if strong
+                else "not_strong_one_to_one"
+            ),
+            "reasons": reasons,
+            "semantic_conclusion": "none",
+        },
+        "forbidden_semantic_claims": [
+            "Euler order",
+            "units",
+            "sign",
+            "interpolation",
+            "pivot",
+            "transform composition",
+            "runtime behavior",
+        ],
+    }
+
+
 _X4CONVERTER_COMMIT = "0be4b494089ba7719d4c5d351e63160ef3843ef5"
 _X4CONVERTER_KEYFRAME_HEADER = (
     "X4ConverterTools/include/X4ConverterTools/ani/Keyframe.h"
@@ -1631,6 +1985,53 @@ def _direct_children(element: ET.Element, tag: str) -> list[ET.Element]:
     return [child for child in element if child.tag == tag]
 
 
+def _authored_restriction_limit(
+    restriction: ET.Element, tag: str
+) -> dict[str, object] | None:
+    limits = _direct_children(restriction, "limits")
+    bound_elements = [
+        bound
+        for limits_element in limits
+        for bound in _direct_children(limits_element, tag)
+    ]
+    if not bound_elements:
+        return None
+    raw_text = bound_elements[0].get("value")
+    candidate_numeric_value = None
+    if raw_text is not None:
+        try:
+            candidate_numeric_value = float(raw_text)
+        except ValueError:
+            pass
+    return {
+        "raw_text": raw_text,
+        "candidate_numeric_value": candidate_numeric_value,
+    }
+
+
+def _parse_authored_connection_restrictions(
+    connection: ET.Element,
+) -> list[dict[str, object]]:
+    source_connection = connection.get("name", "")
+    restriction_elements = [
+        restriction
+        for restrictions in _direct_children(connection, "restrictions")
+        for restriction in _direct_children(restrictions, "restriction")
+    ]
+    return [
+        {
+            "source_connection": source_connection,
+            "restriction_index": restriction_index,
+            "type_token": restriction.get("type"),
+            "type_token_raw_text": restriction.get("type"),
+            "authored_min": _authored_restriction_limit(restriction, "min"),
+            "authored_max": _authored_restriction_limit(restriction, "max"),
+            "evidence_classification": "shipped-source",
+        }
+        for restriction_index, restriction in enumerate(restriction_elements)
+    ]
+
+
 def _resolve_connection_hierarchy(
     records: list[dict[str, object]],
     *,
@@ -1828,6 +2229,7 @@ def _resolve_connection_hierarchy(
                 },
                 "authored_tags": record["authored_tags"],
                 "tag_tokens": [str(token) for token in record["tag_tokens"]],
+                "authored_restrictions": record["authored_restrictions"],
                 "root_to_connection_path": path,
                 "depth": len(path) - 1,
             }
@@ -2291,6 +2693,11 @@ def build_census(
                                         connection.get("tags", "").split()
                                         if "tags" in connection.attrib
                                         else []
+                                    ),
+                                    "authored_restrictions": (
+                                        _parse_authored_connection_restrictions(
+                                            connection
+                                        )
                                     ),
                                     "direct_owned_parts": [
                                         part.get("name", "")
@@ -2989,6 +3396,21 @@ def build_census(
     ] = _summarize_descriptor_slot_024_relationships(
         selected_unique_descriptors_by_class["turret"]
     )
+    selected_conventional_membership_counts = Counter(
+        (
+            str(endpoint["component"]),
+            int(descriptor["descriptor_index"]),
+        )
+        for endpoint, descriptor in selected_endpoint_path_descriptor_memberships
+        if endpoint["component_class"] == "turret"
+    )
+    channel_1_authored_restriction_correlation = (
+        _build_channel_1_restriction_correlation(
+            selected_unique_descriptors_by_class["turret"],
+            selected_conventional_membership_counts,
+            component_to_macros,
+        )
+    )
 
     # Raw per-record values are needed only to produce the aggregate inventory;
     # keep the public census structural and bounded.
@@ -3065,7 +3487,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 16,
+        "schema_version": 17,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -3331,6 +3753,9 @@ def build_census(
                 "missileturret"
             ],
         },
+        "candidate_channel_1_authored_restriction_correlation": (
+            channel_1_authored_restriction_correlation
+        ),
         "selected_descriptor_offset_148_inventory_and_slot_024_relationships": {
             "evidence_classification": "inference",
             "descriptor_identity": ["component", "descriptor_index"],

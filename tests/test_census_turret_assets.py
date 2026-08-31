@@ -205,6 +205,7 @@ class CensusTests(unittest.TestCase):
                                 "authored_attributes": {"name": "MissileEndpoint", "tags": "rocket"},
                                 "authored_tags": "rocket",
                                 "tag_tokens": ["rocket"],
+                                "authored_restrictions": [],
                                 "root_to_connection_path": ["MissileEndpoint"],
                                 "depth": 0,
                             }
@@ -250,6 +251,7 @@ class CensusTests(unittest.TestCase):
                                 "authored_attributes": {"name": "SharedEndpoint", "tags": "laser "},
                                 "authored_tags": "laser ",
                                 "tag_tokens": ["laser"],
+                                "authored_restrictions": [],
                                 "root_to_connection_path": ["SharedEndpoint"],
                                 "depth": 0,
                             }
@@ -581,6 +583,7 @@ class CensusTests(unittest.TestCase):
                         "authored_attributes": {"name": "Branch", "parent": "BasePart"},
                         "authored_tags": None,
                         "tag_tokens": [],
+                        "authored_restrictions": [],
                         "root_to_connection_path": ["Root", "Branch"],
                         "depth": 1,
                     },
@@ -592,6 +595,7 @@ class CensusTests(unittest.TestCase):
                         "authored_attributes": {"name": "Child", "parent": "BasePart"},
                         "authored_tags": None,
                         "tag_tokens": [],
+                        "authored_restrictions": [],
                         "root_to_connection_path": ["Root", "Child"],
                         "depth": 1,
                     },
@@ -603,6 +607,7 @@ class CensusTests(unittest.TestCase):
                         "authored_attributes": {"name": "EmptyParentRoot", "parent": ""},
                         "authored_tags": None,
                         "tag_tokens": [],
+                        "authored_restrictions": [],
                         "root_to_connection_path": ["EmptyParentRoot"],
                         "depth": 0,
                     },
@@ -614,6 +619,7 @@ class CensusTests(unittest.TestCase):
                         "authored_attributes": {"name": "Grand", "parent": "ArmPart", "tags": "laser"},
                         "authored_tags": "laser",
                         "tag_tokens": ["laser"],
+                        "authored_restrictions": [],
                         "root_to_connection_path": ["Root", "Child", "Grand"],
                         "depth": 2,
                     },
@@ -625,6 +631,7 @@ class CensusTests(unittest.TestCase):
                         "authored_attributes": {"name": "Root"},
                         "authored_tags": None,
                         "tag_tokens": [],
+                        "authored_restrictions": [],
                         "root_to_connection_path": ["Root"],
                         "depth": 0,
                     },
@@ -1331,6 +1338,232 @@ class CensusTests(unittest.TestCase):
         self.assertEqual(raw_record["record_index"], 0)
         self.assertEqual(raw_record["byte_offset"], 176)
         self.assertEqual(raw_record["raw_values"], list(values))
+
+    def test_channel_1_restriction_correlation_uses_exact_source_connections_and_masks(self) -> None:
+        def main_triple_record(x: float, y: float, z: float) -> bytes:
+            values: list[float | int] = [0] * 32
+            values[0:3] = [x, y, z]
+            return _candidate_key_record(tuple(values))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="correlation_component" class="turret">
+                    <source geometry="geometry/correlation"/>
+                    <connections>
+                      <connection name="WrongAncestor">
+                        <restrictions><restriction type="rotation_y"><limits><min value="-90"/><max value="90"/></limits></restriction></restrictions>
+                        <parts><part name="AncestorPart"/></parts>
+                      </connection>
+                      <connection name="ExactA" parent="AncestorPart">
+                        <animations><animation name="Selected"/></animations>
+                        <restrictions><restriction type="rotation_x"><limits><min value="-10 "/><max value=" 20"/></limits></restriction></restrictions>
+                        <parts><part name="PartA"/></parts>
+                      </connection>
+                      <connection name="EndpointA1" tags="laser" parent="PartA"/>
+                      <connection name="EndpointA2" tags="laser" parent="PartA"/>
+                      <connection name="ExactB">
+                        <animations><animation name="Selected"/></animations>
+                        <restrictions><restriction type="rotation_x"/><restriction type="rotation_y"><limits><min value="-5"/></limits></restriction></restrictions>
+                        <parts><part name="PartB"/></parts>
+                      </connection>
+                      <connection name="EndpointB" tags="laser" parent="PartB"/>
+                      <connection name="ExactC">
+                        <animations><animation name="Selected"/></animations>
+                        <parts><part name="PartC"/></parts>
+                      </connection>
+                      <connection name="EndpointC" tags="laser" parent="PartC"/>
+                      <connection name="ControlD">
+                        <animations><animation name="Selected"/></animations>
+                        <restrictions><restriction type="rotation_y"/></restrictions>
+                        <parts><part name="PartD"/></parts>
+                      </connection>
+                      <connection name="EndpointD" tags="laser" parent="PartD"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    (
+                        "correlation_macro",
+                        "turret",
+                        "correlation_component",
+                    )
+                ),
+            )
+            (roots["base"] / "geometry/correlation.ANI").write_bytes(
+                _ani_bytes(
+                    ("PartA", "Selected", 0, 2, 0, 0, 0),
+                    ("PartB", "Selected", 0, 2, 0, 0, 0),
+                    ("PartC", "Selected", 0, 2, 0, 0, 0),
+                    ("PartD", "Selected", 0, 2, 0, 0, 0),
+                    key_data=b"".join(
+                        (
+                            main_triple_record(1.0, 3.0, 4.0),
+                            main_triple_record(2.0, 3.0, 5.0),
+                            main_triple_record(0.0, 0.0, 0.0),
+                            main_triple_record(0.0, 1.0, 0.0),
+                            main_triple_record(1.0, 1.0, 1.0),
+                            main_triple_record(2.0, 2.0, 2.0),
+                            main_triple_record(7.0, 8.0, 9.0),
+                            main_triple_record(7.0, 8.0, 9.0),
+                        )
+                    ),
+                )
+            )
+            report = build_census(roots)
+
+        component = report["component_to_macros"][0]
+        connections = {
+            connection["name"]: connection for connection in component["connections"]
+        }
+        self.assertEqual(
+            connections["ExactA"]["authored_restrictions"],
+            [
+                {
+                    "source_connection": "ExactA",
+                    "restriction_index": 0,
+                    "type_token": "rotation_x",
+                    "type_token_raw_text": "rotation_x",
+                    "authored_min": {
+                        "raw_text": "-10 ",
+                        "candidate_numeric_value": -10.0,
+                    },
+                    "authored_max": {
+                        "raw_text": " 20",
+                        "candidate_numeric_value": 20.0,
+                    },
+                    "evidence_classification": "shipped-source",
+                }
+            ],
+        )
+        self.assertEqual(
+            connections["ExactB"]["authored_restrictions"][0]["authored_min"],
+            None,
+        )
+        self.assertEqual(
+            connections["ExactB"]["authored_restrictions"][1]["authored_max"],
+            None,
+        )
+
+        study = report["candidate_channel_1_authored_restriction_correlation"]
+        self.assertEqual(study["evidence_classification"], "inference")
+        self.assertEqual(
+            study["identity_join_evidence_classification"], "shipped-source"
+        )
+        self.assertEqual(
+            study["x4converter_label_lead"],
+            {
+                "label": "rotation_euler",
+                "evidence_classification": "third-party-technique",
+                "semantic_promotion": "not_permitted_by_this_study",
+            },
+        )
+        primary = study["primary_changing_main_triple_cohort"]
+        control = study["identical_main_triple_control_cohort"]
+        self.assertEqual(primary["selected_descriptor_memberships"], 4)
+        self.assertEqual(primary["unique_descriptor_count"], 3)
+        self.assertEqual(control["selected_descriptor_memberships"], 1)
+        self.assertEqual(control["unique_descriptor_count"], 1)
+
+        records = {record["part"]: record for record in primary["descriptors"]}
+        self.assertEqual(records["PartA"]["source_connection"], "ExactA")
+        self.assertEqual(records["PartA"]["restriction_count"], 1)
+        self.assertEqual(records["PartA"]["restriction_type_tokens"], ["rotation_x"])
+        self.assertEqual(records["PartA"]["changing_component_mask"], "101")
+        self.assertEqual(
+            [
+                component["changes_by_exact_raw_bits"]
+                for component in records["PartA"]["candidate_main_components"]
+            ],
+            [True, False, True],
+        )
+        self.assertEqual(
+            records["PartA"]["candidate_main_components"][0]["raw_bit_sequence"],
+            ["0x3f800000", "0x40000000"],
+        )
+        self.assertEqual(
+            records["PartA"]["candidate_main_components"][0][
+                "candidate_numeric_extrema"
+            ],
+            {"finite_count": 2, "non_finite_count": 0, "minimum": 1.0, "maximum": 2.0},
+        )
+        self.assertNotIn("rotation_y", records["PartA"]["restriction_type_tokens"])
+        self.assertEqual(records["PartA"]["selected_endpoint_membership_count"], 2)
+        self.assertEqual(records["PartB"]["restriction_count"], 2)
+        self.assertEqual(records["PartC"]["restriction_count"], 0)
+
+        self.assertEqual(
+            primary["restriction_type_token_by_changing_component_mask"],
+            [
+                {
+                    "restriction_type_token": None,
+                    "changing_component_mask": "111",
+                    "restriction_record_or_unrestricted_descriptor_count": 1,
+                },
+                {
+                    "restriction_type_token": "rotation_x",
+                    "changing_component_mask": "010",
+                    "restriction_record_or_unrestricted_descriptor_count": 1,
+                },
+                {
+                    "restriction_type_token": "rotation_x",
+                    "changing_component_mask": "101",
+                    "restriction_record_or_unrestricted_descriptor_count": 1,
+                },
+                {
+                    "restriction_type_token": "rotation_y",
+                    "changing_component_mask": "010",
+                    "restriction_record_or_unrestricted_descriptor_count": 1,
+                },
+            ],
+        )
+        self.assertEqual(
+            primary["unique_source_connection_restriction_counts"],
+            {"restricted": 2, "unrestricted": 1},
+        )
+        self.assertEqual(
+            primary["ambiguous_or_multiple_restriction_cases"],
+            [
+                {
+                    "component": "correlation_component",
+                    "descriptor_index": 1,
+                    "source_connection": "ExactB",
+                    "restriction_count": 2,
+                    "restriction_type_tokens": ["rotation_x", "rotation_y"],
+                    "reasons": ["multiple_authored_restrictions"],
+                }
+            ],
+        )
+        self.assertEqual(
+            control["descriptors"][0]["changing_component_mask"], "000"
+        )
+        self.assertEqual(
+            control["descriptors"][0]["restriction_type_tokens"], ["rotation_y"]
+        )
+        rotation_x = study["single_rotation_x_or_y_restriction_comparisons"][
+            "rotation_x"
+        ]
+        self.assertEqual(rotation_x["primary_descriptor_count"], 1)
+        self.assertEqual(rotation_x["corresponding_candidate_component"], "slot_000")
+        self.assertEqual(rotation_x["corresponding_component_changed_count"], 1)
+        self.assertEqual(
+            rotation_x["other_component_changed_counts"],
+            {"slot_004": 0, "slot_008": 1},
+        )
+        self.assertEqual(
+            study["semantic_discriminator_assessment"]["status"],
+            "not_strong_one_to_one",
+        )
+        rendered = render_json(study)
+        self.assertNotIn('"candidate_channel_1_label": "rotation"', rendered)
+        self.assertNotIn('"evidence_classification": "live-tested"', rendered)
 
     def test_descriptor_offset_148_inventory_and_slot_024_relationships_are_exact(self) -> None:
         def record(slot_024: float) -> bytes:
