@@ -440,22 +440,29 @@ research.
   4. B's record declares no `<multiplier mining="m" />` child of
      `<damage>` and no `<weapon system="V" />` with V in the utility
      weapon-system vocabulary — the set of `<weapon system>` values
-     authored on bullet records of census NONCOMBAT_UTILITY-classified
-     macros, derived from the ware purpose channel alone (in the X4 9.00
-     corpus exactly {`weapon_mining`}); a marker present means
-     NONCOMBAT_UTILITY, never combat;
+     authored on the bullet records of census NONCOMBAT_UTILITY-classified
+     macros, whose seed set is derived from the ware purpose channel
+     alone (in the X4 9.00 corpus exactly {`weapon_mining`}); a marker
+     present means NONCOMBAT_UTILITY, never combat;
   5. otherwise COMBAT_CANDIDATE.
   No step reads macro names, component identities, source sets, file
-  paths, factions, or display names. Because the utility vocabulary is
-  derived from the ware channel only, P is not circular: P's own output
-  never feeds its vocabulary.
+  paths, factions, or display names. The vocabulary's seed set is the
+  ware-channel-derived NONCOMBAT_UTILITY class, and its values are
+  static authored attributes on those macros' bullet records; P's own
+  output (which covers only no-ware macros, never the seed set) feeds
+  neither, so P is not circular.
 
 ### Corpus results for P (exhaustive, X4 9.00)
 - X4: 9.00
 - Status: shipped-source
 - Source: all 8 shipped source sets extracted to `.x4-research-cache/issue72-a2-sources/`; A3 census output at classifier commit `a9f215f` — 147 equipment macros: 115 conventional `turret` (92 ware-backed COMBAT_CANDIDATE, 19 NONCOMBAT_UTILITY, 4 no-ware) and 32 `missileturret`
 - Live test: no — untested as of 2026-08-31
-- Finding: Applied to all 115 conventional turret macros:
+- Finding: P's domain is the no-ware gap: only the four no-ware macros
+  satisfy its no-exact-ware precondition. The five content conditions
+  were additionally evaluated counterfactually on the other 111
+  ware-backed macros, with that precondition removed and their
+  ware-channel classification kept as ground truth. Across all 115
+  conventional turret macros:
   - The 4 no-ware macros: 4/4 COMBAT_CANDIDATE.
     `turret_kha_l_beam_01_mk1_scenario_macro` (damage 300, no weapon-system
     declaration), `turret_ter_m_laser_story_mk1_macro` (damage 63,
@@ -474,7 +481,8 @@ research.
     (COMBAT_CANDIDATE) and 10 fail closed to UNRESOLVED — 8 with no
     positive direct damage value (5 flak, 2 shotgun, 1 disruptor; those
     bullets carry their damage in a separate `<areadamage>` channel, e.g.
-    value 210, while the `<damage>` element has no value) and 2 whose
+    value 210, and their direct `<damage>` channel is valueless or
+    absent) and 2 whose
     declared bullet `bullet_ter_turret_m_laser_01_mk1_macro` is defined by
     two shipped files in `ego_dlc_terran` (one of them the file authored
     for the s-size bullet) and is therefore ambiguous. These 10 keep
