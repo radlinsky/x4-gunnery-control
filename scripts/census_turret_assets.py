@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
-This tool stops at exact ANI descriptor and authored component source-part
-identity inventory. It does not parse ANI keyframes/channels or interpret
-transforms, pivots, axes, joints, descriptor relevance, or endpoints.
+This tool stops at exact authored connection paths, firing-endpoint connection
+identities, and ANI descriptor/source-part identity. It does not parse ANI
+keyframes/channels or interpret transforms, pivots, axes, joints, descriptor
+relevance, active pose, or prospective muzzle position.
 """
 from __future__ import annotations
 
@@ -484,11 +485,135 @@ def _resolve_connection_hierarchy(
                 "parent_part": parent_part_by_connection[name],
                 "parent_connection": parent_by_connection[name],
                 "direct_owned_parts": sorted(str(part) for part in record["direct_owned_parts"]),
+                "authored_attributes": {
+                    str(key): str(value)
+                    for key, value in sorted(record["authored_attributes"].items())
+                },
+                "authored_tags": record["authored_tags"],
+                "tag_tokens": [str(token) for token in record["tag_tokens"]],
                 "root_to_connection_path": path,
                 "depth": len(path) - 1,
             }
         )
     return connections, source_part_owners, anomalies
+
+
+_FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS = {
+    "turret": "laser",
+    "missileturret": "rocket",
+}
+
+
+def _classify_firing_endpoints(
+    connections: list[dict[str, object]],
+    *,
+    component: str,
+    component_class: str,
+    macros: list[str],
+    macro_classes: list[str],
+    source_set: object,
+    source_file: object,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Classify only explicit engine-facing endpoint tag evidence."""
+
+    anomalies: list[dict[str, object]] = []
+    expected_tag = _FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS.get(component_class)
+    if expected_tag is None:
+        anomalies.append(
+            _anomaly(
+                "unsupported_endpoint_component_class",
+                "referenced component class has no source-backed firing-endpoint tag criterion",
+                component=component,
+                component_class=component_class,
+                source_set=source_set,
+                source_file=source_file,
+            )
+        )
+        return [], anomalies
+    if macro_classes != [component_class]:
+        anomalies.append(
+            _anomaly(
+                "ambiguous_endpoint_class_accounting",
+                "component and referring macro classes do not establish one endpoint role",
+                component=component,
+                component_class=component_class,
+                macro_classes=macro_classes,
+                macros=macros,
+                source_set=source_set,
+                source_file=source_file,
+            )
+        )
+        return [], anomalies
+
+    endpoint_tags = set(_FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS.values())
+    endpoints = []
+    for connection in connections:
+        tokens = [str(token) for token in connection["tag_tokens"]]
+        role_tokens = sorted(endpoint_tags.intersection(tokens))
+        duplicated_role_tokens = sorted(
+            token for token in endpoint_tags if tokens.count(token) > 1
+        )
+        if duplicated_role_tokens:
+            anomalies.append(
+                _anomaly(
+                    "malformed_endpoint_evidence",
+                    "connection repeats an engine-facing firing-endpoint tag token",
+                    component=component,
+                    connection=connection["name"],
+                    component_class=component_class,
+                    tag_attribute=connection["authored_tags"],
+                    repeated_tag_tokens=duplicated_role_tokens,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+            continue
+        if role_tokens and role_tokens != [expected_tag]:
+            anomalies.append(
+                _anomaly(
+                    "ambiguous_endpoint_evidence",
+                    "connection firing-endpoint tag evidence conflicts with its component class",
+                    component=component,
+                    connection=connection["name"],
+                    component_class=component_class,
+                    expected_tag_token=expected_tag,
+                    endpoint_tag_tokens=role_tokens,
+                    tag_attribute=connection["authored_tags"],
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+            continue
+        if role_tokens == [expected_tag]:
+            endpoints.append(
+                {
+                    "component": component,
+                    "component_class": component_class,
+                    "macros": macros,
+                    "macro_classes": macro_classes,
+                    "connection": connection["name"],
+                    "authored_evidence": {
+                        "tag_attribute": connection["authored_tags"],
+                        "tag_token": expected_tag,
+                    },
+                    "root_to_endpoint_connection_path": connection[
+                        "root_to_connection_path"
+                    ],
+                }
+            )
+    if not endpoints and not anomalies:
+        anomalies.append(
+            _anomaly(
+                "missing_firing_endpoint_identity",
+                "component has no connection carrying its source-backed firing-endpoint tag token",
+                component=component,
+                component_class=component_class,
+                expected_tag_token=expected_tag,
+                source_set=source_set,
+                source_file=source_file,
+            )
+        )
+    return endpoints, anomalies
 
 
 def build_census(
@@ -555,6 +680,13 @@ def build_census(
                                 {
                                     "name": connection.get("name", ""),
                                     "parent_part": connection.get("parent"),
+                                    "authored_attributes": dict(connection.attrib),
+                                    "authored_tags": connection.get("tags"),
+                                    "tag_tokens": (
+                                        connection.get("tags", "").split()
+                                        if "tags" in connection.attrib
+                                        else []
+                                    ),
                                     "direct_owned_parts": [
                                         part.get("name", "")
                                         for parts in _direct_children(connection, "parts")
@@ -750,6 +882,26 @@ def build_census(
             if connection_anomalies:
                 continue
 
+            referring_records = sorted(
+                (record for record in unique_records if record["component"] == component),
+                key=lambda record: record["name"],
+            )
+            referring_macros = [record["name"] for record in referring_records]
+            referring_macro_classes = sorted(
+                {record["class"] for record in referring_records}
+            )
+            firing_endpoints, endpoint_anomalies = _classify_firing_endpoints(
+                connections,
+                component=component,
+                component_class=str(definition["component_class"]),
+                macros=referring_macros,
+                macro_classes=referring_macro_classes,
+                source_set=definition["source_set"],
+                source_file=definition["source_file"],
+            )
+            definition["firing_endpoints"] = firing_endpoints
+            anomalies.extend(endpoint_anomalies)
+
             geometry_sources = definition["geometry_sources"]
             if not geometry_sources:
                 anomalies.append(
@@ -931,6 +1083,7 @@ def build_census(
                 "ani_source_set": definition["ani_source_set"],
                 "ani_resource": definition["ani_resource"],
                 "connections": definition["connections"],
+                "firing_endpoints": definition["firing_endpoints"],
                 "ani_descriptors": definition["ani_descriptors"],
                 "source_parts": definition["source_parts"],
                 "authored_connection_animations": definition[
@@ -996,6 +1149,22 @@ def build_census(
         for record in component_to_macros
         if record["source_set"] != record["ani_source_set"]
     ]
+    firing_endpoints = [
+        endpoint
+        for record in component_to_macros
+        for endpoint in record["firing_endpoints"]
+    ]
+    firing_endpoint_counts = Counter(
+        len(record["firing_endpoints"]) for record in component_to_macros
+    )
+    firing_endpoint_evidence_patterns = Counter(
+        (
+            str(endpoint["component_class"]),
+            str(endpoint["authored_evidence"]["tag_token"]),
+            str(endpoint["authored_evidence"]["tag_attribute"]),
+        )
+        for endpoint in firing_endpoints
+    )
     connection_depths = Counter(
         int(connection["depth"])
         for record in component_to_macros
@@ -1057,7 +1226,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 6,
+        "schema_version": 7,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -1093,6 +1262,16 @@ def build_census(
             "connection_identities": sum(
                 len(record["connections"]) for record in component_to_macros
             ),
+            "firing_endpoint_identities": len(firing_endpoints),
+            "conventional_firing_endpoints": sum(
+                endpoint["component_class"] == "turret"
+                for endpoint in firing_endpoints
+            ),
+            "missileturret_firing_endpoints": sum(
+                endpoint["component_class"] == "missileturret"
+                for endpoint in firing_endpoints
+            ),
+            "components_with_zero_or_ambiguous_endpoint_identity": 0,
             "descriptor_source_path_joins": descriptor_source_path_joins,
             "unresolved_or_ambiguous_parent_identities": 0,
             "unresolved_or_ambiguous_descriptor_path_identities": 0,
@@ -1109,6 +1288,31 @@ def build_census(
             str(key): descriptor_count_cardinalities[key]
             for key in sorted(descriptor_count_cardinalities)
         },
+        "firing_endpoint_criterion": {
+            "evidence_classification": "shipped-source",
+            "structural_rule": "exact direct connection tag token selected by exact component class",
+            "component_class_to_tag_token": {
+                key: _FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS[key]
+                for key in sorted(_FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS)
+            },
+        },
+        "firing_endpoints": firing_endpoints,
+        "firing_endpoint_count_distribution": {
+            str(key): firing_endpoint_counts[key]
+            for key in sorted(firing_endpoint_counts)
+        },
+        "firing_endpoint_evidence_patterns": [
+            {
+                "component_class": component_class,
+                "tag_token": tag_token,
+                "exact_tag_attribute": tag_attribute,
+                "endpoint_count": count,
+            }
+            for (component_class, tag_token, tag_attribute), count in sorted(
+                firing_endpoint_evidence_patterns.items()
+            )
+        ],
+        "components_with_zero_or_ambiguous_endpoint_identity": [],
         "component_root_count_distribution": {
             str(key): root_counts[key] for key in sorted(root_counts)
         },

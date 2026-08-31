@@ -93,7 +93,7 @@ def _write(path: Path, relative: str, text: str) -> None:
 
 def _components(*names: str) -> str:
     body = "".join(
-        f'<component name="{name}" class="turret"><source geometry="geometry/{name}"/></component>'
+        f'<component name="{name}" class="turret"><source geometry="geometry/{name}"/><connections><connection name="{name}_endpoint" tags="laser"/></connections></component>'
         for name in names
     )
     return f"<components>{body}</components>"
@@ -117,9 +117,11 @@ class CensusTests(unittest.TestCase):
                 """<components>
                   <component name="shared_component" class="turret">
                     <source geometry="geometry/shared"/>
+                    <connections><connection name="SharedEndpoint" tags="laser "/></connections>
                   </component>
                   <component name="missile_component" class="missileturret">
                     <source geometry="geometry/missile"/>
+                    <connections><connection name="MissileEndpoint" tags="rocket"/></connections>
                   </component>
                   <component name="unrelated_component" class="engine"/>
                 </components>""",
@@ -162,7 +164,30 @@ class CensusTests(unittest.TestCase):
                         "geometry_source": "geometry/missile",
                         "ani_source_set": "base",
                         "ani_resource": "geometry/missile.ANI",
-                        "connections": [],
+                        "connections": [
+                            {
+                                "name": "MissileEndpoint",
+                                "parent_part": None,
+                                "parent_connection": None,
+                                "direct_owned_parts": [],
+                                "authored_attributes": {"name": "MissileEndpoint", "tags": "rocket"},
+                                "authored_tags": "rocket",
+                                "tag_tokens": ["rocket"],
+                                "root_to_connection_path": ["MissileEndpoint"],
+                                "depth": 0,
+                            }
+                        ],
+                        "firing_endpoints": [
+                            {
+                                "component": "missile_component",
+                                "component_class": "missileturret",
+                                "macros": ["missile_macro"],
+                                "macro_classes": ["missileturret"],
+                                "connection": "MissileEndpoint",
+                                "authored_evidence": {"tag_attribute": "rocket", "tag_token": "rocket"},
+                                "root_to_endpoint_connection_path": ["MissileEndpoint"],
+                            }
+                        ],
                         "ani_descriptors": [],
                         "source_parts": [],
                         "authored_connection_animations": [],
@@ -178,7 +203,30 @@ class CensusTests(unittest.TestCase):
                         "geometry_source": "geometry/shared",
                         "ani_source_set": "base",
                         "ani_resource": "geometry/shared.ANI",
-                        "connections": [],
+                        "connections": [
+                            {
+                                "name": "SharedEndpoint",
+                                "parent_part": None,
+                                "parent_connection": None,
+                                "direct_owned_parts": [],
+                                "authored_attributes": {"name": "SharedEndpoint", "tags": "laser "},
+                                "authored_tags": "laser ",
+                                "tag_tokens": ["laser"],
+                                "root_to_connection_path": ["SharedEndpoint"],
+                                "depth": 0,
+                            }
+                        ],
+                        "firing_endpoints": [
+                            {
+                                "component": "shared_component",
+                                "component_class": "turret",
+                                "macros": ["turret_alpha_macro", "turret_beta_macro"],
+                                "macro_classes": ["turret"],
+                                "connection": "SharedEndpoint",
+                                "authored_evidence": {"tag_attribute": "laser ", "tag_token": "laser"},
+                                "root_to_endpoint_connection_path": ["SharedEndpoint"],
+                            }
+                        ],
                         "ani_descriptors": [],
                         "source_parts": [],
                         "authored_connection_animations": [],
@@ -299,6 +347,7 @@ class CensusTests(unittest.TestCase):
                 "assets/component.xml",
                 """<components><component name="component_a" class="turret">
                   <source geometry="Assets\\Exact_CASE_Data"/>
+                  <connections><connection name="Endpoint" tags="laser"/></connections>
                   <metadata><source geometry="nested/misleading"/></metadata>
                 </component></components>""",
             )
@@ -333,6 +382,7 @@ class CensusTests(unittest.TestCase):
                       <metadata><parts><part name="NestedPart"/></parts></metadata>
                     </connection>
                     <connection name="Conn_B"><parts><part name="DuplicateUnused"/></parts></connection>
+                    <connection name="Endpoint" tags="laser"/>
                   </connections>
                   <metadata><connection name="UnrelatedConn"><parts><part name="UnrelatedPart"/></parts></connection></metadata>
                 </component></components>""",
@@ -427,7 +477,7 @@ class CensusTests(unittest.TestCase):
                   <connections>
                     <connection name="Root"><parts><part name="BasePart"/><part name="BasePart"/></parts></connection>
                     <connection name="Child" parent="BasePart"><parts><part name="ArmPart"/></parts></connection>
-                    <connection name="Grand" parent="ArmPart"><parts><part name="BarrelPart"/></parts></connection>
+                    <connection name="Grand" tags="laser" parent="ArmPart"><parts><part name="BarrelPart"/></parts></connection>
                     <connection name="Branch" parent="BasePart"><parts><part name="BranchPart"/></parts></connection>
                     <connection name="EmptyParentRoot" parent=""/>
                   </connections>
@@ -453,6 +503,9 @@ class CensusTests(unittest.TestCase):
                         "parent_part": "BasePart",
                         "parent_connection": "Root",
                         "direct_owned_parts": ["BranchPart"],
+                        "authored_attributes": {"name": "Branch", "parent": "BasePart"},
+                        "authored_tags": None,
+                        "tag_tokens": [],
                         "root_to_connection_path": ["Root", "Branch"],
                         "depth": 1,
                     },
@@ -461,6 +514,9 @@ class CensusTests(unittest.TestCase):
                         "parent_part": "BasePart",
                         "parent_connection": "Root",
                         "direct_owned_parts": ["ArmPart"],
+                        "authored_attributes": {"name": "Child", "parent": "BasePart"},
+                        "authored_tags": None,
+                        "tag_tokens": [],
                         "root_to_connection_path": ["Root", "Child"],
                         "depth": 1,
                     },
@@ -469,6 +525,9 @@ class CensusTests(unittest.TestCase):
                         "parent_part": None,
                         "parent_connection": None,
                         "direct_owned_parts": [],
+                        "authored_attributes": {"name": "EmptyParentRoot", "parent": ""},
+                        "authored_tags": None,
+                        "tag_tokens": [],
                         "root_to_connection_path": ["EmptyParentRoot"],
                         "depth": 0,
                     },
@@ -477,6 +536,9 @@ class CensusTests(unittest.TestCase):
                         "parent_part": "ArmPart",
                         "parent_connection": "Child",
                         "direct_owned_parts": ["BarrelPart"],
+                        "authored_attributes": {"name": "Grand", "parent": "ArmPart", "tags": "laser"},
+                        "authored_tags": "laser",
+                        "tag_tokens": ["laser"],
                         "root_to_connection_path": ["Root", "Child", "Grand"],
                         "depth": 2,
                     },
@@ -485,6 +547,9 @@ class CensusTests(unittest.TestCase):
                         "parent_part": None,
                         "parent_connection": None,
                         "direct_owned_parts": ["BasePart", "BasePart"],
+                        "authored_attributes": {"name": "Root"},
+                        "authored_tags": None,
+                        "tag_tokens": [],
                         "root_to_connection_path": ["Root"],
                         "depth": 0,
                     },
@@ -598,6 +663,182 @@ class CensusTests(unittest.TestCase):
                 )
                 (roots["base"] / "geometry/component_a.ANI").write_bytes(
                     _ani_bytes(("Target", "Sub"))
+                )
+                with self.assertRaises(CensusError) as caught:
+                    build_census(roots)
+                self.assertIn(code, caught.exception.codes)
+
+    def test_firing_endpoints_use_authored_tags_not_connection_spelling(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional_component" class="turret">
+                    <source geometry="geometry/component_a"/>
+                    <connections>
+                      <connection name="Root" tags="part custom  " custom="ExactValue"><parts><part name="Pivot"/></parts></connection>
+                      <connection name="Child" tags="part" parent="Pivot"><parts><part name="Barrel"/></parts></connection>
+                      <connection name="NotNamedLikeEndpointA" tags="laser  " parent="Barrel"/>
+                      <connection name="NotNamedLikeEndpointB" tags="laser" parent="Barrel"/>
+                      <connection name="con_laser_unrelated" tags="decoration" parent="Barrel"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/component_b"/>
+                    <connections><connection name="LaunchPoint" tags="rocket " marker="preserved"/></connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_macro", "turret", "conventional_component"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+
+            report = build_census(roots)
+            conventional, missile = report["component_to_macros"]
+            self.assertEqual(
+                conventional["firing_endpoints"],
+                [
+                    {
+                        "component": "conventional_component",
+                        "component_class": "turret",
+                        "macros": ["conventional_macro"],
+                        "macro_classes": ["turret"],
+                        "connection": "NotNamedLikeEndpointA",
+                        "authored_evidence": {
+                            "tag_attribute": "laser  ",
+                            "tag_token": "laser",
+                        },
+                        "root_to_endpoint_connection_path": [
+                            "Root",
+                            "Child",
+                            "NotNamedLikeEndpointA",
+                        ],
+                    },
+                    {
+                        "component": "conventional_component",
+                        "component_class": "turret",
+                        "macros": ["conventional_macro"],
+                        "macro_classes": ["turret"],
+                        "connection": "NotNamedLikeEndpointB",
+                        "authored_evidence": {
+                            "tag_attribute": "laser",
+                            "tag_token": "laser",
+                        },
+                        "root_to_endpoint_connection_path": [
+                            "Root",
+                            "Child",
+                            "NotNamedLikeEndpointB",
+                        ],
+                    },
+                ],
+            )
+            self.assertEqual(
+                missile["firing_endpoints"],
+                [
+                    {
+                        "component": "missile_component",
+                        "component_class": "missileturret",
+                        "macros": ["missile_macro"],
+                        "macro_classes": ["missileturret"],
+                        "connection": "LaunchPoint",
+                        "authored_evidence": {
+                            "tag_attribute": "rocket ",
+                            "tag_token": "rocket",
+                        },
+                        "root_to_endpoint_connection_path": ["LaunchPoint"],
+                    }
+                ],
+            )
+            unrelated = next(
+                connection
+                for connection in conventional["connections"]
+                if connection["name"] == "con_laser_unrelated"
+            )
+            self.assertEqual(unrelated["authored_tags"], "decoration")
+            self.assertEqual(unrelated["tag_tokens"], ["decoration"])
+            root = next(
+                connection
+                for connection in conventional["connections"]
+                if connection["name"] == "Root"
+            )
+            self.assertEqual(root["authored_tags"], "part custom  ")
+            self.assertEqual(root["tag_tokens"], ["part", "custom"])
+            self.assertEqual(
+                root["authored_attributes"],
+                {"custom": "ExactValue", "name": "Root", "tags": "part custom  "},
+            )
+            self.assertEqual(report["counts"]["firing_endpoint_identities"], 3)
+            self.assertEqual(report["counts"]["conventional_firing_endpoints"], 2)
+            self.assertEqual(report["counts"]["missileturret_firing_endpoints"], 1)
+            self.assertEqual(report["firing_endpoint_count_distribution"], {"1": 1, "2": 1})
+            self.assertEqual(
+                report["firing_endpoint_criterion"],
+                {
+                    "evidence_classification": "shipped-source",
+                    "structural_rule": "exact direct connection tag token selected by exact component class",
+                    "component_class_to_tag_token": {
+                        "missileturret": "rocket",
+                        "turret": "laser",
+                    },
+                },
+            )
+            self.assertEqual(
+                report["firing_endpoint_evidence_patterns"],
+                [
+                    {
+                        "component_class": "missileturret",
+                        "tag_token": "rocket",
+                        "exact_tag_attribute": "rocket ",
+                        "endpoint_count": 1,
+                    },
+                    {
+                        "component_class": "turret",
+                        "tag_token": "laser",
+                        "exact_tag_attribute": "laser",
+                        "endpoint_count": 1,
+                    },
+                    {
+                        "component_class": "turret",
+                        "tag_token": "laser",
+                        "exact_tag_attribute": "laser  ",
+                        "endpoint_count": 1,
+                    },
+                ],
+            )
+            self.assertEqual(
+                report["firing_endpoints"],
+                conventional["firing_endpoints"] + missile["firing_endpoints"],
+            )
+
+    def test_missing_malformed_or_ambiguous_firing_endpoint_evidence_fails_closed(self) -> None:
+        cases = (
+            ("missing", "turret", "turret", '<connection name="con_laser_only_by_name"/>', "missing_firing_endpoint_identity"),
+            ("duplicate_token", "turret", "turret", '<connection name="Endpoint" tags="laser laser"/>', "malformed_endpoint_evidence"),
+            ("both_roles", "turret", "turret", '<connection name="Endpoint" tags="laser rocket"/>', "ambiguous_endpoint_evidence"),
+            ("wrong_role", "turret", "turret", '<connection name="Endpoint" tags="rocket"/>', "ambiguous_endpoint_evidence"),
+            ("missile_duplicate", "missileturret", "missileturret", '<connection name="Endpoint" tags="rocket rocket"/>', "malformed_endpoint_evidence"),
+            ("missile_wrong_role", "missileturret", "missileturret", '<connection name="Endpoint" tags="laser"/>', "ambiguous_endpoint_evidence"),
+            ("unsupported_class", "bullet", "turret", '<connection name="Endpoint" tags="laser"/>', "unsupported_endpoint_component_class"),
+        )
+        for label, component_class, macro_class, connections, code in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                roots = _source_roots(Path(tmp))
+                _write(
+                    roots["base"],
+                    "assets/component.xml",
+                    f'<components><component name="component_a" class="{component_class}"><source geometry="geometry/component_a"/><connections>{connections}</connections></component></components>',
+                )
+                _write(
+                    roots["base"],
+                    "assets/macros.xml",
+                    _macros(("a_macro", macro_class, "component_a")),
                 )
                 with self.assertRaises(CensusError) as caught:
                     build_census(roots)
@@ -838,8 +1079,8 @@ class CensusTests(unittest.TestCase):
                 roots["base"],
                 "assets/components.xml",
                 """<components>
-                  <component name="component_a" class="turret"><source geometry="geometry/shared"/></component>
-                  <component name="component_b" class="turret"><source geometry="geometry/shared"/></component>
+                  <component name="component_a" class="turret"><source geometry="geometry/shared"/><connections><connection name="AEndpoint" tags="laser"/></connections></component>
+                  <component name="component_b" class="turret"><source geometry="geometry/shared"/><connections><connection name="BEndpoint" tags="laser"/></connections></component>
                 </components>""",
             )
             _write(
@@ -863,7 +1104,7 @@ class CensusTests(unittest.TestCase):
             )
             self.assertEqual(report["geometry_source_component_cardinality"], {"2": 1})
 
-    def test_macro_component_class_mismatch_is_reported(self) -> None:
+    def test_macro_component_class_mismatch_blocks_endpoint_accounting(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             roots = _source_roots(Path(tmp))
             _write(roots["base"], "assets/components.xml", _components("component_a"))
@@ -872,22 +1113,9 @@ class CensusTests(unittest.TestCase):
                 "assets/macros.xml",
                 _macros(("a_macro", "missileturret", "component_a")),
             )
-            report = build_census(roots)
-            self.assertEqual(
-                report["macro_component_class_mismatches"],
-                [
-                    {
-                        "macro": "a_macro",
-                        "macro_class": "missileturret",
-                        "macro_source_set": "base",
-                        "macro_source_file": "assets/macros.xml",
-                        "component": "component_a",
-                        "component_class": "turret",
-                        "component_source_set": "base",
-                        "component_source_file": "assets/components.xml",
-                    }
-                ],
-            )
+            with self.assertRaises(CensusError) as caught:
+                build_census(roots)
+            self.assertIn("ambiguous_endpoint_class_accounting", caught.exception.codes)
 
     def test_missing_required_source_set_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -915,6 +1143,7 @@ class CensusTests(unittest.TestCase):
                 "assets/component.xml",
                 """<components><component name="component_a" class="turret">
                   <source geometry="extensions\\ego_dlc_split\\Weapons\\Exact"/>
+                  <connections><connection name="Endpoint" tags="laser"/></connections>
                 </component></components>""",
             )
             _write(
@@ -942,7 +1171,7 @@ class CensusTests(unittest.TestCase):
             _write(
                 roots["ego_dlc_split"],
                 "assets/component.xml",
-                '<components><component name="component_a" class="turret"><source geometry="geometry/component_a"/></component></components>',
+                '<components><component name="component_a" class="turret"><source geometry="geometry/component_a"/><connections><connection name="Endpoint" tags="laser"/></connections></component></components>',
             )
             _write(
                 roots["ego_dlc_split"],
@@ -1033,14 +1262,14 @@ class CensusTests(unittest.TestCase):
             _write(
                 roots["base"],
                 "assets/base_components.xml",
-                '<components><component name="current_a" class="turret"><source geometry="geometry/current_a"/></component></components>',
+                '<components><component name="current_a" class="turret"><source geometry="geometry/current_a"/><connections><connection name="AEndpoint" tags="laser"/></connections></component></components>',
             )
             _write(
                 roots["ego_dlc_boron"],
                 "assets/boron_components.xml",
                 """<components>
-                  <component name="current_b" class="turret"><source geometry="geometry/current_b"/></component>
-                  <component name="current_c" class="missileturret"><source geometry="geometry/current_c"/></component>
+                  <component name="current_b" class="turret"><source geometry="geometry/current_b"/><connections><connection name="BEndpoint" tags="laser"/></connections></component>
+                  <component name="current_c" class="missileturret"><source geometry="geometry/current_c"/><connections><connection name="CEndpoint" tags="rocket"/></connections></component>
                 </components>""",
             )
             _write(
@@ -1211,13 +1440,13 @@ class CensusTests(unittest.TestCase):
                   <component name="component_z" class="turret">
                     <source geometry="geometry/component_z"/>
                     <connections>
-                      <connection name="Z_Child" parent="Z_Part"/>
+                      <connection name="Z_Child" tags="laser" parent="Z_Part"/>
                       <connection name="Z_Root"><parts><part name="Z_Part"/></parts></connection>
                     </connections>
                   </component>
-                  <component name="component_a" class="turret">
+                  <component name="component_a" class="missileturret">
                     <source geometry="geometry/component_a"/>
-                    <connections><connection name="A_Root"/></connections>
+                    <connections><connection name="A_Root" tags="rocket"/></connections>
                   </component>
                 </components>""",
             )
