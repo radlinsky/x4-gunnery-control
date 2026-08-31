@@ -616,6 +616,139 @@ def _classify_firing_endpoints(
     return endpoints, anomalies
 
 
+def _derive_endpoint_source_paths(
+    endpoints: list[dict[str, object]],
+    connections: list[dict[str, object]],
+    ani_descriptors: list[dict[str, object]],
+    *,
+    component: str,
+    source_set: object,
+    source_file: object,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Join exact traversed connection edges, source parts, and ANI identities."""
+
+    anomalies: list[dict[str, object]] = []
+    connections_by_name = {
+        str(connection["name"]): connection for connection in connections
+    }
+
+    for descriptor in ani_descriptors:
+        owner_name = str(descriptor["source_connection"])
+        part = str(descriptor["part"])
+        owner = connections_by_name.get(owner_name)
+        if owner is None or part not in [
+            str(item) for item in owner["direct_owned_parts"]
+        ]:
+            anomalies.append(
+                _anomaly(
+                    "contradictory_descriptor_path_identity",
+                    "ANI descriptor source connection does not own its exact source part",
+                    component=component,
+                    part=part,
+                    subname=descriptor["subname"],
+                    source_connection=owner_name,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+
+    resolved: list[dict[str, object]] = []
+    for endpoint in endpoints:
+        endpoint_name = str(endpoint["connection"])
+        path = [
+            str(connection)
+            for connection in endpoint["root_to_endpoint_connection_path"]
+        ]
+        if not path or path[-1] != endpoint_name or any(
+            connection not in connections_by_name for connection in path
+        ):
+            anomalies.append(
+                _anomaly(
+                    "unresolvable_endpoint_connection_path",
+                    "firing endpoint has no exact resolved root-to-endpoint connection path",
+                    component=component,
+                    endpoint_connection=endpoint_name,
+                    root_to_endpoint_connection_path=path,
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+            continue
+
+        edges: list[dict[str, str]] = []
+        valid = True
+        for parent_name, child_name in zip(path, path[1:]):
+            parent = connections_by_name[parent_name]
+            child = connections_by_name[child_name]
+            child_parent = child["parent_connection"]
+            child_parent_part = child["parent_part"]
+            owned_parts = [str(part) for part in parent["direct_owned_parts"]]
+            if (
+                child_parent != parent_name
+                or child_parent_part is None
+                or str(child_parent_part) not in owned_parts
+            ):
+                anomalies.append(
+                    _anomaly(
+                        "invalid_endpoint_edge_ownership",
+                        "endpoint path edge is not backed by exact parent-connection part ownership",
+                        component=component,
+                        endpoint_connection=endpoint_name,
+                        parent_connection=parent_name,
+                        child_connection=child_name,
+                        child_parent_connection=child_parent,
+                        child_parent_part=child_parent_part,
+                        parent_owned_parts=owned_parts,
+                        source_set=source_set,
+                        source_file=source_file,
+                    )
+                )
+                valid = False
+                break
+            edges.append(
+                {
+                    "parent_connection": parent_name,
+                    "child_connection": child_name,
+                    "child_parent_part": str(child_parent_part),
+                }
+            )
+        if not valid:
+            continue
+
+        memberships: list[dict[str, object]] = []
+        for edge_index, edge in enumerate(edges):
+            for descriptor in ani_descriptors:
+                if not (
+                    descriptor["source_connection"] == edge["parent_connection"]
+                    and descriptor["part"] == edge["child_parent_part"]
+                ):
+                    continue
+                memberships.append(
+                    {
+                        "part": descriptor["part"],
+                        "subname": descriptor["subname"],
+                        "source_connection": descriptor["source_connection"],
+                        "root_to_source_connection_path": descriptor[
+                            "root_to_source_connection_path"
+                        ],
+                        "endpoint_path_edge_index": edge_index,
+                    }
+                )
+
+        resolved.append(
+            {
+                **endpoint,
+                "traversed_connection_edges": edges,
+                "source_part_path": [edge["child_parent_part"] for edge in edges],
+                "ani_descriptor_memberships": memberships,
+            }
+        )
+
+    if anomalies:
+        return [], anomalies
+    return resolved, []
+
+
 def build_census(
     source_sets: Mapping[str, Path], resource_sets: Mapping[str, Path]
 ) -> dict[str, object]:
@@ -1061,6 +1194,18 @@ def build_census(
                         definition["descriptor_parts_absent_from_source_parts"] = sorted(
                             absent_parts
                         )
+                        endpoint_paths, endpoint_path_anomalies = (
+                            _derive_endpoint_source_paths(
+                                definition["firing_endpoints"],
+                                definition["connections"],
+                                joined_descriptors,
+                                component=component,
+                                source_set=definition["source_set"],
+                                source_file=definition["source_file"],
+                            )
+                        )
+                        definition["firing_endpoints"] = endpoint_paths
+                        anomalies.extend(endpoint_path_anomalies)
 
     if anomalies:
         raise CensusError(anomalies)
@@ -1165,6 +1310,34 @@ def build_census(
         )
         for endpoint in firing_endpoints
     )
+    endpoint_path_depths = Counter(
+        len(endpoint["source_part_path"]) for endpoint in firing_endpoints
+    )
+    endpoint_path_descriptor_joins = Counter(
+        len(endpoint["ani_descriptor_memberships"]) for endpoint in firing_endpoints
+    )
+    descriptor_endpoint_path_memberships = sum(
+        len(endpoint["ani_descriptor_memberships"])
+        for endpoint in firing_endpoints
+    )
+    all_component_descriptors = {
+        (
+            str(record["component"]),
+            str(descriptor["part"]),
+            str(descriptor["subname"]),
+        )
+        for record in component_to_macros
+        for descriptor in record["ani_descriptors"]
+    }
+    descriptors_on_endpoint_paths = {
+        (
+            str(endpoint["component"]),
+            str(descriptor["part"]),
+            str(descriptor["subname"]),
+        )
+        for endpoint in firing_endpoints
+        for descriptor in endpoint["ani_descriptor_memberships"]
+    }
     connection_depths = Counter(
         int(connection["depth"])
         for record in component_to_macros
@@ -1226,7 +1399,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 7,
+        "schema_version": 8,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -1272,6 +1445,17 @@ def build_census(
                 for endpoint in firing_endpoints
             ),
             "components_with_zero_or_ambiguous_endpoint_identity": 0,
+            "traversed_endpoint_part_occurrences": sum(
+                len(endpoint["source_part_path"]) for endpoint in firing_endpoints
+            ),
+            "descriptor_endpoint_path_memberships": descriptor_endpoint_path_memberships,
+            "descriptors_on_at_least_one_endpoint_path": len(
+                descriptors_on_endpoint_paths
+            ),
+            "descriptors_only_off_endpoint_paths": len(
+                all_component_descriptors - descriptors_on_endpoint_paths
+            ),
+            "unresolved_or_ambiguous_endpoint_path_identities": 0,
             "descriptor_source_path_joins": descriptor_source_path_joins,
             "unresolved_or_ambiguous_parent_identities": 0,
             "unresolved_or_ambiguous_descriptor_path_identities": 0,
@@ -1312,6 +1496,23 @@ def build_census(
                 firing_endpoint_evidence_patterns.items()
             )
         ],
+        "endpoint_path_depth_distribution": {
+            str(key): endpoint_path_depths[key] for key in sorted(endpoint_path_depths)
+        },
+        "endpoint_path_descriptor_join_distribution": {
+            str(key): endpoint_path_descriptor_joins[key]
+            for key in sorted(endpoint_path_descriptor_joins)
+        },
+        "endpoint_paths_by_descriptor_join_cardinality": {
+            "zero": endpoint_path_descriptor_joins[0],
+            "one": endpoint_path_descriptor_joins[1],
+            "multiple": sum(
+                count
+                for joins, count in endpoint_path_descriptor_joins.items()
+                if joins > 1
+            ),
+        },
+        "unresolved_or_ambiguous_endpoint_path_identities": [],
         "components_with_zero_or_ambiguous_endpoint_identity": [],
         "component_root_count_distribution": {
             str(key): root_counts[key] for key in sorted(root_counts)

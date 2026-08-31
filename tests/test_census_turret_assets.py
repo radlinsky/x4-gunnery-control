@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from census_turret_assets import (  # noqa: E402
     CensusError,
     REQUIRED_SOURCE_SETS,
+    _derive_endpoint_source_paths,
     build_census as _build_census,
     build_reconciliation,
     main,
@@ -186,6 +187,9 @@ class CensusTests(unittest.TestCase):
                                 "connection": "MissileEndpoint",
                                 "authored_evidence": {"tag_attribute": "rocket", "tag_token": "rocket"},
                                 "root_to_endpoint_connection_path": ["MissileEndpoint"],
+                                "traversed_connection_edges": [],
+                                "source_part_path": [],
+                                "ani_descriptor_memberships": [],
                             }
                         ],
                         "ani_descriptors": [],
@@ -225,6 +229,9 @@ class CensusTests(unittest.TestCase):
                                 "connection": "SharedEndpoint",
                                 "authored_evidence": {"tag_attribute": "laser ", "tag_token": "laser"},
                                 "root_to_endpoint_connection_path": ["SharedEndpoint"],
+                                "traversed_connection_edges": [],
+                                "source_part_path": [],
+                                "ani_descriptor_memberships": [],
                             }
                         ],
                         "ani_descriptors": [],
@@ -720,6 +727,20 @@ class CensusTests(unittest.TestCase):
                             "Child",
                             "NotNamedLikeEndpointA",
                         ],
+                        "traversed_connection_edges": [
+                            {
+                                "parent_connection": "Root",
+                                "child_connection": "Child",
+                                "child_parent_part": "Pivot",
+                            },
+                            {
+                                "parent_connection": "Child",
+                                "child_connection": "NotNamedLikeEndpointA",
+                                "child_parent_part": "Barrel",
+                            },
+                        ],
+                        "source_part_path": ["Pivot", "Barrel"],
+                        "ani_descriptor_memberships": [],
                     },
                     {
                         "component": "conventional_component",
@@ -736,6 +757,20 @@ class CensusTests(unittest.TestCase):
                             "Child",
                             "NotNamedLikeEndpointB",
                         ],
+                        "traversed_connection_edges": [
+                            {
+                                "parent_connection": "Root",
+                                "child_connection": "Child",
+                                "child_parent_part": "Pivot",
+                            },
+                            {
+                                "parent_connection": "Child",
+                                "child_connection": "NotNamedLikeEndpointB",
+                                "child_parent_part": "Barrel",
+                            },
+                        ],
+                        "source_part_path": ["Pivot", "Barrel"],
+                        "ani_descriptor_memberships": [],
                     },
                 ],
             )
@@ -753,6 +788,9 @@ class CensusTests(unittest.TestCase):
                             "tag_token": "rocket",
                         },
                         "root_to_endpoint_connection_path": ["LaunchPoint"],
+                        "traversed_connection_edges": [],
+                        "source_part_path": [],
+                        "ani_descriptor_memberships": [],
                     }
                 ],
             )
@@ -816,6 +854,165 @@ class CensusTests(unittest.TestCase):
                 report["firing_endpoints"],
                 conventional["firing_endpoints"] + missile["firing_endpoints"],
             )
+
+    def test_endpoint_source_part_paths_and_exact_descriptor_membership(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/components.xml",
+                """<components>
+                  <component name="conventional_component" class="turret">
+                    <source geometry="geometry/component_a"/>
+                    <connections>
+                      <connection name="Root"><parts><part name="SharedPart"/><part name="SiblingPart"/></parts></connection>
+                      <connection name="SharedNode" parent="SharedPart"><parts><part name="BranchAPart"/><part name="BranchBPart"/></parts></connection>
+                      <connection name="EndpointA" tags="laser" parent="BranchAPart"/>
+                      <connection name="BranchB" parent="BranchBPart"><parts><part name="DeepPart"/></parts></connection>
+                      <connection name="EndpointB" tags="laser" parent="DeepPart"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/component_b"/>
+                    <connections><connection name="RootEndpoint" tags="rocket"><parts><part name="UnusedMissilePart"/></parts></connection></connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_macro", "turret", "conventional_component"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(
+                    ("SharedPart", "SharedSub"),
+                    ("BranchAPart", "SameSub"),
+                    ("SiblingPart", "SameSub"),
+                    ("BranchBPart", "BranchBSub"),
+                    ("DeepPart", "DeepSubA"),
+                    ("DeepPart", "DeepSubB"),
+                )
+            )
+            (roots["base"] / "geometry/component_b.ANI").write_bytes(
+                _ani_bytes(("UnusedMissilePart", "OffPath"))
+            )
+
+            report = build_census(roots)
+            conventional, missile = report["component_to_macros"]
+            endpoint_a, endpoint_b = conventional["firing_endpoints"]
+            self.assertEqual(
+                endpoint_a["traversed_connection_edges"],
+                [
+                    {
+                        "parent_connection": "Root",
+                        "child_connection": "SharedNode",
+                        "child_parent_part": "SharedPart",
+                    },
+                    {
+                        "parent_connection": "SharedNode",
+                        "child_connection": "EndpointA",
+                        "child_parent_part": "BranchAPart",
+                    },
+                ],
+            )
+            self.assertEqual(endpoint_a["source_part_path"], ["SharedPart", "BranchAPart"])
+            self.assertEqual(
+                endpoint_a["ani_descriptor_memberships"],
+                [
+                    {
+                        "part": "SharedPart",
+                        "subname": "SharedSub",
+                        "source_connection": "Root",
+                        "root_to_source_connection_path": ["Root"],
+                        "endpoint_path_edge_index": 0,
+                    },
+                    {
+                        "part": "BranchAPart",
+                        "subname": "SameSub",
+                        "source_connection": "SharedNode",
+                        "root_to_source_connection_path": ["Root", "SharedNode"],
+                        "endpoint_path_edge_index": 1,
+                    },
+                ],
+            )
+            self.assertEqual(
+                endpoint_b["source_part_path"],
+                ["SharedPart", "BranchBPart", "DeepPart"],
+            )
+            self.assertEqual(
+                [(item["part"], item["subname"]) for item in endpoint_b["ani_descriptor_memberships"]],
+                [
+                    ("SharedPart", "SharedSub"),
+                    ("BranchBPart", "BranchBSub"),
+                    ("DeepPart", "DeepSubA"),
+                    ("DeepPart", "DeepSubB"),
+                ],
+            )
+            self.assertNotIn(
+                ("SiblingPart", "SameSub"),
+                [(item["part"], item["subname"]) for item in endpoint_a["ani_descriptor_memberships"] + endpoint_b["ani_descriptor_memberships"]],
+            )
+            root_endpoint = missile["firing_endpoints"][0]
+            self.assertEqual(root_endpoint["traversed_connection_edges"], [])
+            self.assertEqual(root_endpoint["source_part_path"], [])
+            self.assertEqual(root_endpoint["ani_descriptor_memberships"], [])
+            self.assertEqual(report["endpoint_path_depth_distribution"], {"0": 1, "2": 1, "3": 1})
+            self.assertEqual(report["counts"]["traversed_endpoint_part_occurrences"], 5)
+            self.assertEqual(report["endpoint_path_descriptor_join_distribution"], {"0": 1, "2": 1, "4": 1})
+            self.assertEqual(report["endpoint_paths_by_descriptor_join_cardinality"], {"zero": 1, "one": 0, "multiple": 2})
+            self.assertEqual(report["counts"]["descriptor_endpoint_path_memberships"], 6)
+            self.assertEqual(report["counts"]["descriptors_on_at_least_one_endpoint_path"], 5)
+            self.assertEqual(report["counts"]["descriptors_only_off_endpoint_paths"], 2)
+            self.assertEqual(report["counts"]["unresolved_or_ambiguous_endpoint_path_identities"], 0)
+
+    def test_malformed_endpoint_edge_ownership_fails_closed(self) -> None:
+        endpoints = [{"connection": "Child", "root_to_endpoint_connection_path": ["Root", "Child"]}]
+        connections = [
+            {"name": "Root", "parent_connection": None, "parent_part": None, "direct_owned_parts": ["Other"]},
+            {"name": "Child", "parent_connection": "Root", "parent_part": "Required", "direct_owned_parts": []},
+        ]
+        resolved, anomalies = _derive_endpoint_source_paths(
+            endpoints,
+            connections,
+            [],
+            component="component_a",
+            source_set="base",
+            source_file="assets/component.xml",
+        )
+        self.assertEqual(resolved, [])
+        self.assertEqual([item["code"] for item in anomalies], ["invalid_endpoint_edge_ownership"])
+
+        resolved, anomalies = _derive_endpoint_source_paths(
+            [{"connection": "Missing", "root_to_endpoint_connection_path": ["Root", "Missing"]}],
+            connections,
+            [],
+            component="component_a",
+            source_set="base",
+            source_file="assets/component.xml",
+        )
+        self.assertEqual(resolved, [])
+        self.assertEqual([item["code"] for item in anomalies], ["unresolvable_endpoint_connection_path"])
+
+        resolved, anomalies = _derive_endpoint_source_paths(
+            [],
+            connections,
+            [
+                {
+                    "part": "Required",
+                    "subname": "ExactSubname",
+                    "source_connection": "Root",
+                    "root_to_source_connection_path": ["Root"],
+                }
+            ],
+            component="component_a",
+            source_set="base",
+            source_file="assets/component.xml",
+        )
+        self.assertEqual(resolved, [])
+        self.assertEqual([item["code"] for item in anomalies], ["contradictory_descriptor_path_identity"])
 
     def test_missing_malformed_or_ambiguous_firing_endpoint_evidence_fails_closed(self) -> None:
         cases = (
