@@ -65,8 +65,10 @@ _ANI_KEY_RECORD_CANDIDATE_SLOTS = tuple(
         range(0, _ANI_KEY_RECORD_SIZE, 4), _ANI_KEY_RECORD_CANDIDATE_TYPES
     )
 )
-_ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS = (
-    _ANI_KEY_RECORD_CANDIDATE_SLOTS[:3]
+_ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES = (0, 1, 2)
+_ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS = tuple(
+    _ANI_KEY_RECORD_CANDIDATE_SLOTS[index]
+    for index in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES
 )
 _ANI_KEY_RECORD_CANDIDATE_BYTE_COUNTS = Counter(
     byte_index
@@ -575,34 +577,15 @@ def _summarize_candidate_channel_dynamics(
         records = descriptor["_candidate_raw_key_records"]
         candidate_assigned_key_records += len(records)
         for channel_index, field in enumerate(_ANI_CHANNEL_COUNT_FIELDS):
-            candidate_channel = descriptor["key_data"]["channels"][field]
-            record_range = candidate_channel["record_range"]
-            channel_records = [
-                record
-                for record in records
-                if int(record_range["start"])
-                <= int(record["record_index"])
-                < int(record_range["end_exclusive"])
-            ]
-            key_count = int(candidate_channel["record_count"])
+            channel_records = _candidate_channel_records(descriptor, field)
+            key_count = len(channel_records)
             if key_count == 0:
                 classification = "zero_keys"
             elif key_count == 1:
                 classification = "one_key"
             else:
-                raw_bit_triples = {
-                    tuple(
-                        str(record["raw_bits"][slot_index])
-                        for slot_index in range(
-                            len(_ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS)
-                        )
-                    )
-                    for record in channel_records
-                }
-                classification = (
-                    "multiple_keys_identical_raw_bit_triples"
-                    if len(raw_bit_triples) == 1
-                    else "multiple_keys_changing_raw_bit_triples"
+                classification = "multiple_keys_" + (
+                    _classify_candidate_multi_key_triples(channel_records)
                 )
             bucket = candidate_channels[channel_index]["classifications"][
                 classification
@@ -613,6 +596,198 @@ def _summarize_candidate_channel_dynamics(
         "selected_descriptor_memberships": selected_descriptor_memberships,
         "unique_selected_descriptors": len(unique_descriptors),
         "candidate_assigned_key_records": candidate_assigned_key_records,
+        "candidate_channels": candidate_channels,
+    }
+
+
+_CANDIDATE_MULTI_KEY_TRIPLE_CLASSES = (
+    "identical_raw_bit_triples",
+    "changing_raw_bit_triples",
+)
+_CANDIDATE_NUMERIC_ORDERING_SHAPES = (
+    "all_equal",
+    "strictly_increasing",
+    "nondecreasing",
+    "other",
+)
+
+
+def _candidate_channel_records(
+    descriptor: dict[str, object], field: str
+) -> list[dict[str, object]]:
+    record_range = descriptor["key_data"]["channels"][field]["record_range"]
+    return [
+        record
+        for record in descriptor["_candidate_raw_key_records"]
+        if int(record_range["start"])
+        <= int(record["record_index"])
+        < int(record_range["end_exclusive"])
+    ]
+
+
+def _classify_candidate_multi_key_triples(
+    records: list[dict[str, object]],
+) -> str:
+    raw_bit_triples = {
+        tuple(
+            str(record["raw_bits"][slot_index])
+            for slot_index in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOT_INDEXES
+        )
+        for record in records
+    }
+    return (
+        "identical_raw_bit_triples"
+        if len(raw_bit_triples) == 1
+        else "changing_raw_bit_triples"
+    )
+
+
+def _candidate_slot_pattern_inventory(
+    descriptor_records: list[tuple[dict[str, object], list[dict[str, object]]]],
+    slot_index: int,
+) -> dict[str, object]:
+    raw_bits = [
+        str(record["raw_bits"][slot_index])
+        for _, records in descriptor_records
+        for record in records
+    ]
+    raw_bit_counts = Counter(raw_bits)
+    descriptor_pattern_counts = [
+        len({str(record["raw_bits"][slot_index]) for record in records})
+        for _, records in descriptor_records
+    ]
+    return {
+        "slot_id": str(_ANI_KEY_RECORD_CANDIDATE_SLOTS[slot_index]["slot_id"]),
+        "record_count": len(raw_bits),
+        "raw_bit_zero_count": raw_bit_counts["0x00000000"],
+        "raw_bit_nonzero_count": len(raw_bits) - raw_bit_counts["0x00000000"],
+        "distinct_raw_bit_pattern_count": len(raw_bit_counts),
+        "raw_bit_pattern_distribution": [
+            {"raw_bits": bits, "record_count": raw_bit_counts[bits]}
+            for bits in sorted(raw_bit_counts)
+        ],
+        "constant_across_all_records": (
+            len(raw_bit_counts) == 1 if raw_bits else None
+        ),
+        "descriptors_with_constant_raw_bits": sum(
+            count == 1 for count in descriptor_pattern_counts
+        ),
+        "descriptors_with_differing_raw_bits": sum(
+            count > 1 for count in descriptor_pattern_counts
+        ),
+    }
+
+
+def _candidate_numeric_ordering_shape(values: list[float]) -> str:
+    if not all(math.isfinite(value) for value in values):
+        return "other"
+    if all(value == values[0] for value in values[1:]):
+        return "all_equal"
+    if all(left < right for left, right in zip(values, values[1:])):
+        return "strictly_increasing"
+    if all(left <= right for left, right in zip(values, values[1:])):
+        return "nondecreasing"
+    return "other"
+
+
+def _summarize_candidate_channel_metadata(
+    descriptor_records: list[tuple[dict[str, object], list[dict[str, object]]]],
+) -> dict[str, object]:
+    records = [record for _, group in descriptor_records for record in group]
+    enum_triplets = Counter(
+        (
+            tuple(str(record["raw_bits"][slot_index]) for slot_index in (3, 4, 5)),
+            tuple(int(record["raw_values"][slot_index]) for slot_index in (3, 4, 5)),
+        )
+        for record in records
+    )
+    slot_024 = _candidate_slot_pattern_inventory(descriptor_records, 6)
+    slot_024_values = [float(record["raw_values"][6]) for record in records]
+    slot_024["finite_count"] = sum(
+        math.isfinite(value) for value in slot_024_values
+    )
+    slot_024["non_finite_count"] = len(slot_024_values) - int(
+        slot_024["finite_count"]
+    )
+    ordering_shapes = {
+        shape: {"descriptor_count": 0, "key_record_count": 0}
+        for shape in _CANDIDATE_NUMERIC_ORDERING_SHAPES
+    }
+    for _, group in descriptor_records:
+        shape = _candidate_numeric_ordering_shape(
+            [float(record["raw_values"][6]) for record in group]
+        )
+        ordering_shapes[shape]["descriptor_count"] += 1
+        ordering_shapes[shape]["key_record_count"] += len(group)
+    slot_024["descriptor_numeric_ordering_shapes"] = ordering_shapes
+    return {
+        "descriptor_count": len(descriptor_records),
+        "key_record_count": len(records),
+        "candidate_enum_triplet_distribution": [
+            {
+                "raw_bits": list(raw_triplet),
+                "candidate_values": list(value_triplet),
+                "record_count": enum_triplets[(raw_triplet, value_triplet)],
+            }
+            for raw_triplet, value_triplet in sorted(enum_triplets)
+        ],
+        "slot_024": slot_024,
+        "slots_028_072": [
+            _candidate_slot_pattern_inventory(descriptor_records, slot_index)
+            for slot_index in range(7, 19)
+        ],
+        "slots_076_124": [
+            _candidate_slot_pattern_inventory(descriptor_records, slot_index)
+            for slot_index in range(19, 32)
+        ],
+    }
+
+
+def _inventory_candidate_multi_key_metadata(
+    unique_descriptors: dict[tuple[str, int], dict[str, object]],
+    selected_descriptor_memberships: int,
+    *,
+    include_patterns: bool,
+) -> dict[str, object]:
+    candidate_channels = []
+    for channel_index, field in enumerate(_ANI_CHANNEL_COUNT_FIELDS):
+        grouped: dict[
+            str, list[tuple[dict[str, object], list[dict[str, object]]]]
+        ] = {classification: [] for classification in _CANDIDATE_MULTI_KEY_TRIPLE_CLASSES}
+        for descriptor in unique_descriptors.values():
+            records = _candidate_channel_records(descriptor, field)
+            if len(records) <= 1:
+                continue
+            grouped[_classify_candidate_multi_key_triples(records)].append(
+                (descriptor, records)
+            )
+        if include_patterns:
+            classifications = {
+                classification: _summarize_candidate_channel_metadata(
+                    grouped[classification]
+                )
+                for classification in _CANDIDATE_MULTI_KEY_TRIPLE_CLASSES
+            }
+        else:
+            classifications = {
+                classification: {
+                    "descriptor_count": len(grouped[classification]),
+                    "key_record_count": sum(
+                        len(records) for _, records in grouped[classification]
+                    ),
+                }
+                for classification in _CANDIDATE_MULTI_KEY_TRIPLE_CLASSES
+            }
+        candidate_channels.append(
+            {
+                "candidate_channel_id": f"candidate_channel_{channel_index}",
+                "candidate_channel_count_field_index": channel_index,
+                "multiple_key_descriptors": classifications,
+            }
+        )
+    return {
+        "selected_descriptor_memberships": selected_descriptor_memberships,
+        "unique_selected_descriptors": len(unique_descriptors),
         "candidate_channels": candidate_channels,
     }
 
@@ -1909,6 +2084,7 @@ def build_census(
     selected_key_data_accounting_by_class = {}
     selected_candidate_slot_distributions_by_class = {}
     selected_candidate_channel_dynamics_by_class = {}
+    selected_candidate_channel_metadata_by_class = {}
     for component_class in sorted(_INCLUDED_CLASSES):
         memberships = [
             descriptor
@@ -1946,6 +2122,13 @@ def build_census(
         selected_candidate_channel_dynamics_by_class[component_class] = (
             _summarize_candidate_channel_dynamics(
                 unique_descriptors, len(memberships)
+            )
+        )
+        selected_candidate_channel_metadata_by_class[component_class] = (
+            _inventory_candidate_multi_key_metadata(
+                unique_descriptors,
+                len(memberships),
+                include_patterns=component_class == "turret",
             )
         )
 
@@ -2024,7 +2207,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 13,
+        "schema_version": 14,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -2289,6 +2472,63 @@ def build_census(
             "missileturret": selected_candidate_channel_dynamics_by_class[
                 "missileturret"
             ],
+        },
+        "selected_conventional_candidate_channel_metadata_patterns": {
+            "evidence_classification": "inference",
+            "candidate_field_layout": {
+                "evidence_classification": "third-party-technique",
+                "source": (
+                    "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5"
+                    " X4ConverterTools/include/X4ConverterTools/ani/Keyframe.h"
+                    " and X4ConverterTools/src/ani/Keyframe.cpp"
+                ),
+                "candidate_enum_slot_ids": [
+                    str(_ANI_KEY_RECORD_CANDIDATE_SLOTS[index]["slot_id"])
+                    for index in (3, 4, 5)
+                ],
+                "candidate_numeric_ordering_slot_id": str(
+                    _ANI_KEY_RECORD_CANDIDATE_SLOTS[6]["slot_id"]
+                ),
+                "candidate_middle_slot_ids": [
+                    str(_ANI_KEY_RECORD_CANDIDATE_SLOTS[index]["slot_id"])
+                    for index in range(7, 19)
+                ],
+                "candidate_tail_slot_ids": [
+                    str(_ANI_KEY_RECORD_CANDIDATE_SLOTS[index]["slot_id"])
+                    for index in range(19, 32)
+                ],
+            },
+            "candidate_channel_ownership_order": {
+                "evidence_classification": "third-party-technique",
+                "source": (
+                    "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5"
+                    " X4ConverterTools/src/ani/AnimFile.cpp and AnimDesc.cpp"
+                ),
+                "candidate_channel_count_field_indexes": list(
+                    range(len(_ANI_CHANNEL_COUNT_FIELDS))
+                ),
+            },
+            "selection": {
+                "component_class": "conventional",
+                "minimum_candidate_channel_key_count": 2,
+                "descriptor_identity": ["component", "descriptor_index"],
+                "main_raw_bit_triple_slot_ids": [
+                    str(slot["slot_id"])
+                    for slot in _ANI_KEY_RECORD_CANDIDATE_CHANNEL_TRIPLE_SLOTS
+                ],
+            },
+            "numeric_ordering_rule": (
+                "finite candidate decoded values compared in record order;"
+                " categories are tested in reported order"
+            ),
+            "raw_bit_zero_pattern": "0x00000000",
+            "semantic_claim": "none",
+            "conventional": selected_candidate_channel_metadata_by_class[
+                "turret"
+            ],
+            "missileturret_accounting": (
+                selected_candidate_channel_metadata_by_class["missileturret"]
+            ),
         },
         "selected_endpoint_path_descriptor_channel_count_families": {
             "conventional": render_channel_count_families(
