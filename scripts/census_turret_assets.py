@@ -616,10 +616,38 @@ def _classify_firing_endpoints(
     return endpoints, anomalies
 
 
+def _join_authored_animation_selectors(
+    animations: list[dict[str, str]],
+    ani_descriptors: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Join only exact connection-local animation names and ANI subnames."""
+
+    selectors = []
+    for animation in animations:
+        connection = animation["connection"]
+        name = animation["name"]
+        matches = [
+            descriptor
+            for descriptor in ani_descriptors
+            if descriptor["source_connection"] == connection
+            and descriptor["subname"] == name
+        ]
+        selectors.append(
+            {
+                "connection": connection,
+                "name": name,
+                "descriptor_match_count": len(matches),
+                "connection_ani_descriptors": matches,
+            }
+        )
+    return selectors
+
+
 def _derive_endpoint_source_paths(
     endpoints: list[dict[str, object]],
     connections: list[dict[str, object]],
     ani_descriptors: list[dict[str, object]],
+    authored_animation_selectors: list[dict[str, object]] | None = None,
     *,
     component: str,
     source_set: object,
@@ -652,6 +680,7 @@ def _derive_endpoint_source_paths(
                 )
             )
 
+    selectors = authored_animation_selectors or []
     resolved: list[dict[str, object]] = []
     for endpoint in endpoints:
         endpoint_name = str(endpoint["connection"])
@@ -735,12 +764,109 @@ def _derive_endpoint_source_paths(
                     }
                 )
 
+        selector_occurrences: list[dict[str, object]] = []
+        selected_memberships: list[dict[str, object]] = []
+        edge_index_by_parent = {
+            edge["parent_connection"]: edge_index
+            for edge_index, edge in enumerate(edges)
+        }
+        path_selectors = sorted(
+            (
+                selector
+                for selector in selectors
+                if str(selector["connection"]) in edge_index_by_parent
+            ),
+            key=lambda selector: (
+                edge_index_by_parent[str(selector["connection"])],
+                str(selector["name"]),
+            ),
+        )
+        for selector in path_selectors:
+            source_connection = str(selector["connection"])
+            if int(selector["descriptor_match_count"]) == 0:
+                anomalies.append(
+                    _anomaly(
+                        "unresolved_endpoint_path_animation_selector",
+                        "endpoint-path authored animation selector has no exact connection-local ANI descriptor subname match",
+                        component=component,
+                        endpoint_connection=endpoint_name,
+                        source_connection=source_connection,
+                        animation_name=selector["name"],
+                        source_set=source_set,
+                        source_file=source_file,
+                    )
+                )
+                valid = False
+                continue
+
+            edge_index = edge_index_by_parent[source_connection]
+            path_matches = [
+                descriptor
+                for descriptor in memberships
+                if descriptor["source_connection"] == source_connection
+                and descriptor["subname"] == selector["name"]
+            ]
+            evidence = {
+                "connection": source_connection,
+                "name": selector["name"],
+            }
+            selector_occurrences.append(
+                {
+                    "source_connection": source_connection,
+                    "animation_name": selector["name"],
+                    "endpoint_path_edge_index": edge_index,
+                    "authored_selector_evidence": evidence,
+                    "selector_connection_descriptor_match_count": selector[
+                        "descriptor_match_count"
+                    ],
+                    "selector_connection_ani_descriptors": selector[
+                        "connection_ani_descriptors"
+                    ],
+                    "selected_endpoint_path_ani_descriptor_memberships": path_matches,
+                }
+            )
+            selected_memberships.extend(
+                {
+                    **descriptor,
+                    "authored_selector_evidence": evidence,
+                    "selector_connection_descriptor_match_count": selector[
+                        "descriptor_match_count"
+                    ],
+                }
+                for descriptor in path_matches
+            )
+        if not valid:
+            continue
+
+        selected_identities = {
+            (
+                descriptor["part"],
+                descriptor["subname"],
+                descriptor["source_connection"],
+                descriptor["endpoint_path_edge_index"],
+            )
+            for descriptor in selected_memberships
+        }
+        unselected_memberships = [
+            descriptor
+            for descriptor in memberships
+            if (
+                descriptor["part"],
+                descriptor["subname"],
+                descriptor["source_connection"],
+                descriptor["endpoint_path_edge_index"],
+            )
+            not in selected_identities
+        ]
         resolved.append(
             {
                 **endpoint,
                 "traversed_connection_edges": edges,
                 "source_part_path": [edge["child_parent_part"] for edge in edges],
                 "ani_descriptor_memberships": memberships,
+                "authored_animation_selector_occurrences": selector_occurrences,
+                "selected_ani_descriptor_memberships": selected_memberships,
+                "unselected_ani_descriptor_memberships": unselected_memberships,
             }
         )
 
@@ -1009,6 +1135,26 @@ def build_census(
                     )
                     continue
                 authored_animations.append({"connection": connection, "name": name})
+            authored_animation_identity_counts = Counter(
+                (animation["connection"], animation["name"])
+                for animation in authored_animations
+            )
+            for (connection, name), count in sorted(
+                authored_animation_identity_counts.items()
+            ):
+                if count > 1:
+                    anomalies.append(
+                        _anomaly(
+                            "duplicate_authored_animation_selector_identity",
+                            "connection contains the same exact authored animation selector more than once",
+                            component=component,
+                            connection=connection,
+                            animation_name=name,
+                            occurrence_count=count,
+                            source_set=definition["source_set"],
+                            source_file=definition["source_file"],
+                        )
+                    )
             definition["authored_connection_animations"] = sorted(
                 authored_animations, key=lambda item: (item["connection"], item["name"])
             )
@@ -1194,11 +1340,21 @@ def build_census(
                         definition["descriptor_parts_absent_from_source_parts"] = sorted(
                             absent_parts
                         )
+                        authored_animation_selectors = (
+                            _join_authored_animation_selectors(
+                                definition["authored_connection_animations"],
+                                joined_descriptors,
+                            )
+                        )
+                        definition["authored_connection_animations"] = (
+                            authored_animation_selectors
+                        )
                         endpoint_paths, endpoint_path_anomalies = (
                             _derive_endpoint_source_paths(
                                 definition["firing_endpoints"],
                                 definition["connections"],
                                 joined_descriptors,
+                                authored_animation_selectors,
                                 component=component,
                                 source_set=definition["source_set"],
                                 source_file=definition["source_file"],
@@ -1338,6 +1494,61 @@ def build_census(
         for endpoint in firing_endpoints
         for descriptor in endpoint["ani_descriptor_memberships"]
     }
+    authored_animation_selectors = [
+        selector
+        for record in component_to_macros
+        for selector in record["authored_connection_animations"]
+    ]
+    authored_animation_selector_cardinalities = Counter(
+        int(selector["descriptor_match_count"])
+        for selector in authored_animation_selectors
+    )
+    authored_animation_selectors_with_zero_descriptor_matches = [
+        {
+            "component": record["component"],
+            "connection": selector["connection"],
+            "animation_name": selector["name"],
+        }
+        for record in component_to_macros
+        for selector in record["authored_connection_animations"]
+        if int(selector["descriptor_match_count"]) == 0
+    ]
+    authored_animation_selected_descriptor_identities = {
+        (
+            str(record["component"]),
+            str(descriptor["part"]),
+            str(descriptor["subname"]),
+        )
+        for record in component_to_macros
+        for selector in record["authored_connection_animations"]
+        for descriptor in selector["connection_ani_descriptors"]
+    }
+    endpoint_path_selector_occurrences = [
+        (endpoint, selector)
+        for endpoint in firing_endpoints
+        for selector in endpoint["authored_animation_selector_occurrences"]
+    ]
+    endpoint_path_selector_cardinalities = Counter(
+        int(selector["selector_connection_descriptor_match_count"])
+        for _, selector in endpoint_path_selector_occurrences
+    )
+    selected_endpoint_path_descriptor_memberships = [
+        (endpoint, descriptor)
+        for endpoint in firing_endpoints
+        for descriptor in endpoint["selected_ani_descriptor_memberships"]
+    ]
+    selected_endpoint_path_descriptor_identities = {
+        (
+            str(endpoint["component"]),
+            str(descriptor["part"]),
+            str(descriptor["subname"]),
+        )
+        for endpoint, descriptor in selected_endpoint_path_descriptor_memberships
+    }
+    selected_descriptor_counts_by_endpoint = Counter(
+        len(endpoint["selected_ani_descriptor_memberships"])
+        for endpoint in firing_endpoints
+    )
     connection_depths = Counter(
         int(connection["depth"])
         for record in component_to_macros
@@ -1399,7 +1610,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 8,
+        "schema_version": 9,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -1428,10 +1639,50 @@ def build_census(
                     for source_part in record["source_parts"]
                 }
             ),
-            "authored_connection_animations": sum(
-                len(record["authored_connection_animations"])
-                for record in component_to_macros
+            "authored_connection_animations": len(authored_animation_selectors),
+            "authored_animation_selected_descriptor_identities": len(
+                authored_animation_selected_descriptor_identities
             ),
+            "endpoint_path_animation_selector_occurrences": len(
+                endpoint_path_selector_occurrences
+            ),
+            "conventional_endpoint_path_animation_selector_occurrences": sum(
+                endpoint["component_class"] == "turret"
+                for endpoint, _ in endpoint_path_selector_occurrences
+            ),
+            "missileturret_endpoint_path_animation_selector_occurrences": sum(
+                endpoint["component_class"] == "missileturret"
+                for endpoint, _ in endpoint_path_selector_occurrences
+            ),
+            "selected_endpoint_path_descriptor_identities": len(
+                selected_endpoint_path_descriptor_identities
+            ),
+            "selected_endpoint_path_descriptor_memberships": len(
+                selected_endpoint_path_descriptor_memberships
+            ),
+            "conventional_selected_endpoint_path_descriptor_memberships": sum(
+                endpoint["component_class"] == "turret"
+                for endpoint, _ in selected_endpoint_path_descriptor_memberships
+            ),
+            "missileturret_selected_endpoint_path_descriptor_memberships": sum(
+                endpoint["component_class"] == "missileturret"
+                for endpoint, _ in selected_endpoint_path_descriptor_memberships
+            ),
+            "path_local_descriptors_left_unselected": sum(
+                len(endpoint["unselected_ani_descriptor_memberships"])
+                for endpoint in firing_endpoints
+            ),
+            "conventional_path_local_descriptors_left_unselected": sum(
+                len(endpoint["unselected_ani_descriptor_memberships"])
+                for endpoint in firing_endpoints
+                if endpoint["component_class"] == "turret"
+            ),
+            "missileturret_path_local_descriptors_left_unselected": sum(
+                len(endpoint["unselected_ani_descriptor_memberships"])
+                for endpoint in firing_endpoints
+                if endpoint["component_class"] == "missileturret"
+            ),
+            "unresolved_endpoint_path_animation_selectors": 0,
             "connection_identities": sum(
                 len(record["connections"]) for record in component_to_macros
             ),
@@ -1472,6 +1723,71 @@ def build_census(
             str(key): descriptor_count_cardinalities[key]
             for key in sorted(descriptor_count_cardinalities)
         },
+        "authored_animation_selector_identity_rule": {
+            "evidence_classification": "shipped-source",
+            "structural_rule": "same exact source connection and case-sensitive direct animation name equals ANI descriptor subname",
+            "shipped_source_corpus_evidence": {
+                "authored_connection_animation_records": len(
+                    authored_animation_selectors
+                ),
+                "records_with_exact_descriptor_matches": sum(
+                    int(selector["descriptor_match_count"]) > 0
+                    for selector in authored_animation_selectors
+                ),
+            },
+            "corroboration": {
+                "evidence_classification": "third-party-technique",
+                "source": "X4Converter 0be4b494089ba7719d4c5d351e63160ef3843ef5 X4ConverterTools/src/ani/AnimFile.cpp",
+                "finding": "converter copies a direct connection animation name into ANI subname metadata",
+            },
+        },
+        "authored_animation_selector_descriptor_cardinality": {
+            str(key): authored_animation_selector_cardinalities[key]
+            for key in sorted(authored_animation_selector_cardinalities)
+        },
+        "authored_animation_selectors_with_zero_descriptor_matches": (
+            authored_animation_selectors_with_zero_descriptor_matches
+        ),
+        "endpoint_path_selector_connection_descriptor_cardinality": {
+            str(key): endpoint_path_selector_cardinalities[key]
+            for key in sorted(endpoint_path_selector_cardinalities)
+        },
+        "endpoint_selected_descriptor_count_distribution": {
+            str(key): selected_descriptor_counts_by_endpoint[key]
+            for key in sorted(selected_descriptor_counts_by_endpoint)
+        },
+        "endpoint_paths_by_selected_descriptor_cardinality": {
+            "zero": selected_descriptor_counts_by_endpoint[0],
+            "one": selected_descriptor_counts_by_endpoint[1],
+            "multiple": sum(
+                count
+                for selected, count in selected_descriptor_counts_by_endpoint.items()
+                if selected > 1
+            ),
+        },
+        "endpoint_paths_by_selected_descriptor_cardinality_by_component_class": {
+            component_class: {
+                "zero": sum(
+                    not endpoint["selected_ani_descriptor_memberships"]
+                    for endpoint in firing_endpoints
+                    if endpoint["component_class"] == component_class
+                ),
+                "one": sum(
+                    len(endpoint["selected_ani_descriptor_memberships"]) == 1
+                    for endpoint in firing_endpoints
+                    if endpoint["component_class"] == component_class
+                ),
+                "multiple": sum(
+                    len(endpoint["selected_ani_descriptor_memberships"]) > 1
+                    for endpoint in firing_endpoints
+                    if endpoint["component_class"] == component_class
+                ),
+            }
+            for component_class in sorted(
+                _FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS
+            )
+        },
+        "unresolved_endpoint_path_animation_selectors": [],
         "firing_endpoint_criterion": {
             "evidence_classification": "shipped-source",
             "structural_rule": "exact direct connection tag token selected by exact component class",
