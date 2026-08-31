@@ -2,9 +2,10 @@
 """Build the Issue #72 macro-driven X4 9.00 turret asset census.
 
 This tool stops at exact authored connection paths, firing-endpoint connection
-identities, and ANI descriptor/source-part identity. It does not parse ANI
-keyframes/channels or interpret transforms, pivots, axes, joints, descriptor
-relevance, active pose, or prospective muzzle position.
+identities, ANI descriptor/source-part identity, and descriptor channel counts.
+It does not parse ANI keyframes or channel values, or interpret transforms,
+pivots, axes, joints, descriptor relevance, active pose, or prospective muzzle
+position.
 """
 from __future__ import annotations
 
@@ -31,6 +32,13 @@ _INCLUDED_CLASSES = frozenset(("turret", "missileturret"))
 _ANI_HEADER_SIZE = 16
 _ANI_DESCRIPTOR_SIZE = 160
 _ANI_STRING_SIZE = 64
+_ANI_CHANNEL_COUNT_FIELDS = (
+    "position",
+    "rotation",
+    "scale",
+    "pre_scale",
+    "post_scale",
+)
 
 
 class AniDescriptorError(Exception):
@@ -216,7 +224,7 @@ def _decode_ani_descriptor_string(
     return value
 
 
-def _parse_ani_descriptors(path: Path) -> list[dict[str, str]]:
+def _parse_ani_descriptors(path: Path) -> list[dict[str, object]]:
     """Parse only the current ANI v1 header and fixed descriptor table."""
 
     try:
@@ -254,7 +262,7 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, str]]:
             key_offset=key_offset,
         )
 
-    descriptors: list[dict[str, str]] = []
+    descriptors: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
     for index in range(descriptor_count):
         offset = _ANI_HEADER_SIZE + index * _ANI_DESCRIPTOR_SIZE
@@ -268,6 +276,8 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, str]]:
             "subname",
             index,
         )
+        channel_count_values = struct.unpack_from("<5I", data, offset + 128)
+        channel_counts = dict(zip(_ANI_CHANNEL_COUNT_FIELDS, channel_count_values))
         descriptor_padding = struct.unpack_from("<2I", data, offset + 152)
         if descriptor_padding != (0, 0):
             raise AniDescriptorError(
@@ -286,7 +296,9 @@ def _parse_ani_descriptors(path: Path) -> list[dict[str, str]]:
                 subname=subname,
             )
         seen.add(identity)
-        descriptors.append({"part": part, "subname": subname})
+        descriptors.append(
+            {"part": part, "subname": subname, "channel_counts": channel_counts}
+        )
     return sorted(descriptors, key=lambda item: (item["part"], item["subname"]))
 
 
@@ -756,6 +768,7 @@ def _derive_endpoint_source_paths(
                     {
                         "part": descriptor["part"],
                         "subname": descriptor["subname"],
+                        "channel_counts": descriptor["channel_counts"],
                         "source_connection": descriptor["source_connection"],
                         "root_to_source_connection_path": descriptor[
                             "root_to_source_connection_path"
@@ -1332,6 +1345,7 @@ def build_census(
                                 {
                                     "part": part,
                                     "subname": descriptor["subname"],
+                                    "channel_counts": descriptor["channel_counts"],
                                     "source_connection": owner,
                                     "root_to_source_connection_path": connection_paths[owner],
                                 }
@@ -1549,6 +1563,25 @@ def build_census(
         len(endpoint["selected_ani_descriptor_memberships"])
         for endpoint in firing_endpoints
     )
+    selected_channel_count_families_by_class = {
+        component_class: Counter(
+            tuple(int(descriptor["channel_counts"][field]) for field in _ANI_CHANNEL_COUNT_FIELDS)
+            for endpoint, descriptor in selected_endpoint_path_descriptor_memberships
+            if endpoint["component_class"] == component_class
+        )
+        for component_class in sorted(_INCLUDED_CLASSES)
+    }
+
+    def render_channel_count_families(
+        families: Counter[tuple[int, ...]],
+    ) -> list[dict[str, object]]:
+        return [
+            {
+                "channel_counts": dict(zip(_ANI_CHANNEL_COUNT_FIELDS, family)),
+                "selected_descriptor_memberships": families[family],
+            }
+            for family in sorted(families)
+        ]
     connection_depths = Counter(
         int(connection["depth"])
         for record in component_to_macros
@@ -1610,7 +1643,7 @@ def build_census(
         }
 
     return {
-        "schema_version": 9,
+        "schema_version": 10,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -1755,6 +1788,14 @@ def build_census(
         "endpoint_selected_descriptor_count_distribution": {
             str(key): selected_descriptor_counts_by_endpoint[key]
             for key in sorted(selected_descriptor_counts_by_endpoint)
+        },
+        "selected_endpoint_path_descriptor_channel_count_families": {
+            "conventional": render_channel_count_families(
+                selected_channel_count_families_by_class["turret"]
+            ),
+            "missileturret": render_channel_count_families(
+                selected_channel_count_families_by_class["missileturret"]
+            ),
         },
         "endpoint_paths_by_selected_descriptor_cardinality": {
             "zero": selected_descriptor_counts_by_endpoint[0],

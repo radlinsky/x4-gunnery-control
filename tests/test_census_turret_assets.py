@@ -25,14 +25,16 @@ from census_turret_assets import (  # noqa: E402
 
 
 def _ani_bytes(
-    *descriptors: tuple[str, str],
+    *descriptors: tuple[str, str] | tuple[str, str, int, int, int, int, int],
     version: int = 1,
     header_padding: int = 0,
     key_offset: int | None = None,
     descriptor_padding: tuple[int, int] = (0, 0),
 ) -> bytes:
     records = []
-    for part, subname in descriptors:
+    for descriptor in descriptors:
+        part, subname = descriptor[:2]
+        channel_counts = descriptor[2:] or (0, 0, 0, 0, 0)
         part_bytes = part.encode("ascii")
         subname_bytes = subname.encode("ascii")
         if len(part_bytes) > 63 or len(subname_bytes) > 63:
@@ -41,7 +43,7 @@ def _ani_bytes(
             part_bytes.ljust(64, b"\0")
             + subname_bytes.ljust(64, b"\0")
             + struct.pack(
-                "<5If2I", 0, 0, 0, 0, 0, 0.0, *descriptor_padding
+                "<5If2I", *channel_counts, 0.0, *descriptor_padding
             )
         )
     descriptor_table = b"".join(records)
@@ -420,12 +422,14 @@ class CensusTests(unittest.TestCase):
                     {
                         "part": "Part_CASE",
                         "subname": "Sub_CASE",
+                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Conn_A",
                         "root_to_source_connection_path": ["Conn_A"],
                     },
                     {
                         "part": "SharedPart",
                         "subname": "SharedSub",
+                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Conn_A",
                         "root_to_source_connection_path": ["Conn_A"],
                     },
@@ -591,12 +595,14 @@ class CensusTests(unittest.TestCase):
                     {
                         "part": "BarrelPart",
                         "subname": "Sub_CASE",
+                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Grand",
                         "root_to_source_connection_path": ["Root", "Child", "Grand"],
                     },
                     {
                         "part": "BasePart",
                         "subname": "RootSub",
+                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Root",
                         "root_to_source_connection_path": ["Root"],
                     },
@@ -957,6 +963,7 @@ class CensusTests(unittest.TestCase):
                     {
                         "part": "SharedPart",
                         "subname": "SharedSub",
+                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "Root",
                         "root_to_source_connection_path": ["Root"],
                         "endpoint_path_edge_index": 0,
@@ -964,6 +971,7 @@ class CensusTests(unittest.TestCase):
                     {
                         "part": "BranchAPart",
                         "subname": "SameSub",
+                        "channel_counts": {"position": 0, "rotation": 0, "scale": 0, "pre_scale": 0, "post_scale": 0},
                         "source_connection": "SharedNode",
                         "root_to_source_connection_path": ["Root", "SharedNode"],
                         "endpoint_path_edge_index": 1,
@@ -1136,6 +1144,125 @@ class CensusTests(unittest.TestCase):
             )
             self.assertEqual(report["unresolved_endpoint_path_animation_selectors"], [])
             self.assertEqual(render_json(report), render_json(build_census(roots)))
+
+    def test_selected_descriptor_channel_count_families_are_preserved_and_separated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components>
+                  <component name="conventional_component" class="turret">
+                    <source geometry="geometry/component_a"/>
+                    <connections>
+                      <connection name="ConventionalRoot">
+                        <animations><animation name="RootSelector"/></animations>
+                        <parts><part name="RootPart"/></parts>
+                      </connection>
+                      <connection name="ConventionalChild" parent="RootPart">
+                        <animations><animation name="ChildSelector"/></animations>
+                        <parts><part name="ChildPart"/></parts>
+                      </connection>
+                      <connection name="ConventionalEndpointA" tags="laser" parent="ChildPart"/>
+                      <connection name="ConventionalEndpointB" tags="laser" parent="ChildPart"/>
+                    </connections>
+                  </component>
+                  <component name="missile_component" class="missileturret">
+                    <source geometry="geometry/component_b"/>
+                    <connections>
+                      <connection name="MissileRoot">
+                        <animations><animation name="MissileSelector"/></animations>
+                        <parts><part name="MissilePart"/></parts>
+                      </connection>
+                      <connection name="MissileEndpoint" tags="rocket" parent="MissilePart"/>
+                    </connections>
+                  </component>
+                </components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(
+                    ("conventional_macro", "turret", "conventional_component"),
+                    ("missile_macro", "missileturret", "missile_component"),
+                ),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(
+                    ("RootPart", "RootSelector", 3, 4, 0, 0, 0),
+                    ("ChildPart", "ChildSelector", 0, 1, 2, 3, 4),
+                )
+            )
+            (roots["base"] / "geometry/component_b.ANI").write_bytes(
+                _ani_bytes(("MissilePart", "MissileSelector", 8, 7, 6, 5, 4))
+            )
+
+            report = build_census(roots)
+            conventional, missile = report["component_to_macros"]
+            self.assertEqual(
+                [descriptor["channel_counts"] for descriptor in conventional["ani_descriptors"]],
+                [
+                    {"position": 0, "rotation": 1, "scale": 2, "pre_scale": 3, "post_scale": 4},
+                    {"position": 3, "rotation": 4, "scale": 0, "pre_scale": 0, "post_scale": 0},
+                ],
+            )
+            self.assertEqual(
+                [
+                    descriptor["channel_counts"]
+                    for descriptor in conventional["firing_endpoints"][0][
+                        "selected_ani_descriptor_memberships"
+                    ]
+                ],
+                [
+                    {"position": 3, "rotation": 4, "scale": 0, "pre_scale": 0, "post_scale": 0},
+                    {"position": 0, "rotation": 1, "scale": 2, "pre_scale": 3, "post_scale": 4},
+                ],
+            )
+            self.assertEqual(
+                missile["firing_endpoints"][0]["selected_ani_descriptor_memberships"][0][
+                    "channel_counts"
+                ],
+                {"position": 8, "rotation": 7, "scale": 6, "pre_scale": 5, "post_scale": 4},
+            )
+            self.assertEqual(
+                report["selected_endpoint_path_descriptor_channel_count_families"],
+                {
+                    "conventional": [
+                        {
+                            "channel_counts": {
+                                "position": 0,
+                                "rotation": 1,
+                                "scale": 2,
+                                "pre_scale": 3,
+                                "post_scale": 4,
+                            },
+                            "selected_descriptor_memberships": 2,
+                        },
+                        {
+                            "channel_counts": {
+                                "position": 3,
+                                "rotation": 4,
+                                "scale": 0,
+                                "pre_scale": 0,
+                                "post_scale": 0,
+                            },
+                            "selected_descriptor_memberships": 2,
+                        },
+                    ],
+                    "missileturret": [
+                        {
+                            "channel_counts": {
+                                "position": 8,
+                                "rotation": 7,
+                                "scale": 6,
+                                "pre_scale": 5,
+                                "post_scale": 4,
+                            },
+                            "selected_descriptor_memberships": 1,
+                        }
+                    ],
+                },
+            )
 
     def test_endpoint_path_animation_selector_without_exact_descriptor_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
