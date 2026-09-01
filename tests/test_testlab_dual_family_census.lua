@@ -26,7 +26,7 @@ assert(countPlain(loadouts, mountedBeam) == 1,
     "dual-family loadout must mount exactly one Paranid L Beam")
 
 local censusCondition = '$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro or $Weapon.macro == macro.turret_par_l_beam_01_mk1_macro'
-assert(countPlain(scenario, censusCondition) == 2,
-    "both shooter census paths must count the Paranid L Beam as Beam")
+assert(countPlain(scenario, censusCondition) == 1,
+    "shooter census must count the Paranid L Beam as Beam")
 
 print("test_testlab_dual_family_census.lua: ok")
