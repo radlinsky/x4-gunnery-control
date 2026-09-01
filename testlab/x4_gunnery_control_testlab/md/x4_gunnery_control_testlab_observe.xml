@@ -366,7 +366,9 @@
                 <do_elseif value="player.target?">
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
+                <set_value name="$Barrel" exact="event.object.barrelposition"/>
                 <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
+                <set_value name="$TargetMountBearing" exact="if $Aimed then $Aimed.relativeposition.{event.object} else null"/>
                 <debug_text text="'[X4GC TEST FIRED] t=' + player.age
                   + ' weapon=' + event.object
                   + ' macro=' + event.object.macro
@@ -378,7 +380,12 @@
                   + ' aimed=' + (if $Aimed then $Aimed else 'none')
                   + ' aim_error_yaw=' + (if $TargetBearing then $TargetBearing.rotation.yaw else 'none')
                   + ' aim_error_pitch=' + (if $TargetBearing then $TargetBearing.rotation.pitch else 'none')
-                  + ' aim_distance=' + (if $TargetBearing then $TargetBearing.length else 'none')"/>
+                  + ' aim_distance=' + (if $TargetBearing then $TargetBearing.length else 'none')
+                  + ' barrel_x=' + $Barrel.x
+                  + ' barrel_y=' + $Barrel.y
+                  + ' barrel_z=' + $Barrel.z
+                  + ' target_mount_yaw=' + (if $TargetMountBearing then $TargetMountBearing.rotation.yaw else 'none')
+                  + ' target_mount_pitch=' + (if $TargetMountBearing then $TargetMountBearing.rotation.pitch else 'none')"/>
               </actions>
             </cue>
 

@@ -37,12 +37,20 @@ fi
 if ! [[ "$hit_aim" -lt "$hit_soft" && "$hit_soft" -lt "$hit_player" ]]; then
   fail "HIT target precedence is not AimTarget > soft target > player.target"
 fi
+fired_aim=$(printf '%s\n' "$fired_target" | grep -F 'AimTarget? and' | cut -d: -f1)
+fired_soft=$(printf '%s\n' "$fired_target" | grep -F 'SoftTarget? and' | cut -d: -f1)
+fired_player=$(printf '%s\n' "$fired_target" | grep -F 'player.target?' | cut -d: -f1)
+if ! [[ "$fired_aim" -lt "$fired_soft" && "$fired_soft" -lt "$fired_player" ]]; then
+  fail "FIRED target precedence is not AimTarget > soft target > player.target"
+fi
 
 # A firing event must measure the projectile's actual angular error to the
 # selected component. Global UI aim state alone cannot identify a turret's
 # engagement target, which is the ambiguity this diagnostic exists to remove.
 grep -Fq "name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.param} else null\"" "$md" \
-  || fail "FIRED observer does not derive projectile-local target bearing"
+  || fail "FIRED observer lost projectile-local target bearing"
+grep -Fq "name=\"\$TargetMountBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.object} else null\"" "$md" \
+  || fail "FIRED observer does not derive target bearing from the exact firing weapon"
 grep -Fq "' aim_error_yaw='" "$md" || fail "FIRED observer does not log target yaw error"
 grep -Fq "' aim_error_pitch='" "$md" || fail "FIRED observer does not log target pitch error"
 
@@ -441,6 +449,28 @@ printf '%s\n' "$fired_cue" | grep -Fq "+ ' aim_error_yaw=' + (if \$TargetBearing
   || fail "r12 FIRED lost the exact yaw aim-error field"
 printf '%s\n' "$fired_cue" | grep -Fq "+ ' aim_error_pitch=' + (if \$TargetBearing then \$TargetBearing.rotation.pitch else 'none')" \
   || fail "r12 FIRED lost the exact pitch aim-error field"
+
+# FIRED must capture the two raw runtime measurements needed for the later
+# controlled discriminator: the exact firing weapon's barrel position and the
+# aimed target's bearing in that weapon's local/mount frame. Keep target fields
+# survivable when the fallback chain resolves to no target.
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$Barrel\" exact=\"event.object.barrelposition\"/>" \
+  || fail "FIRED does not read the exact firing weapon barrelposition"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$Aimed\" exact=\"null\"/>" \
+  || fail "FIRED does not initialize its aimed target for the no-target fallback"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.param} else null\"/>" \
+  || fail "FIRED lost projectile-local target bearing"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$TargetMountBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.object} else null\"/>" \
+  || fail "FIRED does not derive aimed-target bearing from the exact firing weapon"
+for field in \
+  "+ ' barrel_x=' + \$Barrel.x" \
+  "+ ' barrel_y=' + \$Barrel.y" \
+  "+ ' barrel_z=' + \$Barrel.z" \
+  "+ ' target_mount_yaw=' + (if \$TargetMountBearing then \$TargetMountBearing.rotation.yaw else 'none')" \
+  "+ ' target_mount_pitch=' + (if \$TargetMountBearing then \$TargetMountBearing.rotation.pitch else 'none')"; do
+  printf '%s\n' "$fired_cue" | grep -Fq "$field" \
+    || fail "FIRED lost required raw measurement field: $field"
+done
 
 # MD ObserveHit: one line per hit on the exact armed ship, attributing the
 # weapon, the exact struck component, the aimed target, and istgt.
