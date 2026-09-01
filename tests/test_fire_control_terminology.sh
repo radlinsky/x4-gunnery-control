@@ -3,12 +3,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # T06 — Retired fire-control terminology regression audit.
-# Scans every tracked text file (excluding this script itself) for retired
-# canonical labels, service identifiers, and historical tokens. Uppercase
-# physical masking / ordinary firing-solution prose is preserved; only the
-# current canonical label surface is rejected.
+# Scans tracked text files for retired canonical labels, service identifiers,
+# and historical tokens. The mutable Test Lab scenario spec is intentionally
+# outside this permanent contract: it is operator-authored live-test input.
+#
+# Uppercase physical masking / ordinary firing-solution prose is preserved;
+# only the current canonical label surface is rejected.
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
+
+MUTABLE_LIVE_INPUT="testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua"
 
 # ── forbidden sets ───────────────────────────────────────────────────────────
 CANONICAL_LABELS=(
@@ -42,21 +46,18 @@ IDENTIFIERS=(
   "event=solution_batch"
 )
 
-# Historical tokens that must appear only in their approved files.
+# Historical tokens that must appear only in their approved durable records.
 HISTORICAL_TOKENS=(
   "issue-1-on-solution-"
   "[X4GC TEST SOLUTION]"
-  "pr-2-solution-competing-osakas-r7"
 )
 
 # ── allowlist (path → regex, matched after whitespace normalisation) ──────────
 ALLOWLIST_PATHS=(
   ".agents/skills/research-x4-modding/references/testing-experiments.md|issue-1-on-solution-"
   "testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml|\[X4GC TEST SOLUTION\]"
-  "testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua|\[X4GC TEST SOLUTION\]"
   "testlab/x4_gunnery_control_testlab/ui/testlab.lua|\[X4GC TEST SOLUTION\]"
   "tests/test_filter_gunnery_log.sh|\[X4GC TEST SOLUTION\]"
-  "testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua|pr-2-solution-competing-osakas-r7"
 )
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -78,11 +79,15 @@ is_allowlisted() {
 # scan_file <path> [content...]
 #   When called with only a path: reads from the file (main-scan mode).
 #   When called with path + content: checks the given text (self-check mode).
+#   The mutable live scenario spec is skipped in either mode.
 #   Returns 0 if the file/content passes, sets SCANNER_ERROR on failure.
 SCANNER_ERROR=""
 scan_file() {
   local file=$1
   shift
+
+  [[ "$file" == "$MUTABLE_LIVE_INPUT" ]] && return 0
+
   local normalized
   if [[ $# -eq 0 ]]; then
     # Main-scan mode — only scan tracked text files.
@@ -184,10 +189,8 @@ scan_file "some/other/file.xml" "[X4GC TEST SOLUTION]" && \
 scan_file "testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml" "[X4GC TEST SOLUTION]" \
   || fail "self-check: [X4GC TEST SOLUTION] MUST be allowed in observe.xml"
 
-# 8. Rejects pr-2-solution-competing-osakas-r7 at a wrong path and allows its approved path.
-scan_file "other/path.lua" "pr-2-solution-competing-osakas-r7" && \
-  fail "self-check: pr-2-solution-competing-osakas-r7 must NOT be allowed outside scenario_spec.lua"
-scan_file "testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua" "pr-2-solution-competing-osakas-r7" \
-  || fail "self-check: pr-2-solution-competing-osakas-r7 MUST be allowed in scenario_spec.lua"
+# 8. The mutable live scenario is not a permanent terminology contract.
+scan_file "$MUTABLE_LIVE_INPUT" "ON SOLUTION SolutionService issue-1-on-solution-live" \
+  || fail "self-check: mutable live scenario input must be excluded from the terminology audit"
 
 echo "fire-control terminology matcher self-checks passed"
