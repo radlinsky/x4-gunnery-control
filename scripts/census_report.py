@@ -500,7 +500,7 @@ def _assemble_census_report(
         }
 
     return {
-        "schema_version": 24,
+        "schema_version": 25,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),

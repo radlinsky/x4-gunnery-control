@@ -73,6 +73,13 @@ def _build_combat_conventional_topology_inventory(
         key=lambda item: (-len(item[1]["macros"]), item[0]),
     ):
         endpoint_count, endpoint_structure = signature
+        nonzero_indexes = {
+            index
+            for _depth, channel_count_tuples in endpoint_structure
+            for channel_counts in channel_count_tuples
+            for index, count in enumerate(channel_counts)
+            if count > 0
+        }
         groups.append(
             {
                 "endpoint_count": endpoint_count,
@@ -86,6 +93,7 @@ def _build_combat_conventional_topology_inventory(
                     }
                     for depth, channel_count_tuples in endpoint_structure
                 ],
+                "nonzero_candidate_channel_indexes": sorted(nonzero_indexes),
                 "macro_count": len(members["macros"]),
                 "unique_component_count": len(members["components"]),
                 "macros": sorted(members["macros"]),

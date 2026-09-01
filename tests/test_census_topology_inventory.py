@@ -123,6 +123,7 @@ _EXPECTED_GROUPS = [
                 "selected_descriptor_channel_count_tuples": [[2, 0, 1, 0, 0]],
             }
         ],
+        "nonzero_candidate_channel_indexes": [0, 2],
         "macro_count": 2,
         "unique_component_count": 2,
         "macros": ["macro_alpha", "macro_beta"],
@@ -136,6 +137,7 @@ _EXPECTED_GROUPS = [
                 "selected_descriptor_channel_count_tuples": [[0, 4, 0, 1, 0]],
             }
         ],
+        "nonzero_candidate_channel_indexes": [1, 3],
         "macro_count": 1,
         "unique_component_count": 1,
         "macros": ["macro_delta"],
@@ -149,6 +151,7 @@ _EXPECTED_GROUPS = [
                 "selected_descriptor_channel_count_tuples": [[2, 0, 1, 0, 0]],
             }
         ],
+        "nonzero_candidate_channel_indexes": [0, 2],
         "macro_count": 1,
         "unique_component_count": 1,
         "macros": ["macro_gamma"],
@@ -166,6 +169,7 @@ _EXPECTED_GROUPS = [
                 "selected_descriptor_channel_count_tuples": [],
             },
         ],
+        "nonzero_candidate_channel_indexes": [],
         "macro_count": 1,
         "unique_component_count": 1,
         "macros": ["macro_twin"],
