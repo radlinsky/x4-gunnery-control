@@ -11,25 +11,21 @@ prospective muzzle position.
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import struct
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 
-REQUIRED_SOURCE_SETS = (
-    "base",
-    "ego_dlc_split",
-    "ego_dlc_terran",
-    "ego_dlc_pirate",
-    "ego_dlc_boron",
-    "ego_dlc_timelines",
-    "ego_dlc_mini_01",
-    "ego_dlc_mini_02",
+from census_common import (
+    REQUIRED_SOURCE_SETS,
+    CensusError,
+    _anomaly,
+    render_json,
 )
+
 _INCLUDED_CLASSES = frozenset(("turret", "missileturret"))
 _ANI_HEADER_SIZE = 16
 _ANI_DESCRIPTOR_SIZE = 160
@@ -101,28 +97,6 @@ class AniDescriptorError(Exception):
         self.message = message
         self.details = details
         super().__init__(message)
-
-
-class CensusError(Exception):
-    """A fail-closed census error with deterministic machine-readable details."""
-
-    def __init__(self, anomalies: Iterable[dict[str, object]]):
-        self.anomalies = sorted(
-            anomalies,
-            key=lambda item: (
-                str(item.get("code", "")),
-                str(item.get("source_set", "")),
-                str(item.get("source_file", "")),
-                str(item.get("macro", "")),
-                str(item.get("component", "")),
-            ),
-        )
-        self.codes = tuple(str(item["code"]) for item in self.anomalies)
-        super().__init__(render_json({"status": "error", "anomalies": self.anomalies}).rstrip())
-
-
-def _anomaly(code: str, message: str, **details: object) -> dict[str, object]:
-    return {"code": code, "message": message, **details}
 
 
 def _purpose_tokens(attributes: Sequence[object]) -> list[str]:
@@ -6360,10 +6334,6 @@ def build_reconciliation(
         },
         "anomalies": [],
     }
-
-
-def render_json(report: object) -> str:
-    return json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
 
 
 def _parse_source_set(value: str) -> tuple[str, Path]:
