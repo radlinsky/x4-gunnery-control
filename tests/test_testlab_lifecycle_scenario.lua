@@ -771,8 +771,67 @@ local function modelParanidPlasma(harness)
     end
 end
 
+-- Issue #72: the accepted historical Issue #67 r32 scenario, carried in
+-- memory so the lifecycle regression no longer depends on the mutable live
+-- scenario in ui/scenario_spec.lua. Returns a fresh table each call so every
+-- harness owns its own fixture; the integrity check near the end re-asserts
+-- this literal field by field.
+local function issue67R32Spec()
+    return {
+        id      = "issue-67-argon-sky-survey-r32",
+        enabled = false,
+        location = {
+            sectorMacro = "Cluster_29_Sector001_macro",
+            x = 500000, y = 0, z = 0,
+        },
+        setup   = {
+            remote          = true,
+            shipMacro       = "ship_par_l_destroyer_01_a_macro",
+            shipLabel       = "ISSUE SKY-SURVEY PARANID DESTROYER 1",
+            turretGroup     = "group_front_up_mid2",
+            turretLabel     = "Front Upper Mid Plasma",
+            selectAll       = false,
+            expectedTurrets = 1,
+            expectedMemberMacros = { "turret_par_l_plasma_01_mk1_macro" },
+        },
+        groups = {
+            { label = "ISSUE SKY-SURVEY PARANID DESTROYER",
+              macro = "ship_par_l_destroyer_01_a_macro", faction = "player",
+              count = 1, distance = 1, x = 0, y = 0, spread = 0, behaviour = "wait",
+              role = "shooter", loadout = "issue67_paranid_sky_survey",
+              geometryWeaponMacro = "turret_par_l_plasma_01_mk1_macro",
+              expectedGeometryWeapons = 1,
+              expectedWeapons = 1, expectedTurrets = 1, expectedPlasma = 1, expectedBeam = 0,
+              expectedMissileTurrets = 0, expectedGuided = 0, expectedDumbfire = 0, expectedAmmo = 0 },
+            { label = "SKY SURVEY A 000",
+              macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+              -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
+              count = 1, distance = 263.535, x = -39.429, y = 699.533, spread = 0,
+              ox = -39.429, oy = 601.324, oz = 25.352,
+              yaw = 218.0993, pitch = 78.6164, roll = 171.2717,
+              preserveOrientation = true,
+              behaviour = "wait", hostile = true, holdFire = true,
+              stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
+              loadout = "issue67_argon_sky_target",
+              geometryCase = "arc_split" },
+            { label = "SKY SURVEY A 100",
+              macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
+              -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
+              count = 1, distance = 74.485, x = -223.612, y = 1886.521, spread = 0,
+              ox = -223.612, oy = 1788.313, oz = -163.698,
+              yaw = 214.0265, pitch = 68.9246, roll = -166.8782,
+              preserveOrientation = true,
+              behaviour = "wait", hostile = true, holdFire = true,
+              stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
+              loadout = "issue67_argon_sky_target",
+              geometryCase = "positive_control" },
+        },
+        stations = {},
+    }
+end
+
 local function shippedTwoPhaseToQualify()
-    local harness = loadHarness()
+    local harness = loadHarness(issue67R32Spec())
     harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
@@ -1199,18 +1258,18 @@ for _, case in ipairs(malformed) do
     end
 end
 
--- The shipped spec file must itself stay loadable and inert, so that an
--- unrelated Reload UI never spawns whatever the last test left behind. These
--- two authored r32 survey transforms are shared by the integrity and
--- flat-transport checks; the independent geometry derivation is locked by
--- tests/test_issue67_sky_ring.sh.
+-- Issue #72: the historical r32 fixture is carried in-memory by
+-- issue67R32Spec(), so this regression no longer pins the mutable live
+-- scenario in ui/scenario_spec.lua. These two authored r32 survey transforms
+-- are shared by the integrity and flat-transport checks; the independent
+-- geometry derivation is locked by tests/test_issue67_sky_ring.sh.
 local expectedRing = {
     { label = "SKY SURVEY A 000", x = -39.429, y = 699.533, distance = 263.535, yaw = 218.0993, pitch = 78.6164, roll = 171.2717, ox = -39.429, oy = 601.324, oz = 25.352 },
     { label = "SKY SURVEY A 100", x = -223.612, y = 1886.521, distance = 74.485, yaw = 214.0265, pitch = 68.9246, roll = -166.8782, ox = -223.612, oy = 1788.313, oz = -163.698 },
 }
 do
-    local shipped = dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
-    assert(type(shipped) == "table" and shipped.enabled == false, "the repository fixture must load and remain disabled")
+    local shipped = issue67R32Spec()
+    assert(type(shipped) == "table" and shipped.enabled == false, "the r32 fixture must load and remain disabled")
     assert(shipped.id == "issue-67-argon-sky-survey-r32" and shipped.setup.shipMacro == "ship_par_l_destroyer_01_a_macro"
             and shipped.setup.turretGroup == "group_front_up_mid2" and shipped.setup.turretLabel == "Front Upper Mid Plasma"
             and shipped.setup.expectedTurrets == 1, "the shipped r32 fixture must retain its exact Paranid L setup")
@@ -1237,7 +1296,7 @@ do
 end
 
 do
-    local harness = loadHarness()
+    local harness = loadHarness(issue67R32Spec())
     harness.openFromGunnery({ label = "survey launcher", phase = "console" })
     harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
     local events = scenarioEvents(harness)
@@ -1262,9 +1321,9 @@ end
 -- from the shipped spec (as it did when the greyed-out Create button shipped),
 -- loadSpec returns an error, scenarioSpecLabel() renders "invalid (...)", and
 -- Create is disabled in game. This offline guard is the one that catches that
--- drift: loadHarness() with no argument loads the real shipped spec file.
+-- drift: the fixture is passed explicitly, carrying the historical r32 spec.
 do
-    local harness = loadHarness()
+    local harness = loadHarness(issue67R32Spec())
     harness.openFromGunnery({ label = "shipped-spec launcher", phase = "console" })
     harness.testMenu.onShowMenu()
     local specLabelText
