@@ -629,7 +629,7 @@
                   <set_value name="$LocalBeam" exact="0"/>
                   <set_value name="$LocalPlasma" exact="0"/>
                   <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
-                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro">
+                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro or $Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
                       <set_value name="$LocalBeam" operation="add"/>
                     </do_if>
                     <do_elseif value="$Weapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
