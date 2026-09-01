@@ -15,6 +15,7 @@ before relying on any claim.
 | Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
 | Turret macros with no equipment ware | [turret-no-ware-macros.md](turret-no-ware-macros.md) | X4 9.00 shipped-source COMBAT_CANDIDATE evidence for `turret_xen_l_laser_01_mk1_scenario_macro` |
 | Combat topology group priorities (Issue #72 A3) | [turret-topology-priorities.md](turret-topology-priorities.md) | X4 9.00 shipped-source inventory of the 38 COMBAT_CANDIDATE endpoint-topology groups (92 macros, 91 components) in schema-25 census order (macro coverage only; no semantic or gameplay-value claims) |
+| Rank-1 turret `turret_active` descriptor profiles (Issue #72 A3) | [turret-rank1-animation-profile.md](turret-rank1-animation-profile.md) | X4 9.00 shipped-source record of all 20 rank-1 components' muzzle-path `turret_active` descriptors with same-name selector coverage: 9 distinct profiles — rank 1 splits; Paranid L Beam shares a 3-component profile; no runtime or channel-meaning claims |
 | Live tests and observations | [testing-experiments.md](testing-experiments.md) | Promotion rules and regression matrix |
 
 Search these references before adding a record. Keep one primary source per
