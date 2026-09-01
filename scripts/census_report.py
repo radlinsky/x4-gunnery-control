@@ -34,6 +34,7 @@ from census_common import REQUIRED_SOURCE_SETS, CensusError
 from census_eligibility import _build_combat_conventional_turret_eligibility
 from census_endpoint_paths import _FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS
 from census_identity import _INCLUDED_CLASSES
+from census_topology import _build_combat_conventional_topology_inventory
 from census_x4converter_evidence import (
     _x4converter_candidate_key_record_semantic_lead,
     _x4converter_descriptor_offset_148_lead,
@@ -483,6 +484,11 @@ def _assemble_census_report(
     )
     if combat_eligibility_anomalies:
         raise CensusError(combat_eligibility_anomalies)
+    combat_conventional_topology_inventory = (
+        _build_combat_conventional_topology_inventory(
+            combat_eligibility, component_to_macros
+        )
+    )
 
     counts_by_source_set = {}
     for source_set in REQUIRED_SOURCE_SETS:
@@ -494,7 +500,7 @@ def _assemble_census_report(
         }
 
     return {
-        "schema_version": 23,
+        "schema_version": 24,
         "x4_version": "9.00",
         "official_source_sets": list(REQUIRED_SOURCE_SETS),
         "official_resource_sets": list(REQUIRED_SOURCE_SETS),
@@ -603,6 +609,9 @@ def _assemble_census_report(
         "equipment_macros": equipment_macros,
         "component_to_macros": component_to_macros,
         "combat_conventional_turret_eligibility": combat_eligibility,
+        "combat_conventional_topology_inventory": (
+            combat_conventional_topology_inventory
+        ),
         "component_macro_cardinality": {str(key): cardinalities[key] for key in sorted(cardinalities)},
         "ani_descriptor_count_cardinality": {
             str(key): descriptor_count_cardinalities[key]
