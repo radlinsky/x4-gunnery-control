@@ -408,8 +408,8 @@ do
     for _, line in ipairs(xml) do
         if line:find("<create_ship ", 1, true) then creates = creates + 1 end
     end
-    assert(creates == 8, "expected the eight create_ship branches (colossus + survey shooter + sparse target + generic, per context), found " .. creates)
-    assert(#spawnRotations == 8,
+    assert(creates == 10, "expected ten create_ship branches (including the Issue #69 dual-family shooter, per context), found " .. creates)
+    assert(#spawnRotations == 10,
         "one authored spawn rotation per create_ship branch")
     for _, line in ipairs(spawnRotations) do
         assert(line:find('<rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>', 1, true),
