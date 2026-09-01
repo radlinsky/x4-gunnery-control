@@ -325,6 +325,67 @@ do
         "the target-only loadout must fail closed with the shooter-loadout reason")
 end
 
+-- Issue #72: the restored historical Paranid L dual-family shooter must pass
+-- the shooter-loadout guard with its exact two-turret / one-Beam / one-Plasma
+-- census, and the scenario_group payload must transport that census intact.
+do
+    local harness = loadHarness({
+        id = "issue72-dual-family",
+        enabled = true,
+        groups = {
+            { label = "Dual Family Paranid L", macro = "ship_par_l_destroyer_02_a_macro",
+              faction = "player", count = 1, distance = 1, behaviour = "wait",
+              role = "shooter", loadout = "issue69_paranid_dual_family",
+              expectedWeapons = 2, expectedTurrets = 2,
+              expectedBeam = 1, expectedPlasma = 1,
+              expectedMissileTurrets = 0, expectedAmmo = 0 },
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 3,
+        "an exact dual-family shooter spec must be accepted and transported; got "
+            .. #events .. " events")
+    assert(events[2].params.role == "shooter"
+            and events[2].params.loadout == "issue69_paranid_dual_family"
+            and events[2].params.expectedWeapons == 2
+            and events[2].params.expectedTurrets == 2
+            and events[2].params.expectedBeam == 1
+            and events[2].params.expectedPlasma == 1
+            and events[2].params.expectedMissileTurrets == 0
+            and events[2].params.expectedAmmo == 0,
+        "the dual-family scenario_group payload must carry the exact 2-turret / 1-Beam / 1-Plasma census")
+end
+
+-- The dual-family census is exact: any drift from the 2-weapon / 2-turret /
+-- 1-Beam / 1-Plasma / 0-missile / 0-ammo contract must fail closed before
+-- transport, exactly like the other shooter loadouts.
+for _, case in ipairs({
+    { field = "expectedWeapons", value = 3 },
+    { field = "expectedBeam", value = 2 },
+    { field = "expectedPlasma", value = 2 },
+    { field = "expectedMissileTurrets", value = 1 },
+    { field = "expectedAmmo", value = 1 },
+}) do
+    local group = { label = "Dual Family Paranid L",
+        macro = "ship_par_l_destroyer_02_a_macro", faction = "player",
+        count = 1, distance = 1, behaviour = "wait", role = "shooter",
+        loadout = "issue69_paranid_dual_family",
+        expectedWeapons = 2, expectedTurrets = 2,
+        expectedBeam = 1, expectedPlasma = 1 }
+    group[case.field] = case.value
+    local harness = loadHarness({ id = "issue72-dual-family-" .. case.field,
+        enabled = true, groups = { group } })
+    assert(#scenarioEvents(harness) == 0,
+        "a dual-family census drifted on " .. case.field
+            .. " must reject the spec before transport")
+    harness.openFromGunnery({ label = "invalid dual family", phase = "console" })
+    harness.fix.buttonByText(ReadText(20992, 25)).handlers.onClick()
+    assert(#scenarioEvents(harness) == 0
+            and harness.fix.logContains("has_an_inconsistent_shooter_census"),
+        "a dual-family census drifted on " .. case.field
+            .. " must fail closed with the inconsistent-census reason")
+end
+
 -- surface_mask groups require ox/oy/oz to each be present and finite; omitting
 -- any one of them must reject the spec before transport with a field-specific
 -- finite-number reason.

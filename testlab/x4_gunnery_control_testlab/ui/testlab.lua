@@ -206,7 +206,8 @@ local function validateSpec(raw)
         if role == "shooter" then
             if group.loadout ~= "issue65_odysseus_mixed_missiles"
                     and group.loadout ~= "issue67_colossus_arc_barrel"
-                    and group.loadout ~= "issue67_paranid_sky_survey" then
+                    and group.loadout ~= "issue67_paranid_sky_survey"
+                    and group.loadout ~= "issue69_paranid_dual_family" then
                 return nil, where .. ".loadout is not a supported shooter loadout"
             end
             local missileCensus = expectedMissileTurrets > 0
@@ -228,9 +229,13 @@ local function validateSpec(raw)
             local paranidSkyCensus = expectedWeapons == 1 and expectedTurrets == 1
                 and expectedBeam == 0 and expectedPlasma == 1
                 and expectedMissileTurrets == 0 and expectedAmmo == 0
+            local issue69DualCensus = expectedWeapons == 2 and expectedTurrets == 2
+                and expectedBeam == 1 and expectedPlasma == 1
+                and expectedMissileTurrets == 0 and expectedAmmo == 0
             if (group.loadout == "issue65_odysseus_mixed_missiles" and not missileCensus)
                     or (group.loadout == "issue67_colossus_arc_barrel" and not conventionalCensus)
-                    or (group.loadout == "issue67_paranid_sky_survey" and not paranidSkyCensus) then
+                    or (group.loadout == "issue67_paranid_sky_survey" and not paranidSkyCensus)
+                    or (group.loadout == "issue69_paranid_dual_family" and not issue69DualCensus) then
                 return nil, where .. " has an inconsistent shooter census"
             end
         elseif tostring(group.loadout or "") ~= "" then
