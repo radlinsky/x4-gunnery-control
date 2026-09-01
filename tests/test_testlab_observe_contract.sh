@@ -6,7 +6,6 @@ md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml
 scenario=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
 loadouts=testlab/x4_gunnery_control_testlab/libraries/loadouts.xml
 testlab_ui=testlab/x4_gunnery_control_testlab/ui/testlab.lua
-scenario_spec=testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
@@ -37,12 +36,20 @@ fi
 if ! [[ "$hit_aim" -lt "$hit_soft" && "$hit_soft" -lt "$hit_player" ]]; then
   fail "HIT target precedence is not AimTarget > soft target > player.target"
 fi
+fired_aim=$(printf '%s\n' "$fired_target" | grep -F 'AimTarget? and' | cut -d: -f1)
+fired_soft=$(printf '%s\n' "$fired_target" | grep -F 'SoftTarget? and' | cut -d: -f1)
+fired_player=$(printf '%s\n' "$fired_target" | grep -F 'player.target?' | cut -d: -f1)
+if ! [[ "$fired_aim" -lt "$fired_soft" && "$fired_soft" -lt "$fired_player" ]]; then
+  fail "FIRED target precedence is not AimTarget > soft target > player.target"
+fi
 
 # A firing event must measure the projectile's actual angular error to the
 # selected component. Global UI aim state alone cannot identify a turret's
 # engagement target, which is the ambiguity this diagnostic exists to remove.
 grep -Fq "name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.param} else null\"" "$md" \
-  || fail "FIRED observer does not derive projectile-local target bearing"
+  || fail "FIRED observer lost projectile-local target bearing"
+grep -Fq "name=\"\$TargetMountBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.object} else null\"" "$md" \
+  || fail "FIRED observer does not derive target bearing from the exact firing weapon"
 grep -Fq "' aim_error_yaw='" "$md" || fail "FIRED observer does not log target yaw error"
 grep -Fq "' aim_error_pitch='" "$md" || fail "FIRED observer does not log target pitch error"
 
@@ -208,6 +215,46 @@ grep -Fq '<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_front_r
   || fail "r15 Colossus E loadout does not mount its Plasma group via group_front_right_up"
 [[ $(grep -Fc '<loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>' "$scenario") -eq 2 ]] \
   || fail "r15 static Colossus E loadout is not used in remote and local creation branches"
+[[ $(grep -Fc '<loadout ref="x4gc_testlab_issue67_paranid_sky_survey"/>' "$scenario") -eq 2 ]] \
+  || fail "r15 survey creation routes lost their literal static loadout reference"
+
+# Issue #69: restore the already-live Paranid dual-family static loadout and
+# both MD creation routes without bringing back the unrelated experimental
+# matrix/probe code.
+grep -Fq '<loadout id="x4gc_testlab_issue69_paranid_dual_family" macro="ship_par_l_destroyer_01_a_macro">' "$loadouts" \
+  || fail "issue #69 dual-family loadout is missing"
+grep -Fq '<turrets macro="turret_par_l_plasma_01_mk1_macro" group="group_front_up_mid2" exact="1"/>' "$loadouts" \
+  || fail "issue #69 loadout lost its exact Plasma/group combination"
+grep -Fq '<turrets macro="turret_par_l_beam_01_mk1_macro" group="group_rear_down_mid" exact="1"/>' "$loadouts" \
+  || fail "issue #69 loadout lost its exact Beam/group combination"
+python3 - "$scenario" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+key = r'<do_elseif value="\$Def\.\$loadout == \'issue69_paranid_dual_family\'">(.*?)</do_elseif>'
+branches = re.findall(key, text, re.DOTALL)
+if len(branches) != 2:
+    raise SystemExit(f"FAIL: expected exactly two separate issue #69 creation branches, found {len(branches)}")
+literal = '<loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>'
+remote = [branch for branch in branches if 'sector="$ScenarioSector"' in branch]
+local = [branch for branch in branches if 'zone="player.zone"' in branch]
+if len(remote) != 1 or literal not in remote[0]:
+    raise SystemExit("FAIL: expected exactly one remote issue #69 branch with the literal static loadout ref")
+if len(local) != 1 or literal not in local[0]:
+    raise SystemExit("FAIL: expected exactly one local issue #69 branch with the literal static loadout ref")
+PY
+if grep -Fq "\$Issue67SurveyLoadout" "$scenario"; then
+  fail "variable-selected static survey loadout reference remains"
+fi
+[[ $(grep -Fc '<loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>' "$scenario") -eq 2 ]] \
+  || fail "issue #69 literal static loadout ref is not used exactly once per creation route"
+grep -Fq "\$Def.\$loadout != 'issue69_paranid_dual_family'" "$scenario" \
+  || fail "known-loadout validation rejects the issue #69 static loadout"
+grep -Fq "\$Def.\$loadout == 'issue69_paranid_dual_family'" "$scenario" \
+  || fail "issue #69 spawner loadout key is missing"
+grep -Fq "\$loadout   = if @event.param3.\$loadout" "$scenario" \
+  || fail "scenario spawner does not transport the static loadout key"
 grep -Fq "\$geometryweaponmacro = if @event.param3.\$geometryWeaponMacro" "$scenario" \
   || fail "r15 geometry weapon macro is not transported into MD"
 grep -Fq "\$expectedgeometryweapons = if @event.param3.\$expectedGeometryWeapons" "$scenario" \
@@ -249,8 +296,11 @@ grep -Fq 'authored_yaw=' "$scenario" \
   || fail "r15 spawn telemetry does not log authored orientation"
 grep -Fq "actual_yaw=' + \$Target.rotation.yaw" "$scenario" \
   || fail "r15 qualification telemetry does not capture settled target orientation"
-grep -Fq 'preserveOrientation = true' "$scenario_spec" \
-  || fail "r15 survey targets do not preserve authored orientation"
+# preserveOrientation is honored end-to-end at the reusable layer: the Lua
+# validator/transport (checked against $testlab_ui above) and the MD
+# skipalignment consumer (checked against $scenario below). Whether any live
+# fixture happens to set the flag is mutable operator input, not a unit-test
+# contract, so it is deliberately not asserted here.
 
 # The qualifier remains settled, case-specific, and fail-closed. LOS stays
 # independent telemetry and must not suppress the geometric candidates.
@@ -441,6 +491,28 @@ printf '%s\n' "$fired_cue" | grep -Fq "+ ' aim_error_yaw=' + (if \$TargetBearing
   || fail "r12 FIRED lost the exact yaw aim-error field"
 printf '%s\n' "$fired_cue" | grep -Fq "+ ' aim_error_pitch=' + (if \$TargetBearing then \$TargetBearing.rotation.pitch else 'none')" \
   || fail "r12 FIRED lost the exact pitch aim-error field"
+
+# FIRED must capture the two raw runtime measurements needed for the later
+# controlled discriminator: the exact firing weapon's barrel position and the
+# aimed target's bearing in that weapon's local/mount frame. Keep target fields
+# survivable when the fallback chain resolves to no target.
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$Barrel\" exact=\"event.object.barrelposition\"/>" \
+  || fail "FIRED does not read the exact firing weapon barrelposition"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$Aimed\" exact=\"null\"/>" \
+  || fail "FIRED does not initialize its aimed target for the no-target fallback"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.param} else null\"/>" \
+  || fail "FIRED lost projectile-local target bearing"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$TargetMountBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.object} else null\"/>" \
+  || fail "FIRED does not derive aimed-target bearing from the exact firing weapon"
+for field in \
+  "+ ' barrel_x=' + \$Barrel.x" \
+  "+ ' barrel_y=' + \$Barrel.y" \
+  "+ ' barrel_z=' + \$Barrel.z" \
+  "+ ' target_mount_yaw=' + (if \$TargetMountBearing then \$TargetMountBearing.rotation.yaw else 'none')" \
+  "+ ' target_mount_pitch=' + (if \$TargetMountBearing then \$TargetMountBearing.rotation.pitch else 'none')"; do
+  printf '%s\n' "$fired_cue" | grep -Fq "$field" \
+    || fail "FIRED lost required raw measurement field: $field"
+done
 
 # MD ObserveHit: one line per hit on the exact armed ship, attributing the
 # weapon, the exact struck component, the aimed target, and istgt.

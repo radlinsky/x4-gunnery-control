@@ -451,6 +451,18 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
+                  <do_elseif value="$Def.$loadout == 'issue69_paranid_dual_family'">
+                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                                 sector="$ScenarioSector" macro="macro.{$Def.$macro}">
+                      <owner exact="$Owner"/>
+                      <loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>
+                      <pilot><select faction="$Owner" tags="tag.pilot"/></pilot>
+                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
+                                y="ScenarioRoot.$PendingAnchorY + $Def.$y"
+                                z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
+                    </create_ship>
+                  </do_elseif>
                   <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
@@ -497,6 +509,15 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
+                  <do_elseif value="$Def.$loadout == 'issue69_paranid_dual_family'">
+                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                                 zone="player.zone" macro="macro.{$Def.$macro}">
+                      <owner exact="$Owner"/>
+                      <loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>
+                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
+                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
+                    </create_ship>
+                  </do_elseif>
                   <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  zone="player.zone" macro="macro.{$Def.$macro}">
@@ -529,7 +550,7 @@
                 <do_if value="$Def.$loadout == 'issue65_odysseus_mixed_missiles'">
                   <apply_loadout object="$Ship" loadout="$Issue65OdysseusLoadout"/>
                 </do_if>
-                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and not ($Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask')">
+                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and $Def.$loadout != 'issue69_paranid_dual_family' and not ($Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask')">
                   <set_value name="$LoadoutFailures" operation="add"/>
                   <debug_text text="'[X4GC TEST SCENARIO] unknown deterministic loadout=' + $Def.$loadout + ' ship=' + $Ship"/>
                 </do_elseif>
@@ -608,7 +629,7 @@
                   <set_value name="$LocalBeam" exact="0"/>
                   <set_value name="$LocalPlasma" exact="0"/>
                   <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
-                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro">
+                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro or $Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
                       <set_value name="$LocalBeam" operation="add"/>
                     </do_if>
                     <do_elseif value="$Weapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">

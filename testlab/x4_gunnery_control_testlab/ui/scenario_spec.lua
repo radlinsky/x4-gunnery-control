@@ -99,72 +99,99 @@
 --     geometryRole   string  Optional "aim_split" transport role.
 --     searchAttempts/searchStepY
 --                        Bounded deterministic vertical position search.
---
--- Issue #67 r32 is the Argon half of the Paranid L-destroyer sky-cap arc
--- survey. The r15 Colossus E ring could not answer goal 1 (own-hull
--- occlusion at the {-10,+90} lower limit); r16..r32 mount the plasma survey
--- on the Paranid destroyer top deck so out-of-arc directions face open sky.
--- Two independently spawned Argon L destroyers (xenon-owned, the r16
--- hostility mechanism) carry the same sky parameters, so the A/B isolates the
--- target hull. r32 splits the two survey roles explicitly through geometryCase:
--- A000 is the straddling arc_split surface (origin above the +80 arc stop,
--- hittable aim inside it) and A100 is the positive_control that is fully inside
--- the arc and must fire. They retain authored transforms while the owner
--- manually selects the qualified root and surface; Test Lab never automates
--- Direct control.
+-- Issue #72 A3 channel-0 discriminator (r1). One Paranid L destroyer carries a
+-- Beam and a Plasma (dual-family) so a single shooter exposes both channels;
+-- two xenon-owned Argon L destroyers are the A/B targets. WARNING: these A/B
+-- coordinates are invalid — the selected Beam turret is self-hull masked at
+-- both targets, so r1 produced no FIRED evidence. Do not reuse these
+-- coordinates unchanged; #83 replaces the discriminator geometry.
 
 -- Published as a global because X4 loads ui.xml <file> entries for their side
 -- effects and discards their return value; the `return` at the end is what the
 -- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-67-argon-sky-survey-r32",
+    id      = "issue-72-a3-channel0-discriminator-r1",
     enabled = false,
+
     location = {
         sectorMacro = "Cluster_29_Sector001_macro",
-        x = 500000, y = 0, z = 0,
+        x = 500000,
+        y = 0,
+        z = 0,
     },
-    setup   = {
+
+    setup = {
         remote          = true,
         shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE SKY-SURVEY PARANID DESTROYER 1",
-        turretGroup     = "group_front_up_mid2",
-        turretLabel     = "Front Upper Mid Plasma",
+        shipLabel       = "ISSUE72 PAR L BEAM SHOOTER 1",
+        turretGroup     = "group_rear_down_mid",
+        turretLabel     = "Rear Lower Mid Beam",
         selectAll       = false,
         expectedTurrets = 1,
-        expectedMemberMacros = { "turret_par_l_plasma_01_mk1_macro" },
+        expectedMemberMacros = {
+            "turret_par_l_beam_01_mk1_macro",
+        },
     },
+
     groups = {
-        { label = "ISSUE SKY-SURVEY PARANID DESTROYER",
-          macro = "ship_par_l_destroyer_01_a_macro", faction = "player",
-          count = 1, distance = 1, x = 0, y = 0, spread = 0, behaviour = "wait",
-          role = "shooter", loadout = "issue67_paranid_sky_survey",
-          geometryWeaponMacro = "turret_par_l_plasma_01_mk1_macro",
-          expectedGeometryWeapons = 1,
-          expectedWeapons = 1, expectedTurrets = 1, expectedPlasma = 1, expectedBeam = 0,
-          expectedMissileTurrets = 0, expectedGuided = 0, expectedDumbfire = 0, expectedAmmo = 0 },
-        { label = "SKY SURVEY A 000",
-          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
-          -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
-          count = 1, distance = 263.535, x = -39.429, y = 699.533, spread = 0,
-          ox = -39.429, oy = 601.324, oz = 25.352,
-          yaw = 218.0993, pitch = 78.6164, roll = 171.2717,
-          preserveOrientation = true,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
-          loadout = "issue67_argon_sky_target",
-          geometryCase = "arc_split" },
-        { label = "SKY SURVEY A 100",
-          macro = "ship_arg_l_destroyer_02_a_macro", faction = "xenon",
-          -- anchor-frame distance/x/y retain r31 solver provenance; ox/oy/oz are P*-relative placement
-          count = 1, distance = 74.485, x = -223.612, y = 1886.521, spread = 0,
-          ox = -223.612, oy = 1788.313, oz = -163.698,
-          yaw = 214.0265, pitch = 68.9246, roll = -166.8782,
-          preserveOrientation = true,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true, geometryRole = "surface_mask",
-          loadout = "issue67_argon_sky_target",
-          geometryCase = "positive_control" },
+        {
+            label     = "ISSUE72 PAR L BEAM SHOOTER",
+            macro     = "ship_par_l_destroyer_01_a_macro",
+            faction   = "player",
+            count     = 1,
+            distance  = 1,
+            x         = 0,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+
+            role      = "shooter",
+            loadout   = "issue69_paranid_dual_family",
+
+            expectedWeapons        = 2,
+            expectedTurrets        = 2,
+            expectedBeam           = 1,
+            expectedPlasma         = 1,
+            expectedMissileTurrets = 0,
+            expectedGuided         = 0,
+            expectedDumbfire       = 0,
+            expectedAmmo           = 0,
+        },
+
+        {
+            label     = "ISSUE72 CHANNEL0 TARGET A",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 7000,
+            x         = 0,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE72 CHANNEL0 TARGET B",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 7000,
+            x         = 2000,
+            y         = 1500,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
     },
+
     stations = {},
 }
+
 return X4GunneryTestLabScenarioSpec

@@ -51,6 +51,12 @@ for shell_test in tests/*.sh; do
   echo "running $shell_test"
   timeout 120s bash "$shell_test"
 done
+# Python contract tests run serially so CI output stays attributable to one
+# test at a time; under set -e a non-zero exit from any test fails validation.
+for python_test in tests/*.py; do
+  echo "running $python_test"
+  python3 "$python_test"
+done
 # Line 19 runs the test scripts directly, so a .sh committed as 100644 fails
 # validation on a fresh clone (it only worked where a local chmod +x was left).
 if git ls-files -s '*.sh' | grep -v '^100755'; then

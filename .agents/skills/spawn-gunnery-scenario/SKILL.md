@@ -110,6 +110,10 @@ copies of the wrong macro.
 
 ### Deterministic turret equipment and operator identity
 
+Use [../../../docs/TURRET_ASSET_KINEMATICS.md](../../../docs/TURRET_ASSET_KINEMATICS.md)
+for the canonical distinction between equipment macro, component asset, hull
+connection/group, runtime turret instance, muzzle endpoint, and display label.
+
 Mount turrets with group-targeted
 `<turrets macro="..." group="..." exact="N"/>` entries under `<groups>`.
 Never isolate a turret with singular `<turret path="..."/>`: on the Behemoth E,

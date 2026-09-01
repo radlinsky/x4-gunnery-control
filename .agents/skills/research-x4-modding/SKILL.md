@@ -67,6 +67,9 @@ not give it a higher classification.
 
 ## Read the focused reference
 
+- Read [../../../docs/TURRET_ASSET_KINEMATICS.md](../../../docs/TURRET_ASSET_KINEMATICS.md)
+  before tracing turret assets, mounts, runtime instances, ANI descriptors, or
+  muzzle endpoints; it is the canonical identity vocabulary.
 - Read [references/source-policy.md](references/source-policy.md) for source
   order, classification, and KB update criteria.
 - Read [references/source-registry.md](references/source-registry.md) for every

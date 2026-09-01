@@ -24,7 +24,8 @@ Helper.closeMenu = function() end
 
 X4GunneryTestLabState = nil
 dofile("testlab/x4_gunnery_control_testlab/ui/testlab_state.lua")
-dofile("testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua")
+-- Observation behavior is independent of the mutable live scenario fixture.
+X4GunneryTestLabScenarioSpec = nil
 assert(pcall(dofile, "testlab/x4_gunnery_control_testlab/ui/testlab.lua"))
 
 local testMenu
