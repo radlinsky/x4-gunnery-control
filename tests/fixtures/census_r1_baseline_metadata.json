@@ -1,0 +1,30 @@
+{
+  "issue": 78,
+  "round": "R1",
+  "normalization_version": "1",
+  "tested_starting_sha": "668621a22b8825e69dbe199b5a43104cff50bd85",
+  "x4_version_reported_by_census": "9.00",
+  "official_source_sets": [
+    "base",
+    "ego_dlc_split",
+    "ego_dlc_terran",
+    "ego_dlc_pirate",
+    "ego_dlc_boron",
+    "ego_dlc_timelines",
+    "ego_dlc_mini_01",
+    "ego_dlc_mini_02"
+  ],
+  "normalized_full_report_sha256": "20342692805d98b7cabddb30e088ce930b0d9811138a6afedd21c325833d6646",
+  "deterministic_run_count": 2,
+  "normalized_reports_byte_identical": true,
+  "accepted_counts": {
+    "equipment_macros": 147,
+    "combat_candidate_macros": 92,
+    "noncombat_utility_macros": 19,
+    "unresolved_no_ware_macros": 4,
+    "missileturret_excluded_macros": 32
+  },
+  "turret_active_changing_case_baseline_flag_enforced": true,
+  "turret_active_changing_case_baseline_flag": "--require-accepted-turret-active-changing-case-baseline",
+  "normalization_rule": "In every string value of the complete census report, replace a machine-specific absolute source or ANI resource root prefix (a value equal to a set root or beginning with the root followed by '/') with the stable identity ${X4_SET:<name>}. No other report data is altered. In this baseline the report stored only set-root-relative paths, so no absolute root prefixes occurred, the normalization was a verified no-op, and each normalized report is byte-identical to its raw report."
+}
