@@ -43,7 +43,7 @@ local function loadHarness(spec, realTime)
     X4GunneryTestLabState = nil
     dofile("testlab/x4_gunnery_control_testlab/ui/testlab_state.lua")
     -- Permanent tests always supply a synthetic scenario (or deliberately no
-    -- scenario). The mutable live scenario_spec.lua is not a unit-test fixture.
+    -- scenario). The mutable live scenario spec is not a unit-test fixture.
     X4GunneryTestLabScenarioSpec = spec ~= "absent" and spec or nil
     local ok, err = pcall(dofile, "testlab/x4_gunnery_control_testlab/ui/testlab.lua")
     assert(ok, "testlab.lua failed to load: " .. tostring(err))

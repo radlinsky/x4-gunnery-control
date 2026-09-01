@@ -133,6 +133,19 @@ fi
 
 echo "fire-control terminology audit passed"
 
+# ── mutable-fixture tripwire ──────────────────────────────────────────────────
+# The live scenario spec is never a unit-test fixture (AGENTS.md "Test value").
+# That rule lived only as prose once, and a coupling shipped anyway, so enforce
+# it: no permanent executable test may read scenario_spec.lua. Test reusable
+# Test Lab behavior with synthetic specs instead. Docs (*.md) may name the path;
+# this owner file is the sole allowlist entry.
+spec_basename=$(basename "$MUTABLE_LIVE_INPUT")
+while IFS= read -r offender; do
+  [[ "$offender" == "tests/test_fire_control_terminology.sh" ]] && continue
+  fail "$offender reads the mutable live fixture $spec_basename; test reusable Test Lab behavior with a synthetic spec instead"
+done < <(grep -rlF "$spec_basename" tests/ --include='*.sh' --include='*.lua' --include='*.py')
+echo "mutable-fixture tripwire passed"
+
 # ── matcher self-checks ───────────────────────────────────────────────────────
 # These prove the shared scanner catches what it should and allows what it must.
 # Each test calls scan_file (the same function used by the repository loop) and

@@ -6,7 +6,6 @@ md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml
 scenario=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
 loadouts=testlab/x4_gunnery_control_testlab/libraries/loadouts.xml
 testlab_ui=testlab/x4_gunnery_control_testlab/ui/testlab.lua
-scenario_spec=testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
@@ -297,8 +296,11 @@ grep -Fq 'authored_yaw=' "$scenario" \
   || fail "r15 spawn telemetry does not log authored orientation"
 grep -Fq "actual_yaw=' + \$Target.rotation.yaw" "$scenario" \
   || fail "r15 qualification telemetry does not capture settled target orientation"
-grep -Fq 'preserveOrientation = true' "$scenario_spec" \
-  || fail "r15 survey targets do not preserve authored orientation"
+# preserveOrientation is honored end-to-end at the reusable layer: the Lua
+# validator/transport (checked against $testlab_ui above) and the MD
+# skipalignment consumer (checked against $scenario below). Whether any live
+# fixture happens to set the flag is mutable operator input, not a unit-test
+# contract, so it is deliberately not asserted here.
 
 # The qualifier remains settled, case-specific, and fail-closed. LOS stays
 # independent telemetry and must not suppress the geometric candidates.
