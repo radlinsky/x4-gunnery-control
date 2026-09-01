@@ -120,19 +120,6 @@ _EXPECTED_GROUPS = [
         "endpoint_structure": [
             {
                 "source_part_path_depth": 1,
-                "selected_descriptor_channel_count_tuples": [[0, 4, 0, 1, 0]],
-            }
-        ],
-        "macro_count": 1,
-        "unique_component_count": 1,
-        "macros": ["macro_delta"],
-        "components": ["component_delta"],
-    },
-    {
-        "endpoint_count": 1,
-        "endpoint_structure": [
-            {
-                "source_part_path_depth": 1,
                 "selected_descriptor_channel_count_tuples": [[2, 0, 1, 0, 0]],
             }
         ],
@@ -140,6 +127,19 @@ _EXPECTED_GROUPS = [
         "unique_component_count": 2,
         "macros": ["macro_alpha", "macro_beta"],
         "components": ["component_alpha", "component_beta"],
+    },
+    {
+        "endpoint_count": 1,
+        "endpoint_structure": [
+            {
+                "source_part_path_depth": 1,
+                "selected_descriptor_channel_count_tuples": [[0, 4, 0, 1, 0]],
+            }
+        ],
+        "macro_count": 1,
+        "unique_component_count": 1,
+        "macros": ["macro_delta"],
+        "components": ["component_delta"],
     },
     {
         "endpoint_count": 1,

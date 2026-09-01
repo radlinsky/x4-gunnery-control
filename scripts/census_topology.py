@@ -68,7 +68,10 @@ def _build_combat_conventional_topology_inventory(
         members["components"].add(component)
 
     groups = []
-    for signature, members in sorted(groups_by_signature.items()):
+    for signature, members in sorted(
+        groups_by_signature.items(),
+        key=lambda item: (-len(item[1]["macros"]), item[0]),
+    ):
         endpoint_count, endpoint_structure = signature
         groups.append(
             {
