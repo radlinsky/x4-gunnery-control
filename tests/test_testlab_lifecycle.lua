@@ -268,7 +268,9 @@ local function station(id, enabled)
     return {
         id = id,
         enabled = enabled,
-        setup = {
+        -- Load-time replay is intentionally only for simple specs with no setup
+        -- metadata. Disabled Create-path specs keep the exact synthetic setup.
+        setup = enabled and nil or {
             shipMacro = "test_ship_macro",
             shipLabel = "Test Ship",
             turretGroup = "g",
