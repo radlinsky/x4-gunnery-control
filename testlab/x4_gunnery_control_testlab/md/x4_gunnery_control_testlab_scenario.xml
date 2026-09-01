@@ -451,11 +451,12 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
-                  <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
+                  <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey' or $Def.$loadout == 'issue69_paranid_dual_family'">
+                    <set_value name="$Issue67SurveyLoadout" exact="if $Def.$loadout == 'issue69_paranid_dual_family' then 'x4gc_testlab_issue69_paranid_dual_family' else 'x4gc_testlab_issue67_paranid_sky_survey'"/>
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_paranid_sky_survey"/>
+                      <loadout ref="$Issue67SurveyLoadout"/>
                       <!-- A captain is required for the player to man the
                            gunner console on the Paranid destroyer flight bridge.
                            Mirrors the Colossus E pilot prerequisite. -->
@@ -497,11 +498,12 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
-                  <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
+                  <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey' or $Def.$loadout == 'issue69_paranid_dual_family'">
+                    <set_value name="$Issue67SurveyLoadout" exact="if $Def.$loadout == 'issue69_paranid_dual_family' then 'x4gc_testlab_issue69_paranid_dual_family' else 'x4gc_testlab_issue67_paranid_sky_survey'"/>
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  zone="player.zone" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_paranid_sky_survey"/>
+                      <loadout ref="$Issue67SurveyLoadout"/>
                       <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
@@ -529,7 +531,7 @@
                 <do_if value="$Def.$loadout == 'issue65_odysseus_mixed_missiles'">
                   <apply_loadout object="$Ship" loadout="$Issue65OdysseusLoadout"/>
                 </do_if>
-                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and not ($Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask')">
+                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and $Def.$loadout != 'issue69_paranid_dual_family' and not ($Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask')">
                   <set_value name="$LoadoutFailures" operation="add"/>
                   <debug_text text="'[X4GC TEST SCENARIO] unknown deterministic loadout=' + $Def.$loadout + ' ship=' + $Ship"/>
                 </do_elseif>

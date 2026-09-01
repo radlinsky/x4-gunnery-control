@@ -47,6 +47,28 @@
       <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
+  <loadout id="x4gc_testlab_issue69_paranid_dual_family" macro="ship_par_l_destroyer_01_a_macro">
+    <macros>
+      <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_02"/>
+      <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_01"/>
+      <shield macro="shield_par_l_standard_01_mk2_macro" path="../con_shieldgen_large_01"/>
+      <shield macro="shield_par_l_standard_01_mk1_macro" path="../con_shieldgen_large_02"/>
+    </macros>
+    <groups>
+      <turrets macro="turret_par_l_plasma_01_mk1_macro" group="group_front_up_mid2" exact="1"/>
+      <turrets macro="turret_par_l_beam_01_mk1_macro" group="group_rear_down_mid" exact="1"/>
+    </groups>
+    <software>
+      <software ware="software_dockmk2"/>
+      <software ware="software_flightassistmk1"/>
+      <software ware="software_scannerlongrangemk2"/>
+      <software ware="software_scannerobjectmk2"/>
+      <software ware="software_targetmk1"/>
+    </software>
+    <virtualmacros>
+      <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
+    </virtualmacros>
+  </loadout>
   <loadout id="x4gc_testlab_issue67_argon_sky_target" macro="ship_arg_l_destroyer_02_a_macro">
     <macros>
       <engine macro="engine_arg_l_allround_01_mk1_macro" path="../con_engine_03"/>

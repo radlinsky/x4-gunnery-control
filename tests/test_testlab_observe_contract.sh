@@ -216,6 +216,28 @@ grep -Fq '<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_front_r
   || fail "r15 Colossus E loadout does not mount its Plasma group via group_front_right_up"
 [[ $(grep -Fc '<loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>' "$scenario") -eq 2 ]] \
   || fail "r15 static Colossus E loadout is not used in remote and local creation branches"
+[[ $(grep -Fc "<loadout ref=\"\$Issue67SurveyLoadout\"/>" "$scenario") -eq 2 ]] \
+  || fail "r15 survey creation routes lost their static loadout reference"
+
+# Issue #69: restore the already-live Paranid dual-family static loadout and
+# both MD creation routes without bringing back the unrelated experimental
+# matrix/probe code.
+grep -Fq '<loadout id="x4gc_testlab_issue69_paranid_dual_family" macro="ship_par_l_destroyer_01_a_macro">' "$loadouts" \
+  || fail "issue #69 dual-family loadout is missing"
+grep -Fq '<turrets macro="turret_par_l_plasma_01_mk1_macro" group="group_front_up_mid2" exact="1"/>' "$loadouts" \
+  || fail "issue #69 loadout lost its exact Plasma/group combination"
+grep -Fq '<turrets macro="turret_par_l_beam_01_mk1_macro" group="group_rear_down_mid" exact="1"/>' "$loadouts" \
+  || fail "issue #69 loadout lost its exact Beam/group combination"
+[[ $(grep -Fc "<do_elseif value=\"\$Def.\$loadout == 'issue67_paranid_sky_survey' or \$Def.\$loadout == 'issue69_paranid_dual_family'\">" "$scenario") -eq 2 ]] \
+  || fail "issue #69 spawner does not recognize the static loadout in both routes"
+[[ $(grep -Fc "<set_value name=\"\$Issue67SurveyLoadout\" exact=\"if \$Def.\$loadout == 'issue69_paranid_dual_family' then 'x4gc_testlab_issue69_paranid_dual_family' else 'x4gc_testlab_issue67_paranid_sky_survey'\"/>" "$scenario") -eq 2 ]] \
+  || fail "issue #69 static loadout is not selected in both local and remote creation routes"
+grep -Fq "\$Def.\$loadout != 'issue69_paranid_dual_family'" "$scenario" \
+  || fail "known-loadout validation rejects the issue #69 static loadout"
+grep -Fq "\$Def.\$loadout == 'issue69_paranid_dual_family'" "$scenario" \
+  || fail "issue #69 spawner loadout key is missing"
+grep -Fq "\$loadout   = if @event.param3.\$loadout" "$scenario" \
+  || fail "scenario spawner does not transport the static loadout key"
 grep -Fq "\$geometryweaponmacro = if @event.param3.\$geometryWeaponMacro" "$scenario" \
   || fail "r15 geometry weapon macro is not transported into MD"
 grep -Fq "\$expectedgeometryweapons = if @event.param3.\$expectedGeometryWeapons" "$scenario" \
