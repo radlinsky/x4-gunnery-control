@@ -202,22 +202,22 @@ local function validateSpec(raw)
         if type(raw.setup.expectedTurrets) ~= "number" or raw.setup.expectedTurrets < 1 then
             return nil, "spec.setup.expectedTurrets must be a positive number"
         end
-        local expectedMacros = {}
-        local rawExpectedMacros = raw.setup.expectedMemberMacros or raw.setup.expectedMacros
-        if rawExpectedMacros ~= nil then
-            if type(rawExpectedMacros) ~= "table" then
+        local expectedMemberMacros = {}
+        local rawExpectedMemberMacros = raw.setup.expectedMemberMacros
+        if rawExpectedMemberMacros ~= nil then
+            if type(rawExpectedMemberMacros) ~= "table" then
                 return nil, "spec.setup.expectedMemberMacros must be a list"
             end
-            for index, macro in ipairs(rawExpectedMacros) do
+            for index, macro in ipairs(rawExpectedMemberMacros) do
                 if type(macro) ~= "string" or macro == "" then
                     return nil, "spec.setup.expectedMemberMacros[" .. index .. "] must be a non-empty string"
                 end
-                expectedMacros[#expectedMacros + 1] = macro
+                expectedMemberMacros[#expectedMemberMacros + 1] = macro
             end
-            if #expectedMacros ~= math.floor(raw.setup.expectedTurrets) then
+            if #expectedMemberMacros ~= math.floor(raw.setup.expectedTurrets) then
                 return nil, "spec.setup.expectedMemberMacros must match expectedTurrets"
             end
-            table.sort(expectedMacros)
+            table.sort(expectedMemberMacros)
         end
         setup = {
             remote = raw.setup.remote == true,
@@ -226,8 +226,7 @@ local function validateSpec(raw)
             turretGroup = raw.setup.turretGroup,
             turretLabel = raw.setup.turretLabel,
             expectedTurrets = math.floor(raw.setup.expectedTurrets),
-            expectedMacros = expectedMacros,
-            expectedMemberMacros = expectedMacros,
+            expectedMemberMacros = expectedMemberMacros,
             selectAll = raw.setup.selectAll == true,
         }
     end
@@ -384,9 +383,9 @@ local function resolveExactGroup()
             .. " operational turrets, found " .. #memberIDs
     end
     table.sort(memberMacros)
-    if #setup.expectedMacros > 0
-            and table.concat(memberMacros, ",") ~= table.concat(setup.expectedMacros, ",") then
-        return nil, setup.turretLabel .. " needs macros " .. table.concat(setup.expectedMacros, ",")
+    if #setup.expectedMemberMacros > 0
+            and table.concat(memberMacros, ",") ~= table.concat(setup.expectedMemberMacros, ",") then
+        return nil, setup.turretLabel .. " needs macros " .. table.concat(setup.expectedMemberMacros, ",")
             .. ", found " .. table.concat(memberMacros, ",")
     end
     table.sort(memberIDs)
