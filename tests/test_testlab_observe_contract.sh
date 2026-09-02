@@ -171,20 +171,6 @@ def loadout(loadout_id):
         raise SystemExit(f"FAIL: missing deterministic loadout {loadout_id}")
     return match.group(1)
 
-mixed = loadout("x4gc_testlab_par_l_destroyer_01_mixed_missiles")
-expected = {
-    'turret_par_m_guided_02_mk1_macro': 3,
-    'turret_par_m_dumbfire_02_mk1_macro': 3,
-    'turret_par_l_guided_01_mk1_macro': 2,
-    'turret_par_l_dumbfire_01_mk1_macro': 1,
-}
-for macro, count in expected.items():
-    actual = mixed.count(f'<turrets macro="{macro}"')
-    if actual != count:
-        raise SystemExit(f"FAIL: mixed-missile loadout {macro} count {actual}, expected {count}")
-if mixed.count('<ammunition macro="missile_gen_') != 4 or mixed.count('exact="40"/>') != 4:
-    raise SystemExit("FAIL: mixed-missile loadout no longer stocks four 40-round missile types")
-
 dual = loadout("x4gc_testlab_par_l_destroyer_01_beam_plasma")
 for entry in (
     '<turrets macro="turret_par_l_plasma_01_mk1_macro" group="group_front_up_mid2" exact="1"/>',

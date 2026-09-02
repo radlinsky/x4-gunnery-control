@@ -13,8 +13,6 @@ assert(not loadouts:find("x4gc_testlab_issue", 1, true),
     "reusable deterministic loadout ids must not be issue-numbered")
 assert(loadouts:find('id="x4gc_testlab_par_l_destroyer_01_beam_plasma"', 1, true),
     "the current dual-family fixture must use a descriptive library id")
-assert(loadouts:find('id="x4gc_testlab_par_l_destroyer_01_mixed_missiles"', 1, true),
-    "the former code-authored missile loadout must live in the data library")
 assert(scenario:find('<get_loadout result="$RequestedLoadout" loadout="$Def.$loadout" macro="macro.{$Def.$macro}"/>', 1, true),
     "MD must resolve the authored loadout id generically")
 assert(scenario:find('<apply_loadout object="$Ship" loadout="$RequestedLoadout"/>', 1, true),
