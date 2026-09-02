@@ -180,8 +180,8 @@ interpret raw log lines. Treat manual visual observations as owner observations
 unless they have matching machine evidence.
 
 For firing/targeting experiments, prefer correlated shot/projectile/hit evidence
-when available. `ON SOLUTION` proves a geometry solution only; it does not by
-itself prove actual turret targeting.
+when available. A geometry-qualified state proves a geometry solution only; it
+does not by itself prove actual turret targeting.
 
 If the evidence cannot distinguish code failure from setup, stale fixture state,
 readiness, logging gaps, or unrelated X4 behavior, improve the evidence before
