@@ -95,6 +95,8 @@ changes. Do not weaken valid tests to accommodate a fixture.
 
 Follow [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for installation,
 reload, and restart decisions. Apply it to the exact state not yet loaded in X4.
+For repeat runs, compute the reset from the files changed since the exact head
+already loaded in the current X4 process, not from the full PR diff.
 When a restart is required, have the owner use
 `scripts/launch-x4-test-lab-dev.bat` from the exact worktree under test; that
 launcher installs Test Lab and enables the installed scenario copy.
