@@ -39,7 +39,7 @@ scenario_skill_dir=.agents/skills/spawn-gunnery-scenario
 scenario_skill="$scenario_skill_dir/SKILL.md"
 scenario_equipment="$scenario_skill_dir/references/equipment-and-stations.md"
 scenario_geometry="$scenario_skill_dir/references/surface-geometry.md"
-grep -Fq '`research-x4-modding` rather than guessing.' "$scenario_skill"
+grep -Fq "\`research-x4-modding\` rather than guessing." "$scenario_skill"
 grep -Fq 'not the station root' "$scenario_equipment"
 grep -Fq 'same exact component the owner will interact with' "$scenario_geometry"
 if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill_dir"; then
