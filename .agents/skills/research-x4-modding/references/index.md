@@ -17,7 +17,7 @@ before relying on any claim.
 | Combat topology group priorities | [turret-topology-priorities.md](turret-topology-priorities.md) | X4 9.00 shipped-source inventory of the 38 COMBAT_CANDIDATE endpoint-topology groups (92 macros, 91 components) in schema-25 census order (macro coverage only; no semantic or gameplay-value claims) |
 | Rank-1 turret `turret_active` descriptor profiles | [turret-rank1-animation-profile.md](turret-rank1-animation-profile.md) | X4 9.00 shipped-source record of all 20 rank-1 components' muzzle-path `turret_active` descriptors with same-name selector coverage: 9 distinct profiles — rank 1 splits; Paranid L Beam shares a 3-component profile; no runtime or channel-meaning claims |
 | Paranid L Beam candidate-channel-0 semantics | [paranid-l-beam-channel0-semantics.md](paranid-l-beam-channel0-semantics.md) | X4 9.00 offline result: position/translation is UNPROVEN; X4Converter says `posKeys`/`location`, but checked shipped and official sources do not independently establish that semantic |
-| Live tests and observations | [testing-experiments.md](testing-experiments.md) | Promotion rules and regression matrix |
+| Live tests and observations | [testing-experiments.md](testing-experiments.md) | Historical experiment archive and regression matrix |
 
 Search these references before adding a record. Keep one primary source per
 claim and add a second only when it materially corroborates the finding.
