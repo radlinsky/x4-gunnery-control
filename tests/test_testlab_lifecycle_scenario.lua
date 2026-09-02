@@ -179,7 +179,6 @@ local function localScenario(id, groupOverrides)
             expectedTurrets = 1,
         },
         groups = { group(groupOverrides) },
-        stations = {},
     }
 end
 
@@ -193,17 +192,15 @@ local function requestScenario(harness)
     return events, events[1].params.requestId
 end
 
-local ready8Order = {
-    "spawned", "stations", "modules", "turrets", "missileTurrets", "shields", "engines",
-    "safeFixtures", "safeWeapons", "unsafeWeapons", "defenceUnits", "hostiles", "repairFixtures",
-    "shooters", "shooterMissileTurrets", "guided", "dumbfire", "ammo",
-    "loadoutFailures", "locationFailures", "shooterWeapons", "shooterTurrets",
-    "shooterBeam", "shooterPlasma", "preflightFailures", "geometrySplits",
+local ready9Order = {
+    "spawned", "safeFixtures", "safeWeapons", "unsafeWeapons", "defenceUnits",
+    "hostiles", "repairFixtures", "shooters", "shooterWeapons", "shooterTurrets",
+    "shooterMissileTurrets", "loadoutFailures", "locationFailures",
 }
 
-local function ready8(requestId, specId, values)
-    local parts = { "x4gct8", requestId, specId }
-    for _, field in ipairs(ready8Order) do
+local function ready9(requestId, specId, values)
+    local parts = { "x4gct9", requestId, specId }
+    for _, field in ipairs(ready9Order) do
         parts[#parts + 1] = tostring((values or {})[field] or 0)
     end
     return table.concat(parts, ":")
@@ -222,14 +219,12 @@ do
                 distance = -250,
                 spread = 12,
                 x = 40, y = -50,
-                ox = 1, oy = 2, oz = 3,
                 hostile = true, holdFire = true, repairGuard = true,
                 yaw = 15, pitch = -20, roll = 25,
                 preserveOrientation = true,
             }),
             group({ label = "defaults" }),
         },
-        stations = {},
     })
     local events = scenarioEvents(harness)
     assert(#events == 4, "flat spec must stream begin + 2 groups + commit")
@@ -242,13 +237,11 @@ do
     local explicit = events[2].params
     assert(explicit.distance == -250 and explicit.spread == 12
             and explicit.x == 40 and explicit.y == -50
-            and explicit.ox == 1 and explicit.oy == 2 and explicit.oz == 3
             and explicit.yaw == 15 and explicit.pitch == -20 and explicit.roll == 25
             and explicit.preserveOrientation == true,
         "explicit group scalars must survive Lua-to-MD transport")
     local defaults = events[3].params
     assert(defaults.x == 0 and defaults.y == 0
-            and defaults.ox == 0 and defaults.oy == 0 and defaults.oz == 0
             and defaults.yaw == 0 and defaults.pitch == 0 and defaults.roll == 0
             and defaults.preserveOrientation == false,
         "omitted optional group scalars must use stable flat defaults")
@@ -258,6 +251,32 @@ do
                 "scenario transport must not pass nested Lua tables to MD")
         end
     end
+end
+
+-- Deterministic loadout identity and census are data. The validator must accept
+-- a new named loadout without a Test Lab code change and transport only totals.
+do
+    local harness = loadHarness({
+        id = "declarative-loadout",
+        enabled = true,
+        groups = {
+            group({
+                role = "shooter",
+                loadout = "x4gc_testlab_future_fixture",
+                expectedWeapons = 3,
+                expectedTurrets = 2,
+                expectedMissileTurrets = 1,
+            }),
+        },
+    })
+    local events = scenarioEvents(harness)
+    assert(#events == 3, "one declarative group must stream begin + group + commit")
+    local params = events[2].params
+    assert(params.loadout == "x4gc_testlab_future_fixture"
+            and params.expectedWeapons == 3
+            and params.expectedTurrets == 2
+            and params.expectedMissileTurrets == 1,
+        "arbitrary named loadout identity and exact totals must survive flat transport")
 end
 
 -- Representative malformed inputs fail closed without raising or spawning.
@@ -319,7 +338,7 @@ do
     harness.openFromGunnery({ label = "console", phase = "console" })
     local _, requestId = requestScenario(harness)
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        ready8(requestId, "guarded-ready", {
+        ready9(requestId, "guarded-ready", {
             spawned = 1, safeFixtures = 1, safeWeapons = 1,
             hostiles = 1, repairFixtures = 1,
         }))
@@ -334,7 +353,7 @@ do
     harness.openFromGunnery({ label = "console", phase = "console" })
     local _, requestId = requestScenario(harness)
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        ready8(requestId, "guarded-unsafe", {
+        ready9(requestId, "guarded-unsafe", {
             spawned = 1, safeFixtures = 1, safeWeapons = 1, unsafeWeapons = 1,
             hostiles = 1, repairFixtures = 1,
         }))
@@ -369,12 +388,12 @@ do
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
         "x4gct1:stale_1:local-lifecycle:1")
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":wrong-spec:1")
+        ready9(requestId, "wrong-spec", { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
         "stale-request and wrong-spec acknowledgements must be ignored")
 
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":local-lifecycle:1")
+        ready9(requestId, "local-lifecycle", { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "matching complete acknowledgement must return to Gunnery exactly once")
     assert(session.checkedGroupKeys[selectedKey] == true and session.checkedGroupKeys.extra == nil,
@@ -406,7 +425,6 @@ do
             expectedMemberMacros = { "weapon_a_macro", "weapon_b_macro" },
         },
         groups = { group() },
-        stations = {},
     })
     local groupBuffer = {
         [0] = { path = "p", group = "g1", contextid = 5 },
@@ -449,7 +467,7 @@ do
     local session = harness.openFromGunnery({ label = "console", phase = "console" })
     local _, requestId = requestScenario(harness)
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":select-all:1")
+        ready9(requestId, "select-all", { spawned = 1 }))
 
     local key1 = X4GunneryState.groupKey(5, "p", "g1")
     local key2 = X4GunneryState.groupKey(5, "p", "g2")
@@ -475,7 +493,7 @@ do
     session.aimTargetID = 9001
     local _, requestId = requestScenario(harness)
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":stale-observe-target:1")
+        ready9(requestId, "stale-observe-target", { spawned = 1 }))
 
     local staleState, staleMark = false, false
     for _, event in ipairs(harness.fix.uiTriggeredEvents) do
@@ -542,7 +560,7 @@ do
     session.staged.extra = { mode = "defend", preTickMode = "attack" }
     local _, requestId = requestScenario(harness)
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":ack-count-guard:1")
+        ready9(requestId, "ack-count-guard", { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
         "partial spawn acknowledgement must keep Test Lab open")
     assert(harness.fix.logContains("action=failed"),
@@ -580,7 +598,7 @@ do
     local _, requestId = requestScenario(harness)
     harness.fix.C.IsComponentOperational = function() return false end
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":group-changed:1")
+        ready9(requestId, "group-changed", { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
         "changed exact-group membership must keep Test Lab open")
     assert(session.checkedGroupKeys.extra == true and session.staged.extra.mode == "defend",
@@ -601,7 +619,7 @@ do
             and harness.fix.logContains("reason=creation_pending"),
         "a stale pending Despawn handler must send no cleanup event")
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":pending-despawn:1")
+        ready9(requestId, "pending-despawn", { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "rejected pending Despawn must preserve the matching READY handoff")
 end
@@ -638,7 +656,6 @@ do
             expectedTurrets = 1,
         },
         groups = { group() },
-        stations = {},
     })
     harness.openFromGunnery({ label = "safe launcher", phase = "console" })
     local events, requestId = requestScenario(harness)
@@ -649,7 +666,7 @@ do
         "remote begin must transport its synthetic flat location")
 
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
-        "x4gct1:" .. requestId .. ":remote-lifecycle:1")
+        ready9(requestId, "remote-lifecycle", { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1
             and harness.fix.logContains("action=remote_ready"),
         "remote READY must return to the safe launcher for teleport")

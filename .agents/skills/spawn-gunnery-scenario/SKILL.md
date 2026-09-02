@@ -25,12 +25,9 @@ the Test Lab development installer enables only the installed copy.
 Read specialized guidance only when the requested fixture needs it:
 
 - [references/remote-fixtures.md](references/remote-fixtures.md) — spawned player
-  ships, teleport handoff, remote Create/Despawn safety, deferred qualification.
-- [references/surface-geometry.md](references/surface-geometry.md) — surface
-  selection, arc/line-of-fire experiments, weapon-relative placement, bounded
-  searches.
-- [references/equipment-and-stations.md](references/equipment-and-stations.md) —
-  sparse or unusual X4 loadouts, surface identity, station equipment.
+  ships, teleport handoff, and remote Create/Despawn safety.
+- [references/equipment.md](references/equipment.md) — deterministic sparse or
+  unusual ship/turret loadouts and exact asset identity.
 
 For turret asset/mount/runtime terminology, use
 [../../../docs/TURRET_ASSET_KINEMATICS.md](../../../docs/TURRET_ASSET_KINEMATICS.md).
