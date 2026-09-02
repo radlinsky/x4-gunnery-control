@@ -37,8 +37,8 @@ A created station root, visible shell, or expected module count is not enough to
 claim an equipped station fixture. Withhold READY until the live census proves
 the required operational modules and relevant game equipment.
 
-Apply station equipment to the intended operational station module, not the
-station root. Verify the module's exact macro before applying a loadout.
+Apply station equipment to the intended operational station module, not the station root.
+Verify the module's exact macro before applying a loadout.
 
 For an exact deterministic set, build a loadout whose group/path form matches the
 module's actual connection semantics and apply it to that module. For a generated
