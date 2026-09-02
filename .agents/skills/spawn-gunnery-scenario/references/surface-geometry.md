@@ -18,9 +18,9 @@ For each role, keep these independent where they matter to the experiment:
 - line of fire or other experiment-specific geometry predicate;
 - operator designation and observation correlation.
 
-A no-fire interval does not identify which predicate failed. `ON SOLUTION` or a
-geometry-qualified state proves only that a geometry solution was found; it does
-not prove that the turret actually targeted or fired at that object.
+A no-fire interval does not identify which predicate failed. A geometry-qualified
+state proves only that a geometry solution was found; it does not prove that the
+turret actually targeted or fired at that object.
 
 ## Weapon-relative placement
 
