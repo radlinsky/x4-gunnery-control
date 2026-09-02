@@ -27,3 +27,12 @@ affects player interaction.
 Update a durable claim only after checking its version, source path/URL, and
 classification. Include `X4`, `Status`, `Source`, and `Live test` fields. Keep
 paraphrases short; proprietary unpacked source stays outside the repository.
+
+## Reference index rule
+
+Keep `references/index.md` focused on durable technical provenance. Index rows
+may summarize the technical subject, evidence boundary, applicable X4/source
+version, source/cache/parser or tool provenance, evidence classification, and
+an accepted or live-tested SHA when that SHA is technically useful. Do not put
+GitHub issue numbers, task labels, or workstream identifiers in index-row
+titles or descriptions. GitHub issues carry that project-management history.

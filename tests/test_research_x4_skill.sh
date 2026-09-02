@@ -14,6 +14,10 @@ if rg -n 'TODO' "$skill"; then
   echo 'skill still contains TODO markers' >&2
   exit 1
 fi
+if rg -n '^\|.*#[0-9]+\b' "$skill/references/index.md"; then
+  echo 'research index contains GitHub issue/task labels' >&2
+  exit 1
+fi
 for classification in documented-public shipped-source third-party-technique inference live-tested; do
   grep -Fq "\`$classification\`" "$skill/SKILL.md"
 done

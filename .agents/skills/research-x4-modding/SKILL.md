@@ -18,6 +18,8 @@ for it.
   proposed findings with classification, source, version, and live-test need.
 - Keep user observations experimental until reproduced. Never upgrade them to
   a durable claim from a report alone.
+- Keep `references/index.md` technical; omit GitHub issue/task/workstream labels
+  from index rows and keep that project-management history in GitHub.
 - For an active live-test workstream, keep hypotheses, planned discriminators,
   failed-fixture diagnoses, and provisional conclusions in the issue/log until
   the decisive run has completed. Do not pre-write a durable KB conclusion and
