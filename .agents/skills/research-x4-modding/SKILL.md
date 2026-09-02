@@ -18,6 +18,12 @@ for it.
   proposed findings with classification, source, version, and live-test need.
 - Keep user observations experimental until reproduced. Never upgrade them to
   a durable claim from a report alone.
+- Keep `references/index.md` technical. Index rows may summarize the technical
+  subject, evidence boundary, applicable X4/source version, source/cache/parser
+  or tool provenance, evidence classification, and an accepted or live-tested
+  SHA when technically useful. Do not include GitHub issue numbers, task
+  labels, or workstream identifiers in index-row titles or descriptions;
+  GitHub issues carry that project-management history.
 - For an active live-test workstream, keep hypotheses, planned discriminators,
   failed-fixture diagnoses, and provisional conclusions in the issue/log until
   the decisive run has completed. Do not pre-write a durable KB conclusion and
