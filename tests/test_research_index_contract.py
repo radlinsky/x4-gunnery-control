@@ -12,8 +12,8 @@ def test_reference_index_omits_issue_task_labels():
         for line_number, line in enumerate(INDEX.read_text(encoding="utf-8").splitlines(), start=1)
         if line.startswith("|") and not line.startswith("|---")
     ]
-    task_label = re.compile(r"\bIssue\s+#\d+\b|#\d+\s+[A-Z]\d+\b")
-    offenders = [(line_number, line) for line_number, line in rows if task_label.search(line)]
+    issue_reference = re.compile(r"#\d+\b")
+    offenders = [(line_number, line) for line_number, line in rows if issue_reference.search(line)]
 
     assert not offenders, "reference index contains GitHub issue/task labels: " + "; ".join(
         f"line {line_number}: {line}" for line_number, line in offenders
