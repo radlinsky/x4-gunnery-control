@@ -35,15 +35,15 @@ grep -Fq 'Rename a cue when moving it across the hierarchy' "$skill/references/m
 grep -Fq 'A remote operational station can receive exact turret and shield equipment synchronously' "$skill/references/md-ai.md"
 grep -Fq 'documented as either a ship or a station module' "$skill/references/md-ai.md"
 grep -Fq 'md/setup.xml:85-99' "$skill/references/md-ai.md"
-scenario_skill=.agents/skills/spawn-gunnery-scenario/SKILL.md
-grep -Fq 'Never pass the station root.' "$scenario_skill"
-grep -Fq "apply_loadout object=\"\$Module\"" "$scenario_skill"
-grep -Fq 'same-action-list censuses' "$scenario_skill"
-grep -Fq 'Qualify each role against the same exact component the owner will click;' "$scenario_skill"
-grep -Fq 'Different root/module supplies each predicate' "$scenario_skill"
-grep -Fq 'CANNOT BEAR and LINE OF FIRE BLOCKED cannot be' "$scenario_skill"
-if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill"; then
-  echo 'scenario skill still applies a station loadout to the station root' >&2
+scenario_skill_dir=.agents/skills/spawn-gunnery-scenario
+scenario_skill="$scenario_skill_dir/SKILL.md"
+scenario_equipment="$scenario_skill_dir/references/equipment-and-stations.md"
+scenario_geometry="$scenario_skill_dir/references/surface-geometry.md"
+grep -Fq '`research-x4-modding` rather than guessing.' "$scenario_skill"
+grep -Fq 'not the station root' "$scenario_equipment"
+grep -Fq 'same exact component the owner will interact with' "$scenario_geometry"
+if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill_dir"; then
+  echo 'scenario guidance still applies a station loadout to the station root' >&2
   exit 1
 fi
 grep -Fq 'XTools_1.11.zip!Readme.txt' "$skill/references/tooling.md"
