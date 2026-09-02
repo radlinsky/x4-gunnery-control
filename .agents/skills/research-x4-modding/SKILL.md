@@ -16,15 +16,15 @@ for it.
   `references/`.
 - On implicit use to answer a question, do not mutate the repository. Return
   proposed findings with classification, source, version, and live-test need.
-- Keep user observations experimental until reproduced. Never upgrade them to
-  a durable claim from a report alone.
 - Keep `references/index.md` technical; omit GitHub issue/task/workstream labels
   from index rows and keep that project-management history in GitHub.
-- For an active live-test workstream, keep hypotheses, planned discriminators,
-  failed-fixture diagnoses, and provisional conclusions in the issue/log until
-  the decisive run has completed. Do not pre-write a durable KB conclusion and
-  then try to make the run fit it. After the run, inspect the correlated engine
-  log yourself and record only what its accepted controls actually establish.
+- Design live tests source-first: inspect current shipped source before probing,
+  then use a controlled fixture that isolates the mechanism under test and
+  includes discriminating controls.
+- Keep user observations, hypotheses, failed-fixture diagnoses, and provisional
+  conclusions experimental in the issue/log. Promote to `live-tested` only
+  after reproduction and your own review of the correlated engine log; a user
+  report alone is never enough. Record only what the accepted controls establish.
 - Never copy unpacked game files, third-party extension files, catalogs, or
   data files into tracked repository paths. Use the ignored
   `.x4-research-cache/` or an explicit external temporary directory.
@@ -83,8 +83,11 @@ not give it a higher classification.
 - Read [references/tooling.md](references/tooling.md) before using XRCatTool.
 - Read [references/debug-logging.md](references/debug-logging.md) for X4
   `-logfile` argument form, log location, and missing-log diagnosis.
-- Read [references/testing-experiments.md](references/testing-experiments.md)
-  for live-test design and evidence promotion.
+- Search [references/testing-experiments.md](references/testing-experiments.md)
+  only when a prior live experiment is relevant to the current mechanism or
+  failure mode. It is a historical archive, not default reading for live-test
+  design or evidence promotion; prefer a narrower focused reference when one
+  already covers the fact.
 
 ## Use the helpers safely
 
