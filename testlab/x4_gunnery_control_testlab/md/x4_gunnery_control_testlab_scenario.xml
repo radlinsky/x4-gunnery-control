@@ -80,9 +80,9 @@
               $preserveorientation = @event.param3.$preserveOrientation == true,
               $role      = if @event.param3.$role      then event.param3.$role      else '',
               $loadout   = if @event.param3.$loadout   then event.param3.$loadout   else '',
-              $expectedweapons = if @event.param3.$expectedWeapons then event.param3.$expectedWeapons else -1,
-              $expectedturrets = if @event.param3.$expectedTurrets then event.param3.$expectedTurrets else -1,
-              $expectedmissileturrets = if @event.param3.$expectedMissileTurrets then event.param3.$expectedMissileTurrets else -1
+              $expectedweapons = event.param3.$expectedWeapons,
+              $expectedturrets = event.param3.$expectedTurrets,
+              $expectedmissileturrets = event.param3.$expectedMissileTurrets
             ]"/>
           </actions>
         </cue>
