@@ -16,7 +16,12 @@
 --                             after the owner teleports aboard.
 --     shipMacro       string  Required player ship macro.
 --     shipLabel       string  Exact visible ship name (trimmed).
---     turretGroup     string  Raw turret group id.
+--     turretGroup     string  Named-group selector: raw turret group id.
+--                             Required for selectAll; when selectAll is false
+--                             it is mutually exclusive with singleTurretMacro.
+--     singleTurretMacro string Optional exact equipment macro of a production
+--                             kind="single" turret entry. Selects that one
+--                             turret; requires expectedTurrets = 1.
 --     turretLabel     string  Human-readable group label.
 --     expectedTurrets number  Exact operational-member count.
 --     expectedMemberMacros list Optional exact sorted member-macro multiset.

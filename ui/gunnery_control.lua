@@ -307,7 +307,8 @@ local function readGroups(ship)
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
-                    operationalCount = 0, members = {}, mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
+                    macro = componentData(component, "macro") or "", operationalCount = 0, members = {},
+                    mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
                     displayName = memberName(component, slot) }
                 groups[#groups + 1] = entry
             end

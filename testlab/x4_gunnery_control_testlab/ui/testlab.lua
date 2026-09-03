@@ -194,13 +194,47 @@ local function validateSpec(raw)
     local setup
     if raw.setup ~= nil then
         if type(raw.setup) ~= "table" then return nil, "spec.setup must be a table" end
-        for _, field in ipairs({ "shipMacro", "shipLabel", "turretGroup", "turretLabel" }) do
+        for _, field in ipairs({ "shipMacro", "shipLabel", "turretLabel" }) do
             if type(raw.setup[field]) ~= "string" or raw.setup[field] == "" then
                 return nil, "spec.setup." .. field .. " must be a non-empty string"
             end
         end
+        local singleTurretMacro
+        if raw.setup.singleTurretMacro ~= nil then
+            if type(raw.setup.singleTurretMacro) ~= "string" or raw.setup.singleTurretMacro == "" then
+                return nil, "spec.setup.singleTurretMacro must be a non-empty string"
+            end
+            singleTurretMacro = raw.setup.singleTurretMacro
+        end
+        local selectAll = raw.setup.selectAll == true
+        local turretGroup
+        if selectAll then
+            if type(raw.setup.turretGroup) ~= "string" or raw.setup.turretGroup == "" then
+                return nil, "spec.setup.turretGroup must be a non-empty string"
+            end
+            turretGroup = raw.setup.turretGroup
+        else
+            local namedGroup
+            if raw.setup.turretGroup ~= nil then
+                if type(raw.setup.turretGroup) ~= "string" or raw.setup.turretGroup == "" then
+                    return nil, "spec.setup.turretGroup must be a non-empty string"
+                end
+                namedGroup = raw.setup.turretGroup
+            end
+            if namedGroup and singleTurretMacro then
+                return nil, "spec.setup.turretGroup and spec.setup.singleTurretMacro are mutually exclusive"
+            end
+            if namedGroup then
+                turretGroup = namedGroup
+            elseif not singleTurretMacro then
+                return nil, "spec.setup needs either turretGroup or singleTurretMacro"
+            end
+        end
         if type(raw.setup.expectedTurrets) ~= "number" or raw.setup.expectedTurrets < 1 then
             return nil, "spec.setup.expectedTurrets must be a positive number"
+        end
+        if singleTurretMacro and not selectAll and raw.setup.expectedTurrets ~= 1 then
+            return nil, "spec.setup.singleTurretMacro requires expectedTurrets = 1"
         end
         local expectedMemberMacros = {}
         local rawExpectedMemberMacros = raw.setup.expectedMemberMacros
@@ -223,11 +257,12 @@ local function validateSpec(raw)
             remote = raw.setup.remote == true,
             shipMacro = raw.setup.shipMacro,
             shipLabel = raw.setup.shipLabel,
-            turretGroup = raw.setup.turretGroup,
+            turretGroup = turretGroup,
             turretLabel = raw.setup.turretLabel,
             expectedTurrets = math.floor(raw.setup.expectedTurrets),
             expectedMemberMacros = expectedMemberMacros,
-            selectAll = raw.setup.selectAll == true,
+            selectAll = selectAll,
+            singleTurretMacro = singleTurretMacro,
         }
     end
     local location
@@ -357,6 +392,23 @@ local function resolveExactGroup()
             end
         end
         if #selectedGroups == 0 then return nil, "no mutable turret groups" end
+    elseif setup.singleTurretMacro then
+        local matches = {}
+        for _, group in ipairs(ship.groups or {}) do
+            if group.kind == "single" and group.mutable == true
+                    and group.macro == setup.singleTurretMacro then
+                matches[#matches + 1] = group
+            end
+        end
+        if #matches == 0 then
+            return nil, "no mutable single turret with macro " .. setup.singleTurretMacro
+        end
+        if #matches > 1 then
+            return nil, #matches .. " mutable single turrets with macro " .. setup.singleTurretMacro
+                .. "; expected exactly one"
+        end
+        selected = matches[1]
+        selectedGroups[1] = selected
     else
         for _, group in ipairs(ship.groups or {}) do
             if trim(group.group) == setup.turretGroup then selected = group; break end
@@ -392,7 +444,7 @@ local function resolveExactGroup()
     table.sort(groupKeys)
     return {
         label = setup.turretLabel,
-        rawGroup = setup.turretGroup,
+        rawGroup = setup.turretGroup or "",
         memberIDs = table.concat(memberIDs, ","),
         memberMacros = table.concat(memberMacros, ","),
         shipID = tostring(ship.id),
