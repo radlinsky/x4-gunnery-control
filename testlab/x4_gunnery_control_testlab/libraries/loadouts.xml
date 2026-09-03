@@ -3,7 +3,7 @@
      entries from extensions, so the MD spawner can use the same static
      <loadout ref="..."/> route as shipped scenarios. -->
 <loadouts>
-  <loadout id="x4gc_testlab_issue67_colossus_arc_barrel" macro="ship_arg_xl_carrier_02_a_macro">
+  <loadout id="x4gc_testlab_arg_xl_carrier_02_beam_plasma" macro="ship_arg_xl_carrier_02_a_macro">
     <macros>
       <engine macro="engine_arg_xl_allround_01_mk1_macro" path="../con_engine_02"/>
       <engine macro="engine_arg_xl_allround_01_mk1_macro" path="../con_engine_01"/>
@@ -26,7 +26,7 @@
       <thruster macro="thruster_gen_xl_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
-  <loadout id="x4gc_testlab_issue67_paranid_sky_survey" macro="ship_par_l_destroyer_01_a_macro">
+  <loadout id="x4gc_testlab_par_l_destroyer_01_plasma" macro="ship_par_l_destroyer_01_a_macro">
     <macros>
       <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_02"/>
       <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_01"/>
@@ -47,7 +47,7 @@
       <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
-  <loadout id="x4gc_testlab_issue69_paranid_dual_family" macro="ship_par_l_destroyer_01_a_macro">
+  <loadout id="x4gc_testlab_par_l_destroyer_01_beam_plasma" macro="ship_par_l_destroyer_01_a_macro">
     <macros>
       <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_02"/>
       <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_01"/>
@@ -69,7 +69,7 @@
       <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
-  <loadout id="x4gc_testlab_issue67_argon_sky_target" macro="ship_arg_l_destroyer_02_a_macro">
+  <loadout id="x4gc_testlab_arg_l_destroyer_02_beam" macro="ship_arg_l_destroyer_02_a_macro">
     <macros>
       <engine macro="engine_arg_l_allround_01_mk1_macro" path="../con_engine_03"/>
       <engine macro="engine_arg_l_allround_01_mk1_macro" path="../con_engine_02"/>

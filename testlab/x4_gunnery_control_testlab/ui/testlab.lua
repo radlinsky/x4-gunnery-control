@@ -4,10 +4,6 @@ local State = X4GunneryTestLabState
 local menu = { name = "X4GunneryTestLab", uixID = "x4_gunnery_control_testlab" }
 local sweep, inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved, closing, suppressReopen = nil, nil, nil, 0, 0, nil, nil, nil, false, false
 local scenarioActionStatus, scenarioRequestSerial, pendingScenario, remoteScenarioReady = nil, 0, nil, false
--- Two-phase #67 surface geometry discriminator: after the OOS census the
--- fixture is geometry-PENDING; settled ship surfaces are measured in system
--- once the owner teleports aboard the preserved Paranid destroyer.
-local pendingQualify, remoteGeometryPending = nil, false
 local finishGroups, emitSummary, returnToGunnery
 
 local function text(id) return ReadText(20992, id) end
@@ -119,17 +115,19 @@ local function validateSpec(raw)
     if raw.enabled ~= true and raw.enabled ~= false then return nil, "spec.enabled must be true or false" end
     if type(raw.groups) ~= "table" then return nil, "spec.groups must be a list" end
     local groups = {}
-    local geometryCases = { arc_split = 0, positive_control = 0 }
     for index, group in ipairs(raw.groups) do
         local where = "groups[" .. index .. "]"
         if type(group) ~= "table" then return nil, where .. " is not a table" end
         if type(group.macro) ~= "string" or group.macro == "" then return nil, where .. ".macro must be a non-empty string" end
         if type(group.faction) ~= "string" or group.faction == "" then return nil, where .. ".faction must be a non-empty string" end
-        if type(group.count) ~= "number" or group.count < 1 then return nil, where .. ".count must be a positive number" end
-        -- Signed, like x and y: MD passes this straight to safepos as z, so a
-        -- negative value spawns the group astern. The old non-negative guard
-        -- rejected the whole spec whenever a group used that.
-        if type(group.distance) ~= "number" then return nil, where .. ".distance must be a number" end
+        if type(group.count) ~= "number" or group.count < 1 or group.count > 12
+                or group.count ~= math.floor(group.count) then
+            return nil, where .. ".count must be an integer from 1 to 12"
+        end
+        if type(group.distance) ~= "number" or group.distance ~= group.distance
+                or group.distance == math.huge or group.distance == -math.huge then
+            return nil, where .. ".distance must be a finite number"
+        end
         local behaviour = group.behaviour or "wait"
         if behaviour ~= "wait" and behaviour ~= "attack" and behaviour ~= "none" then
             return nil, where .. ".behaviour must be wait, attack or none"
@@ -138,202 +136,61 @@ local function validateSpec(raw)
         if role ~= "" and role ~= "shooter" then
             return nil, where .. ".role must be empty or shooter"
         end
-        local geometryRole = tostring(group.geometryRole or "")
-        local geometryCase = tostring(group.geometryCase or "")
-        if geometryRole ~= "" and geometryRole ~= "clear_arc" and geometryRole ~= "below_arc"
-                and geometryRole ~= "surface_mask" then
-            return nil, where .. ".geometryRole must be empty, clear_arc, below_arc, or surface_mask"
-        end
-        if geometryRole == "surface_mask" then
-            if geometryCase ~= "arc_split" and geometryCase ~= "positive_control" then
-                return nil, where .. ".geometryCase must be arc_split or positive_control for surface_mask"
-            end
-            geometryCases[geometryCase] = geometryCases[geometryCase] + 1
-        elseif geometryCase ~= "" then
-            return nil, where .. ".geometryCase is only valid for surface_mask"
-        end
-        local offset = {}
-        for _, field in ipairs({ "ox", "oy", "oz" }) do
-            local value = group[field]
-            if geometryRole == "surface_mask" then
-                if value == nil then
-                    return nil, where .. "." .. field .. " must be a finite number"
-                end
-            elseif value == nil then
-                value = 0
-            end
-            if type(value) ~= "number" or value ~= value
-                    or value == math.huge or value == -math.huge then
-                return nil, where .. "." .. field .. " must be a finite number"
-            end
-            offset[field] = value
-        end
-        if group.preserveOrientation ~= nil
-                and type(group.preserveOrientation) ~= "boolean" then
+        if group.preserveOrientation ~= nil and type(group.preserveOrientation) ~= "boolean" then
             return nil, where .. ".preserveOrientation must be a boolean"
         end
-        local orientation = {}
-        for _, field in ipairs({ "yaw", "pitch", "roll" }) do
+        local numbers = {}
+        for _, field in ipairs({ "spread", "x", "y", "yaw", "pitch", "roll" }) do
             local value = group[field]
             if value == nil then value = 0 end
             if type(value) ~= "number" or value ~= value
                     or value == math.huge or value == -math.huge then
                 return nil, where .. "." .. field .. " must be a finite number"
             end
-            orientation[field] = value
+            numbers[field] = value
         end
-        local expectedMissileTurrets = tonumber(group.expectedMissileTurrets) or 0
-        local expectedGuided = tonumber(group.expectedGuided) or 0
-        local expectedDumbfire = tonumber(group.expectedDumbfire) or 0
-        local expectedAmmo = tonumber(group.expectedAmmo) or 0
-        local expectedWeapons = tonumber(group.expectedWeapons) or 0
-        local expectedTurrets = tonumber(group.expectedTurrets) or 0
-        local expectedBeam = tonumber(group.expectedBeam) or 0
-        local expectedPlasma = tonumber(group.expectedPlasma) or 0
-        local geometryWeaponMacro = tostring(group.geometryWeaponMacro or "")
-        local expectedGeometryWeapons = tonumber(group.expectedGeometryWeapons) or 0
-        for field, value in pairs({ expectedWeapons = expectedWeapons,
-                expectedTurrets = expectedTurrets, expectedBeam = expectedBeam,
-                expectedPlasma = expectedPlasma,
-                expectedGeometryWeapons = expectedGeometryWeapons,
-                expectedMissileTurrets = expectedMissileTurrets,
-                expectedGuided = expectedGuided, expectedDumbfire = expectedDumbfire,
-                expectedAmmo = expectedAmmo }) do
-            if value < 0 or value ~= math.floor(value) then
-                return nil, where .. "." .. field .. " must be a non-negative integer"
+        local loadout = tostring(group.loadout or "")
+        local expected = { expectedWeapons = -1, expectedTurrets = -1, expectedMissileTurrets = -1 }
+        for field in pairs(expected) do
+            local value = group[field]
+            if loadout ~= "" then
+                if type(value) ~= "number" or value < 0 or value ~= math.floor(value) then
+                    return nil, where .. "." .. field .. " must be a non-negative integer when loadout is set"
+                end
+                expected[field] = value
+            elseif value ~= nil then
+                return nil, where .. "." .. field .. " requires loadout"
             end
         end
-        if role == "shooter" then
-            if group.loadout ~= "issue65_odysseus_mixed_missiles"
-                    and group.loadout ~= "issue67_colossus_arc_barrel"
-                    and group.loadout ~= "issue67_paranid_sky_survey"
-                    and group.loadout ~= "issue69_paranid_dual_family" then
-                return nil, where .. ".loadout is not a supported shooter loadout"
-            end
-            local missileCensus = expectedMissileTurrets > 0
-                and expectedGuided + expectedDumbfire == expectedMissileTurrets
-                and expectedAmmo > 0
-            -- issue67_colossus_arc_barrel arms the Colossus E group_front_left_up
-            -- (beam, 2 turrets) and group_front_right_up (plasma, 2 turrets) via a
-            -- static loadout. The census invariant (`.weapons` and `.turrets` both
-            -- count turret-mounted weapons => 4) and the exact mount are
-            -- live-verified on the Colossus E (r9 observed all four firing and
-            -- hitting A).
-            local conventionalCensus = expectedWeapons == 4 and expectedTurrets == 4
-                and expectedBeam == 2 and expectedPlasma == 2
-                and expectedMissileTurrets == 0 and expectedAmmo == 0
-            -- issue67_paranid_sky_survey arms one turret_par_l_plasma_01_mk1_macro
-            -- on the Paranid L destroyer group_front_up_mid2. The census invariant
-            -- (turret-mounted weapon counted in both `.weapons` and `.turrets` => 1)
-            -- is live-tested via the r16 sky-survey fixture.
-            local paranidSkyCensus = expectedWeapons == 1 and expectedTurrets == 1
-                and expectedBeam == 0 and expectedPlasma == 1
-                and expectedMissileTurrets == 0 and expectedAmmo == 0
-            local issue69DualCensus = expectedWeapons == 2 and expectedTurrets == 2
-                and expectedBeam == 1 and expectedPlasma == 1
-                and expectedMissileTurrets == 0 and expectedAmmo == 0
-            if (group.loadout == "issue65_odysseus_mixed_missiles" and not missileCensus)
-                    or (group.loadout == "issue67_colossus_arc_barrel" and not conventionalCensus)
-                    or (group.loadout == "issue67_paranid_sky_survey" and not paranidSkyCensus)
-                    or (group.loadout == "issue69_paranid_dual_family" and not issue69DualCensus) then
-                return nil, where .. " has an inconsistent shooter census"
-            end
-        elseif tostring(group.loadout or "") ~= "" then
-            if geometryRole ~= "surface_mask" or group.loadout ~= "issue67_argon_sky_target" then
-                return nil, where .. ".loadout is unsupported for a non-shooter group"
-            end
+        if role == "shooter" and loadout == "" then
+            return nil, where .. ".loadout must be set for role=shooter"
         end
         groups[#groups + 1] = {
             label = tostring(group.label or ("group" .. index)),
             macro = group.macro,
             faction = group.faction,
-            count = math.floor(group.count),
+            count = group.count,
             distance = group.distance,
-            spread = tonumber(group.spread) or 0,
-            x = tonumber(group.x) or 0,
-            y = tonumber(group.y) or 0,
-            ox = offset.ox,
-            oy = offset.oy,
-            oz = offset.oz,
+            spread = numbers.spread,
+            x = numbers.x,
+            y = numbers.y,
             behaviour = behaviour,
             hostile = group.hostile == true,
             holdFire = group.holdFire == true,
             stripDefenceUnits = group.stripDefenceUnits == true,
             repairGuard = group.repairGuard == true,
-            yaw = orientation.yaw,
-            pitch = orientation.pitch,
-            roll = orientation.roll,
+            yaw = numbers.yaw,
+            pitch = numbers.pitch,
+            roll = numbers.roll,
             preserveOrientation = group.preserveOrientation == true,
             role = role,
-            loadout = tostring(group.loadout or ""),
-            geometryRole = geometryRole,
-            geometryCase = geometryCase,
-            expectedWeapons = expectedWeapons,
-            expectedTurrets = expectedTurrets,
-            expectedBeam = expectedBeam,
-            expectedPlasma = expectedPlasma,
-            geometryWeaponMacro = geometryWeaponMacro,
-            expectedGeometryWeapons = expectedGeometryWeapons,
-            expectedMissileTurrets = expectedMissileTurrets,
-            expectedGuided = expectedGuided,
-            expectedDumbfire = expectedDumbfire,
-            expectedAmmo = expectedAmmo,
+            loadout = loadout,
+            expectedWeapons = expected.expectedWeapons,
+            expectedTurrets = expected.expectedTurrets,
+            expectedMissileTurrets = expected.expectedMissileTurrets,
         }
     end
-    if geometryCases.arc_split + geometryCases.positive_control > 0
-            and (geometryCases.arc_split ~= 1 or geometryCases.positive_control ~= 1) then
-        return nil, "surface_mask requires exactly one arc_split and one positive_control geometryCase"
-    end
-    local stations = {}
-    if raw.stations ~= nil and type(raw.stations) ~= "table" then
-        return nil, "spec.stations must be a list"
-    end
-    for index, station in ipairs(raw.stations or {}) do
-        local where = "stations[" .. index .. "]"
-        if type(station) ~= "table" then return nil, where .. " is not a table" end
-        if station.recipe ~= "xen_defence" then
-            return nil, where .. ".recipe must be xen_defence"
-        end
-        if type(station.faction) ~= "string" or station.faction == "" then
-            return nil, where .. ".faction must be a non-empty string"
-        end
-        if type(station.distance) ~= "number" then
-            return nil, where .. ".distance must be a number"
-        end
-        if type(station.expectedModules) ~= "number" or station.expectedModules < 1 then
-            return nil, where .. ".expectedModules must be a positive number"
-        end
-        if type(station.minSurfaces) ~= "number" or station.minSurfaces < 1 then
-            return nil, where .. ".minSurfaces must be a positive number"
-        end
-        local geometryRole = tostring(station.geometryRole or "")
-        if geometryRole ~= "" and geometryRole ~= "aim_split" then
-            return nil, where .. ".geometryRole must be empty or aim_split"
-        end
-        local searchAttempts = tonumber(station.searchAttempts) or 1
-        if searchAttempts < 1 or searchAttempts > 12 or searchAttempts ~= math.floor(searchAttempts) then
-            return nil, where .. ".searchAttempts must be an integer from 1 to 12"
-        end
-        stations[#stations + 1] = {
-            label = tostring(station.label or ("station" .. index)),
-            recipe = station.recipe,
-            faction = station.faction,
-            distance = station.distance,
-            spread = tonumber(station.spread) or 0,
-            x = tonumber(station.x) or 0,
-            y = tonumber(station.y) or 0,
-            hostile = station.hostile == true,
-            holdFire = station.holdFire == true,
-            geometryRole = geometryRole,
-            searchAttempts = searchAttempts,
-            searchStepY = tonumber(station.searchStepY) or 0,
-            expectedModules = math.floor(station.expectedModules),
-            minSurfaces = math.floor(station.minSurfaces),
-        }
-    end
-    if #groups == 0 and #stations == 0 then
-        return nil, "spec.groups is empty"
-    end
+    if #groups == 0 then return nil, "spec.groups is empty" end
     local setup
     if raw.setup ~= nil then
         if type(raw.setup) ~= "table" then return nil, "spec.setup must be a table" end
@@ -345,22 +202,22 @@ local function validateSpec(raw)
         if type(raw.setup.expectedTurrets) ~= "number" or raw.setup.expectedTurrets < 1 then
             return nil, "spec.setup.expectedTurrets must be a positive number"
         end
-        local expectedMacros = {}
-        local rawExpectedMacros = raw.setup.expectedMemberMacros or raw.setup.expectedMacros
-        if rawExpectedMacros ~= nil then
-            if type(rawExpectedMacros) ~= "table" then
+        local expectedMemberMacros = {}
+        local rawExpectedMemberMacros = raw.setup.expectedMemberMacros
+        if rawExpectedMemberMacros ~= nil then
+            if type(rawExpectedMemberMacros) ~= "table" then
                 return nil, "spec.setup.expectedMemberMacros must be a list"
             end
-            for index, macro in ipairs(rawExpectedMacros) do
+            for index, macro in ipairs(rawExpectedMemberMacros) do
                 if type(macro) ~= "string" or macro == "" then
                     return nil, "spec.setup.expectedMemberMacros[" .. index .. "] must be a non-empty string"
                 end
-                expectedMacros[#expectedMacros + 1] = macro
+                expectedMemberMacros[#expectedMemberMacros + 1] = macro
             end
-            if #expectedMacros ~= math.floor(raw.setup.expectedTurrets) then
+            if #expectedMemberMacros ~= math.floor(raw.setup.expectedTurrets) then
                 return nil, "spec.setup.expectedMemberMacros must match expectedTurrets"
             end
-            table.sort(expectedMacros)
+            table.sort(expectedMemberMacros)
         end
         setup = {
             remote = raw.setup.remote == true,
@@ -369,8 +226,7 @@ local function validateSpec(raw)
             turretGroup = raw.setup.turretGroup,
             turretLabel = raw.setup.turretLabel,
             expectedTurrets = math.floor(raw.setup.expectedTurrets),
-            expectedMacros = expectedMacros,
-            expectedMemberMacros = expectedMacros,
+            expectedMemberMacros = expectedMemberMacros,
             selectAll = raw.setup.selectAll == true,
         }
     end
@@ -394,7 +250,7 @@ local function validateSpec(raw)
         return nil, "remote setup requires spec.location"
     end
     return {
-        id = raw.id, enabled = raw.enabled, groups = groups, stations = stations,
+        id = raw.id, enabled = raw.enabled, groups = groups,
         setup = setup, location = location,
     }
 end
@@ -418,21 +274,8 @@ local function scenarioSpecLabel()
     return scenarioSpec.id .. (scenarioSpec.enabled and " (enabled)" or " (disabled)")
 end
 
--- Geometry that depends on live collision/aim data is deliberately qualified
--- only after teleport. A remote census therefore reports PENDING until one
--- in-system measurement identifies the exact component the timed run will use.
-local function specHasPendingGeometry()
-    for _, group in ipairs(scenarioSpec and scenarioSpec.groups or {}) do
-        if group.geometryRole == "surface_mask" then return true end
-    end
-    for _, station in ipairs(scenarioSpec and scenarioSpec.stations or {}) do
-        if station.geometryRole == "aim_split" then return true end
-    end
-    return false
-end
-
 -- A remote fixture's player ship is disposable only while the owner is not
--- aboard it.  Keep this identity check deliberately narrower than
+-- aboard it. Keep this identity check deliberately narrower than
 -- resolveExactGroup(): damaged/missing turrets must not make an occupied
 -- spawned ship suddenly safe to destroy.
 local function occupiedRemoteShooter()
@@ -474,41 +317,21 @@ local function sendScenarioSpec(force, requestId)
         AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group", {
             label = group.label, macro = group.macro, faction = group.faction,
             count = group.count, distance = group.distance, spread = group.spread,
-            x = group.x, y = group.y, ox = group.ox, oy = group.oy, oz = group.oz,
+            x = group.x, y = group.y,
             behaviour = group.behaviour, hostile = group.hostile,
             holdFire = group.holdFire, stripDefenceUnits = group.stripDefenceUnits,
             repairGuard = group.repairGuard,
             yaw = group.yaw, pitch = group.pitch, roll = group.roll,
             preserveOrientation = group.preserveOrientation,
             role = group.role, loadout = group.loadout,
-            geometryRole = group.geometryRole,
-            geometryCase = group.geometryCase,
             expectedWeapons = group.expectedWeapons,
             expectedTurrets = group.expectedTurrets,
-            expectedBeam = group.expectedBeam,
-            expectedPlasma = group.expectedPlasma,
-            geometryWeaponMacro = group.geometryWeaponMacro,
-            expectedGeometryWeapons = group.expectedGeometryWeapons,
             expectedMissileTurrets = group.expectedMissileTurrets,
-            expectedGuided = group.expectedGuided,
-            expectedDumbfire = group.expectedDumbfire,
-            expectedAmmo = group.expectedAmmo,
-        })
-    end
-    for _, station in ipairs(scenarioSpec.stations) do
-        AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_station", {
-            label = station.label, recipe = station.recipe, faction = station.faction,
-            distance = station.distance, spread = station.spread,
-            x = station.x, y = station.y, hostile = station.hostile,
-            holdFire = station.holdFire, geometryRole = station.geometryRole,
-            searchAttempts = station.searchAttempts, searchStepY = station.searchStepY,
-            expectedModules = station.expectedModules, minSurfaces = station.minSurfaces,
         })
     end
     AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_commit")
     log("scenario_spec", { action = "sent", spec_id = scenarioSpec.id,
-        groups = #scenarioSpec.groups, stations = #scenarioSpec.stations,
-        forced = tostring(force == true) })
+        groups = #scenarioSpec.groups, forced = tostring(force == true) })
     return true
 end
 
@@ -560,9 +383,9 @@ local function resolveExactGroup()
             .. " operational turrets, found " .. #memberIDs
     end
     table.sort(memberMacros)
-    if #setup.expectedMacros > 0
-            and table.concat(memberMacros, ",") ~= table.concat(setup.expectedMacros, ",") then
-        return nil, setup.turretLabel .. " needs macros " .. table.concat(setup.expectedMacros, ",")
+    if #setup.expectedMemberMacros > 0
+            and table.concat(memberMacros, ",") ~= table.concat(setup.expectedMemberMacros, ",") then
+        return nil, setup.turretLabel .. " needs macros " .. table.concat(setup.expectedMemberMacros, ",")
             .. ", found " .. table.concat(memberMacros, ",")
     end
     table.sort(memberIDs)
@@ -609,7 +432,6 @@ local function createTestScenario()
     local remote = scenarioSpec.setup and scenarioSpec.setup.remote == true
     local selection, reason
     if remote then
-        selection = resolveExactGroup()
         local occupiedShooterID = occupiedRemoteShooter()
         if remoteScenarioReady or occupiedShooterID then
             scenarioActionStatus = "BLOCKED: remote fixture already exists; do not Create again. "
@@ -621,9 +443,7 @@ local function createTestScenario()
             menu.display()
             return
         end
-        selection = nil
-    end
-    if not remote then
+    else
         selection, reason = resolveExactGroup()
         if not selection then
             scenarioActionStatus = "FAILED: " .. reason
@@ -632,47 +452,29 @@ local function createTestScenario()
             return
         end
     end
+
     local expectedShips, expectedHostiles, expectedRepairFixtures = 0, 0, 0
-    local expectedShooters, expectedMissileTurrets, expectedGuided = 0, 0, 0
-    local expectedDumbfire, expectedAmmo = 0, 0
-    local expectedWeapons, expectedTurrets, expectedBeam, expectedPlasma = 0, 0, 0, 0
-    local expectedGeometrySplits = 0
+    local expectedSafeFixtures, expectedShooters = 0, 0
+    local expectedWeapons, expectedTurrets, expectedMissileTurrets = 0, 0, 0
     for _, group in ipairs(scenarioSpec.groups) do
         expectedShips = expectedShips + group.count
         if group.hostile then expectedHostiles = expectedHostiles + group.count end
         if group.repairGuard then expectedRepairFixtures = expectedRepairFixtures + group.count end
-        if group.role == "shooter" then expectedShooters = expectedShooters + group.count end
-        expectedWeapons = expectedWeapons + group.expectedWeapons * group.count
-        expectedTurrets = expectedTurrets + group.expectedTurrets * group.count
-        expectedBeam = expectedBeam + group.expectedBeam * group.count
-        expectedPlasma = expectedPlasma + group.expectedPlasma * group.count
-        expectedMissileTurrets = expectedMissileTurrets + group.expectedMissileTurrets * group.count
-        expectedGuided = expectedGuided + group.expectedGuided * group.count
-        expectedDumbfire = expectedDumbfire + group.expectedDumbfire * group.count
-        expectedAmmo = expectedAmmo + group.expectedAmmo * group.count
-    end
-    local expectedStations, expectedModules, minSurfaces, expectedSafeFixtures = #scenarioSpec.stations, 0, 0, 0
-    for _, group in ipairs(scenarioSpec.groups) do
         if group.holdFire then expectedSafeFixtures = expectedSafeFixtures + group.count end
+        if group.role == "shooter" then
+            expectedShooters = expectedShooters + group.count
+            expectedWeapons = expectedWeapons + group.expectedWeapons * group.count
+            expectedTurrets = expectedTurrets + group.expectedTurrets * group.count
+            expectedMissileTurrets = expectedMissileTurrets + group.expectedMissileTurrets * group.count
+        end
     end
-    for _, station in ipairs(scenarioSpec.stations) do
-        expectedModules = expectedModules + station.expectedModules
-        minSurfaces = minSurfaces + station.minSurfaces
-        if station.hostile then expectedHostiles = expectedHostiles + 1 end
-        if station.holdFire then expectedSafeFixtures = expectedSafeFixtures + 1 end
-        -- An aim_split station produces NO out-of-system split: it is preserved at
-        -- attempt-0 and the split is re-measured in system by GeometryQualify, so
-        -- the OOS acknowledgement must still expect zero splits.
-    end
+
     scenarioRequestSerial = scenarioRequestSerial + 1
     local requestId = clockToken(GetCurRealTime()) .. "_" .. tostring(scenarioRequestSerial)
     pendingScenario = {
         requestId = requestId,
         specId = scenarioSpec.id,
         expectedShips = expectedShips,
-        expectedStations = expectedStations,
-        expectedModules = expectedModules,
-        minSurfaces = minSurfaces,
         expectedSafeFixtures = expectedSafeFixtures,
         expectedRepairFixtures = expectedRepairFixtures,
         expectedDefenceUnits = 0,
@@ -680,27 +482,18 @@ local function createTestScenario()
         expectedShooters = expectedShooters,
         expectedWeapons = expectedWeapons,
         expectedTurrets = expectedTurrets,
-        expectedBeam = expectedBeam,
-        expectedPlasma = expectedPlasma,
         expectedMissileTurrets = expectedMissileTurrets,
-        expectedGuided = expectedGuided,
-        expectedDumbfire = expectedDumbfire,
-        expectedAmmo = expectedAmmo,
-        expectedLocationFailures = 0,
         expectedLoadoutFailures = 0,
-        expectedPreflightFailures = 0,
-        expectedGeometrySplits = expectedGeometrySplits,
-        deadline = getElapsedTime() + (expectedStations > 0 and 60 or 10),
+        expectedLocationFailures = 0,
+        deadline = getElapsedTime() + 10,
         selection = selection,
         remote = remote,
     }
     scenarioActionStatus = "CREATING: replacing the previous fixture and verifying "
-        .. expectedShips .. " ships, " .. expectedStations .. " stations, and live surfaces..."
+        .. expectedShips .. " ships..."
     sendScenarioSpec(true, requestId)
     log("scenario_create", {
         action = "requested", spec_id = scenarioSpec.id, expected_ships = expectedShips,
-        expected_stations = expectedStations, expected_modules = expectedModules,
-        min_surfaces = minSurfaces,
         request_id = requestId, load_time = scenarioLoadTime,
         group = selection and selection.rawGroup or "deferred_remote",
         member_ids = selection and selection.memberIDs or "deferred_remote",
@@ -731,98 +524,27 @@ local function despawnTestScenario()
 end
 
 local function onScenarioReady(_, param)
-    local value = tostring(param or "")
-    local requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures,
-        shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures,
-        shooterWeapons, shooterTurrets, shooterBeam, shooterPlasma,
-        preflightFailures, geometrySplits =
-        value:match("^x4gct8:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-    if not requestId then
-        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures,
-            shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
-            value:match("^x4gct7:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-        shooterWeapons, shooterTurrets, shooterBeam, shooterPlasma,
-            preflightFailures, geometrySplits = "0", "0", "0", "0", "0", "0"
-    end
-    if not requestId then
-        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures =
-            value:match("^x4gct6:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-        shooters, shooterMissileTurrets, guided, dumbfire, ammo, loadoutFailures, locationFailures =
-            "0", "0", "0", "0", "0", "0", "0"
-        shooterWeapons, shooterTurrets, shooterBeam, shooterPlasma,
-            preflightFailures, geometrySplits = "0", "0", "0", "0", "0", "0"
-    end
-    if not requestId then
-        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles =
-            value:match("^x4gct5:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-        repairFixtures = tostring(pendingScenario and pendingScenario.expectedRepairFixtures or 0)
-    end
-    if not requestId then
-        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-            safeFixtures, safeWeapons, unsafeWeapons, defenceUnits =
-        value:match("^x4gct4:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-        hostiles = tostring(pendingScenario and pendingScenario.expectedHostiles or 0)
-        repairFixtures = tostring(pendingScenario and pendingScenario.expectedRepairFixtures or 0)
-    end
-    if not requestId then
-        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines,
-            safeFixtures, safeWeapons, unsafeWeapons =
-        value:match("^x4gct3:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-        defenceUnits, hostiles = "0", tostring(pendingScenario and pendingScenario.expectedHostiles or 0)
-        repairFixtures = tostring(pendingScenario and pendingScenario.expectedRepairFixtures or 0)
-    end
-    if not requestId then
-        requestId, specId, spawned, stations, modules, turrets, missileTurrets, shields, engines =
-            value:match("^x4gct2:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures = "0", "0", "0", "0", "0", "0"
-    end
-    if not requestId then
-        requestId, specId, spawned = value:match("^x4gct1:([^:]+):([^:]+):(%d+)$")
-        stations, modules, turrets, missileTurrets, shields, engines = "0", "0", "0", "0", "0", "0"
-        safeFixtures, safeWeapons, unsafeWeapons, defenceUnits, hostiles, repairFixtures = "0", "0", "0", "0", "0", "0"
-    end
-    if not pendingScenario or requestId ~= pendingScenario.requestId
+    local requestId, specId, spawned, safeFixtures, safeWeapons, unsafeWeapons,
+        defenceUnits, hostiles, repairFixtures, shooters, shooterWeapons,
+        shooterTurrets, shooterMissileTurrets, loadoutFailures, locationFailures =
+        tostring(param or ""):match(
+            "^x4gct9:([^:]+):([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
+    if not requestId or not pendingScenario or requestId ~= pendingScenario.requestId
             or specId ~= pendingScenario.specId then return end
-    spawned, stations, modules = tonumber(spawned), tonumber(stations), tonumber(modules)
-    turrets, missileTurrets = tonumber(turrets), tonumber(missileTurrets)
-    shields, engines = tonumber(shields), tonumber(engines)
+    spawned = tonumber(spawned)
     safeFixtures, safeWeapons, unsafeWeapons = tonumber(safeFixtures), tonumber(safeWeapons), tonumber(unsafeWeapons)
-    defenceUnits = tonumber(defenceUnits)
-    hostiles = tonumber(hostiles)
-    repairFixtures = tonumber(repairFixtures)
-    shooters, shooterMissileTurrets = tonumber(shooters), tonumber(shooterMissileTurrets)
-    guided, dumbfire, ammo = tonumber(guided), tonumber(dumbfire), tonumber(ammo)
+    defenceUnits, hostiles, repairFixtures = tonumber(defenceUnits), tonumber(hostiles), tonumber(repairFixtures)
+    shooters, shooterWeapons, shooterTurrets = tonumber(shooters), tonumber(shooterWeapons), tonumber(shooterTurrets)
+    shooterMissileTurrets = tonumber(shooterMissileTurrets)
     loadoutFailures, locationFailures = tonumber(loadoutFailures), tonumber(locationFailures)
-    shooterWeapons, shooterTurrets = tonumber(shooterWeapons), tonumber(shooterTurrets)
-    shooterBeam, shooterPlasma = tonumber(shooterBeam), tonumber(shooterPlasma)
-    preflightFailures, geometrySplits = tonumber(preflightFailures), tonumber(geometrySplits)
-    local surfaces = modules + turrets + missileTurrets + shields + engines
     local request = pendingScenario
     pendingScenario = nil
+
     if spawned ~= request.expectedShips then
         scenarioActionStatus = "FAILED: created " .. tostring(spawned) .. " of "
             .. tostring(request.expectedShips) .. " ships; inspect debug.log"
         log("scenario_create", { action = "failed", request_id = request.requestId,
             expected_ships = request.expectedShips, spawned_ships = spawned })
-        menu.display()
-        return
-    end
-    if stations ~= request.expectedStations or modules ~= request.expectedModules
-            or surfaces < request.minSurfaces then
-        scenarioActionStatus = "FAILED: station census was " .. stations .. " stations, "
-            .. modules .. " modules, " .. surfaces .. " operational surfaces; expected "
-            .. request.expectedStations .. "/" .. request.expectedModules .. "/at least "
-            .. request.minSurfaces .. "; inspect debug.log"
-        log("scenario_create", { action = "failed", request_id = request.requestId,
-            expected_stations = request.expectedStations, spawned_stations = stations,
-            expected_modules = request.expectedModules, spawned_modules = modules,
-            min_surfaces = request.minSurfaces, operational_surfaces = surfaces,
-            turrets = turrets, missile_turrets = missileTurrets, shields = shields,
-            engines = engines })
         menu.display()
         return
     end
@@ -857,41 +579,21 @@ local function onScenarioReady(_, param)
         return
     end
     if shooters ~= request.expectedShooters
-            or shooterWeapons ~= request.expectedWeapons or shooterTurrets ~= request.expectedTurrets
-            or shooterBeam ~= request.expectedBeam or shooterPlasma ~= request.expectedPlasma
+            or shooterWeapons ~= request.expectedWeapons
+            or shooterTurrets ~= request.expectedTurrets
             or shooterMissileTurrets ~= request.expectedMissileTurrets
-            or guided ~= request.expectedGuided or dumbfire ~= request.expectedDumbfire
-            or ammo ~= request.expectedAmmo or loadoutFailures ~= request.expectedLoadoutFailures then
-        scenarioActionStatus = "FAILED: shooter census was " .. shooters .. " ships, "
-            .. shooterWeapons .. " weapons/" .. shooterTurrets .. " ordinary turrets ("
-            .. shooterBeam .. " beam/" .. shooterPlasma .. " plasma), "
-            .. shooterMissileTurrets .. " missile turrets (" .. guided .. " guided/"
-            .. dumbfire .. " dumbfire), " .. ammo .. " missiles, and "
-            .. loadoutFailures .. " loadout failures; inspect debug.log"
+            or loadoutFailures ~= request.expectedLoadoutFailures then
+        scenarioActionStatus = "FAILED: shooter/loadout census was " .. shooters .. " shooters, "
+            .. shooterWeapons .. " weapons, " .. shooterTurrets .. " ordinary turrets, "
+            .. shooterMissileTurrets .. " missile turrets, and " .. loadoutFailures
+            .. " loadout failures; inspect debug.log"
         log("scenario_create", { action = "failed", request_id = request.requestId,
             expected_shooters = request.expectedShooters, shooters = shooters,
             expected_weapons = request.expectedWeapons, weapons = shooterWeapons,
             expected_turrets = request.expectedTurrets, ordinary_turrets = shooterTurrets,
-            expected_beam = request.expectedBeam, beam = shooterBeam,
-            expected_plasma = request.expectedPlasma, plasma = shooterPlasma,
             expected_missile_turrets = request.expectedMissileTurrets,
             shooter_missile_turrets = shooterMissileTurrets,
-            expected_guided = request.expectedGuided, guided = guided,
-            expected_dumbfire = request.expectedDumbfire, dumbfire = dumbfire,
-            expected_ammo = request.expectedAmmo, ammo = ammo,
             loadout_failures = loadoutFailures })
-        menu.display()
-        return
-    end
-    if preflightFailures ~= request.expectedPreflightFailures
-            or geometrySplits ~= request.expectedGeometrySplits then
-        scenarioActionStatus = "FAILED: geometry preflight found " .. geometrySplits
-            .. " discriminating station targets and " .. preflightFailures
-            .. " failed controls; expected " .. request.expectedGeometrySplits
-            .. "/0; inspect debug.log"
-        log("scenario_create", { action = "failed", request_id = request.requestId,
-            expected_geometry_splits = request.expectedGeometrySplits,
-            geometry_splits = geometrySplits, preflight_failures = preflightFailures })
         menu.display()
         return
     end
@@ -904,37 +606,21 @@ local function onScenarioReady(_, param)
         menu.display()
         return
     end
+
     if request.remote then
         remoteScenarioReady = true
-        remoteGeometryPending = specHasPendingGeometry()
-        if remoteGeometryPending then
-            scenarioActionStatus = "PENDING: remote ship census verified; surface geometry is NOT qualified; teleport to "
-                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once — it independently scans the two settled "
-                .. "Argon targets for the authored arc-split and positive-control Beam surfaces"
-            log("scenario_create", { action = "remote_geometry_pending", request_id = request.requestId,
-                spawned_ships = spawned, spawned_stations = stations, spawned_modules = modules,
-                operational_surfaces = surfaces, turrets = turrets,
-                missile_turrets = missileTurrets, shields = shields, engines = engines,
-                shooters = shooters,
-                weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
-                beam = shooterBeam, plasma = shooterPlasma,
-                geometry_splits = geometrySplits, preflight_failures = preflightFailures,
-                location_failures = locationFailures })
-        else
-            scenarioActionStatus = "READY: remote fixture verified; teleport to "
-                .. scenarioSpec.setup.shipLabel .. " and open Test Lab once to arm "
-                .. scenarioSpec.setup.turretLabel
-            log("scenario_create", { action = "remote_ready", request_id = request.requestId,
-                spawned_ships = spawned, shooters = shooters,
-                weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
-                beam = shooterBeam, plasma = shooterPlasma,
-                missile_turrets = shooterMissileTurrets, guided = guided,
-                dumbfire = dumbfire, ammo = ammo, geometry_splits = geometrySplits,
-                preflight_failures = preflightFailures, location_failures = locationFailures })
-        end
+        scenarioActionStatus = "READY: remote fixture verified; teleport to "
+            .. scenarioSpec.setup.shipLabel .. " and open Test Lab once to arm "
+            .. scenarioSpec.setup.turretLabel
+        log("scenario_create", { action = "remote_ready", request_id = request.requestId,
+            spawned_ships = spawned, shooters = shooters,
+            weapons = shooterWeapons, ordinary_turrets = shooterTurrets,
+            missile_turrets = shooterMissileTurrets,
+            location_failures = locationFailures })
         returnToGunnery("remote_scenario_ready")
         return
     end
+
     local selection, reason = resolveExactGroup()
     if not selection or selection.shipID ~= request.selection.shipID
             or selection.groupKey ~= request.selection.groupKey
@@ -946,141 +632,18 @@ local function onScenarioReady(_, param)
         return
     end
     applyExactGroup(selection)
-    scenarioActionStatus = "READY: " .. spawned .. " named ships, " .. stations
-        .. " named stations, and " .. surfaces .. " operational surfaces; only "
+    scenarioActionStatus = "READY: " .. spawned .. " named ships; only "
         .. selection.label .. " ticked"
     log("scenario_create", {
-        action = "ready", request_id = request.requestId, spawned_ships = spawned, group = selection.rawGroup,
-        spawned_stations = stations, spawned_modules = modules,
-        operational_surfaces = surfaces, turrets = turrets,
-        missile_turrets = missileTurrets, shields = shields, engines = engines,
-        safe_fixtures = safeFixtures, safe_weapons = safeWeapons, unsafe_weapons = unsafeWeapons,
-        defence_units = defenceUnits,
-        hostiles = hostiles,
-        repair_fixtures = repairFixtures,
-        member_ids = selection.memberIDs,
+        action = "ready", request_id = request.requestId, spawned_ships = spawned,
+        group = selection.rawGroup, safe_fixtures = safeFixtures,
+        safe_weapons = safeWeapons, unsafe_weapons = unsafeWeapons,
+        defence_units = defenceUnits, hostiles = hostiles,
+        repair_fixtures = repairFixtures, member_ids = selection.memberIDs,
     })
-    -- An engaged session parked before scenario replacement still names the
-    -- fixture MD just destroyed. Arm the listeners, but suppress that exact
-    -- stale id until Gunnery selects a different live target; otherwise the
-    -- synchronous first state push snapshots an invalid component.
     local currentSession = api() and api().getSession and api().getSession()
     setObserving(true, currentSession and currentSession.aimTargetID)
     returnToGunnery("scenario_ready")
-end
-
--- MD sends the exact qualifying component as a component-valued event before
--- the packed terminal census. Keeping the component typed avoids parsing the
--- engine's platform-dependent UniverseID string form.
--- MD first sends a correlated string token, then the component-valued target.
--- Keep the component typed and accept it only once for the exact pending token;
--- stale target events cannot otherwise be correlated by their opaque ID.
-local function onGeometryQualifiedTargetToken(_, token)
-    if not pendingQualify or tostring(token or "") ~= pendingQualify.requestId then return end
-    pendingQualify.targetTokenAuthorized = true
-end
-
-local function onGeometryQualifiedTarget(_, component)
-    if not pendingQualify or not pendingQualify.targetTokenAuthorized or component == nil then return end
-    pendingQualify.targetTokenAuthorized = nil
-    pendingQualify.designatedComponent = component
-end
-
--- Phase-two acknowledgement for the #67 direct ship-surface sky-survey
--- discriminator. Qualify only when the exact Plasma census and both authored
--- Argon L Beam roles independently reproduce: one upper-limit arc split and
--- one fully inside positive control, each separated, in range, and legally
--- attackable. LOS is telemetry, not a candidate gate. Test Lab marks the arc
--- split surface
--- in Gunnery, but the owner performs the Direct-control, target-ship, and
--- exact-surface clicks being tested.
-local function onGeometryQualified(_, param)
-    local token, qualified, targetCount, surfaceCount, measured, surfacePairs,
-        originOutsidePairs, aimInsidePairs, arcSplitPairs, arcCandidatePairs,
-        selectedSurfaceMembers, positiveControlMembers =
-        tostring(param or ""):match("^x4gcq9:([^:]+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+):(%d+)$")
-    if not token or not pendingQualify or token ~= pendingQualify.requestId then return end
-    local request = pendingQualify
-    pendingQualify = nil
-    request.targetTokenAuthorized = nil
-    qualified, targetCount, surfaceCount = tonumber(qualified), tonumber(targetCount), tonumber(surfaceCount)
-    measured, surfacePairs = tonumber(measured), tonumber(surfacePairs)
-    originOutsidePairs, aimInsidePairs = tonumber(originOutsidePairs), tonumber(aimInsidePairs)
-    arcSplitPairs, arcCandidatePairs = tonumber(arcSplitPairs), tonumber(arcCandidatePairs)
-    selectedSurfaceMembers = tonumber(selectedSurfaceMembers)
-    positiveControlMembers = tonumber(positiveControlMembers)
-    if qualified == 1 and targetCount == 2 and surfaceCount > 0
-            and request.expectedGeometryWeapons == 1 and measured == 1
-            and measured == request.expectedGeometryWeapons and arcCandidatePairs >= 1
-            and selectedSurfaceMembers == 1 and positiveControlMembers == 1
-            and request.designatedComponent ~= nil then
-        applyExactGroup(request.selection)
-        local bridge = api()
-        local marked = bridge and bridge.suggestTestEngagement
-            and bridge.suggestTestEngagement(request.designatedComponent, function(selected)
-                if not selected then return end
-                scenarioActionStatus = "RUNNING: owner manually designated exact qualified Argon L Beam surface "
-                    .. tostring(request.designatedComponent) .. "; observation armed"
-                log("geometry_qualify", { action = "operator_designated",
-                    request_id = request.requestId,
-                    designated_target = "ship_surface",
-                    designated_component = request.designatedComponent,
-                    direct_mode = "manual", ship_id = request.selection.shipID,
-                    group = request.selection.rawGroup,
-                    member_ids = request.selection.memberIDs,
-                    member_macros = request.selection.memberMacros })
-                setObserving(true)
-            end)
-        if not marked then
-            scenarioActionStatus = "FAILED: exact Argon L Beam surface qualified but could not be marked for manual selection; diagnostic not started"
-            log("geometry_qualify", { action = "failed", request_id = request.requestId,
-                reason = "manual_component_mark_failed",
-                designated_target = "ship_surface",
-                designated_component = request.designatedComponent,
-                arc_candidate_pairs = arcCandidatePairs,
-                selected_surface_members = selectedSurfaceMembers })
-            menu.display()
-            return
-        end
-        remoteScenarioReady = false
-        remoteGeometryPending = false
-        scenarioActionStatus = "QUALIFIED GEOMETRY: use Direct control and manually click the [TEST TARGET] ship, then its [TEST TARGET] surface"
-        log("geometry_qualify", { action = "qualified", request_id = request.requestId,
-            targets = targetCount, surfaces = surfaceCount,
-            measured = measured, surface_pairs = surfacePairs,
-            origin_outside_pairs = originOutsidePairs,
-            aim_inside_pairs = aimInsidePairs,
-            arc_split_pairs = arcSplitPairs,
-            arc_candidate_pairs = arcCandidatePairs,
-            selected_surface_members = selectedSurfaceMembers,
-            positive_control_members = positiveControlMembers,
-            designated_target = "ship_surface",
-            designated_component = request.designatedComponent,
-            designation = "manual_pending",
-            direct_mode = "manual_pending", ship_id = request.selection.shipID,
-            group = request.selection.rawGroup, member_ids = request.selection.memberIDs,
-            member_macros = request.selection.memberMacros })
-        returnToGunnery("geometry_qualified")
-    else
-        scenarioActionStatus = "FAILED: settled Argon sky-survey scan did not independently qualify both exact Beam roles across "
-            .. targetCount .. " targets and " .. surfaceCount .. " operational surfaces"
-            .. " (origin-outside/aim-inside/arc-split/arc-candidate pairs="
-            .. originOutsidePairs .. "/" .. aimInsidePairs .. "/" .. arcSplitPairs .. "/"
-            .. arcCandidatePairs .. ", " .. surfacePairs .. " surface pairs, "
-            .. selectedSurfaceMembers .. " selected members); diagnostic not started"
-        log("geometry_qualify", { action = "failed", request_id = request.requestId,
-            targets = targetCount, surfaces = surfaceCount,
-            measured = measured, surface_pairs = surfacePairs,
-            origin_outside_pairs = originOutsidePairs,
-            aim_inside_pairs = aimInsidePairs,
-            arc_split_pairs = arcSplitPairs,
-            arc_candidate_pairs = arcCandidatePairs,
-            selected_surface_members = selectedSurfaceMembers,
-            positive_control_members = positiveControlMembers,
-            designated_target = "ship_surface",
-            designated_component = request.designatedComponent or "none" })
-        menu.display()
-    end
 end
 
 local function shipFields(item)
@@ -1178,45 +741,9 @@ end
 
 function menu.onShowMenu()
     closing, suppressReopen = false, false
-    -- Reload UI intentionally wipes this file's remoteScenarioReady latch but
-    -- leaves both the spawned objects and MD's exact candidate groups alive.
-    -- Recover only while seated in the uniquely named/macro-matched shooter;
-    -- GeometryQualify still fail-closes on the MD-side exact target census.
-    if not remoteScenarioReady and scenarioSpec and scenarioSpec.setup
-            and scenarioSpec.setup.remote and specHasPendingGeometry()
-            and occupiedRemoteShooter() then
-        remoteScenarioReady, remoteGeometryPending = true, true
-        log("scenario_create", { action = "recovered_geometry_pending_after_ui_reload",
-            spec_id = scenarioSpec.id })
-    end
-    if pendingQualify then
-        -- The in-system surface discriminator is still running; keep the menu
-        -- up and wait for GeometryQualify rather than re-issuing it.
-        menu.display()
-        return
-    end
     if remoteScenarioReady then
         local selection, reason = resolveExactGroup()
         if selection then
-            if remoteGeometryPending then
-                -- Phase two: the exact Plasma group is verified, so scan the
-                -- two settled Argon Beam surfaces in system. Do NOT arm or return
-                -- until both authored sky-survey roles qualify independently.
-                scenarioRequestSerial = scenarioRequestSerial + 1
-                local token = clockToken(GetCurRealTime()) .. "_q" .. tostring(scenarioRequestSerial)
-                pendingQualify = { requestId = token, selection = selection,
-                    expectedGeometryWeapons = scenarioSpec.groups[1].expectedGeometryWeapons,
-                    deadline = getElapsedTime() + 30 }
-                AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
-                    { requestId = token })
-                scenarioActionStatus = "QUALIFYING: scanning the two settled Argon Beam surfaces for arc-split and positive-control roles with "
-                    .. selection.label .. " (" .. selection.memberIDs .. ")"
-                log("geometry_qualify", { action = "requested", request_id = token,
-                    ship_id = selection.shipID, group = selection.rawGroup,
-                    member_ids = selection.memberIDs, member_macros = selection.memberMacros })
-                menu.display()
-                return
-            end
             applyExactGroup(selection)
             remoteScenarioReady = false
             scenarioActionStatus = "ARMED: " .. selection.label
@@ -1359,14 +886,6 @@ function menu.onUpdate()
         menu.display()
         return
     end
-    if pendingQualify and now >= pendingQualify.deadline then
-        local request = pendingQualify
-        pendingQualify = nil
-        scenarioActionStatus = "FAILED: no in-system geometry acknowledgement; inspect debug.log"
-        log("geometry_qualify", { action = "timeout", request_id = request.requestId })
-        menu.display()
-        return
-    end
     if not sweep or sweep.phase ~= "inspecting" then return end
     local item = State.current(sweep)
     if not item then return end
@@ -1418,9 +937,6 @@ local function init()
     end
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
-    RegisterEvent("X4GunneryTestLab.GeometryQualifiedTargetToken", onGeometryQualifiedTargetToken)
-    RegisterEvent("X4GunneryTestLab.GeometryQualifiedTarget", onGeometryQualifiedTarget)
-    RegisterEvent("X4GunneryTestLab.GeometryQualified", onGeometryQualified)
     if api() then
         api().registerTestLab({ open = function()
             local main = Helper.getMenu("X4GunneryMenu")

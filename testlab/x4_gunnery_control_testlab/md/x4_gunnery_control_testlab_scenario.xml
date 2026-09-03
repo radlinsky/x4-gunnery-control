@@ -1,114 +1,20 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Gunnery Control Test Lab - Live Scenario Spawner
-  Developer-only.  Belongs in testlab, NOT in the shipped mod.
+<!-- Developer-only Test Lab scenario spawner.
 
-  Spawns the fixture described by testlab/x4_gunnery_control_testlab/ui/
-  scenario_spec.lua. The directing agent edits and installs that spec; the
-  owner presses Create test scenario after Lua preflights the exact ship and
-  turret group. MD acknowledges the actual spawned count before Test Lab
-  returns control.
+  Lua streams one flat transaction because nested Lua tables are not a proven
+  UI-to-MD transport:
+    scenario_begin  {specId, force, requestId, sectorMacro, anchorX/Y/Z}
+    scenario_group  {label, macro, faction, count, distance, spread, x/y,
+                     behaviour, hostile, holdFire, stripDefenceUnits, repairGuard,
+                     yaw/pitch/roll, preserveOrientation, role, loadout,
+                     expectedWeapons, expectedTurrets, expectedMissileTurrets}
+    scenario_commit
 
-  TRANSPORT
-  Lua cannot hand MD a nested table safely: the only live-tested Lua->MD payload
-  shape is a FLAT table of scalar keys, where the engine prepends '$' to every
-  Lua string key (research KB, "Lua->MD AddUITriggeredEvent transport contract",
-  live-tested 2026-08-04).  A multi-group spec is therefore streamed as a
-  sequence of flat events rather than one nested payload:
-
-    scenario_begin  {specId=, force=, requestId=, sectorMacro=,
-                     anchorX=, anchorY=, anchorZ=}
-    scenario_group  {macro=, faction=, count=, distance=, spread=,
-                     behaviour="wait"|"attack"|"none", hostile=true|false,
-                     label=, ox=, oy=, oz=, holdFire=, stripDefenceUnits=,
-                     repairGuard=, yaw=, pitch=, roll=, preserveOrientation=,
-                     role=, loadout=,
-                     geometryRole=, expectedWeapons=, expectedTurrets=,
-                     expectedBeam=, expectedPlasma=,
-                     expectedMissileTurrets=, expectedGuided=,
-                     expectedDumbfire=, expectedAmmo=}        (repeated)
-    scenario_station {recipe="xen_defence", faction=, distance=, spread=,
-                      x=, y=, hostile=, label=, expectedModules=,
-                      minSurfaces=, holdFire=, geometryRole=,
-                      searchAttempts=, searchStepY=}          (repeated)
-    scenario_commit {}
-
-  Begin decides whether this spec should spawn at all (see IDEMPOTENCY), group
-  events queue definitions into ScenarioRoot.$Pending, and commit despawns the
-  previous fixture and creates the new one.  If Begin declines, the group and
-  commit events are ignored because ScenarioRoot.$Accepting is false.
-
-  IDEMPOTENCY
-  Every Reload UI re-runs testlab.lua, so the spec is re-sent on every reload.
-  ScenarioRoot.$SpawnedSpecId records the id of the fixture currently on the
-  field.  scenario_begin refuses when the incoming specId equals it, so a
-  Reload UI during an unrelated test cannot stack a second copy of the same
-  fleet.  Changing `id` in the spec (or pressing the on-demand button, which
-  sends force=true) is what makes it spawn again.  MD cue variables survive a
-  UI reload - that is the property the whole gunnery persistence layer is built
-  on (docs/RELOADING.md, "Two consequences worth knowing") - so this comparison
-  still holds after the reload that triggers it.
-
-  Despawn always precedes spawn on an accepted commit, so even a forced re-run
-  replaces rather than piles up.
-
-  Evidence citations
-  create_ship / owner exact / loadout level:
-    .x4-research-cache/extracted/scripts-9.00/md/rml_deliver_fleet.xml:251-259
-    .x4-research-cache/extracted/scripts-9.00/md/tutorial_captureship.xml:180-183
-    .x4-research-cache/extracted/scripts-9.00/md/lib_generic.xml:741-742
-
-  static named loadout supplied while creating the shipped Colossus E:
-    .x4-research-cache/extracted/issue67-vanilla-md-9.00/md/scenario_combat.xml:738-748
-    .x4-research-cache/extracted/issue67-vanilla-md-9.00/libraries/loadouts.xml:405-451
-
-  get_loadout: lookup a named loadout by ID string (loadout=) and optional
-  defining macro (macro=) into result=; the shipped call site consumes the
-  result via apply_loadout. Shipped source does NOT state what a missing ID
-  leaves in result, or that execution even continues after it, so the
-  pre-spawn probe logs a stage/result marker around each lookup instead of
-  assuming anything about a failed lookup:
-    .x4-research-cache/extracted/schemas-9.00/libraries/common.xsd:24489-24519
-    .x4-research-cache/extracted/issue67-vanilla-md-9.00/md/showcases.xml:23
-
-  safepos with a z distance plus a max scatter:
-    .x4-research-cache/extracted/scripts-9.00/md/tutorial_map_missions.xml:523
-
-  macro.{<string>} - resolving a UI-supplied macro NAME to a macro:
-    .x4-research-cache/extracted/scripts-9.00/md/x4ep1_mentor_subscription.xml:9235-9236,9564
-
-  faction.{<string>} - INFERRED, not directly attested.  `faction` is a lookup
-  keyword exactly like `macro`
-    (.x4-research-cache/extracted/props-9.00/libraries/scriptproperties.xml:2862-2864
-     for macro, :2903-2907 for faction), and `lookup.faction.{$i}` indexing is
-  attested at
-    .x4-research-cache/extracted/scripts-9.00/md/gm_find_object.xml:1106-1108.
-  The `?` guard below falls back to faction.xenon and logs, so a wrong faction
-  string degrades to a visible log line rather than a broken cue.
-
-  do_for_each over a list of tables, with optional-key access ($Def.$key?):
-    .x4-research-cache/extracted/scripts-9.00/md/rml_deliver_fleet.xml:461-483
-
-  append_to_list of a table literal:
-    .x4-research-cache/extracted/scripts-9.00/md/factiongoal_plunder.xml:19
-
-  add_relation_boost (hostile):
-    .x4-research-cache/extracted/scripts-9.00/md/encounters.xml:300
-
-  Wait order (stationary):
-    .x4-research-cache/extracted/scripts-9.00/md/rml_repairobject.xml:290
-    .x4-research-cache/extracted/scripts-9.00/md/lib_generic.xml:762
-
-  Attack order:
-    .x4-research-cache/extracted/scripts-9.00/md/encounters.xml:301-306
-
-  do_for_each / destroy_object cleanup:
-    .x4-research-cache/extracted/scripts-9.00/md/cpu_ship_manager.xml:879-894
-
-  RELOAD NOTE: any change to THIS file requires a full game restart, because
-  testlab/ md is only reloadable together with the rest of the extension.
-  Editing scenario_spec.lua alone needs only install + Reload UI.
-  See docs/RELOADING.md.
+  A non-empty loadout is the exact id registered in libraries/loadouts.xml.
+  MD resolves it with get_loadout and applies it with apply_loadout. Those actions
+  are shipped-source in X4 9.00 (common.xsd/showcases.xml); Test Lab then requires
+  the authored exact operational totals before READY. A bad or unresolved route
+  cannot arm the fixture: it either records a loadout failure or produces no
+  correlated READY and Lua times out.
 -->
 <mdscript name="X4GunneryTestLabScenario" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../../#modding/xsd/md.xsd">
   <cues>
@@ -141,51 +47,13 @@
               <set_value name="ScenarioRoot.$PendingAnchorY" exact="if @event.param3.$anchorY then event.param3.$anchorY else 0"/>
               <set_value name="ScenarioRoot.$PendingAnchorZ" exact="if @event.param3.$anchorZ then event.param3.$anchorZ else 0"/>
               <set_value name="ScenarioRoot.$Pending" exact="[]"/>
-              <set_value name="ScenarioRoot.$PendingStations" exact="[]"/>
               <debug_text text="'[X4GC TEST SCENARIO] accepting spec id=' + $SpecId + ' force=' + $Force"/>
             </do_else>
           </actions>
         </cue>
 
-        <!-- ScenarioStation
-             Streams the one station recipe currently proven from X4's shipped
-             constructionplans.xml. The recipe name is deliberately narrow:
-             an unknown plan must fail visibly rather than create another
-             plausible-looking but unequipped shell. -->
-        <cue name="ScenarioStation" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_station'"/>
-            <check_value value="ScenarioRoot.$Accepting? and ScenarioRoot.$Accepting"/>
-          </conditions>
-          <actions>
-            <append_to_list name="ScenarioRoot.$PendingStations" exact="table[
-              $label           = if @event.param3.$label           then event.param3.$label           else 'station',
-              $recipe          = if @event.param3.$recipe          then event.param3.$recipe          else '',
-              $faction         = if @event.param3.$faction         then event.param3.$faction         else 'xenon',
-              $distance        = if @event.param3.$distance        then event.param3.$distance        else 30000,
-              $spread          = if @event.param3.$spread          then event.param3.$spread          else 0,
-              $x               = if @event.param3.$x               then event.param3.$x               else 0,
-              $y               = if @event.param3.$y               then event.param3.$y               else 0,
-              $hostile         = @event.param3.$hostile == true,
-              $holdfire        = @event.param3.$holdFire == true,
-              $geometryrole    = if @event.param3.$geometryRole then event.param3.$geometryRole else '',
-              $searchattempts  = if @event.param3.$searchAttempts then event.param3.$searchAttempts else 1,
-              $searchstepy     = if @event.param3.$searchStepY then event.param3.$searchStepY else 0,
-              $expectedmodules = if @event.param3.$expectedModules then event.param3.$expectedModules else 0,
-              $minsurfaces      = if @event.param3.$minSurfaces     then event.param3.$minSurfaces     else 0
-            ]"/>
-          </actions>
-        </cue>
 
-        <!-- ScenarioGroup
-             AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_group",
-               {macro=, faction=, count=, distance=, spread=, x=, y=,
-                ox=, oy=, oz=, behaviour=, hostile=, label=})
-             One event per group in the spec.  Queued, not spawned.
-             ox/oy/oz = P*-relative root offsets for surface_mask groups.
-             x = metres right of player ship (default 0), positive = right.
-             y = metres above player ship (default 0), positive = up.
-             z (distance) = metres forward of player ship, positive = forward. -->
+        <!-- ScenarioGroup: one flat ship-batch record. -->
         <cue name="ScenarioGroup" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'scenario_group'"/>
@@ -193,40 +61,28 @@
           </conditions>
           <actions>
             <append_to_list name="ScenarioRoot.$Pending" exact="table[
-              $label     = if @event.param3.$label     then event.param3.$label     else 'group',
+              $label     = if @event.param3.$label     then event.param3.$label     else 'target',
               $macro     = if @event.param3.$macro     then event.param3.$macro     else '',
               $faction   = if @event.param3.$faction   then event.param3.$faction   else 'xenon',
               $count     = if @event.param3.$count     then event.param3.$count     else 1,
-              $distance  = if @event.param3.$distance  then event.param3.$distance  else 5000,
+              $distance  = event.param3.$distance,
               $spread    = if @event.param3.$spread    then event.param3.$spread    else 0,
               $x         = if @event.param3.$x         then event.param3.$x         else 0,
               $y         = if @event.param3.$y         then event.param3.$y         else 0,
-              $ox        = if @event.param3.$ox        then event.param3.$ox        else 0,
-              $oy        = if @event.param3.$oy        then event.param3.$oy        else 0,
-              $oz        = if @event.param3.$oz        then event.param3.$oz        else 0,
               $behaviour = if @event.param3.$behaviour then event.param3.$behaviour else 'wait',
               $hostile   = @event.param3.$hostile == true,
               $holdfire  = @event.param3.$holdFire == true,
               $stripdefenceunits = @event.param3.$stripDefenceUnits == true,
               $repairguard = @event.param3.$repairGuard == true,
               $yaw       = if @event.param3.$yaw       then event.param3.$yaw       else 0,
-              $pitch    = if @event.param3.$pitch    then event.param3.$pitch    else 0,
-              $roll     = if @event.param3.$roll     then event.param3.$roll     else 0,
+              $pitch     = if @event.param3.$pitch     then event.param3.$pitch     else 0,
+              $roll      = if @event.param3.$roll      then event.param3.$roll      else 0,
               $preserveorientation = @event.param3.$preserveOrientation == true,
               $role      = if @event.param3.$role      then event.param3.$role      else '',
               $loadout   = if @event.param3.$loadout   then event.param3.$loadout   else '',
-              $geometryrole = if @event.param3.$geometryRole then event.param3.$geometryRole else '',
-              $geometrycase = if @event.param3.$geometryCase then event.param3.$geometryCase else '',
-              $expectedweapons = if @event.param3.$expectedWeapons then event.param3.$expectedWeapons else 0,
-              $expectedturrets = if @event.param3.$expectedTurrets then event.param3.$expectedTurrets else 0,
-              $expectedbeam = if @event.param3.$expectedBeam then event.param3.$expectedBeam else 0,
-              $expectedplasma = if @event.param3.$expectedPlasma then event.param3.$expectedPlasma else 0,
-              $geometryweaponmacro = if @event.param3.$geometryWeaponMacro then event.param3.$geometryWeaponMacro else '',
-              $expectedgeometryweapons = if @event.param3.$expectedGeometryWeapons then event.param3.$expectedGeometryWeapons else 0,
-              $expectedmissileturrets = if @event.param3.$expectedMissileTurrets then event.param3.$expectedMissileTurrets else 0,
-              $expectedguided = if @event.param3.$expectedGuided then event.param3.$expectedGuided else 0,
-              $expecteddumbfire = if @event.param3.$expectedDumbfire then event.param3.$expectedDumbfire else 0,
-              $expectedammo = if @event.param3.$expectedAmmo then event.param3.$expectedAmmo else 0
+              $expectedweapons = event.param3.$expectedWeapons,
+              $expectedturrets = event.param3.$expectedTurrets,
+              $expectedmissileturrets = event.param3.$expectedMissileTurrets
             ]"/>
           </actions>
         </cue>
@@ -247,18 +103,9 @@
             <signal_cue_instantly cue="DespawnScenarioImpl"/>
 
             <create_group groupname="ScenarioRoot.$Spawned"/>
-            <create_group groupname="ScenarioRoot.$SpawnedStations"/>
             <create_group groupname="ScenarioRoot.$SafeObjects"/>
             <create_group groupname="ScenarioRoot.$RepairObjects"/>
             <create_group groupname="ScenarioRoot.$PlayerShooters"/>
-            <create_group groupname="ScenarioRoot.$SurfaceMaskTargets"/>
-            <set_value name="ScenarioRoot.$SurfaceMaskPlacements" exact="[]"/>
-            <set_value name="$StationModules" exact="0"/>
-            <set_value name="$StationTurrets" exact="0"/>
-            <set_value name="$StationMissileTurrets" exact="0"/>
-            <set_value name="$StationShields" exact="0"/>
-            <set_value name="$StationEngines" exact="0"/>
-            <set_value name="$StationLoadoutFailures" exact="0"/>
             <set_value name="$SafeObjectCount" exact="0"/>
             <set_value name="$SafeWeapons" exact="0"/>
             <set_value name="$UnsafeWeapons" exact="0"/>
@@ -268,31 +115,11 @@
             <set_value name="$ShooterCount" exact="0"/>
             <set_value name="$ShooterWeapons" exact="0"/>
             <set_value name="$ShooterTurrets" exact="0"/>
-            <set_value name="$ShooterBeam" exact="0"/>
-            <set_value name="$ShooterPlasma" exact="0"/>
             <set_value name="$ShooterMissileTurrets" exact="0"/>
-            <set_value name="$ShooterGuided" exact="0"/>
-            <set_value name="$ShooterDumbfire" exact="0"/>
-            <set_value name="$ShooterAmmo" exact="0"/>
             <set_value name="$LoadoutFailures" exact="0"/>
             <set_value name="$LocationFailures" exact="0"/>
             <set_value name="$DormantShooterWeapons" exact="0"/>
             <set_value name="$UnsafeDormantShooterWeapons" exact="0"/>
-            <set_value name="$PreflightFailures" exact="0"/>
-            <set_value name="$GeometrySplits" exact="0"/>
-            <set_value name="$GeometryPending" exact="0"/>
-            <set_value name="$GeometryShooter" exact="null"/>
-            <set_value name="$PStar" exact="null"/>
-            <set_value name="ScenarioRoot.$GeometryShooter" exact="null"/>
-            <set_value name="ScenarioRoot.$GeometryWeaponMacroName" exact="''"/>
-            <set_value name="ScenarioRoot.$ExpectedGeometryWeapons" exact="0"/>
-            <set_value name="ScenarioRoot.$GeometryStation" exact="null"/>
-            <set_value name="ScenarioRoot.$StationLoadoutModule" exact="null"/>
-            <set_value name="ScenarioRoot.$StationLoadoutRequestId" exact="''"/>
-            <set_value name="$ClearArcTarget" exact="null"/>
-            <set_value name="$BelowArcTarget" exact="null"/>
-            <set_value name="$ClearArcRequested" exact="false"/>
-            <set_value name="$BelowArcRequested" exact="false"/>
 
             <!-- Argon Prime's shipped macro is Cluster_14_Sector001_macro.
                  Absolute sector positions keep this fixture independent of the
@@ -320,66 +147,7 @@
               </do_else>
             </do_if>
 
-            <!-- Exact issue #65 shooter loadout, derived from the shipped
-                 story_paranid_stranded_odysseus_E loadout. Every one of the 16
-                 turret slots is a missile turret: 9 guided and 7 dumbfire.
-                 Four ammunition types split the ship's exact 160 capacity. -->
-            <create_loadout result="$Issue65OdysseusLoadout">
-              <macros>
-                <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_03"/>
-                <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_02"/>
-                <engine macro="engine_par_l_allround_01_mk1_macro" path="../con_engine_01"/>
-                <weapon macro="weapon_par_l_destroyer_01_mk1_macro" path="../con_weapon_01"/>
-                <weapon macro="weapon_par_l_destroyer_01_mk1_macro" path="../con_weapon_02"/>
-                <shield macro="shield_par_l_standard_01_mk2_macro" path="../con_shieldgen_large_01"/>
-                <shield macro="shield_par_l_standard_01_mk2_macro" path="../con_shieldgen_large_02"/>
-              </macros>
-              <groups>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_up_mid"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_up_mid"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_down_down" exact="4"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_up_mid2" exact="2"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_up_left"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_up_right"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_front_down_mid"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_down_right"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_down_left"/>
-                <shields macro="shield_par_m_standard_02_mk2_macro" group="group_rear_down_mid" exact="2"/>
-                <turrets macro="turret_par_m_guided_02_mk1_macro" group="group_front_up_mid" exact="2" ammunition="missile_gen_m_guided_01_mk1_macro"/>
-                <turrets macro="turret_par_m_guided_02_mk1_macro" group="group_rear_up_left" exact="2" ammunition="missile_gen_m_guided_01_mk1_macro"/>
-                <turrets macro="turret_par_m_guided_02_mk1_macro" group="group_rear_up_right" exact="2" ammunition="missile_gen_m_guided_01_mk1_macro"/>
-                <turrets macro="turret_par_m_dumbfire_02_mk1_macro" group="group_front_down_mid" exact="2" ammunition="missile_gen_m_dumbfire_01_mk1_macro"/>
-                <turrets macro="turret_par_m_dumbfire_02_mk1_macro" group="group_rear_down_right" exact="2" ammunition="missile_gen_m_dumbfire_01_mk1_macro"/>
-                <turrets macro="turret_par_m_dumbfire_02_mk1_macro" group="group_rear_down_left" exact="2" ammunition="missile_gen_m_dumbfire_01_mk1_macro"/>
-                <turrets macro="turret_par_l_guided_01_mk1_macro" group="group_front_down_down" exact="2" ammunition="missile_gen_l_guided_01_mk1_macro"/>
-                <turrets macro="turret_par_l_guided_01_mk1_macro" group="group_front_up_mid2" ammunition="missile_gen_l_guided_01_mk1_macro"/>
-                <turrets macro="turret_par_l_dumbfire_01_mk1_macro" group="group_rear_down_mid" ammunition="missile_gen_l_dumbfire_01_mk1_macro"/>
-              </groups>
-              <ammunition>
-                <ammunition macro="missile_gen_m_guided_01_mk1_macro" exact="40"/>
-                <ammunition macro="missile_gen_m_dumbfire_01_mk1_macro" exact="40"/>
-                <ammunition macro="missile_gen_l_guided_01_mk1_macro" exact="40"/>
-                <ammunition macro="missile_gen_l_dumbfire_01_mk1_macro" exact="40"/>
-              </ammunition>
-              <software>
-                <software ware="software_dockmk2"/>
-                <software ware="software_flightassistmk1"/>
-                <software ware="software_scannerlongrangemk2"/>
-                <software ware="software_scannerobjectmk2"/>
-                <software ware="software_targetmk1"/>
-                <software ware="software_trademk1"/>
-              </software>
-              <virtualmacros>
-                <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
-              </virtualmacros>
-            </create_loadout>
             <do_for_each name="$Def" in="ScenarioRoot.$Pending">
-              <do_if value="$Def.$geometryrole == 'clear_arc'">
-                <set_value name="$ClearArcRequested" exact="true"/>
-              </do_if>
-              <do_elseif value="$Def.$geometryrole == 'below_arc'">
-                <set_value name="$BelowArcRequested" exact="true"/>
-              </do_elseif>
               <do_if value="$Def.$macro == '' or not @macro.{$Def.$macro}">
                 <debug_text text="'[X4GC TEST SCENARIO] skipping group ' + $Def.$label + '; unknown macro=' + $Def.$macro"/>
                 <continue/>
@@ -400,50 +168,13 @@
               <do_all exact="$Count">
                 <set_value name="$Index" operation="add"/>
 
-                <!-- Issue #67 pre-spawn diagnostic. The static-ref route was later
-                     live-proven (SHA d7e3870) to apply its full per-group census
-                     (weapons=4/turrets=4/beam=2/plasma=2); an earlier 2026-08-23
-                     run had ended with 0 weapons/turrets, unexplained and
-                     superseded. Shipped source proves the get_loadout
-                     syntax and one successful use, but NOT what a missing ID
-                     leaves in result - or that execution even continues after
-                     it - so each lookup is bracketed by its own stage/result
-                     log and the live run is read from the LAST reached marker:
-                       no control result log            -> control lookup did not return; probe invalid
-                       control ok, no custom result log -> failure is at the custom lookup stage
-                       both results, custom not_resolved -> custom registration/lookup failure
-                       both resolved                    -> lookup fine; failure is later create/apply
-                     The shipped control is probed FIRST, so a custom-ID abort
-                     can never hide its own result. Read-only: nothing here
-                     branches on the results, so creation proceeds exactly as
-                     before. -->
-                <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
-                  <get_loadout result="$Issue67ProbeControl" loadout="'scenario_combat_arg_carrier_02'" macro="macro.{$Def.$macro}"/>
-                  <set_value name="$Issue67ProbeControlOk" exact="$Issue67ProbeControl? and $Issue67ProbeControl != null"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=control_result control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved') + ' macro=' + $Def.$macro"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=custom_start macro=' + $Def.$macro"/>
-                  <get_loadout result="$Issue67ProbeCustom" loadout="'x4gc_testlab_issue67_colossus_arc_barrel'" macro="macro.{$Def.$macro}"/>
-                  <set_value name="$Issue67ProbeCustomOk" exact="$Issue67ProbeCustom? and $Issue67ProbeCustom != null"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=custom_result custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' macro=' + $Def.$macro"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 get_loadout stage=summary macro=' + $Def.$macro + ' custom=' + (if $Issue67ProbeCustomOk then 'resolved' else 'not_resolved') + ' control=' + (if $Issue67ProbeControlOk then 'resolved' else 'not_resolved')"/>
-                </do_if>
-                <do_if value="$Remote and $Def.$geometryrole == 'surface_mask' and $PStar == null">
-                  <set_value name="$LocationFailures" operation="add"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] reason=pstar_unresolved label=' + $Def.$label + ' macro=' + $Def.$macro"/>
-                  <continue/>
-                </do_if>
                 <do_if value="$Remote">
-                  <do_if value="not $ScenarioSector">
-                    <continue/>
-                  </do_if>
-                  <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
+                  <do_if value="not $ScenarioSector"><continue/></do_if>
+                  <do_if value="$Def.$role == 'shooter'">
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>
-                      <!-- A captain is required for the player to man a secondary
-                           bridge post (the gunner console); without one the console
-                           is inert. Mirrors vanilla scenario_combat's crewed Colossus. -->
+                      <loadout><level exact="1.0"/></loadout>
                       <pilot><select faction="$Owner" tags="tag.pilot"/></pilot>
                       <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
                                 y="ScenarioRoot.$PendingAnchorY + $Def.$y"
@@ -451,111 +182,48 @@
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_if>
-                  <do_elseif value="$Def.$loadout == 'issue69_paranid_dual_family'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 sector="$ScenarioSector" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>
-                      <pilot><select faction="$Owner" tags="tag.pilot"/></pilot>
-                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
-                                y="ScenarioRoot.$PendingAnchorY + $Def.$y"
-                                z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_elseif>
-                  <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 sector="$ScenarioSector" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_paranid_sky_survey"/>
-                      <!-- A captain is required for the player to man the
-                           gunner console on the Paranid destroyer flight bridge.
-                           Mirrors the Colossus E pilot prerequisite. -->
-                      <pilot><select faction="$Owner" tags="tag.pilot"/></pilot>
-                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
-                                y="ScenarioRoot.$PendingAnchorY + $Def.$y"
-                                z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_elseif>
-                  <do_elseif value="$Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 sector="$ScenarioSector" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_argon_sky_target"/>
-                      <position x="$PStar.x + $Def.$ox" y="$PStar.y + $Def.$oy" z="$PStar.z + $Def.$oz"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_elseif>
                   <do_else>
                     <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
                                  sector="$ScenarioSector" macro="macro.{$Def.$macro}">
                       <owner exact="$Owner"/>
                       <loadout><level exact="1.0"/></loadout>
-                      <position x="if $Def.$geometryrole == 'surface_mask' then $PStar.x + $Def.$ox else ScenarioRoot.$PendingAnchorX + $Def.$x"
-                                y="if $Def.$geometryrole == 'surface_mask' then $PStar.y + $Def.$oy else ScenarioRoot.$PendingAnchorY + $Def.$y"
-                                z="if $Def.$geometryrole == 'surface_mask' then $PStar.z + $Def.$oz else ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+                      <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
+                                y="ScenarioRoot.$PendingAnchorY + $Def.$y"
+                                z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
                       <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
                     </create_ship>
                   </do_else>
                 </do_if>
                 <do_else>
-                  <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 zone="player.zone" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_colossus_arc_barrel"/>
-                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_if>
-                  <do_elseif value="$Def.$loadout == 'issue69_paranid_dual_family'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 zone="player.zone" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue69_paranid_dual_family"/>
-                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_elseif>
-                  <do_elseif value="$Def.$loadout == 'issue67_paranid_sky_survey'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 zone="player.zone" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_paranid_sky_survey"/>
-                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_elseif>
-                  <do_elseif value="$Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask'">
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 zone="player.zone" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout ref="x4gc_testlab_issue67_argon_sky_target"/>
-                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_elseif>
-                  <do_else>
-                    <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
-                                 zone="player.zone" macro="macro.{$Def.$macro}">
-                      <owner exact="$Owner"/>
-                      <loadout><level exact="1.0"/></loadout>
-                      <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
-                      <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
-                    </create_ship>
-                  </do_else>
+                  <create_ship name="$Ship" groupname="ScenarioRoot.$Spawned"
+                               zone="player.zone" macro="macro.{$Def.$macro}">
+                    <owner exact="$Owner"/>
+                    <loadout><level exact="1.0"/></loadout>
+                    <safepos object="player.ship" x="$Def.$x" y="$Def.$y" z="$Def.$distance" max="$Def.$spread"/>
+                    <rotation yaw="($Def.$yaw)deg" pitch="($Def.$pitch)deg" roll="($Def.$roll)deg"/>
+                  </create_ship>
                 </do_else>
 
-                <do_if value="$Def.$loadout == 'issue65_odysseus_mixed_missiles'">
-                  <apply_loadout object="$Ship" loadout="$Issue65OdysseusLoadout"/>
-                </do_if>
-                <do_elseif value="$Def.$loadout != '' and $Def.$loadout != 'issue67_colossus_arc_barrel' and $Def.$loadout != 'issue67_paranid_sky_survey' and $Def.$loadout != 'issue69_paranid_dual_family' and not ($Def.$loadout == 'issue67_argon_sky_target' and $Def.$geometryrole == 'surface_mask')">
-                  <set_value name="$LoadoutFailures" operation="add"/>
-                  <debug_text text="'[X4GC TEST SCENARIO] unknown deterministic loadout=' + $Def.$loadout + ' ship=' + $Ship"/>
-                </do_elseif>
-                <do_if value="$Def.$loadout == 'issue67_colossus_arc_barrel' or $Def.$loadout == 'issue67_paranid_sky_survey'">
-                  <debug_text text="'[X4GC TEST SCENARIO] issue67 loadout_transport=static_ref geometry_weapon_macro=' + $Def.$geometryweaponmacro + ' expected_geometry_weapons=' + $Def.$expectedgeometryweapons + ' ship=' + $Ship"/>
+                <do_if value="$Def.$loadout != ''">
+                  <set_value name="$RequestedLoadout" exact="null"/>
+                  <debug_text text="'[X4GC TEST SCENARIO] loadout_lookup stage=start id=' + $Def.$loadout + ' macro=' + $Def.$macro"/>
+                  <get_loadout result="$RequestedLoadout" loadout="$Def.$loadout" macro="macro.{$Def.$macro}"/>
+                  <do_if value="$RequestedLoadout? and $RequestedLoadout != null">
+                    <apply_loadout object="$Ship" loadout="$RequestedLoadout"/>
+                    <do_if value="$Ship.weapons.operational.count != $Def.$expectedweapons
+                                  or $Ship.turrets.operational.count != $Def.$expectedturrets
+                                  or $Ship.missileturrets.operational.count != $Def.$expectedmissileturrets">
+                      <set_value name="$LoadoutFailures" operation="add"/>
+                      <debug_text text="'[X4GC TEST SCENARIO] loadout_census FAILED id=' + $Def.$loadout + ' ship=' + $Ship + ' weapons=' + $Ship.weapons.operational.count + '/' + $Def.$expectedweapons + ' turrets=' + $Ship.turrets.operational.count + '/' + $Def.$expectedturrets + ' missile_turrets=' + $Ship.missileturrets.operational.count + '/' + $Def.$expectedmissileturrets"/>
+                    </do_if>
+                    <do_else>
+                      <debug_text text="'[X4GC TEST SCENARIO] loadout_census id=' + $Def.$loadout + ' ship=' + $Ship + ' weapons=' + $Ship.weapons.operational.count + ' turrets=' + $Ship.turrets.operational.count + ' missile_turrets=' + $Ship.missileturrets.operational.count"/>
+                    </do_else>
+                  </do_if>
+                  <do_else>
+                    <set_value name="$LoadoutFailures" operation="add"/>
+                    <debug_text text="'[X4GC TEST SCENARIO] loadout_lookup FAILED id=' + $Def.$loadout + ' macro=' + $Def.$macro + ' ship=' + $Ship"/>
+                  </do_else>
                 </do_if>
 
                 <!-- Live tests kept failing on "which of these three identical Xenon fighters
@@ -563,26 +231,6 @@
                      unambiguous in the target list. -->
                 <set_object_name object="$Ship" name="$Def.$label + ' ' + $Index"/>
                 <debug_text text="'[X4GC TEST SCENARIO ORIENTATION] object=' + $Ship + ' name=' + $Ship.knownname + ' authored_yaw=' + $Def.$yaw + ' authored_pitch=' + $Def.$pitch + ' authored_roll=' + $Def.$roll + ' actual_yaw=' + $Ship.rotation.yaw + ' actual_pitch=' + $Ship.rotation.pitch + ' actual_roll=' + $Ship.rotation.roll"/>
-                <do_if value="$Def.$geometryrole == 'clear_arc'">
-                  <set_value name="$ClearArcTarget" exact="$Ship"/>
-                </do_if>
-                <do_elseif value="$Def.$geometryrole == 'below_arc'">
-                  <set_value name="$BelowArcTarget" exact="$Ship"/>
-                </do_elseif>
-                <do_elseif value="$Def.$geometryrole == 'surface_mask'">
-                  <add_to_group groupname="ScenarioRoot.$SurfaceMaskTargets" object="$Ship"/>
-                  <append_to_list name="ScenarioRoot.$SurfaceMaskPlacements" exact="table[$target = $Ship, $label = $Def.$label, $case = $Def.$geometrycase, $ox = $Def.$ox, $oy = $Def.$oy, $oz = $Def.$oz]"/>
-                  <set_value name="$TargetBeamCount" exact="0"/>
-                  <do_for_each name="$TargetWeapon" in="$Ship.turrets.operational.list">
-                    <do_if value="$TargetWeapon.macro == macro.turret_arg_l_beam_01_mk1_macro">
-                      <set_value name="$TargetBeamCount" operation="add"/>
-                    </do_if>
-                  </do_for_each>
-                  <do_if value="$Def.$loadout != 'issue67_argon_sky_target' or ($Def.$geometrycase != 'arc_split' and $Def.$geometrycase != 'positive_control') or $Ship.turrets.operational.count != 1 or $Ship.weapons.operational.count != 1 or $Ship.missileturrets.operational.count != 0 or $TargetBeamCount != 1">
-                    <set_value name="$LoadoutFailures" operation="add"/>
-                    <debug_text text="'[X4GC TEST SCENARIO] target_loadout_failed label=' + $Def.$label + ' case=' + $Def.$geometrycase + ' loadout=' + $Def.$loadout + ' turrets=' + $Ship.turrets.operational.count + ' weapons=' + $Ship.weapons.operational.count + ' missile_turrets=' + $Ship.missileturrets.operational.count + ' exact_beam=' + $TargetBeamCount"/>
-                  </do_if>
-                </do_elseif>
 
                 <!-- A remotely created ship receives a dynamic zone at the
                      requested sector position.  component.position is local
@@ -590,9 +238,9 @@
                      before validating the absolute anchor. -->
                 <do_if value="$Remote">
                   <create_position name="$ShipSectorPosition" object="$Ship" space="$ScenarioSector"/>
-                  <set_value name="$ExpectedSectorX" exact="if $Def.$geometryrole == 'surface_mask' then $PStar.x + $Def.$ox else ScenarioRoot.$PendingAnchorX + $Def.$x"/>
-                  <set_value name="$ExpectedSectorY" exact="if $Def.$geometryrole == 'surface_mask' then $PStar.y + $Def.$oy else ScenarioRoot.$PendingAnchorY + $Def.$y"/>
-                  <set_value name="$ExpectedSectorZ" exact="if $Def.$geometryrole == 'surface_mask' then $PStar.z + $Def.$oz else ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
+                  <set_value name="$ExpectedSectorX" exact="ScenarioRoot.$PendingAnchorX + $Def.$x"/>
+                  <set_value name="$ExpectedSectorY" exact="ScenarioRoot.$PendingAnchorY + $Def.$y"/>
+                  <set_value name="$ExpectedSectorZ" exact="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
                 </do_if>
                 <do_if value="$Remote and ($Ship.sector != $ScenarioSector
                               or $ShipSectorPosition.x lt $ExpectedSectorX - 10m
@@ -608,90 +256,24 @@
                 <do_if value="$Def.$role == 'shooter'">
                   <set_value name="$ShooterCount" operation="add"/>
                   <add_to_group groupname="ScenarioRoot.$PlayerShooters" object="$Ship"/>
-                  <set_value name="$GeometryShooter" exact="$Ship"/>
-                  <!-- Persist the exact shooter so the in-system GeometryQualify
-                       cue can scan settled ship surfaces against these same
-                       turrets after the owner teleports aboard. -->
-                  <set_value name="ScenarioRoot.$GeometryShooter" exact="$Ship"/>
-                  <set_value name="ScenarioRoot.$GeometryWeaponMacroName" exact="$Def.$geometryweaponmacro"/>
-                  <set_value name="ScenarioRoot.$ExpectedGeometryWeapons" exact="$Def.$expectedgeometryweapons"/>
-                  <set_value name="$PStarWeaponMacro" exact="@macro.{$Def.$geometryweaponmacro}"/>
-                  <do_if value="$Remote and $Def.$geometryweaponmacro != '' and $PStarWeaponMacro">
-                    <do_for_each name="$GeometryWeapon" in="$Ship.turrets.operational.list">
-                      <do_if value="$GeometryWeapon.macro == $PStarWeaponMacro and $PStar == null">
-                        <create_position name="$PStar" object="$GeometryWeapon" space="$ScenarioSector"/>
-                        <debug_text text="'[X4GC TEST SCENARIO PSTAR] weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' pstar_x=' + $PStar.x + ' pstar_y=' + $PStar.y + ' pstar_z=' + $PStar.z"/>
-                      </do_if>
-                    </do_for_each>
-                  </do_if>
                   <set_value name="$ShooterWeapons" operation="add" exact="$Ship.weapons.operational.count"/>
                   <set_value name="$ShooterTurrets" operation="add" exact="$Ship.turrets.operational.count"/>
-                  <set_value name="$LocalBeam" exact="0"/>
-                  <set_value name="$LocalPlasma" exact="0"/>
-                  <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
-                    <do_if value="$Weapon.macro == macro.turret_arg_m_beam_02_mk1_macro or $Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
-                      <set_value name="$LocalBeam" operation="add"/>
-                    </do_if>
-                    <do_elseif value="$Weapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
-                      <set_value name="$LocalPlasma" operation="add"/>
-                    </do_elseif>
-                    <do_elseif value="$Weapon.macro == macro.turret_par_l_plasma_01_mk1_macro">
-                      <set_value name="$LocalPlasma" operation="add"/>
-                    </do_elseif>
-                  </do_for_each>
-                  <set_value name="$ShooterBeam" operation="add" exact="$LocalBeam"/>
-                  <set_value name="$ShooterPlasma" operation="add" exact="$LocalPlasma"/>
                   <set_value name="$ShooterMissileTurrets" operation="add" exact="$Ship.missileturrets.operational.count"/>
-                  <set_value name="$LocalGuided" exact="0"/>
-                  <set_value name="$LocalDumbfire" exact="0"/>
-                  <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
-                    <do_if value="$Weapon.ammo.macro and $Weapon.ammo.macro.isguided">
-                      <set_value name="$LocalGuided" operation="add"/>
-                    </do_if>
-                    <do_elseif value="$Weapon.ammo.macro">
-                      <set_value name="$LocalDumbfire" operation="add"/>
-                    </do_elseif>
-                  </do_for_each>
-                  <set_value name="$ShooterGuided" operation="add" exact="$LocalGuided"/>
-                  <set_value name="$ShooterDumbfire" operation="add" exact="$LocalDumbfire"/>
-                  <set_value name="$LocalAmmo" exact="$Ship.ammostorage.{macro.missile_gen_m_guided_01_mk1_macro}.count
-                    + $Ship.ammostorage.{macro.missile_gen_m_dumbfire_01_mk1_macro}.count
-                    + $Ship.ammostorage.{macro.missile_gen_l_guided_01_mk1_macro}.count
-                    + $Ship.ammostorage.{macro.missile_gen_l_dumbfire_01_mk1_macro}.count"/>
-                  <set_value name="$ShooterAmmo" operation="add" exact="$LocalAmmo"/>
-                  <do_if value="$Ship.weapons.operational.count != $Def.$expectedweapons
-                                or $Ship.turrets.operational.count != $Def.$expectedturrets
-                                or $LocalBeam != $Def.$expectedbeam
-                                or $LocalPlasma != $Def.$expectedplasma
-                                or $Ship.missileturrets.operational.count != $Def.$expectedmissileturrets
-                                or $LocalGuided != $Def.$expectedguided
-                                or $LocalDumbfire != $Def.$expecteddumbfire
-                                or $LocalAmmo != $Def.$expectedammo">
-                    <set_value name="$LoadoutFailures" operation="add"/>
-                    <debug_text text="'[X4GC TEST SCENARIO] shooter loadout mismatch ship=' + $Ship + ' weapons=' + $Ship.weapons.operational.count + ' turrets=' + $Ship.turrets.operational.count + ' beam=' + $LocalBeam + ' plasma=' + $LocalPlasma + ' missile_turrets=' + $Ship.missileturrets.operational.count + ' guided=' + $LocalGuided + ' dumbfire=' + $LocalDumbfire + ' ammo=' + $LocalAmmo"/>
-                  </do_if>
-                  <!-- Keep the remote shooter dormant while the owner
-                       teleports. Direct-control engagement owns the selected
-                       groups and temporarily overrides this HOLD FIRE baseline;
-                       no safety guard reasserts it during the actual trial. -->
+                  <!-- Keep a remote shooter dormant while the owner teleports. -->
                   <cease_fire object="$Ship"/>
                   <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
                     <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
                     <do_if value="$Weapon.mode == weaponmode.holdfire">
                       <set_value name="$DormantShooterWeapons" operation="add"/>
                     </do_if>
-                    <do_else>
-                      <set_value name="$UnsafeDormantShooterWeapons" operation="add"/>
-                    </do_else>
+                    <do_else><set_value name="$UnsafeDormantShooterWeapons" operation="add"/></do_else>
                   </do_for_each>
                   <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
                     <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
                     <do_if value="$Weapon.mode == weaponmode.holdfire">
                       <set_value name="$DormantShooterWeapons" operation="add"/>
                     </do_if>
-                    <do_else>
-                      <set_value name="$UnsafeDormantShooterWeapons" operation="add"/>
-                    </do_else>
+                    <do_else><set_value name="$UnsafeDormantShooterWeapons" operation="add"/></do_else>
                   </do_for_each>
                 </do_if>
 
@@ -766,219 +348,13 @@
               <debug_text text="'[X4GC TEST SCENARIO] group ' + $Def.$label + ' macro=' + $Def.$macro + ' faction=' + $Def.$faction + ' count=' + $Count + ' distance=' + $Def.$distance + ' behaviour=' + $Def.$behaviour"/>
             </do_for_each>
 
-            <!-- ScenarioStation consumer (#67 station B).  Create one preserved
-                 station remotely, then run a deliberately narrow station-module
-                 loadout discriminator.  common.xsd documents apply_loadout
-                 object= for a ship OR a station MODULE, not a station root.  Apply
-                 the deterministic standard loadout to one exact operational defence
-                 module and observe the station census immediately, after a
-                 delayed MD cue, and again in system.  Those observations are the
-                 experiment; no timing or remote-equipment conclusion is assumed
-                 here. -->
-            <do_for_each name="$Def" in="ScenarioRoot.$PendingStations">
-              <do_if value="$Def.$recipe != 'xen_defence'">
-                <debug_text text="'[X4GC TEST SCENARIO] skipping station ' + $Def.$label + '; unknown recipe=' + $Def.$recipe"/>
-                <continue/>
-              </do_if>
-              <!-- ponytail: #67 station B is remote-only; no local zone fallback. -->
-              <do_if value="not ($Remote and $ScenarioSector)">
-                <set_value name="$LocationFailures" operation="add"/>
-                <debug_text text="'[X4GC TEST SCENARIO] station ' + $Def.$label + ' needs a resolved remote sector; skipping'"/>
-                <continue/>
-              </do_if>
-
-              <set_value name="$Owner" exact="@faction.{$Def.$faction}"/>
-              <do_if value="not $Owner">
-                <set_value name="$Owner" exact="faction.xenon"/>
-              </do_if>
-              <!-- Two-phase #67 station B.  Out of system at ScenarioCommit time
-                   the turret aim target does not resolve to a real hull surface,
-                   so root and hittable-aim pitch are near-identical (~1e-6 rad
-                   apart in the live run) and no root-outside/aim-inside split can
-                   be measured here; the old bounded OOS search only ever destroyed
-                   equivalent shells.  Preserve exactly ONE station at the attempt-0
-                   position, verify its census, and mark geometry PENDING.  The
-                   discriminating split is re-measured IN SYSTEM by GeometryQualify
-                   after the owner teleports to the Colossus; nothing here reports
-                   the fixture as geometrically ready. -->
-              <set_value name="$AimSplit" exact="$Def.$geometryrole == 'aim_split'"/>
-              <create_station name="$Station"
-                              sector="$ScenarioSector" macro="macro.station_gen_factory_base_01_macro"
-                              constructionplan="'xen_defence'" owner="$Owner"
-                              state="componentstate.operational">
-                <position x="ScenarioRoot.$PendingAnchorX + $Def.$x"
-                          y="ScenarioRoot.$PendingAnchorY + $Def.$y"
-                          z="ScenarioRoot.$PendingAnchorZ + $Def.$distance"/>
-              </create_station>
-              <!-- Safe deterministic discriminator loadout: one defence module,
-                   two non-integrated standard medium lasers in group01, one
-                   medium shield in each of groups01-04, and no large group05
-                   equipment. -->
-              <create_loadout result="$StationLoadout">
-                <groups>
-                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group01"/>
-                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group02"/>
-                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group03"/>
-                  <shields macro="shield_xen_m_standard_02_mk1_macro" group="group04"/>
-                  <turrets macro="turret_xen_m_laser_02_mk1_macro" group="group01" exact="2"/>
-                </groups>
-              </create_loadout>
-              <set_value name="$StationLoadoutModule" exact="null"/>
-              <do_for_each name="$Module" in="$Station.modules.operational.list">
-                <do_if value="not $StationLoadoutModule and $Module.macro == macro.xenon_small_station_01_base_macro">
-                  <set_value name="$StationLoadoutModule" exact="$Module"/>
-                </do_if>
-              </do_for_each>
-              <do_if value="$StationLoadoutModule">
-                <apply_loadout object="$StationLoadoutModule" loadout="$StationLoadout"/>
-                <set_value name="ScenarioRoot.$StationLoadoutModule" exact="$StationLoadoutModule"/>
-                <set_value name="ScenarioRoot.$StationLoadoutRequestId" exact="ScenarioRoot.$PendingRequestId"/>
-              </do_if>
-              <do_else>
-                <set_value name="$StationLoadoutFailures" operation="add"/>
-                <debug_text text="'[X4GC TEST STATION LOADOUT] phase=apply FAILED reason=no_matching_module station=' + $Station + ' modules=' + $Station.modules.operational.count"/>
-              </do_else>
-              <add_to_group groupname="ScenarioRoot.$SpawnedStations" object="$Station"/>
-              <set_object_name object="$Station" name="$Def.$label"/>
-              <do_if value="$AimSplit">
-                <set_value name="ScenarioRoot.$GeometryStation" exact="$Station"/>
-                <set_value name="$GeometryPending" operation="add"/>
-                <debug_text text="'[X4GC TEST SCENARIO] station ' + $Def.$label + ' preserved at attempt-0 for in-system qualification; geometry pending station=' + $Station + '; teleport to the Colossus and open Test Lab once'"/>
-              </do_if>
-
-              <set_value name="$ImmediateLasers" exact="0"/>
-              <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
-                <do_if value="$Weapon.macro == macro.turret_xen_m_laser_02_mk1_macro">
-                  <set_value name="$ImmediateLasers" operation="add"/>
-                </do_if>
-              </do_for_each>
-              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=immediate request_id=' + ScenarioRoot.$PendingRequestId + ' station=' + $Station + ' module=' + $StationLoadoutModule + ' module_macro=' + (if $StationLoadoutModule then $StationLoadoutModule.macro else null) + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' standard_lasers=' + $ImmediateLasers + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
-              <signal_cue cue="StationLoadoutDelayedCensus"/>
-
-              <!-- Strip carried defence drones before hostility. -->
-              <do_if value="$Station.units.{unitcategory.defence}.count">
-                <remove_units object="$Station" category="unitcategory.defence" mk="1"
-                              exact="$Station.units.{unitcategory.defence}.count"/>
-              </do_if>
-              <set_value name="$DefenceUnits" operation="add"
-                         exact="$Station.units.{unitcategory.defence}.count"/>
-
-              <do_if value="$Def.$hostile">
-                <add_relation_boost object="$Station" otherobject="player.ship"
-                                    value="$Station.owner.relation.kill.max"
-                                    decay="1" delay="60min" silent="true"/>
-                <do_if value="player.ship.mayattack.{$Station}">
-                  <set_value name="$Hostiles" operation="add"/>
-                </do_if>
-              </do_if>
-              <signal_objects object="player.galaxy" param="'init station'" param2="$Station" param3="true"/>
-
-              <!-- A hostile surface fixture must never return fire: keep the
-                   weapon surfaces installed for the arc test but hold every
-                   emitter and stop any queued shot.  ScenarioSafetyGuard
-                   reasserts this for as long as the station exists. -->
-              <do_if value="$Def.$holdfire">
-                <set_value name="$SafeObjectCount" operation="add"/>
-                <add_to_group groupname="ScenarioRoot.$SafeObjects" object="$Station"/>
-                <cease_fire object="$Station"/>
-                <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
-                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
-                  <do_if value="$Weapon.mode == weaponmode.holdfire">
-                    <set_value name="$SafeWeapons" operation="add"/>
-                  </do_if>
-                  <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
-                </do_for_each>
-                <do_for_each name="$Weapon" in="$Station.missileturrets.operational.list">
-                  <set_weapon_mode weapon="$Weapon" weaponmode="weaponmode.holdfire"/>
-                  <do_if value="$Weapon.mode == weaponmode.holdfire">
-                    <set_value name="$SafeWeapons" operation="add"/>
-                  </do_if>
-                  <do_else><set_value name="$UnsafeWeapons" operation="add"/></do_else>
-                </do_for_each>
-              </do_if>
-
-              <set_value name="$StationModules" operation="add" exact="$Station.modules.operational.count"/>
-              <set_value name="$StationTurrets" operation="add" exact="$Station.turrets.operational.count"/>
-              <set_value name="$StationMissileTurrets" operation="add" exact="$Station.missileturrets.operational.count"/>
-              <set_value name="$StationShields" operation="add" exact="$Station.shields.operational.count"/>
-              <set_value name="$StationEngines" operation="add" exact="$Station.engines.operational.count"/>
-              <debug_text text="'[X4GC TEST SCENARIO] created station=' + $Station + ' name=' + $Station.knownname + ' recipe=' + $Def.$recipe + ' geometry_pending=' + $AimSplit + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
-            </do_for_each>
-
-            <!-- Fail-closed controls for #67.  READY requires both exact
-                 conventional turrets to see the clear P as in-range, inside
-                 both origin and hittable-aim arcs, and externally unmasked.
-                 The below-arc P must remain in range while both bearings are
-                 below the shared -10 degree lower elevation stop. -->
-            <create_list name="$GeometryControls"/>
-            <do_if value="$ClearArcTarget">
-              <append_to_list name="$GeometryControls" exact="table[$role = 'clear_arc', $target = $ClearArcTarget]"/>
-            </do_if>
-            <do_elseif value="$ClearArcRequested">
-              <set_value name="$PreflightFailures" operation="add"/>
-            </do_elseif>
-            <do_if value="$BelowArcTarget">
-              <append_to_list name="$GeometryControls" exact="table[$role = 'below_arc', $target = $BelowArcTarget]"/>
-            </do_if>
-            <do_elseif value="$BelowArcRequested">
-              <set_value name="$PreflightFailures" operation="add"/>
-            </do_elseif>
-            <do_for_each name="$Control" in="$GeometryControls">
-              <set_value name="$PassingWeapons" exact="0"/>
-              <do_if value="$GeometryShooter">
-                <do_for_each name="$GeometryWeapon" in="$GeometryShooter.turrets.operational.list">
-                  <do_if value="$GeometryWeapon.macro == macro.turret_arg_m_beam_02_mk1_macro
-                                or $GeometryWeapon.macro == macro.turret_arg_m_plasma_02_mk1_macro">
-                    <set_value name="$RootRelative" exact="$Control.$target.relativeposition.{$GeometryWeapon}"/>
-                    <create_orientation name="$AimLocal" orientation="look_at"
-                                        refobject="$Control.$target" useaimtarget="true">
-                      <position object="$GeometryWeapon" space="$GeometryWeapon"/>
-                    </create_orientation>
-                    <set_value name="$RootArcPass" exact="$RootRelative.rotation.pitch ge -10deg and $RootRelative.rotation.pitch le 90deg"/>
-                    <set_value name="$AimArcPass" exact="$AimLocal.pitch ge -10deg and $AimLocal.pitch le 90deg"/>
-                    <set_value name="$InRange" exact="$GeometryWeapon.bboxdistanceto.{$Control.$target} le $GeometryWeapon.maxfirerange"/>
-                    <check_line_of_sight name="$MuzzleLosEx" object="$GeometryWeapon"
-                                         objectoffset="$GeometryWeapon.barrelposition"
-                                         target="$Control.$target" excludeself="true" useaimtarget="true"/>
-                    <!-- $LosEx (no barrel offset, self-excluding) is the diagnostic
-                         module's proven clearance signal; the muzzle rays and barrel
-                         position are logged as measurements, mirroring observe.xml. -->
-                    <check_line_of_sight name="$LosEx" object="$GeometryWeapon"
-                                         target="$Control.$target" excludeself="true" useaimtarget="true"/>
-                    <check_line_of_sight name="$MuzzleLosSelf" object="$GeometryWeapon"
-                                         objectoffset="$GeometryWeapon.barrelposition"
-                                         target="$Control.$target" excludeself="false" useaimtarget="true"/>
-                    <set_value name="$Barrel" exact="$GeometryWeapon.barrelposition"/>
-                    <!-- Gate clear_arc on geometry only. Raycast LOS is unreliable
-                         at the spawn instant (ScenarioCommit): a target in empty
-                         deep space with excludeself=true reads los_ex/muzzle_los_ex/
-                         muzzle_los_self all 0 here, while the settled observe module
-                         reports real values. LOS/barrel are logged for the live
-                         Mark-moment diagnostic, not used to gate READY. -->
-                    <do_if value="($Control.$role == 'clear_arc' and $RootArcPass and $AimArcPass and $InRange)
-                                  or ($Control.$role == 'below_arc' and not $RootArcPass and not $AimArcPass
-                                      and $RootRelative.rotation.pitch lt -10deg and $AimLocal.pitch lt -10deg and $InRange)">
-                      <set_value name="$PassingWeapons" operation="add"/>
-                    </do_if>
-                    <debug_text text="'[X4GC TEST PREFLIGHT] role=' + $Control.$role + ' target=' + $Control.$target + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' root_pitch=' + $RootRelative.rotation.pitch + ' aim_pitch=' + $AimLocal.pitch + ' root_arc_pass=' + $RootArcPass + ' aim_arc_pass=' + $AimArcPass + ' inrange=' + $InRange + ' los_ex=' + $LosEx + ' muzzle_los_ex=' + $MuzzleLosEx + ' muzzle_los_self=' + $MuzzleLosSelf + ' barrel_x=' + $Barrel.x + ' barrel_y=' + $Barrel.y + ' barrel_z=' + $Barrel.z"/>
-                  </do_if>
-                </do_for_each>
-              </do_if>
-              <!-- Every operational turret is a beam or plasma; the control must
-                   pass for all of them, so expected scales with the turret count. -->
-              <do_if value="$PassingWeapons != $GeometryShooter.turrets.operational.count">
-                <set_value name="$PreflightFailures" operation="add"/>
-                <debug_text text="'[X4GC TEST PREFLIGHT] FAILED role=' + $Control.$role + ' passing_weapons=' + $PassingWeapons + ' expected=' + $GeometryShooter.turrets.operational.count"/>
-              </do_if>
-            </do_for_each>
 
             <set_value name="ScenarioRoot.$SpawnedSpecId" exact="ScenarioRoot.$PendingSpecId"/>
             <remove_value name="ScenarioRoot.$Pending"/>
-            <remove_value name="ScenarioRoot.$PendingStations"/>
-            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count + ' stations=' + ScenarioRoot.$SpawnedStations.count + ' modules=' + $StationModules + ' turrets=' + $StationTurrets + ' missile_turrets=' + $StationMissileTurrets + ' shields=' + $StationShields + ' engines=' + $StationEngines + ' safe_fixtures=' + $SafeObjectCount + ' safe_weapons=' + $SafeWeapons + ' unsafe_weapons=' + $UnsafeWeapons + ' defence_units=' + $DefenceUnits + ' hostiles=' + $Hostiles + ' repair_fixtures=' + $RepairObjectCount + ' shooters=' + $ShooterCount + ' shooter_weapons=' + $ShooterWeapons + ' shooter_turrets=' + $ShooterTurrets + ' beam=' + $ShooterBeam + ' plasma=' + $ShooterPlasma + ' shooter_missile_turrets=' + $ShooterMissileTurrets + ' guided=' + $ShooterGuided + ' dumbfire=' + $ShooterDumbfire + ' ammo=' + $ShooterAmmo + ' dormant_shooter_weapons=' + $DormantShooterWeapons + ' unsafe_dormant_shooter_weapons=' + $UnsafeDormantShooterWeapons + ' loadout_failures=' + ($StationLoadoutFailures + $LoadoutFailures + $UnsafeDormantShooterWeapons) + ' location_failures=' + $LocationFailures + ' preflight_failures=' + $PreflightFailures + ' geometry_splits=' + $GeometrySplits"/>
+            <debug_text text="'[X4GC TEST SCENARIO] spawned spec id=' + ScenarioRoot.$SpawnedSpecId + ' ships=' + ScenarioRoot.$Spawned.count + ' safe_fixtures=' + $SafeObjectCount + ' safe_weapons=' + $SafeWeapons + ' unsafe_weapons=' + $UnsafeWeapons + ' defence_units=' + $DefenceUnits + ' hostiles=' + $Hostiles + ' repair_fixtures=' + $RepairObjectCount + ' shooters=' + $ShooterCount + ' shooter_weapons=' + $ShooterWeapons + ' shooter_turrets=' + $ShooterTurrets + ' shooter_missile_turrets=' + $ShooterMissileTurrets + ' dormant_shooter_weapons=' + $DormantShooterWeapons + ' unsafe_dormant_shooter_weapons=' + $UnsafeDormantShooterWeapons + ' loadout_failures=' + ($LoadoutFailures + $UnsafeDormantShooterWeapons) + ' location_failures=' + $LocationFailures"/>
             <do_if value="ScenarioRoot.$PendingRequestId != ''">
               <raise_lua_event name="'X4GunneryTestLab.ScenarioReady'"
-                               param="'x4gct8:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count + ':' + ScenarioRoot.$SpawnedStations.count + ':' + $StationModules + ':' + $StationTurrets + ':' + $StationMissileTurrets + ':' + $StationShields + ':' + $StationEngines + ':' + $SafeObjectCount + ':' + $SafeWeapons + ':' + $UnsafeWeapons + ':' + $DefenceUnits + ':' + $Hostiles + ':' + $RepairObjectCount + ':' + $ShooterCount + ':' + $ShooterMissileTurrets + ':' + $ShooterGuided + ':' + $ShooterDumbfire + ':' + $ShooterAmmo + ':' + ($StationLoadoutFailures + $LoadoutFailures + $UnsafeDormantShooterWeapons) + ':' + $LocationFailures + ':' + $ShooterWeapons + ':' + $ShooterTurrets + ':' + $ShooterBeam + ':' + $ShooterPlasma + ':' + $PreflightFailures + ':' + $GeometrySplits"/>
+                               param="'x4gct9:' + ScenarioRoot.$PendingRequestId + ':' + ScenarioRoot.$SpawnedSpecId + ':' + ScenarioRoot.$Spawned.count + ':' + $SafeObjectCount + ':' + $SafeWeapons + ':' + $UnsafeWeapons + ':' + $DefenceUnits + ':' + $Hostiles + ':' + $RepairObjectCount + ':' + $ShooterCount + ':' + $ShooterWeapons + ':' + $ShooterTurrets + ':' + $ShooterMissileTurrets + ':' + ($LoadoutFailures + $UnsafeDormantShooterWeapons) + ':' + $LocationFailures"/>
             </do_if>
             <remove_value name="ScenarioRoot.$PendingRequestId"/>
           </actions>
@@ -997,35 +373,11 @@
           <actions>
             <set_value name="ScenarioRoot.$Accepting" exact="false"/>
             <remove_value name="ScenarioRoot.$Pending"/>
-            <remove_value name="ScenarioRoot.$PendingStations"/>
             <remove_value name="ScenarioRoot.$PendingRequestId"/>
             <debug_text text="'[X4GC TEST SCENARIO] replacement rejected; player occupies spawned ship=' + player.ship"/>
           </actions>
         </cue>
 
-        <!-- The first post-action-list census.  A nonzero delay forces this into
-             a later MD update while the station remains remote/out of system. -->
-        <cue name="StationLoadoutDelayedCensus" instantiate="true">
-          <conditions>
-            <event_cue_signalled/>
-          </conditions>
-          <delay exact="1ms"/>
-          <actions>
-            <do_if value="ScenarioRoot.$GeometryStation? and ScenarioRoot.$GeometryStation != null and ScenarioRoot.$GeometryStation.exists">
-              <set_value name="$Station" exact="ScenarioRoot.$GeometryStation"/>
-              <set_value name="$DelayedLasers" exact="0"/>
-              <do_for_each name="$Weapon" in="$Station.turrets.operational.list">
-                <do_if value="$Weapon.macro == macro.turret_xen_m_laser_02_mk1_macro">
-                  <set_value name="$DelayedLasers" operation="add"/>
-                </do_if>
-              </do_for_each>
-              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=delayed_1ms request_id=' + ScenarioRoot.$StationLoadoutRequestId + ' station=' + $Station + ' module=' + ScenarioRoot.$StationLoadoutModule + ' modules=' + $Station.modules.operational.count + ' turrets=' + $Station.turrets.operational.count + ' standard_lasers=' + $DelayedLasers + ' missile_turrets=' + $Station.missileturrets.operational.count + ' shields=' + $Station.shields.operational.count + ' engines=' + $Station.engines.operational.count"/>
-            </do_if>
-            <do_else>
-              <debug_text text="'[X4GC TEST STATION LOADOUT] phase=delayed_1ms FAILED reason=station_missing request_id=' + ScenarioRoot.$StationLoadoutRequestId"/>
-            </do_else>
-          </actions>
-        </cue>
 
         <!-- Repair only after a real player-ship hit. Unlike minimum-hull or
              invulnerability flags, this leaves the fixture attackable and its
@@ -1122,46 +474,6 @@
               </do_for_each>
               <remove_value name="ScenarioRoot.$Spawned"/>
             </do_if>
-            <do_if value="ScenarioRoot.$SpawnedStations?">
-              <do_for_each name="$Station" in="ScenarioRoot.$SpawnedStations">
-                <do_if value="$Station.exists">
-                  <destroy_object object="$Station" explosion="false"/>
-                </do_if>
-              </do_for_each>
-              <remove_value name="ScenarioRoot.$SpawnedStations"/>
-            </do_if>
-            <set_value name="ScenarioRoot.$GeometryStation" exact="null"/>
-            <set_value name="ScenarioRoot.$StationLoadoutModule" exact="null"/>
-            <set_value name="ScenarioRoot.$StationLoadoutRequestId" exact="''"/>
-            <do_if value="ScenarioRoot.$SafeObjects?">
-              <remove_value name="ScenarioRoot.$SafeObjects"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$PlayerShooters?">
-              <remove_value name="ScenarioRoot.$PlayerShooters"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$RepairObjects?">
-              <remove_value name="ScenarioRoot.$RepairObjects"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$SurfaceMaskTargets?">
-              <remove_value name="ScenarioRoot.$SurfaceMaskTargets"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$SurfaceMaskPlacements?">
-              <remove_value name="ScenarioRoot.$SurfaceMaskPlacements"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$GeometryQualifyRepositioned?">
-              <remove_value name="ScenarioRoot.$GeometryQualifyRepositioned"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$GeometryQualifyRepositionFailures?">
-              <remove_value name="ScenarioRoot.$GeometryQualifyRepositionFailures"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$GeometryStation?">
-              <remove_value name="ScenarioRoot.$GeometryStation"/>
-            </do_if>
-            <do_if value="ScenarioRoot.$GeometryShooter?">
-              <remove_value name="ScenarioRoot.$GeometryShooter"/>
-            </do_if>
-            <remove_value name="ScenarioRoot.$GeometryWeaponMacroName"/>
-            <remove_value name="ScenarioRoot.$ExpectedGeometryWeapons"/>
             <reset_cue cue="ScenarioRepairArm"/>
             <debug_text text="'[X4GC TEST SCENARIO] despawn complete'"/>
           </actions>
@@ -1215,311 +527,6 @@
             <do_else>
               <debug_text text="'[X4GC TEST SCENARIO] capture skipped; target no longer exists'"/>
             </do_else>
-          </actions>
-        </cue>
-
-        <!-- GeometryQualify
-             AddUITriggeredEvent("X4GunneryTestLabScenario", "qualify_geometry",
-               {requestId = "..."})
-             Phase two of the #67 lower-arc discriminator.
-             r31 leaves the two independently spawned Argon L survey
-             destroyers exactly where remote creation placed them,
-             enumerates every
-             operational surface element after the owner teleports aboard, and
-             measures the transported exact one-Plasma census against every
-             surface.
-             A turret/surface pair SPLITS when its origin sits below the
-             generated -10 deg lower stop while its weapon-consistent aim
-             bearing stays inside the generated -10..90 deg arc; the split
-             pair must also be separated (>= 250m), in range, hold clear
-             self-excluding AND clear self-inclusive muzzle LOS, and be
-             legally attackable. The first exact surface holding at least one
-             fully qualified splitting member is transported to Lua and
-             marked for the owner's manual Direct-control root/surface
-             clicks; the two surface-mask targets are repositioned once from
-             qualification-time PStar, then measured after the 1ms later
-             update. Every raw predicate is logged per pair so the exact
-             splitting turret can be identified later. -->
-        <cue name="GeometryQualify" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'qualify_geometry'"/>
-          </conditions>
-          <actions>
-            <set_value name="ScenarioRoot.$GeometryQualifyRequestId"
-                       exact="if @event.param3.$requestId then event.param3.$requestId else ''"/>
-            <signal_cue cue="GeometryQualifyReposition"/>
-          </actions>
-        </cue>
-
-        <!-- One later cue update repositions the two surface-mask targets once
-             from qualification-time PStar, then measures them after the 1ms
-             later update. -->
-        <cue name="GeometryQualifyReposition" instantiate="true">
-          <conditions>
-            <event_cue_signalled/>
-          </conditions>
-          <actions>
-            <set_value name="ScenarioRoot.$GeometryQualifyRepositioned" exact="0"/>
-            <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" exact="0"/>
-            <set_value name="$RequestId" exact="ScenarioRoot.$GeometryQualifyRequestId"/>
-            <do_if value="ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
-                          and ScenarioRoot.$GeometryShooter.exists
-                          and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2">
-              <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
-              <set_value name="$QualifySector" exact="$Shooter.sector"/>
-              <do_if value="not $QualifySector">
-                <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
-                <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=reposition_missing detail=sector_unresolved shooter=' + $Shooter"/>
-              </do_if>
-              <do_if value="$QualifySector">
-                <set_value name="$GeometryWeaponMacroName" exact="ScenarioRoot.$GeometryWeaponMacroName"/>
-                <set_value name="$GeometryWeaponMacro" exact="@macro.{$GeometryWeaponMacroName}"/>
-                <do_if value="not $GeometryWeaponMacro">
-                  <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
-                  <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=reposition_missing detail=geometry_weapon_macro_unresolved macro=' + $GeometryWeaponMacroName"/>
-                </do_if>
-                <do_if value="$GeometryWeaponMacro">
-                  <set_value name="$CurrentPStar" exact="null"/>
-                  <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
-                    <do_if value="$GeometryWeapon.macro == $GeometryWeaponMacro and $CurrentPStar == null">
-                      <create_position name="$CurrentPStar" object="$GeometryWeapon" space="$QualifySector"/>
-                    </do_if>
-                  </do_for_each>
-                  <do_if value="not $CurrentPStar">
-                    <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
-                    <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=reposition_missing detail=matching_weapon_or_pstar_unresolved macro=' + $GeometryWeaponMacroName + ' shooter=' + $Shooter"/>
-                  </do_if>
-                  <do_if value="$CurrentPStar">
-                    <do_for_each name="$Record" in="ScenarioRoot.$SurfaceMaskPlacements">
-                      <set_value name="$Target" exact="$Record.$target"/>
-                      <do_if value="$Target and $Target.exists">
-                        <set_value name="$PreservedRotation" exact="$Target.rotation"/>
-                        <warp object="$Target" sector="$QualifySector">
-                          <position x="$CurrentPStar.x + $Record.$ox"
-                                    y="$CurrentPStar.y + $Record.$oy"
-                                    z="$CurrentPStar.z + $Record.$oz"/>
-                          <rotation value="$PreservedRotation"/>
-                        </warp>
-                        <set_value name="ScenarioRoot.$GeometryQualifyRepositioned" operation="add"/>
-                        <debug_text text="'[X4GC TEST QUALIFY REPOSITION] request_id=' + $RequestId + ' target=' + $Target + ' target_id=' + $Target.idcode + ' current_pstar_x=' + $CurrentPStar.x + ' current_pstar_y=' + $CurrentPStar.y + ' current_pstar_z=' + $CurrentPStar.z + ' expected_target_x=' + ($CurrentPStar.x + $Record.$ox) + ' expected_target_y=' + ($CurrentPStar.y + $Record.$oy) + ' expected_target_z=' + ($CurrentPStar.z + $Record.$oz) + ' preserved_yaw=' + $PreservedRotation.yaw + ' preserved_pitch=' + $PreservedRotation.pitch + ' preserved_roll=' + $PreservedRotation.roll"/>
-                      </do_if>
-                      <do_if value="not $Target or not $Target.exists">
-                        <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
-                        <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=reposition_missing detail=target_missing target=' + $Target"/>
-                      </do_if>
-                    </do_for_each>
-                  </do_if>
-                </do_if>
-              </do_if>
-            </do_if>
-            <do_if value="not (ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
-                          and ScenarioRoot.$GeometryShooter.exists
-                          and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2)">
-              <set_value name="ScenarioRoot.$GeometryQualifyRepositionFailures" operation="add"/>
-              <debug_text text="'[X4GC TEST QUALIFY REPOSITION] FAILED request_id=' + $RequestId + ' reason=placement_records_missing placement_records=' + (if ScenarioRoot.$SurfaceMaskPlacements? then ScenarioRoot.$SurfaceMaskPlacements.count else 0) + ' shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null)"/>
-            </do_if>
-            <signal_cue cue="GeometryQualifyMeasure"/>
-          </actions>
-        </cue>
-
-
-
-        <!-- Measure
-             One later cue update avoids conflating create/open handling with
-             component discovery. The targets are repositioned once from
-             qualification-time PStar and then measured after the 1ms later
-             update. -->
-        <cue name="GeometryQualifyMeasure" instantiate="true">
-          <conditions>
-            <event_cue_signalled/>
-          </conditions>
-          <delay exact="1ms"/>
-          <actions>
-            <set_value name="$RequestId" exact="ScenarioRoot.$GeometryQualifyRequestId"/>
-            <set_value name="$TargetCount" exact="0"/>
-            <set_value name="$SurfaceCount" exact="0"/>
-            <set_value name="$SurfacePairs" exact="0"/>
-            <set_value name="$Measured" exact="0"/>
-            <set_value name="$SurfaceOriginOutsidePairs" exact="0"/>
-            <set_value name="$SurfaceAimInsidePairs" exact="0"/>
-            <set_value name="$SurfaceArcSplitPairs" exact="0"/>
-            <set_value name="$SurfaceArcCandidatePairs" exact="0"/>
-            <set_value name="$ArcSplitSurface" exact="null"/>
-            <set_value name="$ArcSplitSurfaceMembers" exact="0"/>
-            <set_value name="$PositiveControlSurface" exact="null"/>
-            <set_value name="$PositiveControlSurfaceMembers" exact="0"/>
-            <set_value name="$PostWarpLocationFailures" exact="0"/>
-            <set_value name="$MeasurePStar" exact="null"/>
-            <do_if value="ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
-                          and ScenarioRoot.$GeometryShooter.exists
-                          and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2">
-              <set_value name="$Shooter" exact="ScenarioRoot.$GeometryShooter"/>
-              <set_value name="$QualifySector" exact="$Shooter.sector"/>
-              <do_if value="not $QualifySector">
-                <set_value name="$PostWarpLocationFailures" operation="add"/>
-                <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' reason=post_warp_mismatch detail=sector_unresolved shooter=' + $Shooter"/>
-              </do_if>
-              <do_if value="$QualifySector">
-                <set_value name="$GeometryWeaponMacroName" exact="ScenarioRoot.$GeometryWeaponMacroName"/>
-                <set_value name="$ExpectedGeometryWeapons" exact="ScenarioRoot.$ExpectedGeometryWeapons"/>
-                <set_value name="$GeometryWeaponMacro" exact="@macro.{$GeometryWeaponMacroName}"/>
-                <do_if value="not $GeometryWeaponMacro">
-                  <debug_text text="'[X4GC TEST QUALIFY] FAILED request_id=' + $RequestId + ' reason=geometry_weapon_macro_unresolved macro=' + $GeometryWeaponMacroName"/>
-                </do_if>
-                <do_if value="$GeometryWeaponMacro">
-                  <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
-                    <do_if value="$GeometryWeapon.macro == $GeometryWeaponMacro">
-                      <set_value name="$Measured" operation="add"/>
-                      <!-- sky-survey calibration: exact live pose of the geometry weapon
-                           component (sector space) + barrel, for offline frame solve -->
-                      <create_position name="$QualWeaponSectorPos" object="$GeometryWeapon" space="$QualifySector"/>
-                      <set_value name="$MeasurePStar" exact="$QualWeaponSectorPos"/>
-                      <debug_text text="'[X4GC TEST QUALIFY WEAPONPOSE] request_id=' + $RequestId + ' weapon=' + $GeometryWeapon + ' macro=' + $GeometryWeapon.macro + ' sector_pos=' + $QualWeaponSectorPos + ' rot_yaw=' + $GeometryWeapon.rotation.yaw + ' rot_pitch=' + $GeometryWeapon.rotation.pitch + ' rot_roll=' + $GeometryWeapon.rotation.roll + ' barrel_x=' + $GeometryWeapon.barrelposition.x + ' barrel_y=' + $GeometryWeapon.barrelposition.y + ' barrel_z=' + $GeometryWeapon.barrelposition.z"/>
-                    </do_if>
-                  </do_for_each>
-                  <do_for_each name="$Record" in="ScenarioRoot.$SurfaceMaskPlacements">
-                    <set_value name="$Target" exact="$Record.$target"/>
-                    <set_value name="$GeometryCase" exact="$Record.$case"/>
-                    <do_if value="$Target and $Target.exists">
-                      <create_position name="$TargetSectorPos" object="$Target" space="$QualifySector"/>
-                      <do_if value="not $MeasurePStar">
-                        <set_value name="$PostWarpLocationFailures" operation="add"/>
-                        <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' reason=post_warp_mismatch target=' + $Target + ' target_id=' + $Target.idcode + ' actual_x=' + $TargetSectorPos.x + ' actual_y=' + $TargetSectorPos.y + ' actual_z=' + $TargetSectorPos.z + ' expected_x=null expected_y=null expected_z=null measure_pstar=' + $MeasurePStar"/>
-                      </do_if>
-                      <do_if value="$MeasurePStar">
-                        <set_value name="$ExpectedTargetX" exact="$MeasurePStar.x + $Record.$ox"/>
-                        <set_value name="$ExpectedTargetY" exact="$MeasurePStar.y + $Record.$oy"/>
-                        <set_value name="$ExpectedTargetZ" exact="$MeasurePStar.z + $Record.$oz"/>
-                        <do_if value="$TargetSectorPos.x lt $ExpectedTargetX - 10m
-                                      or $TargetSectorPos.x gt $ExpectedTargetX + 10m
-                                      or $TargetSectorPos.y lt $ExpectedTargetY - 10m
-                                      or $TargetSectorPos.y gt $ExpectedTargetY + 10m
-                                      or $TargetSectorPos.z lt $ExpectedTargetZ - 10m
-                                      or $TargetSectorPos.z gt $ExpectedTargetZ + 10m">
-                          <set_value name="$PostWarpLocationFailures" operation="add"/>
-                          <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' reason=post_warp_mismatch target=' + $Target + ' target_id=' + $Target.idcode + ' actual_x=' + $TargetSectorPos.x + ' actual_y=' + $TargetSectorPos.y + ' actual_z=' + $TargetSectorPos.z + ' expected_x=' + $ExpectedTargetX + ' expected_y=' + $ExpectedTargetY + ' expected_z=' + $ExpectedTargetZ + ' measure_pstar_x=' + $MeasurePStar.x + ' measure_pstar_y=' + $MeasurePStar.y + ' measure_pstar_z=' + $MeasurePStar.z"/>
-                        </do_if>
-                      </do_if>
-                      <set_value name="$TargetCount" operation="add"/>
-                      <!-- sky-survey calibration: dump the weapon world pose once per target
-                           plus each surface's sector-space position and true centre
-                           distance, so the offline ring can solve the live weapon
-                           frame by exact correspondence instead of proxy bounds. -->
-                      <create_position name="$WeaponSectorPos" object="$Shooter" space="$QualifySector"/>
-                      <debug_text text="'[X4GC TEST QUALIFY WEAPON] request_id=' + $RequestId + ' weapon=' + $GeometryWeaponMacroName + ' shooter_sector_pos=' + $WeaponSectorPos + ' shooter_zone=' + $Shooter.zone + ' shooter_rot_yaw=' + $Shooter.rotation.yaw + ' shooter_rot_pitch=' + $Shooter.rotation.pitch + ' shooter_rot_roll=' + $Shooter.rotation.roll"/>
-                      <find_object_component name="$Surfaces" object="$Target"
-                                             surfaceelement="true" multiple="true"
-                                             state="componentstate.operational"/>
-                      <set_value name="$SurfaceCount" operation="add" exact="$Surfaces.count"/>
-                      <do_for_each name="$Surface" in="$Surfaces">
-                        <set_value name="$SurfaceArcCandidateMembers" exact="0"/>
-                        <set_value name="$SurfacePositiveCandidateMembers" exact="0"/>
-                        <do_for_each name="$GeometryWeapon" in="$Shooter.turrets.operational.list">
-                          <do_if value="$Surface.macro == macro.turret_arg_l_beam_01_mk1_macro and $GeometryWeaponMacro and $GeometryWeapon.macro == $GeometryWeaponMacro">
-                            <set_value name="$SurfacePairs" operation="add"/>
-                            <set_value name="$SurfaceRelative" exact="$Surface.relativeposition.{$GeometryWeapon}"/>
-                            <create_orientation name="$SurfaceAimLocal" orientation="look_at"
-                                                refobject="$Surface" useaimtarget="true">
-                              <position object="$GeometryWeapon" space="$GeometryWeapon"/>
-                            </create_orientation>
-                            <set_value name="$SurfaceRange" exact="$GeometryWeapon.bboxdistanceto.{$Surface}"/>
-                            <set_value name="$Separated" exact="$SurfaceRange ge 250m"/>
-                            <set_value name="$SurfaceInRange" exact="$SurfaceRange le $GeometryWeapon.maxfirerange"/>
-                            <check_line_of_sight name="$SurfaceMuzzleLosEx" object="$GeometryWeapon"
-                                                 objectoffset="$GeometryWeapon.barrelposition"
-                                                 target="$Surface" excludeself="true" useaimtarget="true"/>
-                            <check_line_of_sight name="$SurfaceMuzzleLosSelf" object="$GeometryWeapon"
-                                                 objectoffset="$GeometryWeapon.barrelposition"
-                                                 target="$Surface" excludeself="false" useaimtarget="true"/>
-                            <set_value name="$SurfaceMayAttack" exact="@$Shooter.mayattack.{$Surface}"/>
-                            <create_position name="$SurfaceSectorPos" object="$Surface" space="$QualifySector"/>
-                            <set_value name="$SurfaceCentreRange" exact="$GeometryWeapon.distanceto.{$Surface}"/>
-                            <!-- The Paranid L plasma band is {-5,+80} (shipped source,
-                                 ui/turret_arc_limits.lua); the sky-survey split straddles
-                                 the UPPER limit: origin above +80deg is open sky, never
-                                 own-hull blocked. Origin-outside therefore means pitch
-                                 gt +80deg, and aim-inside means within [-5,+80]. -->
-                            <set_value name="$SurfaceOriginOutside"
-                                       exact="$SurfaceRelative.rotation.pitch gt 80deg"/>
-                            <set_value name="$SurfaceAimInside"
-                                       exact="$SurfaceAimLocal.pitch ge -5deg and $SurfaceAimLocal.pitch le 80deg"/>
-                            <set_value name="$SurfaceArcSplit"
-                                       exact="$SurfaceOriginOutside and $SurfaceAimInside"/>
-                            <set_value name="$SurfacePositiveControl"
-                                       exact="$SurfaceRelative.rotation.pitch ge -5deg and $SurfaceRelative.rotation.pitch le 70.001deg and $SurfaceAimLocal.pitch ge -5deg and $SurfaceAimLocal.pitch le 70.001deg"/>
-                            <!-- r31 measured 49/49 externally blocked rays despite the
-                                 authored open-sky geometry. Cause remains unknown
-                                 (post-warp state, firing hull, or parent-component ray).
-                                 Both LOS variants are telemetry only; the bounded offline
-                                 OBB segment gate remains in tests/test_issue67_sky_ring.sh. -->
-                            <set_value name="$SurfaceArcCandidate" exact="$GeometryCase == 'arc_split' and $Separated and $SurfaceArcSplit and $SurfaceInRange and $SurfaceMayAttack"/>
-                            <set_value name="$SurfacePositiveCandidate" exact="$GeometryCase == 'positive_control' and $Separated and $SurfacePositiveControl and $SurfaceInRange and $SurfaceMayAttack"/>
-                            <do_if value="$SurfaceOriginOutside">
-                              <set_value name="$SurfaceOriginOutsidePairs" operation="add"/>
-                            </do_if>
-                            <do_if value="$SurfaceAimInside">
-                              <set_value name="$SurfaceAimInsidePairs" operation="add"/>
-                            </do_if>
-                            <do_if value="$SurfaceArcSplit">
-                              <set_value name="$SurfaceArcSplitPairs" operation="add"/>
-                            </do_if>
-                            <do_if value="$SurfaceArcCandidate">
-                              <set_value name="$SurfaceArcCandidatePairs" operation="add"/>
-                            </do_if>
-                            <do_if value="$SurfaceArcCandidate">
-                              <set_value name="$SurfaceArcCandidateMembers" operation="add"/>
-                            </do_if>
-                            <do_if value="$SurfacePositiveCandidate">
-                              <set_value name="$SurfacePositiveCandidateMembers" operation="add"/>
-                            </do_if>
-                            <debug_text text="'[X4GC TEST QUALIFY SURFACE] request_id=' + $RequestId + ' label=' + $Record.$label + ' case=' + $GeometryCase + ' target=' + $Target + ' target_id=' + $Target.idcode + ' surface=' + $Surface + ' surface_id=' + $Surface.idcode + ' surface_macro=' + $Surface.macro + ' weapon=' + $GeometryWeapon + ' weapon_macro=' + $GeometryWeapon.macro + ' origin_pitch=' + $SurfaceRelative.rotation.pitch + ' aim_pitch=' + $SurfaceAimLocal.pitch + ' separated=' + $Separated + ' inrange=' + $SurfaceInRange + ' range=' + $SurfaceRange + ' centre_range=' + $SurfaceCentreRange + ' surface_sector_pos=' + $SurfaceSectorPos + ' maxrange=' + $GeometryWeapon.maxfirerange + ' muzzle_los_ex=' + $SurfaceMuzzleLosEx + ' muzzle_los_self=' + $SurfaceMuzzleLosSelf + ' mayattack=' + $SurfaceMayAttack + ' origin_outside=' + $SurfaceOriginOutside + ' aim_inside=' + $SurfaceAimInside + ' arc_split=' + $SurfaceArcSplit + ' positive_control=' + $SurfacePositiveControl + ' arc_candidate=' + $SurfaceArcCandidate + ' positive_candidate=' + $SurfacePositiveCandidate"/>
-                          </do_if>
-                        </do_for_each>
-                        <do_if value="$ArcSplitSurface == null and $Measured == $ExpectedGeometryWeapons and $SurfaceArcCandidateMembers ge 1">
-                          <set_value name="$ArcSplitSurface" exact="$Surface"/>
-                          <set_value name="$ArcSplitSurfaceMembers" exact="$SurfaceArcCandidateMembers"/>
-                        </do_if>
-                        <do_if value="$PositiveControlSurface == null and $Measured == $ExpectedGeometryWeapons and $SurfacePositiveCandidateMembers ge 1">
-                          <set_value name="$PositiveControlSurface" exact="$Surface"/>
-                          <set_value name="$PositiveControlSurfaceMembers" exact="$SurfacePositiveCandidateMembers"/>
-                        </do_if>
-                      </do_for_each>
-                      <debug_text text="'[X4GC TEST QUALIFY TARGET] request_id=' + $RequestId + ' target=' + $Target + ' target_id=' + $Target.idcode + ' operational_surfaces=' + $Surfaces.count + ' actual_yaw=' + $Target.rotation.yaw + ' actual_pitch=' + $Target.rotation.pitch + ' actual_roll=' + $Target.rotation.roll"/>
-                    </do_if>
-                    <do_if value="not $Target or not $Target.exists">
-                      <set_value name="$PostWarpLocationFailures" operation="add"/>
-                      <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' reason=post_warp_mismatch target=' + $Target + ' target_id=' + (if $Target and $Target.exists then $Target.idcode else null) + ' actual_x=' + (if $Target and $Target.exists then $Target.position.x else null) + ' actual_y=' + (if $Target and $Target.exists then $Target.position.y else null) + ' actual_z=' + (if $Target and $Target.exists then $Target.position.z else null) + ' expected_x=' + (if $MeasurePStar then $MeasurePStar.x + $Record.$ox else null) + ' expected_y=' + (if $MeasurePStar then $MeasurePStar.y + $Record.$oy else null) + ' expected_z=' + (if $MeasurePStar then $MeasurePStar.z + $Record.$oz else null) + ' measure_pstar=' + $MeasurePStar"/>
-                    </do_if>
-                  </do_for_each>
-                </do_if>
-              </do_if>
-            </do_if>
-            <do_if value="not (ScenarioRoot.$GeometryShooter? and ScenarioRoot.$GeometryShooter != null
-                          and ScenarioRoot.$GeometryShooter.exists
-                          and ScenarioRoot.$SurfaceMaskPlacements?
-                          and ScenarioRoot.$SurfaceMaskPlacements.count == 2)">
-              <debug_text text="'[X4GC TEST QUALIFY] FAILED request_id=' + $RequestId + ' reason=preserved_object_missing shooter=' + (if ScenarioRoot.$GeometryShooter? then ScenarioRoot.$GeometryShooter else null) + ' placement_records=' + (if ScenarioRoot.$SurfaceMaskPlacements? then ScenarioRoot.$SurfaceMaskPlacements.count else 0) + ' surface_targets=' + (if ScenarioRoot.$SurfaceMaskTargets? then ScenarioRoot.$SurfaceMaskTargets.count else 0)"/>
-            </do_if>
-            <set_value name="$Qualified"
-                       exact="$TargetCount == 2 and $SurfaceCount gt 0 and $ExpectedGeometryWeapons gt 0
-                              and $Measured == $ExpectedGeometryWeapons and $ArcSplitSurface != null and $ArcSplitSurfaceMembers == 1
-                              and $PositiveControlSurface != null and $PositiveControlSurfaceMembers == 1
-                              and ScenarioRoot.$GeometryQualifyRepositioned == 2
-                              and ScenarioRoot.$GeometryQualifyRepositionFailures == 0
-                              and $PostWarpLocationFailures == 0"/>
-            <debug_text text="'[X4GC TEST QUALIFY] request_id=' + $RequestId + ' action=' + (if $Qualified then 'qualified' else 'failed') + ' targets=' + $TargetCount + ' surfaces=' + $SurfaceCount + ' measured=' + $Measured + ' expected_geometry_weapons=' + (if ScenarioRoot.$ExpectedGeometryWeapons? then ScenarioRoot.$ExpectedGeometryWeapons else 0) + ' geometry_weapon_macro=' + (if ScenarioRoot.$GeometryWeaponMacroName? then ScenarioRoot.$GeometryWeaponMacroName else '') + ' surface_pairs=' + $SurfacePairs + ' origin_outside_pairs=' + $SurfaceOriginOutsidePairs + ' aim_inside_pairs=' + $SurfaceAimInsidePairs + ' arc_split_pairs=' + $SurfaceArcSplitPairs + ' arc_candidate_pairs=' + $SurfaceArcCandidatePairs + ' arc_split_surface=' + $ArcSplitSurface + ' arc_split_macro=' + (if $ArcSplitSurface then $ArcSplitSurface.macro else null) + ' arc_split_surface_members=' + $ArcSplitSurfaceMembers + ' positive_control_surface=' + $PositiveControlSurface + ' positive_control_macro=' + (if $PositiveControlSurface then $PositiveControlSurface.macro else null) + ' positive_control_surface_members=' + $PositiveControlSurfaceMembers + ' repositioned=' + ScenarioRoot.$GeometryQualifyRepositioned + ' reposition_failures=' + ScenarioRoot.$GeometryQualifyRepositionFailures + ' post_warp_location_failures=' + $PostWarpLocationFailures"/>
-            <do_if value="$Qualified">
-              <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTargetToken'" param="$RequestId"/>
-              <raise_lua_event name="'X4GunneryTestLab.GeometryQualifiedTarget'" param="$ArcSplitSurface"/>
-            </do_if>
-            <raise_lua_event name="'X4GunneryTestLab.GeometryQualified'"
-                             param="'x4gcq9:' + $RequestId + ':' + (if $Qualified then 1 else 0) + ':' + $TargetCount + ':' + $SurfaceCount + ':' + $Measured + ':' + $SurfacePairs + ':' + $SurfaceOriginOutsidePairs + ':' + $SurfaceAimInsidePairs + ':' + $SurfaceArcSplitPairs + ':' + $SurfaceArcCandidatePairs + ':' + $ArcSplitSurfaceMembers + ':' + $PositiveControlSurfaceMembers"/>
-            <remove_value name="ScenarioRoot.$GeometryQualifyRequestId"/>
-            <remove_value name="ScenarioRoot.$GeometryQualifyRepositioned"/>
-            <remove_value name="ScenarioRoot.$GeometryQualifyRepositionFailures"/>
           </actions>
         </cue>
 
