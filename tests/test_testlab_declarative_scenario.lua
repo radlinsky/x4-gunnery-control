@@ -21,6 +21,8 @@ assert(scenario:find('$expectedweapons = event.param3.$expectedWeapons,', 1, tru
         and scenario:find('$expectedturrets = event.param3.$expectedTurrets,', 1, true)
         and scenario:find('$expectedmissileturrets = event.param3.$expectedMissileTurrets', 1, true),
     "MD must preserve zero-valued authored census totals from the flat Lua transport")
+assert(scenario:find('$distance  = event.param3.$distance,', 1, true),
+    "MD must preserve zero-valued authored distance from the flat Lua transport")
 assert(not scenario:find("$Def.$loadout ==", 1, true),
     "MD must not branch on fixture-specific loadout names")
 assert(not ui:find("supported shooter loadout", 1, true),

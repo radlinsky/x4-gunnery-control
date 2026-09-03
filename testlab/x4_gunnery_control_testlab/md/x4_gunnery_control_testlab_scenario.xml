@@ -65,7 +65,7 @@
               $macro     = if @event.param3.$macro     then event.param3.$macro     else '',
               $faction   = if @event.param3.$faction   then event.param3.$faction   else 'xenon',
               $count     = if @event.param3.$count     then event.param3.$count     else 1,
-              $distance  = if @event.param3.$distance  then event.param3.$distance  else 1000,
+              $distance  = event.param3.$distance,
               $spread    = if @event.param3.$spread    then event.param3.$spread    else 0,
               $x         = if @event.param3.$x         then event.param3.$x         else 0,
               $y         = if @event.param3.$y         then event.param3.$y         else 0,
