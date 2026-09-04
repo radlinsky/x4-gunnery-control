@@ -3282,6 +3282,24 @@ local function onOpenOnboard(_, shipComponent)
     if persistence then persistence.request() end
     transitionLifecycle(State.lifecycle.suspendedMap, "onboard ingress parked until Map closes")
     logSession("onboard ingress accepted; parked until Map closes")
+    -- The interact-menu action closes only the right-click menu; the Map stays
+    -- open, and the suspend/resume reopen only fires once the Map is gone. Close
+    -- the Map and open the console in one handoff -- the same proven vanilla-menu
+    -- transition redirectDockedMenu uses for DockedMenu (closeMenu() directly
+    -- races TopLevelMenu). Deferred a frame so we do not open two menus in the
+    -- interact render pass. If the session is replaced first, or the Map is
+    -- somehow already gone, the watchdog/gameplanchange reopen still covers it.
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not sameSession(expectedSession, expectedEpoch)
+                or not State.isMapSuspended(session) then return end
+        local mapMenu = Helper.getMenu("MapMenu")
+        if mapMenu then
+            Helper.closeMenuAndOpenNewMenu(mapMenu, "X4GunneryMenu", { 0, 0 }, true)
+        else
+            log("onboard ingress: MapMenu unavailable; awaiting map close")
+        end
+    end, false, getElapsedTime() + 0.05)
 end
 
 TestAPI.onOpenOnboard = onOpenOnboard
