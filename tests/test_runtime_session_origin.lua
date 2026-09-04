@@ -3,7 +3,8 @@
 -- Proves State.newSession records an origin ("chair" default, "onboard"
 -- explicit) and that the single sessionContextValid() gate behaves per origin:
 --   chair   -> valid only while seated (gunnercontrol) on the same ship;
---   onboard -> valid while physically aboard the same ship, no seat required.
+--   onboard -> valid while physically aboard the same player-owned ship, no
+--              seat required.
 --
 -- The fixture stubs playerShip() through C.GetPlayerOccupiedShipID (0) falling
 -- back to C.GetContextByClass(...) == 42, validated as a ship by
@@ -11,6 +12,14 @@
 -- baseline control group is "gunnercontrol".
 
 local fix = dofile("tests/support/runtime_fixture.lua").load()
+
+-- Ownership is part of onboard-session validity but not chair-session validity.
+-- Keep it mutable so the same-ship ownership-loss case is exercised directly.
+local playerOwned = true
+GetComponentData = function(_, key)
+    if key == "isplayerowned" then return playerOwned end
+    return nil
+end
 
 -- ── No session yet: the gate short-circuits to invalid ───────────────────────
 assert(fix.API.sessionContextValid() == false,
@@ -36,9 +45,7 @@ assert(fix.API.sessionContextValid() == false,
     "chair session invalid when control group is not gunnercontrol")
 fix.C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
 
--- Chair invalid on a different ship (also stands in for a non-player-owned ship:
--- ownership is enforced at ingress, so any other occupant fails the same-ship
--- check here).
+-- Chair invalid on a different ship.
 fix.C.GetPlayerOccupiedShipID = function() return 99 end
 assert(fix.API.sessionContextValid() == false,
     "chair session invalid when the player is in a different ship")
@@ -55,6 +62,12 @@ fix.C.GetPlayerCurrentControlGroup = function() return "" end
 assert(fix.API.sessionContextValid() == true,
     "onboard session valid while aboard, even with an empty control group")
 fix.C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
+
+-- Onboard invalid if the exact same occupied ship stops being player-owned.
+playerOwned = false
+assert(fix.API.sessionContextValid() == false,
+    "onboard session invalid when the occupied ship is no longer player-owned")
+playerOwned = true
 
 -- Onboard invalid on a different ship.
 fix.C.GetPlayerOccupiedShipID = function() return 99 end

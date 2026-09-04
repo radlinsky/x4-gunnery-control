@@ -189,18 +189,18 @@ local function isInGunnerChair()
     return controlGroup() == "gunnercontrol" and playerShip() ~= 0
 end
 
--- Single source of truth for "is the current session still valid in the world".
--- chair:   player is still in the gunnercontrol seat of the same ship.
--- onboard: player is still physically inside the same ship (no seat required);
---          playerShip() already resolves the enclosing container and rejects a
---          station, a non-ship, or a lost occupant by returning 0, so a bad
---          container fails the sameID check below.
--- For a chair session this is logically identical to the previous inline guard
--- (isInGunnerChair() and same ship), so chair behaviour is unchanged.
+local function ownedByPlayer(ship)
+    return ship ~= 0 and componentData(ship, "isplayerowned")
+end
+
+-- Single source of truth for whether the current session still matches the
+-- player's physical/control context.
+-- chair: same ship + gunnercontrol seat.
+-- onboard: same ship + player ownership; no seat required.
 local function sessionContextValid()
     if not session then return false end
     if not sameID(playerShip(), session.shipID) then return false end
-    if session.origin == "onboard" then return true end
+    if session.origin == "onboard" then return ownedByPlayer(session.shipID) end
     return controlGroup() == "gunnercontrol"
 end
 
@@ -255,12 +255,6 @@ local function transitionLifecycle(nextLifecycle, reason, quiet)
     if not quiet then
         logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
     end
-end
-
-local function ownedByPlayer(ship)
-    -- Ownership is intentionally conservative. The player must be seated in the
-    -- vessel they are controlling; this excludes station/remote contexts.
-    return ship ~= 0 and componentData(ship, "isplayerowned")
 end
 
 local function memberName(componentID, ordinal)
@@ -572,11 +566,7 @@ local function restoreDirect(reason)
     end, false, getElapsedTime() + 0.5)
 end
 
--- Onboard exit/return camera restore. Task 1 (#68) live-proved that a plain
--- cockpit-view restore is enough while standing on foot: no GetUp(), no notify
--- reset, no soft-target workaround (run token 307721696_1, 2026-09-03). This is
--- the single hook the onboard paths use so any future on-foot adjustment lands
--- in one place.
+-- Standing onboard sessions restore the normal player view without GetUp().
 local function restoreStandingCamera()
     C.SetPlayerCameraCockpitView(true)
 end
@@ -755,8 +745,7 @@ local function leaveChair(reason)
 end
 
 -- Onboard counterpart to leaveChair: same teardown, but the player is standing,
--- not seated, so there is no GetUp() and seatLeaving is never set. discardSession
--- runs the on-foot camera restore via the origin branch (Task 3b).
+-- so there is no GetUp() and seatLeaving is never set.
 local function leaveOnboard(reason)
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
     discardSession(reason)
@@ -2249,11 +2238,9 @@ function menu.onShowMenu()
     -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
     -- so the mode guard is required: dropping it would create a reticule Auto
     -- never otherwise shows.
-    -- This explicit resume handoff also grants the one bounded retry: live Task
-    -- 6 runs showed the engine refusing the resume's first SetSofttarget while
-    -- it settles after the menu transition, then accepting the same write
-    -- moments later. Granting it only here keeps the generic refusal-abandons
-    -- contract for every other re-point origin (restore envelope, tests).
+    -- A Map/Test Lab resume can transiently refuse the first SetSofttarget while
+    -- the menu transition settles, so grant one bounded retry only on this handoff.
+    -- Other re-point origins keep the normal refusal-abandons contract.
     if (resuming or mapSuspendResume) and session.phase == "engaged"
         and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
         session.repointTargetID = session.aimTargetID
@@ -3260,12 +3247,9 @@ end
 TestAPI.runSessionWatchdog = sessionWatchdog
 TestAPI.sessionContextValid = function() return sessionContextValid() end
 
--- Onboard Map ingress (#68 Task 4). MD's OnboardIngress cue raises this after the
--- player picks "Gunnery Control" on the exact ship containing them, while the Map
--- is still the active external menu. We do NOT open our menu over the Map: park a
--- fresh onboard session as suspendedMap and let the proven Map-close ->
--- reopenSuspendedSession path (Task 2d, now onboard-aware) display it. All checks
--- re-run here because the Map could have changed the world since Get_Actions.
+-- Map ingress is revalidated in Lua before a fresh onboard session is parked.
+-- The existing suspended-Map lifecycle opens Gunnery Control only after the Map
+-- has fully closed.
 local function onOpenOnboard(_, shipComponent)
     if session then return end
     local ship = id(shipComponent)
@@ -3282,16 +3266,8 @@ local function onOpenOnboard(_, shipComponent)
     if persistence then persistence.request() end
     transitionLifecycle(State.lifecycle.suspendedMap, "onboard ingress parked until Map closes")
     logSession("onboard ingress accepted; parked until Map closes")
-    -- Close the Map the way the engine itself does: call the map menu's own
-    -- onCloseElement("close"). Verified in vanilla menu_map.lua, that runs
-    -- Helper.closeMenu(menu, "close") AND menu.cleanup() and clears any context
-    -- menu/panels -- a full, clean close. This is keybind-agnostic: it invokes
-    -- the close action, not a specific key, so a rebound Map key does not matter.
-    -- Deliberately NOT a bare Helper.closeMenu (skips cleanup(), left the map
-    -- half-alive) and NOT closeMenuAndOpenNewMenu (opened our console into the
-    -- map's teardown and corrupted its dropdowns). Once the Map is fully gone the
-    -- existing suspend/resume reopen opens the console cleanly. Deferred a frame
-    -- to stay out of the interact render pass.
+    -- Use MapMenu's own close handler so its normal cleanup runs before the
+    -- suspended-session reopen. Defer one frame to leave the interact render pass.
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not sameSession(expectedSession, expectedEpoch)
