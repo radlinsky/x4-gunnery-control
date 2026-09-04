@@ -6,4 +6,9 @@
        A hard dependency disables us for whichever half of users installed the other one.
        kuertee's own recommendation. Load order is still honoured when the id does match. -->
   <dependency id="kuerteeUIExtensionsAndHUD" version="900" optional="true" name="kuertee UI Extensions and HUD"/>
+  <!-- Interact Menu API (SirNukes Mod Support APIs, bundled by UI Extensions) powers the
+       onboard Map right-click "Gunnery Control" action (#68). optional="true": if it is
+       absent the Get_Actions event never signals, the action never appears, and the chair
+       path is completely unaffected. No version pin so it never blocks load. -->
+  <dependency id="sn_mod_support_apis" optional="true" name="SirNukes Mod Support APIs"/>
 </content>

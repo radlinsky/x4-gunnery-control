@@ -678,5 +678,58 @@
         </cue>
       </cues>
     </cue>
+
+    <!-- #68 onboard Map ingress. Adds a "Gunnery Control" action to the Map
+         right-click menu of the ONE ship the player is physically inside, via
+         the Interact Menu API bundled with UI Extensions (SirNukes Mod Support
+         APIs). If that API is absent, Get_Actions never signals, this whole
+         block is inert, and the chair path is untouched. -->
+    <cue name="OnboardIngress">
+      <cues>
+        <cue name="AddAction" instantiate="true">
+          <conditions>
+            <event_cue_signalled cue="md.Interact_Menu_API.Get_Actions"/>
+          </conditions>
+          <actions>
+            <set_value name="$object" exact="@event.param.$object"/>
+            <!-- Only the exact player-owned ship currently containing the player,
+                 and only if it has at least one operational turret group. This
+                 excludes another owned ship, a subordinate, a docked-but-not-
+                 entered ship, and any station (all fail $object == player.container). -->
+            <do_if value="$object and $object.isclass.ship and $object.owner == faction.player and $object == player.container">
+              <find_object_component name="$turret" object="$object" class="class.turret" checkoperational="true" multiple="false"/>
+              <do_if value="$turret">
+                <!-- $section: 'interaction' is the intended section for an action on
+                     the player's own ship (not an order on an enemy). Confirm the
+                     exact token against the installed Interact Menu API in the
+                     Task 6 live run; a wrong token only misplaces the entry. -->
+                <signal_cue_instantly cue="md.Interact_Menu_API.Add_Action" param="table[
+                  $id       = 'x4gc_open_onboard',
+                  $section  = 'interaction',
+                  $text     = ReadText(20991, 104),
+                  $icon     = 'menu_weapon',
+                  $callback = OnboardIngress.OnSelected
+                ]"/>
+              </do_if>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="OnSelected" instantiate="true">
+          <conditions>
+            <event_cue_signalled/>
+          </conditions>
+          <actions>
+            <do_if value="event.param.$id == 'x4gc_open_onboard'">
+              <set_value name="$object" exact="event.param.$object"/>
+              <!-- Re-validate after the Map closed: never infer a different ship.
+                   Lua re-checks occupancy/ownership/turrets again on receipt. -->
+              <do_if value="$object and $object == player.container and $object.owner == faction.player">
+                <raise_lua_event name="'X4GunneryControl.OpenOnboard'" param="$object"/>
+              </do_if>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
   </cues>
 </mdscript>

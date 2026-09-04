@@ -124,9 +124,14 @@ function State.isMapSuspended(session)
         or session.lifecycle == State.lifecycle.reopening)
 end
 
-function State.newSession(shipID, controlGroup)
+function State.newSession(shipID, controlGroup, origin)
     return {
         active = true, shipID = shipID, controlGroup = controlGroup,
+        -- Session ingress origin: "chair" (physical gunnercontrol seat) or
+        -- "onboard" (standing aboard the same ship, no seat). Drives context
+        -- validity and physical exit behaviour; the legacy controlGroup field
+        -- above stays for save-compat and is deliberately never read.
+        origin = origin or "chair",
         lifecycle = State.lifecycle.owned,
         phase = "console", groups = {}, expanded = {},
         checkedGroupKeys = {}, controlMode = nil,
@@ -926,6 +931,9 @@ function State.saveState(session)
         povMode = session.povMode or "manual",
         autoNextTarget = flag(session.autoNextTarget ~= false),
         directMode = session.directMode or "attackenemies",
+        -- Ingress origin must survive a Reload-UI so an onboard console does not
+        -- come back as a chair session (which would then demand the seat).
+        origin = session.origin or "chair",
         shipID = tostring(session.shipID),
         -- Which ship this payload belongs to. shipID cannot answer that after a
         -- load, because a load reassigns it; the name survives.
@@ -1048,6 +1056,11 @@ local function validSessionRecord(record)
     -- When present it must be one of the two known values; anything else is corruption.
     if record.directMode ~= nil then
         if record.directMode ~= "attackenemies" and record.directMode ~= "autoassist" then return false end
+    end
+    -- origin: optional; absent in legacy payloads (defaults to "chair"). When
+    -- present it must be one of the two known ingress kinds.
+    if record.origin ~= nil then
+        if record.origin ~= "chair" and record.origin ~= "onboard" then return false end
     end
     return validCameraLocation(record)
 end
@@ -1267,6 +1280,9 @@ function State.restoreState(session, records, liveGroups)
     -- the caller's candidate; on any refusal above, it is byte-for-byte the
     -- object that onRestoreEnvelope created before it considered a swap.
     session.phase = head.phase
+    -- Legacy payloads predate origin; treat an absent/unknown value as chair so
+    -- an old save never resurrects as an onboard session.
+    session.origin = (head.origin == "onboard") and "onboard" or "chair"
     session.controlMode = (head.controlMode ~= "" and head.controlMode) or nil
     session.povAnchor = head.povAnchor
     session.povMode = head.povMode
