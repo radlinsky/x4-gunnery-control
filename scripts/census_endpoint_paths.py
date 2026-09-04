@@ -584,6 +584,33 @@ def _derive_endpoint_source_paths(
             )
             not in selected_identities
         ]
+
+        # A turret_active descriptor is ancestry-covered when an exact
+        # turret_active authored selector occurs on its own source connection
+        # or a strict ancestor. Edge indexes order the linear root-to-endpoint
+        # path, so the lowest turret_active selector edge index bounds coverage.
+        turret_active_selector_edge_indexes = [
+            int(occurrence["endpoint_path_edge_index"])
+            for occurrence in selector_occurrences
+            if occurrence["animation_name"] == "turret_active"
+        ]
+        min_turret_active_selector_edge_index = (
+            min(turret_active_selector_edge_indexes)
+            if turret_active_selector_edge_indexes
+            else None
+        )
+        ancestry_covered_turret_active_memberships = (
+            [
+                descriptor
+                for descriptor in memberships
+                if descriptor["subname"] == "turret_active"
+                and int(descriptor["endpoint_path_edge_index"])
+                >= min_turret_active_selector_edge_index
+            ]
+            if min_turret_active_selector_edge_index is not None
+            else []
+        )
+
         resolved.append(
             {
                 **endpoint,
@@ -593,6 +620,9 @@ def _derive_endpoint_source_paths(
                 "authored_animation_selector_occurrences": selector_occurrences,
                 "selected_ani_descriptor_memberships": selected_memberships,
                 "unselected_ani_descriptor_memberships": unselected_memberships,
+                "_ancestry_covered_turret_active_descriptor_memberships": (
+                    ancestry_covered_turret_active_memberships
+                ),
             }
         )
 
