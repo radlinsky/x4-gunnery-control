@@ -3282,6 +3282,23 @@ local function onOpenOnboard(_, shipComponent)
     if persistence then persistence.request() end
     transitionLifecycle(State.lifecycle.suspendedMap, "onboard ingress parked until Map closes")
     logSession("onboard ingress accepted; parked until Map closes")
+    -- Close the Map the way the engine itself does: call the map menu's own
+    -- onCloseElement("close"). Verified in vanilla menu_map.lua, that runs
+    -- Helper.closeMenu(menu, "close") AND menu.cleanup() and clears any context
+    -- menu/panels -- a full, clean close. This is keybind-agnostic: it invokes
+    -- the close action, not a specific key, so a rebound Map key does not matter.
+    -- Deliberately NOT a bare Helper.closeMenu (skips cleanup(), left the map
+    -- half-alive) and NOT closeMenuAndOpenNewMenu (opened our console into the
+    -- map's teardown and corrupted its dropdowns). Once the Map is fully gone the
+    -- existing suspend/resume reopen opens the console cleanly. Deferred a frame
+    -- to stay out of the interact render pass.
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not sameSession(expectedSession, expectedEpoch)
+                or not State.isMapSuspended(session) then return end
+        local mapMenu = Helper.getMenu("MapMenu")
+        if mapMenu and mapMenu.onCloseElement then mapMenu.onCloseElement("close") end
+    end, false, getElapsedTime() + 0.05)
 end
 
 TestAPI.onOpenOnboard = onOpenOnboard

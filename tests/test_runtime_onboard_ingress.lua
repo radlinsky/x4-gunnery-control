@@ -47,12 +47,22 @@ do
     assert(fix.API.getSession() == nil, "onboard ingress ignores a ship with no usable turret group")
 end
 
--- ── onOpenOnboard: success + already-active guard ────────────────────────────
+-- ── onOpenOnboard: success + Map close via its own onCloseElement + guard ─────
 do
     local fix = dofile("tests/support/runtime_fixture.lua").load()
     State = X4GunneryState
     ownPlayerShip()
     installOneGroup(fix)
+    -- The deferred callback must invoke the MapMenu's own onCloseElement("close")
+    -- (the engine's full close), NOT open our console over it.
+    local mapClosedWith
+    Helper.getMenu = function(name)
+        if name == "MapMenu" then
+            return { name = "MapMenu", onCloseElement = function(reason) mapClosedWith = reason end }
+        end
+    end
+
+    local mark = fix.callbackCheckpoint()
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
     local s = fix.API.getSession()
     assert(s ~= nil, "onboard ingress must create a session")
@@ -62,9 +72,27 @@ do
     assert(#s.groups >= 1, "onboard ingress must capture the usable turret group(s)")
     assert(next(s.committedBaseline or {}) ~= nil, "onboard ingress must seed the baseline")
 
+    fix.drainCallbacksSince(mark)
+    assert(mapClosedWith == "close",
+        "onboard ingress must close the Map via its own onCloseElement(\"close\")")
+
     -- A second OpenOnboard while a session exists is a no-op (guard at entry).
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
     assert(fix.API.getSession() == s, "a second OpenOnboard must not replace the live session")
+end
+
+-- ── onOpenOnboard: no crash when MapMenu is unavailable ───────────────────────
+do
+    local fix = dofile("tests/support/runtime_fixture.lua").load()
+    State = X4GunneryState
+    ownPlayerShip()
+    installOneGroup(fix)
+    Helper.getMenu = function() return nil end  -- no Map to close
+    local mark = fix.callbackCheckpoint()
+    fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
+    fix.drainCallbacksSince(mark)
+    assert(fix.API.getSession() ~= nil and fix.API.getSession().lifecycle == State.lifecycle.suspendedMap,
+        "with no MapMenu the onboard session stays parked for the watchdog reopen")
 end
 
 -- ── Onboard exit: leaveSession -> leaveOnboard (no GetUp), origin restore ─────
