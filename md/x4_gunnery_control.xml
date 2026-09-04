@@ -721,8 +721,11 @@
           <actions>
             <do_if value="event.param.$id == 'x4gc_open_onboard'">
               <set_value name="$object" exact="event.param.$object"/>
-              <!-- Re-validate after the Map closed: never infer a different ship.
-                   Lua re-checks occupancy/ownership/turrets again on receipt. -->
+              <!-- Re-validate on selection (the right-click menu closes here, but the
+                   Map itself typically stays open): never infer a different ship. Lua
+                   re-checks occupancy/ownership/turrets on receipt, parks the session,
+                   and it only displays once the Map is actually closed (onOpenOnboard).
+                   Whether the Map auto-closes on selection is a Task 6 live observation. -->
               <do_if value="$object and $object == player.container and $object.owner == faction.player">
                 <raise_lua_event name="'X4GunneryControl.OpenOnboard'" param="$object"/>
               </do_if>
