@@ -125,6 +125,7 @@ end
 do
     local fix = dofile("tests/support/runtime_fixture.lua").load()
     State = X4GunneryState
+    ownPlayerShip()
     fix.gcMenu.onShowMenu()
     local seed = fix.API.getSession()
     local payload = State.encode(State.saveState({
