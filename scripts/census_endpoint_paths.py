@@ -599,3 +599,92 @@ def _derive_endpoint_source_paths(
     if anomalies:
         return [], anomalies
     return resolved, []
+
+
+def _derive_endpoint_authored_geometry(
+    endpoint: dict[str, object],
+    connections: list[dict[str, object]],
+    *,
+    component: str,
+    source_set: object,
+    source_file: object,
+) -> tuple[dict[str, object] | None, list[dict[str, object]]]:
+    """Derive one resolved endpoint's ordered authored source-geometry chain.
+
+    Pairs each traversed source part with the connection that directly owns it
+    and preserves, per layer, that connection's authored offset, the part's
+    private authored offset, and that layer's authored restrictions; the
+    endpoint connection's own authored offset is preserved as the final leaf.
+
+    Fails closed unless each source part identifies exactly one owning-connection
+    part-transform record. Offsets are copied verbatim, not interpreted; ANI
+    records are not consulted and no matrices are composed.
+    """
+
+    connections_by_name = {
+        str(connection["name"]): connection for connection in connections
+    }
+    endpoint_name = str(endpoint["connection"])
+    anomalies: list[dict[str, object]] = []
+
+    layers: list[dict[str, object]] = []
+    for edge in endpoint["traversed_connection_edges"]:
+        owner_name = str(edge["parent_connection"])
+        part = str(edge["child_parent_part"])
+        owner = connections_by_name.get(owner_name)
+        transforms = (
+            [
+                transform
+                for transform in owner.get("_direct_owned_part_transforms", [])
+                if str(transform["name"]) == part
+            ]
+            if owner is not None
+            else []
+        )
+        if len(transforms) != 1:
+            anomalies.append(
+                _anomaly(
+                    "ambiguous_source_part_transform_identity"
+                    if len(transforms) > 1
+                    else "missing_source_part_transform_identity",
+                    "endpoint source part does not identify exactly one owning-connection transform record",
+                    component=component,
+                    endpoint_connection=endpoint_name,
+                    owning_connection=owner_name,
+                    source_part=part,
+                    transform_count=len(transforms),
+                    source_set=source_set,
+                    source_file=source_file,
+                )
+            )
+            continue
+        layers.append(
+            {
+                "source_part": part,
+                "owning_connection": owner_name,
+                "connection_authored_offset": owner["_authored_offset"],
+                "part_authored_offset": transforms[0]["_authored_offset"],
+                "authored_restrictions": owner["authored_restrictions"],
+            }
+        )
+
+    endpoint_connection = connections_by_name.get(endpoint_name)
+    if endpoint_connection is None:
+        anomalies.append(
+            _anomaly(
+                "unresolvable_endpoint_leaf_transform_identity",
+                "resolved endpoint connection is absent from the component graph",
+                component=component,
+                endpoint_connection=endpoint_name,
+                source_set=source_set,
+                source_file=source_file,
+            )
+        )
+
+    if anomalies:
+        return None, anomalies
+    return {
+        "endpoint_connection": endpoint_name,
+        "source_geometry_layers": layers,
+        "endpoint_authored_offset": endpoint_connection["_authored_offset"],
+    }, []

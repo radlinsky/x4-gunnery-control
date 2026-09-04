@@ -93,6 +93,7 @@ from census_eligibility import (
 from census_endpoint_paths import (
     _FIRING_ENDPOINT_TAG_BY_COMPONENT_CLASS,
     _classify_firing_endpoints,
+    _derive_endpoint_authored_geometry,
     _derive_endpoint_source_paths,
     _join_authored_animation_selectors,
     _resolve_connection_hierarchy,
