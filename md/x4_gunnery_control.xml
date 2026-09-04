@@ -680,10 +680,10 @@
     </cue>
 
     <!-- #68 onboard Map ingress. Adds a "Gunnery Control" action to the Map
-         right-click menu of the ONE ship the player is physically inside, via
-         the Interact Menu API bundled with UI Extensions (SirNukes Mod Support
-         APIs). If that API is absent, Get_Actions never signals, this whole
-         block is inert, and the chair path is untouched. -->
+         right-click menu of the one ship the player is physically inside via
+         SirNukes Mod Support APIs' Interact Menu API. If that API is absent,
+         Get_Actions never signals, this block is inert, and the chair path is
+         untouched. -->
     <cue name="OnboardIngress">
       <cues>
         <cue name="AddAction" instantiate="true">
@@ -699,10 +699,8 @@
             <do_if value="$object and $object.isclass.ship and $object.owner == faction.player and $object == player.container">
               <find_object_component name="$turret" object="$object" class="class.turret" checkoperational="true" multiple="false"/>
               <do_if value="$turret">
-                <!-- $section: 'interaction' is the intended section for an action on
-                     the player's own ship (not an order on an enemy). Confirm the
-                     exact token against the installed Interact Menu API in the
-                     Task 6 live run; a wrong token only misplaces the entry. -->
+                <!-- 'interaction' is the API section for an action on the
+                     player's own ship rather than an order on another object. -->
                 <signal_cue_instantly cue="md.Interact_Menu_API.Add_Action" param="table[
                   $id       = 'x4gc_open_onboard',
                   $section  = 'interaction',
@@ -721,11 +719,9 @@
           <actions>
             <do_if value="event.param.$id == 'x4gc_open_onboard'">
               <set_value name="$object" exact="event.param.$object"/>
-              <!-- Re-validate on selection (the right-click menu closes here, but the
-                   Map itself typically stays open): never infer a different ship. Lua
-                   re-checks occupancy/ownership/turrets on receipt, parks the session,
-                   and it only displays once the Map is actually closed (onOpenOnboard).
-                   Whether the Map auto-closes on selection is a Task 6 live observation. -->
+              <!-- Re-validate the exact ship on selection. Lua independently
+                   re-checks occupancy, ownership, and turrets, then closes the Map
+                   through its normal UI lifecycle before opening Gunnery Control. -->
               <do_if value="$object and $object == player.container and $object.owner == faction.player">
                 <raise_lua_event name="'X4GunneryControl.OpenOnboard'" param="$object"/>
               </do_if>
