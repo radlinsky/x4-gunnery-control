@@ -47,12 +47,17 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- The disabled fixture below is retained only as the current work-in-progress
--- input. Its A/B coordinates are known-bad for the channel discriminator; do
--- not treat them as a reusable geometry fixture.
+-- #68 Task 6 onboard-fallback fixture: spawn a player-owned Behemoth (Terran L
+-- destroyer, the tracked chair-deficient ship) remotely, teleport aboard, and
+-- prove the Map right-click "Gunnery Control" ingress on foot. Beam turrets are
+-- loaded across TWO groups because the Behemoth E rejects a singular turret-group
+-- loadout (memory: behemoth-e-no-direct-control-until-68). No hostiles: this run
+-- proves ingress + lifecycle + on-foot exit, not firing.
+-- The repository copy stays disabled; launch-x4-test-lab-dev.bat enables the
+-- installed copy.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-72-a3-channel0-discriminator-r1",
+    id      = "issue-68-onboard-behemoth-e-r1",
     enabled = false,
 
     location = {
@@ -64,21 +69,22 @@ X4GunneryTestLabScenarioSpec = {
 
     setup = {
         remote          = true,
-        shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE72 PAR L BEAM SHOOTER 1",
-        turretGroup     = "group_rear_down_mid",
-        turretLabel     = "Rear Lower Mid Beam",
+        shipMacro       = "ship_ter_l_destroyer_01_a_macro",
+        shipLabel       = "ISSUE68 ONBOARD BEHEMOTH 1",
+        turretGroup     = "group_back_mid_mid",
+        turretLabel     = "Back Mid Beam",
         selectAll       = false,
-        expectedTurrets = 1,
+        expectedTurrets = 2,
         expectedMemberMacros = {
-            "turret_par_l_beam_01_mk1_macro",
+            "turret_ter_l_beam_01_mk1_macro",
+            "turret_ter_l_beam_01_mk1_macro",
         },
     },
 
     groups = {
         {
-            label     = "ISSUE72 PAR L BEAM SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
+            label     = "ISSUE68 ONBOARD BEHEMOTH",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
             distance  = 1,
@@ -88,42 +94,10 @@ X4GunneryTestLabScenarioSpec = {
             behaviour = "wait",
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
+            loadout   = "x4gc_testlab_ter_l_destroyer_01_beam",
+            expectedWeapons        = 4,
+            expectedTurrets        = 4,
             expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE72 CHANNEL0 TARGET A",
-            macro     = "ship_arg_l_destroyer_02_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 7000,
-            x         = 0,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-        },
-
-        {
-            label     = "ISSUE72 CHANNEL0 TARGET B",
-            macro     = "ship_arg_l_destroyer_02_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 7000,
-            x         = 2000,
-            y         = 1500,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
         },
     },
 }
