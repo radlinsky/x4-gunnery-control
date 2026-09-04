@@ -316,7 +316,8 @@ local function readGroups(ship)
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
-                    operationalCount = 0, members = {}, mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
+                    macro = componentData(component, "macro") or "", operationalCount = 0, members = {},
+                    mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
                     displayName = memberName(component, slot) }
                 groups[#groups + 1] = entry
             end
@@ -1542,7 +1543,7 @@ function TestAPI.getSessionEpoch()
 end
 
 local function copyCurrentShipSweep(groups)
-    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    if not session or not sessionContextValid() then return nil, "not seated in gunnery control" end
     local ship = session.shipID
     local result = { id = tostring(ship), name = str(C.GetComponentName(ship)), macro = componentData(ship, "macro"), groups = {} }
     for _, group in ipairs(groups or {}) do
@@ -1568,7 +1569,7 @@ end
 -- Fresh hardware view for scenario preflight/revalidation. Unlike refresh(),
 -- this must not reconcile or otherwise mutate the parked Gunnery session.
 function TestAPI.getCurrentShipSweepReadOnly()
-    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    if not session or not sessionContextValid() then return nil, "not seated in gunnery control" end
     return copyCurrentShipSweep(readGroups(session.shipID))
 end
 

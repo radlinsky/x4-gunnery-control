@@ -483,6 +483,97 @@ do
         "selectAll activation must not claim one exact group as the selected group")
 end
 
+-- singleTurretMacro resolves one mutable production single entry through the
+-- existing exact-selection activation path.
+do
+    local harness = loadHarness({
+        id = "single-turret",
+        enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro",
+            shipLabel = "Test Ship",
+            turretLabel = "Single Turret",
+            singleTurretMacro = "single_turret_macro",
+            expectedTurrets = 1,
+        },
+        groups = { group() },
+    })
+    -- Zero upgrade groups: the lone turret slot is a production single entry,
+    -- discovered through the same C APIs as every other turret.
+    harness.fix.C.GetNumUpgradeGroups = function() return 0 end
+    harness.fix.C.GetUpgradeGroups2 = function() return 0 end
+    harness.fix.C.GetNumUpgradeSlots = function() return 1 end
+    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot)
+        return slot == 1 and 27 or 0
+    end
+    GetComponentData = function(component, field)
+        if field == "macro" then
+            return tonumber(component) == 27 and "single_turret_macro"
+                or "test_ship_macro"
+        end
+        if field == "isplayerowned" then return true end
+        return nil
+    end
+
+    local session = harness.openFromGunnery({ label = "console", phase = "console" })
+    local _, requestId = requestScenario(harness)
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        ready9(requestId, "single-turret", { spawned = 1 }))
+
+    local singleKey = X4GunneryState.singleKey(27)
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
+        "an exact single-turret resolution must complete scenario setup")
+    assert(session.checkedGroupKeys[singleKey] == true,
+        "single-turret activation must check the exact single group")
+    assert(session.selectedGroupKey == singleKey,
+        "single-turret activation must claim the resolved single group as selected")
+end
+
+-- Two mutable production singles sharing the requested macro fail closed
+-- before any scenario event or handoff, with the ambiguity logged.
+do
+    local harness = loadHarness({
+        id = "ambiguous-single",
+        enabled = false,
+        setup = {
+            shipMacro = "test_ship_macro",
+            shipLabel = "Test Ship",
+            turretLabel = "Ambiguous Single Turret",
+            singleTurretMacro = "shared_single_macro",
+            expectedTurrets = 1,
+        },
+        groups = { group() },
+    })
+    harness.fix.C.GetNumUpgradeGroups = function() return 0 end
+    harness.fix.C.GetUpgradeGroups2 = function() return 0 end
+    harness.fix.C.GetNumUpgradeSlots = function() return 2 end
+    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot)
+        return slot == 1 and 27 or 28
+    end
+    GetComponentData = function(component, field)
+        if field == "macro" then
+            local id = tonumber(component)
+            if id == 27 or id == 28 then return "shared_single_macro" end
+            return "test_ship_macro"
+        end
+        if field == "isplayerowned" then return true end
+        return nil
+    end
+
+    harness.openFromGunnery({ label = "console", phase = "console" })
+    local create = harness.fix.buttonByText(ReadText(20992, 25))
+    assert(create and create.handlers.onClick,
+        "Test Lab must expose Create test scenario")
+    create.handlers.onClick()
+    assert(#scenarioEvents(harness) == 0,
+        "an ambiguous single-turret macro must spawn nothing")
+    assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 0,
+        "an ambiguous single-turret macro must keep Test Lab open")
+    assert(harness.fix.logContains(
+            "reason=2_mutable_single_turrets_with_macro_shared_single_macro__expected_exactly_one"),
+        "the ambiguity must be logged as the rejection reason")
+end
+
 -- Replacing an engaged fixture must suppress the parked aim target that MD just
 -- destroyed. Observation resumes only after Gunnery reports a distinct target.
 do
