@@ -53,11 +53,11 @@ do
     State = X4GunneryState
     ownPlayerShip()
     installOneGroup(fix)
-    -- Capture the Map->console handoff: the deferred callback should close the
-    -- MapMenu and open X4GunneryMenu (mirrors redirectDockedMenu).
-    local handoff
+    -- The deferred callback must CLOSE the MapMenu (not open our console over it);
+    -- the existing suspend/resume reopen then opens the console cleanly.
+    local closedMap
     Helper.getMenu = function(name) return name == "MapMenu" and { name = "MapMenu" } or nil end
-    Helper.closeMenuAndOpenNewMenu = function(src, newName) handoff = { src = src, newName = newName } end
+    Helper.closeMenu = function(m) if m and m.name == "MapMenu" then closedMap = true end end
 
     local mark = fix.callbackCheckpoint()
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
@@ -70,15 +70,14 @@ do
     assert(next(s.committedBaseline or {}) ~= nil, "onboard ingress must seed the baseline")
 
     fix.drainCallbacksSince(mark)
-    assert(handoff and handoff.newName == "X4GunneryMenu" and handoff.src.name == "MapMenu",
-        "onboard ingress must close the Map and open X4GunneryMenu")
+    assert(closedMap, "onboard ingress must close the Map so the reopen path opens the console")
 
     -- A second OpenOnboard while a session exists is a no-op (guard at entry).
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
     assert(fix.API.getSession() == s, "a second OpenOnboard must not replace the live session")
 end
 
--- ── onOpenOnboard: Map handoff fallback when MapMenu is unavailable ───────────
+-- ── onOpenOnboard: no crash when MapMenu is unavailable ───────────────────────
 do
     local fix = dofile("tests/support/runtime_fixture.lua").load()
     State = X4GunneryState
@@ -91,7 +90,6 @@ do
     -- Session stays parked; the watchdog/gameplanchange reopen path still applies.
     assert(fix.API.getSession() ~= nil and fix.API.getSession().lifecycle == State.lifecycle.suspendedMap,
         "with no MapMenu the onboard session stays parked for the watchdog reopen")
-    assert(fix.logContains("MapMenu unavailable"), "must log the missing-Map fallback")
 end
 
 -- ── Onboard exit: leaveSession -> leaveOnboard (no GetUp), origin restore ─────
