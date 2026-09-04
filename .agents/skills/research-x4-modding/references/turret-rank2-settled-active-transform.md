@@ -1,16 +1,19 @@
 # Rank-2 turret settled `turret_active` transform (X4 9.00)
 
-**SOURCE-DERIVED CANDIDATE — NOT LIVE-TESTED**
+**SOURCE-DERIVED RULE — LIVE-TESTED ON THE PARANID M LASER REPRESENTATIVE**
 
 The seven rank-2 turret components have enough mutually corroborating offline
-source evidence to define one candidate rule for their settled
-`turret_active` pose. The rule is suitable for a later X4 instrumentation/model
-discriminator; it is not runtime proof and must not be promoted to production
-without that discriminator.
+source evidence to define one rule for their settled `turret_active` pose. A
+controlled X4 9.00 discriminator has now independently corroborated the
+additive local-X channel-1 composition on the exact Paranid M laser
+representative. That live result validates the semantic choice for this exact
+rank-2 topology; it is not the later nine-pose runtime-position validation for
+every source-resolved topology.
 
-This reference closes only the source-semantics question needed for the settled
-pose. It does not establish arbitrary ANI channels, transition interpolation,
-or runtime telemetry signs.
+This reference closes the source-semantics question needed for the settled
+pose and records the representative runtime discriminator. It does not
+establish arbitrary ANI channels, transition interpolation, or a global
+runtime telemetry sign convention.
 
 ## Scope and sources
 
@@ -49,7 +52,9 @@ Offline sources checked:
    binary ANI channel layout or its composition rule. An Egosoft-forum
    community guide supplied only a workflow lead, not an official semantic.
 
-No X4 process was run.
+The original source pass did not run X4. The later live discriminator is
+recorded below and used the exact source chain in this file without fitting
+runtime constants.
 
 ## Exact authored topology
 
@@ -73,7 +78,7 @@ The rotator-base part identity is `detail_xl_rotator_base` except for
 
 `part_rotator` carries an unrestricted `rotation_y` restriction. `part_gun`
 carries `rotation_x` with limits −10° through 89°. These are authored axis and
-limit facts; this offline pass does not assign signs to runtime yaw/pitch
+limit facts; this source pass does not assign signs to runtime yaw/pitch
 telemetry.
 
 ### Shared upstream authored transforms
@@ -170,7 +175,7 @@ cross-family construction of the shipped assets.
 ## Generic settled-transform rule
 
 For each path part, preserve the component's authored connection transform
-and part transform as separate layers. Under the source-derived candidate:
+and part transform as separate layers. Under the source-derived rule:
 
 1. Apply the authored connection transform from the parent part to the named
    connection.
@@ -197,9 +202,10 @@ M_k(ψ,θ) = L_anim_base* · L_part_arm* · L_rotator_base*
            · L_part_gun* · X(θ) · E_k,       k ∈ {1,2}
 ```
 
-This notation deliberately leaves runtime telemetry sign outside the fixed
-active-pose result. It does not import the rank-1 prospective model's telemetry
-sign into a different topology without proof.
+This notation deliberately leaves a global runtime telemetry-sign convention
+outside the fixed active-pose result. The live discriminator below instantiates
+the representative from projectile bore direction rather than assuming that a
+logged target-bearing sign is the joint sign.
 
 ### Representative: `turret_par_m_laser_01_mk1`
 
@@ -263,7 +269,7 @@ Exact exported residues remain in the literal matrices, but the authored
 leave Paranid/Terran at +35° while Teladi remains at 0°, despite their identical
 active ANI triples and shared topology. The additive interpretation therefore
 explains both authored families with one rule and is the mechanically coherent
-source-derived candidate.
+source-derived rule.
 
 One generic algorithm covers all seven. They do **not** require separate
 semantic groups. Real data differences that remain parameters of that rule are:
@@ -290,31 +296,100 @@ the settled-pose requirement.
 This does not globally establish X4's interpolation enum, control-point, or
 selector-propagation semantics.
 
+## X4 9.00 live discriminator
+
+A controlled live run on 2026-09-04 used X4 9.00 build 611726 and the exact
+Paranid representative `turret_par_m_laser_01_mk1_macro` on
+`ship_par_m_trans_container_01_a_macro`. The repository base was
+`22d479b6b7e1d0d3ad2470cee1e1b1ff37e449b3`; the scenario was intentionally
+uncommitted Test Lab input named
+`issue-83-b2-par-m-laser-channel1-discriminator-r1`.
+
+The corrected Test Lab operational census was exactly one weapon, one ordinary
+turret, and zero missile turrets. Create reached `remote_ready`; onboard Test
+Lab resolved exactly one intended equipment macro and enabled observation.
+Early records while the turret remained in default `attackenemies` mode are
+excluded because the discriminator contract required explicit
+`autoassist` / Attack my current enemy attribution. Only later `autoassist`
+records whose `aimed=` object matched the selected target are used, with
+correlated `HIT ... istgt=1` records for both named targets.
+
+After training settled, repeated exact-turret `FIRED` records converged to:
+
+| target | projectile yaw | projectile pitch | runtime `barrelposition` |
+|---|---:|---:|---|
+| left | about `-0.635243` | `0.643347` | `(-2.50881, 4.76001, 2.37470)` |
+| right | about `+0.635244` | `0.643347` | `(2.00360, 4.76001, 2.74713)` |
+
+Use the projectile bore directions from those same firing instants to
+instantiate the variable yaw/pitch portion of each candidate. This avoids
+assuming that target-relative telemetry signs are the native joint signs.
+Compare right-minus-left muzzle displacement rather than absolute muzzle
+position: fixed hull-mount translation cancels, and displacement magnitude is
+also invariant to any fixed hull-mount rotation.
+
+The runtime displacement is approximately:
+
+```text
+(4.5124118, 0, 0.3724348) m
+|Δ| = 4.5277553 m
+```
+
+For authored endpoint 2, the additive source rule predicts:
+
+```text
+(4.5124173, 0, 0.3724296) m
+|Δ| = 4.5277603 m
+```
+
+The vector residual is about `7.6e-6 m`; the magnitude residual is about
+`5.0e-6 m`.
+
+The replacement control treats the same active channel-1 values as replacing
+the authored rotations, leaving the Paranid fixed frame at +35° as described
+above. For each observed projectile bore direction, solve that control's two
+live joint rotations to reproduce the bore direction before evaluating the
+muzzle. It predicts approximately:
+
+```text
+(3.9155441, -0.3358029, 0.4795738) m
+|Δ| = 3.9590706 m
+```
+
+That is about `0.6931763 m` vector error and `0.5686847 m` magnitude error.
+The conclusion is not dependent on choosing endpoint 2 after the fact: using
+endpoint 1 or the endpoint midpoint still leaves the additive displacement
+magnitude within about `0.0051 m` or `0.0152 m` respectively, while the
+replacement controls miss by about `0.5831 m` or `0.6118 m`.
+
+The live discriminator therefore selects the additive local-X channel-1
+composition and rejects the replacement interpretation for this exact Paranid
+rank-2 representative.
+
 ## Decision and proof boundary
 
-**SOURCE-SEMANTICS RESOLVED.**
+**SOURCE-SEMANTICS RESOLVED; REPRESENTATIVE RUNTIME DISCRIMINATOR PASSED.**
 
 The shipped hierarchy/numeric construction and the pinned converter's additive
-Euler interpretation independently converge on one exact candidate rule for
-all seven components. That is sufficient to implement a bounded live
-instrumentation/model discriminator. It is not sufficient to claim runtime
-truth or ship a production transform.
+Euler interpretation independently converge on one exact source rule for all
+seven components. X4 9.00 then independently selected that additive rule over
+the replacement control on the Paranid M laser representative using actual
+firing and hit evidence at two materially distinct bearings.
 
-The later discriminator must still establish that X4 9.00 consumes these exact
-ancestor-covered descriptors as the candidate predicts and that its observed
-settled muzzle positions agree with the additive local-Euler composition. A
-replacement-control model is useful because it differs materially for the
-Paranid/Terran authored family while leaving the Teladi family conceptually
-unchanged. That runtime check is validation of the resolved source candidate,
-not a missing offline transform choice.
+This promotes the additive channel-1 composition needed by this exact rank-2
+settled topology from source-derived inference to a representative
+`live-tested` semantic. It does not claim that all seven component-specific
+geometries have separately passed runtime position validation; that remains a
+later topology-validation requirement.
 
 Not established here:
 
-- general channel-1 semantics outside this exact topology and state;
+- general channel-1 semantics outside this exact topology and settled state;
 - transition interpolation/control semantics;
-- runtime yaw/pitch telemetry signs;
-- production accuracy or tolerance;
-- any live-tested claim.
+- a global runtime yaw/pitch telemetry-sign convention;
+- nine-pose production accuracy/tolerance for the topology;
+- runtime validation of every component-specific offset/end-point set in the
+  seven-member cohort.
 
 ## Evidence records
 
@@ -345,11 +420,28 @@ Not established here:
 - Status: inference
 - Source: shipped-source hierarchy/numeric agreement plus the pinned
   third-party transform technique
-- Live test: no
+- Live test: representative runtime corroboration recorded separately below
 - Finding: additive local channel-1 rotations produce one mechanically coherent
   fixed active orientation and one generic transform rule across all seven;
-  replacement creates an unexplained authored-family split. Suitable for a
-  later discriminator, not for production promotion.
+  replacement creates an unexplained authored-family split.
+
+### Paranid M laser additive channel-1 composition
+
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: owner-captured `debug.log`, 2026-09-04, scenario
+  `issue-83-b2-par-m-laser-channel1-discriminator-r1`; exact source transforms
+  and endpoints recorded above
+- Live test: yes — repository base
+  `22d479b6b7e1d0d3ad2470cee1e1b1ff37e449b3` plus uncommitted fixture-only
+  scenario input
+- Finding: corrected setup reached remote READY and exact single-turret
+  activation; after excluding pre-`autoassist` records, both intended targets
+  produced attributable exact-turret FIRED/HIT evidence. The settled
+  right-minus-left runtime muzzle displacement was within about `7.6e-6 m` of
+  the additive endpoint-2 prediction, while the replacement control was about
+  `0.693 m` away. Additive local-X channel-1 composition is therefore
+  independently corroborated for this exact rank-2 representative.
 
 ### Official tooling availability
 
@@ -360,5 +452,5 @@ Not established here:
 - Live test: no
 - Finding: availability/version only — Egosoft lists Blender Mod Tools 0.7.0
   for X4 9.00 and above, but the package is login/game-registration restricted.
-  No public official source
-  checked in this pass specified the binary ANI composition semantics.
+  No public official source checked in this pass specified the binary ANI
+  composition semantics.
