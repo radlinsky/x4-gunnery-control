@@ -36,4 +36,18 @@ assert(fresh and #fresh.groups == 1 and #fresh.groups[1].members == 1,
 local reconciled = fix.API.getCurrentShipSweep()
 assert(reconciled and #reconciled.groups == 1 and #reconciled.groups[1].members == 1,
     "legacy current-ship sweep must still refresh and return groups")
+
+-- Onboard sessions (standing, no gunner seat) must still get a fresh
+-- read-only sweep while the session context holds, and must be rejected once
+-- the player is no longer aboard the session's ship.
+session.origin = "onboard"
+fix.C.GetPlayerCurrentControlGroup = function() return "main" end
+fix.C.GetPlayerOccupiedShipID = function() return session.shipID end
+local onboard = fix.API.getCurrentShipSweepReadOnly()
+assert(onboard and #onboard.groups == 1 and #onboard.groups[1].members == 1,
+    "read-only sweep must work for an onboard session without a gunner seat")
+fix.C.GetPlayerOccupiedShipID = function() return session.shipID + 1 end
+local rejected, reason = fix.API.getCurrentShipSweepReadOnly()
+assert(rejected == nil and reason ~= nil,
+    "read-only sweep must reject a session whose occupied ship no longer matches")
 print("runtime coverage targeting tests passed")

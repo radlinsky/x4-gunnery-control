@@ -120,11 +120,11 @@ end
 -- State.newSession is pure Lua and cannot read the ship's name. It is recorded
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
-local function newSession(ship)
+local function newSession(ship, origin)
     engageabilityCache, engageabilityRequests = {}, {}
     engageabilityRepaintPending = nil
     surfacePinnedUpdatePending = false
-    local session = State.newSession(ship, "gunnercontrol")
+    local session = State.newSession(ship, "gunnercontrol", origin or "chair")
     session.shipName = str(C.GetComponentName(ship))
     return session
 end
@@ -189,6 +189,21 @@ local function isInGunnerChair()
     return controlGroup() == "gunnercontrol" and playerShip() ~= 0
 end
 
+local function ownedByPlayer(ship)
+    return ship ~= 0 and componentData(ship, "isplayerowned")
+end
+
+-- Single source of truth for whether the current session still matches the
+-- player's physical/control context.
+-- chair: same ship + gunnercontrol seat.
+-- onboard: same ship + player ownership; no seat required.
+local function sessionContextValid()
+    if not session then return false end
+    if not sameID(playerShip(), session.shipID) then return false end
+    if session.origin == "onboard" then return ownedByPlayer(session.shipID) end
+    return controlGroup() == "gunnercontrol"
+end
+
 -- Every registered View entry, as id/owning-menu-name. A view that outlives its
 -- menu keeps the engine in menu-input mode, which would explain Esc doing
 -- nothing after get-up until another menu opens and closes. View is a global
@@ -240,12 +255,6 @@ local function transitionLifecycle(nextLifecycle, reason, quiet)
     if not quiet then
         logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
     end
-end
-
-local function ownedByPlayer(ship)
-    -- Ownership is intentionally conservative. The player must be seated in the
-    -- vessel they are controlling; this excludes station/remote contexts.
-    return ship ~= 0 and componentData(ship, "isplayerowned")
 end
 
 local function memberName(componentID, ordinal)
@@ -307,7 +316,8 @@ local function readGroups(ship)
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
-                    operationalCount = 0, members = {}, mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
+                    macro = componentData(component, "macro") or "", operationalCount = 0, members = {},
+                    mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
                     displayName = memberName(component, slot) }
                 groups[#groups + 1] = entry
             end
@@ -557,9 +567,14 @@ local function restoreDirect(reason)
     end, false, getElapsedTime() + 0.5)
 end
 
+-- Standing onboard sessions restore the normal player view without GetUp().
+local function restoreStandingCamera()
+    C.SetPlayerCameraCockpitView(true)
+end
+
 local function returnToConsole(reason)
     if not session then return end
-    C.SetPlayerCameraCockpitView(true)
+    if session.origin == "onboard" then restoreStandingCamera() else C.SetPlayerCameraCockpitView(true) end
     State.returnToConsole(session)
     menu.display()
 end
@@ -587,7 +602,11 @@ local function discardSession(reason)
     clearOwnShipSofttarget()
     restoreDirect(reason)
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
-    if not seatLeaving then C.SetPlayerCameraCockpitView(true) end
+    if session.origin == "onboard" then
+        restoreStandingCamera()
+    elseif not seatLeaving then
+        C.SetPlayerCameraCockpitView(true)
+    end
     session = nil
     logSession("session discarded: " .. reason)
     -- ponytail: this popup is a real user-facing feature AND is load-bearing.
@@ -724,6 +743,27 @@ local function leaveChair(reason)
         seatLeaving = false
     end, false, getElapsedTime() + 0.05)
     return true
+end
+
+-- Onboard counterpart to leaveChair: same teardown, but the player is standing,
+-- so there is no GetUp() and seatLeaving is never set.
+local function leaveOnboard(reason)
+    AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
+    discardSession(reason)
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        menu.elementFrame = nil
+        Helper.closeMenu(menu, "close", false, false)
+    end, false, getElapsedTime() + 0.05)
+    return true
+end
+
+-- Single exit dispatcher used by every UI/close call site so the seat vs. foot
+-- difference lives in one place.
+local function leaveSession(reason)
+    if session and session.origin == "onboard" then
+        return leaveOnboard(reason)
+    end
+    return leaveChair(reason)
 end
 
 local targetRoot, isEligibleEngagementTarget, cycleTarget
@@ -1503,7 +1543,7 @@ function TestAPI.getSessionEpoch()
 end
 
 local function copyCurrentShipSweep(groups)
-    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    if not session or not sessionContextValid() then return nil, "not seated in gunnery control" end
     local ship = session.shipID
     local result = { id = tostring(ship), name = str(C.GetComponentName(ship)), macro = componentData(ship, "macro"), groups = {} }
     for _, group in ipairs(groups or {}) do
@@ -1529,7 +1569,7 @@ end
 -- Fresh hardware view for scenario preflight/revalidation. Unlike refresh(),
 -- this must not reconcile or otherwise mutate the parked Gunnery session.
 function TestAPI.getCurrentShipSweepReadOnly()
-    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    if not session or not sessionContextValid() then return nil, "not seated in gunnery control" end
     return copyCurrentShipSweep(readGroups(session.shipID))
 end
 
@@ -2130,7 +2170,11 @@ function menu.onShowMenu()
     -- mark themselves non-fullscreen so they do not behave like a full map
     -- menu. This is a runtime behavior gate and must remain live-tested.
     C.SetTrackedMenuFullscreen(menu.name, false)
-    if not isInGunnerChair() then
+    -- A fresh chair sit-down still requires the seat. An onboard session in
+    -- flight (parked by onOpenOnboard, reopened when the Map closes) is allowed
+    -- through even though the player is standing; sessionContextValid() re-checks
+    -- it on the next onUpdate.
+    if not (session and session.origin == "onboard") and not isInGunnerChair() then
         endSession("menu opened after leaving chair")
         return
     end
@@ -2195,11 +2239,9 @@ function menu.onShowMenu()
     -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
     -- so the mode guard is required: dropping it would create a reticule Auto
     -- never otherwise shows.
-    -- This explicit resume handoff also grants the one bounded retry: live Task
-    -- 6 runs showed the engine refusing the resume's first SetSofttarget while
-    -- it settles after the menu transition, then accepting the same write
-    -- moments later. Granting it only here keeps the generic refusal-abandons
-    -- contract for every other re-point origin (restore envelope, tests).
+    -- A Map/Test Lab resume can transiently refuse the first SetSofttarget while
+    -- the menu transition settles, so grant one bounded retry only on this handoff.
+    -- Other re-point origins keep the normal refusal-abandons contract.
     if (resuming or mapSuspendResume) and session.phase == "engaged"
         and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
         session.repointTargetID = session.aimTargetID
@@ -2318,7 +2360,7 @@ function menu.display()
             -- the same action: this stands the player up. It read "Cease
             -- Engagement" while it dropped back to the console, which it no
             -- longer does.
-            directRow[2]:createButton({}):setText(text(14))
+            directRow[2]:createButton({}):setText(session.origin == "onboard" and text(103) or text(14))
             -- Cease Engagement now stands the player up rather than dropping
             -- back to the console. Revert is bound to leaving the chair, so this
             -- is the only seated action that can still restore the turrets --
@@ -2326,7 +2368,7 @@ function menu.display()
             -- seated player who wants to stand the guns down unticks and presses
             -- "Update turret behavior" instead.
             directRow[2].handlers.onClick = function()
-                leaveChair("compact cease button")
+                leaveSession("compact cease button")
             end
             local canCycleTarget = hasMultipleTargets()
             local pRow4 = controls:addRow("cycle_target", {})
@@ -2842,7 +2884,7 @@ function menu.display()
         actions[5].handlers.onClick = function() refresh(); menu.display() end
         actions[7]:createButton({}):setText(text(32))
         actions[7].handlers.onClick = openTestLab
-        actions[8]:createButton({}):setText(text(14)); actions[8].handlers.onClick = function() leaveChair("get up button") end
+        actions[8]:createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[8].handlers.onClick = function() leaveSession("get up button") end
     else
         -- 8 cols: [1-2] Auto-engage [3-4] Direct-control [5-6] Refresh [7-8] GetUp
         actions[1]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(68))
@@ -2851,7 +2893,7 @@ function menu.display()
         actions[3].handlers.onClick = function() startTargetSelection(State.checkedGroups(session)) end
         actions[5]:setColSpan(2):createButton({}):setText(text(15))
         actions[5].handlers.onClick = function() refresh(); menu.display() end
-        actions[7]:setColSpan(2):createButton({}):setText(text(14)); actions[7].handlers.onClick = function() leaveChair("get up button") end
+        actions[7]:setColSpan(2):createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[7].handlers.onClick = function() leaveSession("get up button") end
     end
     -- "Update turret behavior" (id 83): permanent commit. Writes staged to the
     -- ship AND advances committedBaseline. Greyed while staged == committedBaseline;
@@ -2879,7 +2921,7 @@ end
 
 function menu.onUpdate()
     if not session then return end
-    if not isInGunnerChair() or not sameID(playerShip(), session.shipID) then
+    if not sessionContextValid() then
         endSession("left chair or ship")
         return
     end
@@ -3011,7 +3053,7 @@ function menu.onCloseElement(dueToClose)
         return
     end
     if session then
-        leaveChair("console closed")
+        leaveSession("console closed")
     else
         Helper.closeMenu(menu, dueToClose, false, false)
     end
@@ -3093,7 +3135,7 @@ end
 
 reopenSuspendedSession = function(reason)
     if resumePending or not session or session.lifecycle ~= State.lifecycle.suspendedMap or menu.shown or activeExternalMenuName() then return end
-    if not isInGunnerChair() or not sameID(playerShip(), session.shipID) then
+    if not sessionContextValid() then
         endSession("suspended session no longer seated")
         return
     end
@@ -3204,6 +3246,39 @@ local function sessionWatchdog()
 end
 
 TestAPI.runSessionWatchdog = sessionWatchdog
+TestAPI.sessionContextValid = function() return sessionContextValid() end
+
+-- Map ingress is revalidated in Lua before a fresh onboard session is parked.
+-- The existing suspended-Map lifecycle opens Gunnery Control only after the Map
+-- has fully closed.
+local function onOpenOnboard(_, shipComponent)
+    if session then return end
+    local ship = id(shipComponent)
+    if ship == 0 then return end
+    if not sameID(playerShip(), ship) then return end
+    if not ownedByPlayer(ship) then return end
+    local groups = readGroups(ship)
+    if #groups == 0 then return end
+    session = newSession(ship, "onboard")
+    session.groups = groups
+    -- Seed now: the suspend/resume reopen treats this as a resume and skips
+    -- seeding, so committedBaseline must already be populated.
+    State.seedBaseline(session, groups)
+    if persistence then persistence.request() end
+    transitionLifecycle(State.lifecycle.suspendedMap, "onboard ingress parked until Map closes")
+    logSession("onboard ingress accepted; parked until Map closes")
+    -- Use MapMenu's own close handler so its normal cleanup runs before the
+    -- suspended-session reopen. Defer one frame to leave the interact render pass.
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not sameSession(expectedSession, expectedEpoch)
+                or not State.isMapSuspended(session) then return end
+        local mapMenu = Helper.getMenu("MapMenu")
+        if mapMenu and mapMenu.onCloseElement then mapMenu.onCloseElement("close") end
+    end, false, getElapsedTime() + 0.05)
+end
+
+TestAPI.onOpenOnboard = onOpenOnboard
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
@@ -3235,6 +3310,7 @@ local function init()
     -- attack (capital.xml:1070 condition). The handler re-issues emitDirectFallback
     -- so directed turrets roll to the next hostile instead of holding fire.
     -- The handler's own guards silently drop events for stale sessions.
+    RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
@@ -3267,8 +3343,12 @@ local function init()
         -- has never been observed to fire across the 2026-08-08 runs. Nothing is
         -- lost if it ever does -- MD still holds the payload and chair ingress
         -- asks again -- but do not treat the deferral as a tested route.
-        if not isInGunnerChair() then
-            log("restore deferred; player is not in a gunner chair")
+        -- An onboard session restores while the player is standing, so the gate
+        -- is "aboard a ship", not "seated". restoreState's ship-name match and the
+        -- post-build sessionContextValid() check below enforce identity/origin, so
+        -- a chair payload restored off the seat (or a mismatched ship) is refused.
+        if playerShip() == 0 then
+            log("restore deferred; player is not aboard a ship")
             return
         end
         local candidate = newSession(playerShip())
@@ -3294,6 +3374,14 @@ local function init()
         -- restore continuation, now operating on the accepted live candidate.
         sessionEpoch = sessionEpoch + 1
         session = candidate
+        -- Final identity/origin gate: a chair payload restored off the seat, or a
+        -- session whose ship/container no longer matches, is dropped rather than
+        -- resumed onto the wrong context.
+        if not sessionContextValid() then
+            session = nil
+            log("restore refused; context invalid for this origin")
+            return
+        end
         log("restore accepted; phase=" .. tostring(session.phase))
         if session.phase ~= "engaged" then
             -- Target selection can be entered from Direct-control. Its

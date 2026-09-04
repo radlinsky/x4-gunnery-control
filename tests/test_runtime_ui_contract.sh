@@ -230,9 +230,13 @@ grep -Fq 'redirectDockedMenu()' "$main"
 grep -Fq 'Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab"' "$testlab"
 
 grep -Fq 'local seatLeaving = false' "$main"
-grep -Fq 'if not seatLeaving then C.SetPlayerCameraCockpitView(true) end' "$main"
-if grep -A20 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCameraCockpitView(true)' && \
-   ! grep -A20 'local function discardSession' "$main" | grep -Fq 'if not seatLeaving then C.SetPlayerCameraCockpitView(true) end'; then
+# discardSession restores the chair camera only when NOT leaving the seat (the
+# notify path covers the seat-exit case), and routes the onboard exit through
+# restoreStandingCamera() instead of a bare cockpit restore (#68 Task 3).
+grep -Fq 'local function restoreStandingCamera()' "$main"
+grep -Fq 'elseif not seatLeaving then' "$main"
+if grep -A30 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCameraCockpitView(true)' && \
+   ! grep -A30 'local function discardSession' "$main" | grep -Fq 'elseif not seatLeaving then'; then
   echo "unguarded C.SetPlayerCameraCockpitView(true) found inside discardSession" >&2
   exit 1
 fi

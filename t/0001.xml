@@ -50,5 +50,7 @@
     <t id="100">UNKNOWN</t>
     <t id="101">Direct-control turret mode</t>
     <t id="102">The engine mode Direct-control arms checked turret groups with. Selecting an ordinary mode on a checked group takes that group out of Direct-control.</t>
+    <t id="103">Leave Gunnery Control</t>
+    <t id="104">Gunnery Control</t>
   </page>
 </language>
