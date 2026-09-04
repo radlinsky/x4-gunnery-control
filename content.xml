@@ -6,12 +6,7 @@
        A hard dependency disables us for whichever half of users installed the other one.
        kuertee's own recommendation. Load order is still honoured when the id does match. -->
   <dependency id="kuerteeUIExtensionsAndHUD" version="900" optional="true" name="kuertee UI Extensions and HUD"/>
-  <!-- Interact Menu API (SirNukes Mod Support APIs, a SEPARATE extension - not bundled in
-       kuertee UI Extensions) powers the onboard Map right-click "Gunnery Control" action
-       (#68). The dependency id is the extension's content id, which is the Steam Workshop id
-       ws_2042901274 (the id other consumers declare, e.g. allectus); "sn_mod_support_apis"
-       is only its folder/UI-module name and is NOT a content id. optional="true": if absent,
-       Get_Actions never signals, the action never appears, and the chair path is unaffected.
-       No version pin so it never blocks load. -->
+  <!-- SirNukes Mod Support APIs is a separate optional extension that provides onboard Map
+       ingress. If absent, only that action is unavailable; chair ingress still works. -->
   <dependency id="ws_2042901274" optional="true" name="SirNukes Mod Support APIs"/>
 </content>
