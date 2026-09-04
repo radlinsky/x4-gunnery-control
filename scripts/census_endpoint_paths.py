@@ -205,6 +205,9 @@ def _resolve_connection_hierarchy(
                 "tag_tokens": [str(token) for token in record["tag_tokens"]],
                 "authored_restrictions": record["authored_restrictions"],
                 "_authored_offset": record["authored_offset"],
+                "_direct_owned_part_transforms": record.get(
+                    "_direct_owned_part_transforms", []
+                ),
                 "root_to_connection_path": path,
                 "depth": len(path) - 1,
             }

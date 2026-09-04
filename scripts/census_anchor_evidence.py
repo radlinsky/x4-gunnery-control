@@ -672,7 +672,7 @@ def _build_paranid_l_beam_live_anchor(
                     **{
                         key: value
                         for key, value in connection.items()
-                        if key != "_authored_offset"
+                        if key not in ("_authored_offset", "_direct_owned_part_transforms")
                     },
                     "authored_offset": connection["_authored_offset"],
                 }
