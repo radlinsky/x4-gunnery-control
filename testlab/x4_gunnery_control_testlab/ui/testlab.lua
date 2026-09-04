@@ -393,25 +393,19 @@ local function resolveExactGroup()
         end
         if #selectedGroups == 0 then return nil, "no mutable turret groups" end
     elseif setup.singleTurretMacro then
-        local matches, presentSingleMacros = {}, {}
+        local matches = {}
         for _, group in ipairs(ship.groups or {}) do
-            if group.kind == "single" and group.mutable == true then
-                presentSingleMacros[#presentSingleMacros + 1] = trim(group.macro) == ""
-                    and "BLANK" or tostring(group.macro)
-                if group.macro == setup.singleTurretMacro then
-                    matches[#matches + 1] = group
-                end
+            if group.kind == "single" and group.mutable == true
+                    and group.macro == setup.singleTurretMacro then
+                matches[#matches + 1] = group
             end
         end
-        table.sort(presentSingleMacros)
-        local present = #presentSingleMacros > 0 and table.concat(presentSingleMacros, ",") or "NONE"
         if #matches == 0 then
             return nil, "no mutable single turret with macro " .. setup.singleTurretMacro
-                .. "; present mutable single macros " .. present
         end
         if #matches > 1 then
             return nil, #matches .. " mutable single turrets with macro " .. setup.singleTurretMacro
-                .. "; expected exactly one; present mutable single macros " .. present
+                .. "; expected exactly one"
         end
         selected = matches[1]
         selectedGroups[1] = selected
@@ -799,29 +793,8 @@ end
 
 function menu.onShowMenu()
     closing, suppressReopen = false, false
-    local usesRemoteSetup = scenarioSpec and scenarioSpec.setup
-        and scenarioSpec.setup.remote == true or false
-    local occupiedShooterID = usesRemoteSetup and occupiedRemoteShooter() or nil
-    log("scenario_entry", {
-        remote_setup = tostring(usesRemoteSetup),
-        remote_ready = tostring(remoteScenarioReady),
-        occupied_remote_shooter = tostring(occupiedShooterID ~= nil),
-        ship_id = occupiedShooterID or "",
-    })
-    local probedSelection, probeReason
-    if occupiedShooterID then
-        probedSelection, probeReason = resolveExactGroup()
-        if probedSelection then
-            log("scenario_resolver_probe", { action = "resolved", ship_id = occupiedShooterID,
-                member_macros = probedSelection.memberMacros })
-        else
-            log("scenario_resolver_probe", { action = "rejected", ship_id = occupiedShooterID,
-                reason = probeReason })
-        end
-    end
     if remoteScenarioReady then
-        local selection, reason = probedSelection, probeReason
-        if not occupiedShooterID then selection, reason = resolveExactGroup() end
+        local selection, reason = resolveExactGroup()
         if selection then
             applyExactGroup(selection)
             remoteScenarioReady = false
