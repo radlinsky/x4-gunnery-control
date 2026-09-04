@@ -95,7 +95,7 @@ X4GunneryTestLabScenarioSpec = {
 
             role      = "shooter",
             loadout   = "x4ep1_gamestart_trade_playertransporter",
-            expectedWeapons        = 0,
+            expectedWeapons        = 1,
             expectedTurrets        = 1,
             expectedMissileTurrets = 0,
         },
