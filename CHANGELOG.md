@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Add onboard Map ingress for Gunnery Control (#68). While on foot aboard the
+  exact player-owned ship, Map → right-click that ship → **Gunnery Control**
+  opens the existing console without requiring a gunner chair. The chair path
+  remains unchanged, no remote action is offered for other ships, and onboard
+  sessions persist across Reload UI and end if the player leaves the ship or it
+  is no longer player-owned.
+
 - Correct missile-turret ENGAGEABLE geometry (#65). A missile turret with
   affirmatively guided loaded ammunition now retains the bearing and range
   gates without requiring a direct muzzle-to-target line. Unguided missile
