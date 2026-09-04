@@ -3282,22 +3282,6 @@ local function onOpenOnboard(_, shipComponent)
     if persistence then persistence.request() end
     transitionLifecycle(State.lifecycle.suspendedMap, "onboard ingress parked until Map closes")
     logSession("onboard ingress accepted; parked until Map closes")
-    -- The interact-menu action closes only the right-click menu; the Map stays
-    -- open, and the suspend/resume reopen only fires once the Map is gone. Just
-    -- CLOSE the Map here and let the existing reopen (watchdog / gameplanchange,
-    -- both guarded on the Map being gone) open the console -- the same clean path
-    -- a manual map close already uses. Do NOT closeMenuAndOpenNewMenu: that opens
-    -- our console before the Map finishes tearing down ("open the replacement
-    -- before closing"), and rendering the turret dropdowns into the Map's still
-    -- live UI corrupts them (invalid dropdownID spam, blurred menuless view).
-    -- Deferred a frame to stay out of the interact render pass.
-    local expectedSession, expectedEpoch = session, sessionEpoch
-    Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        if not sameSession(expectedSession, expectedEpoch)
-                or not State.isMapSuspended(session) then return end
-        local mapMenu = Helper.getMenu("MapMenu")
-        if mapMenu then Helper.closeMenu(mapMenu, "close", false, false) end
-    end, false, getElapsedTime() + 0.05)
 end
 
 TestAPI.onOpenOnboard = onOpenOnboard
