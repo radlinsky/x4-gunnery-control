@@ -52,64 +52,36 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #75: live-regress the generated prospective-muzzle path for the exact
--- Paranid L Beam accepted in #74. This keeps only the two #69 Beam cases:
--- FAR is the known self-mask discriminator, and NEAR has the external blocker.
--- The old qualifier placed the FAR surface at 0.70 Beam range astern, NEAR at
--- 0.40 range right/astern, and the blocker halfway to NEAR. Beam range is about
--- 14 km, so these fixed root positions preserve that shape without restoring
--- the deleted issue-specific qualifier machinery. Keep this copy disabled.
+-- Issue #110 Task 1: establish the mouse world-click target contract. The
+-- fixture supplies three simultaneously visible, uniquely named click targets
+-- ahead of the Ray so every Task 1 left-click question has an unambiguous
+-- subject: two separated hostile capitals (LEFT is the "current" target, RIGHT
+-- is the "different hostile"), and one player-owned capital that must never be
+-- an eligible Direct target. Capitals are used deliberately - their turrets
+-- give X4 its own clickable surface markers for the surface-element click.
+-- Placement is fixed and lateral so the owner can tell the three apart on
+-- screen without flying. Keep this copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-75-par-l-beam-far-regression-r1",
+    id      = "issue-110-mouse-target-contract-r1",
     enabled = false,
 
-    location = {
-        sectorMacro = "Cluster_29_Sector001_macro",
-        x = 500000,
-        y = 0,
-        z = 0,
-    },
-
     setup = {
-        remote          = true,
-        shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE75 PAR L BEAM SHOOTER 1",
-        turretGroup     = "group_rear_down_mid",
-        turretLabel     = "Rear Lower Mid Beam",
-        expectedTurrets = 1,
-        expectedMemberMacros = {
-            "turret_par_l_beam_01_mk1_macro",
-        },
-        selectAll = false,
+        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
+        shipLabel       = "Ray",
+        turretGroup     = "group_front_up_left",
+        turretLabel     = "Front Upper Left",
+        expectedTurrets = 2,
     },
 
     groups = {
         {
-            label     = "ISSUE75 PAR L BEAM SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
-            faction   = "player",
-            count     = 1,
-            distance  = 0,
-            x         = 0,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-
-            role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE75 FAR CLEAR",
-            macro     = "ship_arg_l_destroyer_02_a_macro",
+            label     = "ISSUE110 HOSTILE LEFT",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = -9800,
-            x         = 0,
+            distance  = 4500,
+            x         = -1200,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
@@ -117,24 +89,15 @@ X4GunneryTestLabScenarioSpec = {
             holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw = 90,
-            pitch = 0,
-            roll = 0,
-            preserveOrientation = true,
-
-            loadout   = "x4gc_testlab_arg_l_destroyer_02_beam",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE75 NEAR BLOCKED",
-            macro     = "ship_arg_l_destroyer_02_a_macro",
+            label     = "ISSUE110 HOSTILE RIGHT",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = -5600,
-            x         = 5600,
+            distance  = 4500,
+            x         = 1200,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
@@ -142,34 +105,22 @@ X4GunneryTestLabScenarioSpec = {
             holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw = 90,
-            pitch = 0,
-            roll = 0,
-            preserveOrientation = true,
-
-            loadout   = "x4gc_testlab_arg_l_destroyer_02_beam",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
         },
 
+        -- Player-owned: the ineligible-click control. Never designate it.
         {
-            label     = "ISSUE75 NEAR LOS BLOCKER",
-            macro     = "ship_xen_l_terraformer_01_a_macro",
+            label     = "ISSUE110 FRIENDLY CENTRE - DO NOT TARGET",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = -2800,
-            x         = 2800,
+            distance  = 4500,
+            x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
+            hostile   = false,
             holdFire  = true,
             stripDefenceUnits = true,
-            repairGuard       = true,
-            yaw = 90,
-            pitch = 0,
-            roll = 0,
-            preserveOrientation = true,
         },
     },
 }
