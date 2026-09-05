@@ -38,4 +38,47 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_02", transform = { position = { -0.361773, 0.2692866, 10.70685 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
     },
+    ["turret_par_m_laser_01_mk1_macro"] = {
+        semantic_case = "depth5_additive_x_rotation",
+        layers = {
+            {
+                source_part = "anim_base",
+                owning_connection = "ConnectionForanim_base",
+                connection_transform = { position = { 0, -1.991911, 2.638335 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+            },
+            {
+                source_part = "part_arm",
+                owning_connection = "ConnectionForpart_arm",
+                connection_transform = { position = { 0, -0.008089185, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_rotation_x_radians = 0.6108652353286743,
+            },
+            {
+                source_part = "detail_xl_rotator_base",
+                owning_connection = "ConnectionFordetail_xl_rotator_base",
+                connection_transform = { position = { 0, 0.003018975, -3.745065 }, quaternion = { 0.3007058, 0, 0, -0.953717 } },
+                part_transform = { position = { 0, 5.96e-08, -1.192e-07 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_rotation_x_radians = -0.6108652353286743,
+            },
+            {
+                source_part = "part_rotator",
+                owning_connection = "ConnectionForpart_rotator",
+                connection_transform = { position = { 0, 1.039598, 0.6400551 }, quaternion = { -0.3007058, 0, 0, -0.953717 } },
+                part_transform = { position = { 0, -5.96e-08, -1.192e-07 }, quaternion = { 0, 0, 0, 1.0 } },
+                runtime_rotation = { axis = "y" },
+            },
+            {
+                source_part = "part_gun",
+                owning_connection = "ConnectionForpart_gun",
+                connection_transform = { position = { 0, -0.190359, -0.5231426 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 2.384e-07 }, quaternion = { 0, 0, 0, 1.0 } },
+                runtime_rotation = { axis = "x", minimum_degrees = -10.0, maximum_degrees = 89.0 },
+            },
+        },
+        endpoints = {
+            { connection = "con_laser_01", transform = { position = { 0.2562549, 0.2704595, 5.609009 }, quaternion = { 0, 0, 0, 1.0 } } },
+            { connection = "con_laser_02", transform = { position = { -0.3138258, 0.2704595, 5.609009 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+    },
 }

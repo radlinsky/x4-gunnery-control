@@ -34,6 +34,10 @@ local function axis_rotation(axis, degrees)
   fail("unsupported rotation axis " .. tostring(axis))
 end
 
+local function axis_rotation_radians(axis, radians)
+  return axis_rotation(axis, math.deg(radians))
+end
+
 local function rotate_in_frame(rotations, vector)
   for index = #rotations, 1, -1 do
     vector = rotate(rotations[index], vector)
@@ -95,19 +99,21 @@ end
 X4GunneryTurretMuzzleGeometry = nil
 assert(loadfile("ui/turret_muzzle_geometry.lua"))()
 
+local expected_macros = {
+  turret_par_l_beam_01_mk1_macro = true,
+  turret_par_m_laser_01_mk1_macro = true,
+}
 local macro_count = 0
-local macro_name
 for name in pairs(X4GunneryTurretMuzzleGeometry) do
   macro_count = macro_count + 1
-  macro_name = name
+  if not expected_macros[name] then
+    fail("unexpected generated macro key " .. tostring(name))
+  end
 end
-if macro_count ~= 1 then
-  fail("expected exactly one generated macro record, got " .. macro_count)
+if macro_count ~= 2 then
+  fail("expected exactly two generated macro records, got " .. macro_count)
 end
 local expected_macro = "turret_par_l_beam_01_mk1_macro"
-if macro_name ~= expected_macro then
-  fail("unexpected generated macro key " .. tostring(macro_name))
-end
 
 local geometry = X4GunneryTurretMuzzleGeometry[expected_macro]
 local tolerance = 1e-9
@@ -126,6 +132,78 @@ for _, yaw in ipairs({ -90, 0, 90 }) do
           yaw, pitch, axis, difference, actual[axis], expected[axis]
         ))
       end
+    end
+  end
+end
+
+-- depth5_additive_x_rotation composition (issue #83 accepted rule):
+-- C_i, then P_i, then the additive settled local-X rotation, then the
+-- layer's live rotation. Yaw/pitch come from the projectile bore.
+local function evaluate_depth5(geometry, endpoint_connection, yaw, pitch)
+  local position = { 0, 0, 0 }
+  local rotations = {}
+  for _, layer in ipairs(geometry.layers) do
+    position = apply_transform(position, rotations, layer.connection_transform)
+    position = apply_transform(position, rotations, layer.part_transform)
+    if layer.settled_rotation_x_radians then
+      rotations[#rotations + 1] =
+        axis_rotation_radians("x", layer.settled_rotation_x_radians)
+    end
+    if layer.runtime_rotation then
+      local axis = layer.runtime_rotation.axis
+      rotations[#rotations + 1] =
+        axis_rotation_radians(axis, axis == "x" and -pitch or yaw)
+    end
+  end
+  for _, endpoint in ipairs(geometry.endpoints) do
+    if endpoint.connection == endpoint_connection then
+      return add(position, rotate_in_frame(rotations, endpoint.transform.position))
+    end
+  end
+  fail("missing endpoint " .. endpoint_connection)
+end
+
+-- Accepted issue #83 nine-pose live witnesses; never fitted, never derived.
+local laser_poses = {
+  { "center", 0, 0.747567, -0.313826, 5.19057, 2.90662 },
+  { "yaw right", 0.592892, 0.736931, 1.66678, 5.14855, 2.53582 },
+  { "yaw left", -0.592892, 0.736930, -2.1873, 5.14855, 2.18511 },
+  { "pitch low", 0, 0.363425, -0.313826, 3.42557, 4.12367 },
+  { "pitch high", 0, 1.12376, -0.313826, 6.35365, 1.15801 },
+  { "right low", 0.578989, 0.357808, 2.27399, 3.39663, 3.55235 },
+  { "right high", 0.636900, 1.10904, 0.778724, 6.32098, 1.08071 },
+  { "left low", -0.578989, 0.357808, -2.79934, 3.39663, 3.20892 },
+  { "left high", -0.636900, 1.10904, -1.28332, 6.32098, 0.707438 },
+}
+
+local laser = X4GunneryTurretMuzzleGeometry["turret_par_m_laser_01_mk1_macro"]
+if laser.semantic_case ~= "depth5_additive_x_rotation" then
+  fail("unexpected M Laser semantic case " .. tostring(laser.semantic_case))
+end
+for _, pose in ipairs(laser_poses) do
+  local name, yaw, pitch = pose[1], pose[2], pose[3]
+  local actual = evaluate_depth5(laser, "con_laser_02", yaw, pitch)
+  local error_squared = 0
+  for axis = 1, 3 do
+    local difference = actual[axis] - pose[axis + 3]
+    error_squared = error_squared + difference * difference
+  end
+  local distance = math.sqrt(error_squared)
+  if distance > 2e-5 then
+    fail(string.format(
+      "M Laser pose %s off by %.9g m (%.9g, %.9g, %.9g)",
+      name, distance, actual[1], actual[2], actual[3]
+    ))
+  end
+end
+
+-- Determinism: identical inputs must give bit-identical output.
+for _, pose in ipairs(laser_poses) do
+  local first = evaluate_depth5(laser, "con_laser_02", pose[2], pose[3])
+  local second = evaluate_depth5(laser, "con_laser_02", pose[2], pose[3])
+  for axis = 1, 3 do
+    if first[axis] ~= second[axis] then
+      fail("M Laser evaluation is not deterministic at pose " .. pose[1])
     end
   end
 end
