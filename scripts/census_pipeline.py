@@ -248,8 +248,20 @@ def build_census(
                                 source_file=definition["source_file"],
                             )
                         )
-                        anomalies.extend(authored_geometry_anomalies)
                         if authored_geometry is None:
+                            semantic_resolutions.append(
+                                {
+                                    "endpoint_connection": endpoint["connection"],
+                                    "classification": "AMBIGUOUS",
+                                    "reason": "unresolved_authored_geometry",
+                                    "anomaly_codes": sorted(
+                                        {
+                                            str(item["code"])
+                                            for item in authored_geometry_anomalies
+                                        }
+                                    ),
+                                }
+                            )
                             continue
                         semantic_resolutions.append(
                             {
