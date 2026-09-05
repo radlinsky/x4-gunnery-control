@@ -8,6 +8,7 @@ from census_ani_parser import AniDescriptorError, _parse_ani_descriptors
 from census_common import CensusError, _anomaly
 from census_endpoint_paths import (
     _classify_firing_endpoints,
+    _derive_endpoint_authored_geometry,
     _derive_endpoint_source_paths,
     _join_authored_animation_selectors,
     _resolve_connection_hierarchy,
@@ -21,6 +22,7 @@ from census_identity import (
     _validate_authored_animation_selectors,
 )
 from census_report import _assemble_census_report
+from census_source_semantics import _resolve_supported_endpoint_source_semantics
 from census_sources import _validate_resource_sets, _validate_source_sets
 
 
@@ -234,6 +236,32 @@ def build_census(
                     )
                     definition["firing_endpoints"] = endpoint_paths
                     anomalies.extend(endpoint_path_anomalies)
+
+                    semantic_resolutions = []
+                    for endpoint in endpoint_paths:
+                        authored_geometry, authored_geometry_anomalies = (
+                            _derive_endpoint_authored_geometry(
+                                endpoint,
+                                definition["connections"],
+                                component=component,
+                                source_set=definition["source_set"],
+                                source_file=definition["source_file"],
+                            )
+                        )
+                        anomalies.extend(authored_geometry_anomalies)
+                        if authored_geometry is None:
+                            continue
+                        semantic_resolutions.append(
+                            {
+                                "endpoint_connection": endpoint["connection"],
+                                **_resolve_supported_endpoint_source_semantics(
+                                    endpoint,
+                                    authored_geometry,
+                                    component_endpoint_count=len(endpoint_paths),
+                                ),
+                            }
+                        )
+                    definition["_source_semantic_resolutions"] = semantic_resolutions
 
     if anomalies:
         raise CensusError(anomalies)
