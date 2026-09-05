@@ -35,6 +35,7 @@ def build_census(
     expected_turret_active_changing_case_baseline: (
         tuple[int, int, int] | None
     ) = None,
+    include_source_semantic_resolutions: bool = False,
 ) -> dict[str, object]:
     """Return a deterministic census or raise CensusError on any unsafe input."""
 
@@ -277,7 +278,7 @@ def build_census(
 
     if anomalies:
         raise CensusError(anomalies)
-    return _assemble_census_report(
+    report = _assemble_census_report(
         component_definitions,
         unique_records,
         ware_records,
@@ -288,3 +289,10 @@ def build_census(
             expected_turret_active_changing_case_baseline
         ),
     )
+    if include_source_semantic_resolutions:
+        for record in report["component_to_macros"]:
+            definition = component_definitions[str(record["component"])][0]
+            record["source_semantic_resolutions"] = definition[
+                "_source_semantic_resolutions"
+            ]
+    return report
