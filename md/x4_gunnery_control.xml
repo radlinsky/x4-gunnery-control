@@ -346,38 +346,26 @@
                              prospective construction. This is not generic turret
                              geometry: O + Ry(runtime aim yaw) *
                              (P + Rx(-runtime aim pitch) * D). -->
-                        <do_if value="not $lineoffireclear and $weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
+                        <do_if value="not $lineoffireclear and $weapon.macro == macro.turret_par_l_beam_01_mk1_macro and EngageabilityService.$muzzleknown.{$weaponindex} == 1">
+                          <!-- Prospective muzzle from the generated source-resolved
+                               record (ui/turret_muzzle_geometry.lua), delivered as
+                               flat per-weapon scalars. Accepted construction
+                               O + Ry(yaw) * (P + Rx(-pitch) * D); the O/P/D vectors
+                               are derived from authored layers/transforms in UI Lua
+                               rather than hand-copied here. Only the generated path
+                               remains (#74 A2): no hardcoded Beam literals. -->
                           <create_orientation name="$prospectivebearing" orientation="look_at" refobject="$target" useaimtarget="true">
                             <position object="$weapon" space="$weapon"/>
                           </create_orientation>
                           <create_rotation name="$prospectivepitchrotation" pitch="$prospectivebearing.pitch"/>
                           <create_rotation name="$prospectiveyawrotation" yaw="$prospectivebearing.yaw"/>
-                          <do_if value="EngageabilityService.$muzzleknown.{$weaponindex} == 1">
-                            <!-- Prospective muzzle from the generated source-resolved
-                                 record (ui/turret_muzzle_geometry.lua), delivered as
-                                 flat per-weapon scalars. Same accepted construction
-                                 O + Ry(yaw) * (P + Rx(-pitch) * D); the O/P/D vectors
-                                 are derived from authored layers/transforms in UI Lua
-                                 rather than hand-copied here. -->
-                            <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
-                              <position x="EngageabilityService.$muzzledx.{$weaponindex} * 1m" y="EngageabilityService.$muzzledy.{$weaponindex} * 1m" z="EngageabilityService.$muzzledz.{$weaponindex} * 1m"/>
-                            </transform_position>
-                            <create_position name="$prospectiveyaworigin" x="EngageabilityService.$muzzleox.{$weaponindex} * 1m" y="EngageabilityService.$muzzleoy.{$weaponindex} * 1m" z="EngageabilityService.$muzzleoz.{$weaponindex} * 1m"/>
-                            <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
-                              <position x="$prospectivepitcheddownstream.x + EngageabilityService.$muzzlepx.{$weaponindex} * 1m" y="$prospectivepitcheddownstream.y + EngageabilityService.$muzzlepy.{$weaponindex} * 1m" z="$prospectivepitcheddownstream.z + EngageabilityService.$muzzlepz.{$weaponindex} * 1m"/>
-                            </transform_position>
-                          </do_if>
-                          <do_else>
-                            <!-- Retained hardcoded reference construction; A2 removes
-                                 this once the generated path is fully proven. -->
-                            <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
-                              <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
-                            </transform_position>
-                            <create_position name="$prospectiveyaworigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
-                            <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
-                              <position x="$prospectivepitcheddownstream.x - 1.730653e-6m" y="$prospectivepitcheddownstream.y + 2.926126m" z="$prospectivepitcheddownstream.z - 16.11956m"/>
-                            </transform_position>
-                          </do_else>
+                          <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
+                            <position x="EngageabilityService.$muzzledx.{$weaponindex} * 1m" y="EngageabilityService.$muzzledy.{$weaponindex} * 1m" z="EngageabilityService.$muzzledz.{$weaponindex} * 1m"/>
+                          </transform_position>
+                          <create_position name="$prospectiveyaworigin" x="EngageabilityService.$muzzleox.{$weaponindex} * 1m" y="EngageabilityService.$muzzleoy.{$weaponindex} * 1m" z="EngageabilityService.$muzzleoz.{$weaponindex} * 1m"/>
+                          <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
+                            <position x="$prospectivepitcheddownstream.x + EngageabilityService.$muzzlepx.{$weaponindex} * 1m" y="$prospectivepitcheddownstream.y + EngageabilityService.$muzzlepy.{$weaponindex} * 1m" z="$prospectivepitcheddownstream.z + EngageabilityService.$muzzlepz.{$weaponindex} * 1m"/>
+                          </transform_position>
                           <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"/>
                           <do_if value="not $lineoffireclear">
                             <do_for_each name="$prospectivefrac" in="$surfacexfracs" counter="$prospectivei">
