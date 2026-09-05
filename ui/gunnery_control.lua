@@ -62,6 +62,7 @@ local function deriveProspectiveMuzzle(geometry, endpointConnection)
             end
         end
         fixed[#fixed + 1] = layer.connection_transform.quaternion
+        segment = vadd(segment, rotateInFrame(fixed, layer.part_transform.position))
         fixed[#fixed + 1] = layer.part_transform.quaternion
     end
     local endpoint
