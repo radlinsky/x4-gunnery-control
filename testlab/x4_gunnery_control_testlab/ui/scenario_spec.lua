@@ -54,10 +54,11 @@
 --
 -- Issue #99: live-regress the generated prospective-muzzle path for the exact
 -- Paranid M Laser accepted in #98. Reuse the #83 rank-2 shooter/loadout and two
--- live-proven high-elevation aim positions. PITCH HIGH is the positive FAR case:
--- the resting/current muzzle should remain self-masked while the generated
--- target-facing muzzle clears. LEFT HIGH is the bounded negative control, with a
--- separate blocker halfway along its ray. Keep this repository copy disabled.
+-- live-proven high-elevation aim positions. PITCH HIGH is the candidate FAR
+-- positive: A2 passes only if its current-origin fast ray and all six witnesses
+-- are blocked while production still makes the surface ENGAGEABLE. LEFT HIGH is
+-- the bounded negative control, with a separate blocker halfway along its ray.
+-- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
     id      = "issue-99-par-m-laser-far-regression-r1",
