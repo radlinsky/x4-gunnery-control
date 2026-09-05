@@ -42,7 +42,8 @@ local function rotateInFrame(rotations, vector)
 end
 
 -- ponytail: handles only the depth4_dual_translation topology (one y rotator,
--- one x gun); returns nil for anything else so the MD literal fallback stands.
+-- one x gun); returns nil for anything else, so no known prospective geometry is
+-- streamed and the prospective generated-geometry path is not entered.
 local function deriveProspectiveMuzzle(geometry, endpointConnection)
     local fixed = {}
     local segment = { 0, 0, 0 }
