@@ -278,4 +278,90 @@ do
 end
 
 
+-- ── 58. the generated Beam member reproduces the accepted prospective muzzle ──
+-- The production consumer (gunnery_control.lua) derives O/P/D from the generated
+-- geometry record and streams them as the engageability_member muzzle scalars.
+-- This proves those generated scalars, fed through the exact MD construction
+-- O + Ry(yaw) * (P + Rx(-pitch) * D), reproduce the accepted hardcoded Beam
+-- prospective muzzle positions the MD literals used to encode, across poses.
+do
+    local function qrotate(q, v)
+        local x, y, z, w = q[1], q[2], q[3], q[4]
+        local vx, vy, vz = v[1], v[2], v[3]
+        local tx = 2 * (y * vz - z * vy)
+        local ty = 2 * (z * vx - x * vz)
+        local tz = 2 * (x * vy - y * vx)
+        return {
+            vx + w * tx + y * tz - z * ty,
+            vy + w * ty + z * tx - x * tz,
+            vz + w * tz + x * ty - y * tx,
+        }
+    end
+    local function axisRotation(axis, degrees)
+        local r = math.rad(degrees) / 2
+        local s = math.sin(r)
+        if axis == "x" then return { s, 0, 0, math.cos(r) } end
+        return { 0, s, 0, math.cos(r) }
+    end
+    local function vadd(a, b) return { a[1] + b[1], a[2] + b[2], a[3] + b[3] } end
+    -- The accepted hardcoded literals the MD fallback used to carry (#74 A1).
+    local function acceptedMuzzle(yaw, pitch)
+        local O = vadd({ 1.877547e-6, 2.018104, -1.043081e-5 },
+                       { 0, 6.145042419433594, 0 })
+        local P = { -1.730653e-6, 2.926126, -16.11956 }
+        local D = { -0.36177411330546533, 0.4829345992763463, 55.87084740617998 }
+        local pitched = qrotate(axisRotation("x", -pitch), D)
+        return vadd(O, qrotate(axisRotation("y", yaw), vadd(P, pitched)))
+    end
+    -- Same construction, but from whatever O/P/D the production consumer streamed.
+    local function generatedMuzzle(m, yaw, pitch)
+        local O = { m.mox, m.moy, m.moz }
+        local P = { m.mpx, m.mpy, m.mpz }
+        local D = { m.mdx, m.mdy, m.mdz }
+        local pitched = qrotate(axisRotation("x", -pitch), D)
+        return vadd(O, qrotate(axisRotation("y", yaw), vadd(P, pitched)))
+    end
+
+    local sess58 = API.getSession()
+    sess58.phase, sess58.controlMode = "console", nil
+    sess58.groups = {
+        { key = "selected", members = { { componentID = 581, operational = true } } },
+    }
+    sess58.checkedGroupKeys = { selected = true }
+    gcMenu.shown = true
+    local savedAdd58, member58 = AddUITriggeredEvent, nil
+    local savedComponentData58 = GetComponentData
+    GetComponentData = function(component, ...)
+        local values = {}
+        for _, key in ipairs({...}) do
+            values[#values + 1] = (key == "macro")
+                and "turret_par_l_beam_01_mk1_macro" or false
+        end
+        return unpack(values)
+    end
+    AddUITriggeredEvent = function(screen, control, params)
+        if control == "engageability_member" then member58 = params end
+    end
+    API.requestEngageability(800)
+    AddUITriggeredEvent = savedAdd58
+    GetComponentData = savedComponentData58
+
+    assert(member58 ~= nil, "58: no engageability_member streamed for the Beam turret")
+    assert(member58.muzzleknow == 1,
+        "58: the generated Beam member must stream muzzleknow=1")
+    for _, yaw in ipairs({ -90, 0, 90 }) do
+        for _, pitch in ipairs({ -5, 30, 80 }) do
+            local got = generatedMuzzle(member58, yaw, pitch)
+            local want = acceptedMuzzle(yaw, pitch)
+            for axis = 1, 3 do
+                assert(math.abs(got[axis] - want[axis]) <= 1e-6, string.format(
+                    "58: generated Beam muzzle diverges from accepted literal at "
+                    .. "yaw=%g pitch=%g axis=%d (got %.17g want %.17g)",
+                    yaw, pitch, axis, got[axis], want[axis]))
+            end
+        end
+    end
+end
+
+
 print("runtime targeting engageability tests passed")

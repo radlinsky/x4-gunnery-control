@@ -148,31 +148,44 @@ current_surface_breaks=$(printf '%s\n' "$current_surface_scan" | grep -Fc "<brea
 #    after the unchanged current-barrel fast ray and all six current-barrel
 #    witnesses remain blocked. Unsupported conventional macros must never enter
 #    this asset-specific geometry.
-prospective_gate="not \$lineoffireclear and \$weapon.macro == macro.turret_par_l_beam_01_mk1_macro"
+prospective_gate="not \$lineoffireclear and \$weapon.macro == macro.turret_par_l_beam_01_mk1_macro and EngageabilityService.\$muzzleknown.{\$weaponindex} == 1"
 has "$prospective_gate" \
-  || note "exact blocked + Paranid-L-Beam-only prospective gate is missing"
+  || note "exact blocked + Paranid-L-Beam-only + generated-geometry-known prospective gate is missing"
 macro_mentions=$(printf '%s\n' "$block" | grep -Fc 'macro.turret_par_l_beam_01_mk1_macro')
 [ "$macro_mentions" -eq 1 ] \
   || note "prospective geometry must have exactly one exact Beam macro gate (found $macro_mentions mentions)"
 
-# 9a. Copy the accepted Test Lab construction exactly: a separate weapon-local
-#     fast-target bearing, shipped active downstream vector, authored yaw origin
-#     and elevation pivot, applying runtime pitch and then runtime yaw. This must
-#     not alter or reuse the production look_at_bbox arc orientation.
+# 9a. The accepted construction is applied to the GENERATED per-weapon geometry
+#     only (#74 A2): a separate weapon-local fast-target bearing, then the O/P/D
+#     vectors streamed as flat scalars (EngageabilityService.$muzzle*), applying
+#     runtime pitch and then runtime yaw. This must not alter or reuse the
+#     production look_at_bbox arc orientation.
 has "name=\"\$prospectivebearing\" orientation=\"look_at\" refobject=\"\$target\" useaimtarget=\"true\"" \
   || note "prospective origin requires a separate weapon-local look_at + useaimtarget bearing"
 has "<position object=\"\$weapon\" space=\"\$weapon\"/>" \
   || note "prospective bearing must be weapon-local"
 has "<create_rotation name=\"\$prospectivepitchrotation\" pitch=\"\$prospectivebearing.pitch\"/>" \
   || note "prospective construction must apply the accepted runtime pitch"
-has 'x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"' \
-  || note "prospective construction shipped active downstream vector changed"
-has 'x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"' \
-  || note "prospective construction shipped yaw origin changed"
 has "<create_rotation name=\"\$prospectiveyawrotation\" yaw=\"\$prospectivebearing.yaw\"/>" \
   || note "prospective construction must apply the accepted runtime yaw"
-has "x=\"\$prospectivepitcheddownstream.x - 1.730653e-6m\" y=\"\$prospectivepitcheddownstream.y + 2.926126m\" z=\"\$prospectivepitcheddownstream.z - 16.11956m\"" \
-  || note "prospective construction authored elevation-pivot formula changed"
+# The downstream vector D, yaw origin O, and elevation pivot P must come from the
+# streamed generated scalars, not hand-copied literals.
+has "x=\"EngageabilityService.\$muzzledx.{\$weaponindex} * 1m\"" \
+  || note "prospective downstream D must read the generated \$muzzledx scalar"
+has "name=\"\$prospectiveyaworigin\" x=\"EngageabilityService.\$muzzleox.{\$weaponindex} * 1m\"" \
+  || note "prospective yaw origin O must read the generated \$muzzleox scalar"
+has "x=\"\$prospectivepitcheddownstream.x + EngageabilityService.\$muzzlepx.{\$weaponindex} * 1m\"" \
+  || note "prospective elevation pivot P must read the generated \$muzzlepx scalar"
+# The A1 hardcoded Beam literals must no longer exist anywhere in production.
+# Patterns are double-quoted with escaped '$' so they stay literal MD text.
+for literal in \
+  "x=\"-0.36177411330546533m\" y=\"0.4829345992763463m\" z=\"55.87084740617998m\"" \
+  "x=\"1.877547e-6m\" y=\"2.018104m + 6.145042419433594m\" z=\"-1.043081e-5m\"" \
+  "z=\"\$prospectivepitcheddownstream.z - 16.11956m\""; do
+  if grep -Fq -- "$literal" "$md"; then
+    note "hardcoded Beam geometry literal must be removed from production: $literal"
+  fi
+done
 
 # 9b. From that origin, retain conventional own-hull collision: fast aim-target
 #     first, then (only if blocked) the same six target-local witnesses.
