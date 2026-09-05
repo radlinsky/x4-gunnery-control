@@ -191,17 +191,17 @@ class SourceSemanticTests(unittest.TestCase):
                 ]
                 self.assertEqual(
                     layers[1]["settled_local_euler_xyz_delta_radians"],
-                    [-0.6108652353286743, -0.0, 0.0],
+                    [0.6108652353286743, -0.0, 0.0],
                 )
                 self.assertEqual(
                     layers[2]["settled_local_euler_xyz_delta_radians"],
-                    [0.6108652353286743, -0.0, 0.0],
+                    [-0.6108652353286743, -0.0, 0.0],
                 )
                 if with_residue:
                     self.assertEqual(
                         layers[2]["settled_local_position_delta"],
                         [
-                            4.6193599700927734e-7,
+                            -4.6193599700927734e-7,
                             8.195638656616211e-8,
                             -2.7567148208618164e-7,
                         ],

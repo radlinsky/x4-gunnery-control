@@ -54,12 +54,18 @@ def _apply(
     positions: dict[int, list[float]] | None = None,
     rotations: dict[int, list[float]] | None = None,
 ) -> dict[str, object]:
+    # ANI stores X in the opposite handedness from authored XML geometry.
+    # Normalize accepted ANI position/rotation triples at this boundary so
+    # their raw literals remain byte-faithful to the source records.
+    def _native(triple: list[float]) -> list[float]:
+        return [-triple[0], triple[1], triple[2]]
+
     result = deepcopy(authored_geometry)
     layers = result["source_geometry_layers"]
     for edge_index, value in (positions or {}).items():
-        layers[edge_index]["settled_local_position_delta"] = list(value)
+        layers[edge_index]["settled_local_position_delta"] = _native(value)
     for edge_index, value in (rotations or {}).items():
-        layers[edge_index]["settled_local_euler_xyz_delta_radians"] = list(value)
+        layers[edge_index]["settled_local_euler_xyz_delta_radians"] = _native(value)
     return result
 
 
