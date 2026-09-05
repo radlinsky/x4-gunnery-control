@@ -136,6 +136,18 @@
             <set_value name="EngageabilityService.$arcknown" exact="[]"/>
             <set_value name="EngageabilityService.$arcmins" exact="[]"/>
             <set_value name="EngageabilityService.$arcmaxs" exact="[]"/>
+            <!-- Per-weapon prospective-muzzle vectors (#74): flat scalar lists
+                 delivered on engageability_member, one entry per weapon index. -->
+            <set_value name="EngageabilityService.$muzzleknown" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzleox" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzleoy" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzleoz" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzlepx" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzlepy" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzlepz" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzledx" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzledy" exact="[]"/>
+            <set_value name="EngageabilityService.$muzzledz" exact="[]"/>
             <set_value name="EngageabilityService.$targets" exact="[]"/>
             <set_value name="EngageabilityService.$targetids" exact="[]"/>
           </actions>
@@ -150,6 +162,16 @@
             <set_value name="$arcknow" exact="@event.param3.$arcknow"/>
             <set_value name="$arcmin" exact="@event.param3.$arcmin"/>
             <set_value name="$arcmax" exact="@event.param3.$arcmax"/>
+            <set_value name="$muzzleknow" exact="@event.param3.$muzzleknow"/>
+            <set_value name="$mox" exact="@event.param3.$mox"/>
+            <set_value name="$moy" exact="@event.param3.$moy"/>
+            <set_value name="$moz" exact="@event.param3.$moz"/>
+            <set_value name="$mpx" exact="@event.param3.$mpx"/>
+            <set_value name="$mpy" exact="@event.param3.$mpy"/>
+            <set_value name="$mpz" exact="@event.param3.$mpz"/>
+            <set_value name="$mdx" exact="@event.param3.$mdx"/>
+            <set_value name="$mdy" exact="@event.param3.$mdy"/>
+            <set_value name="$mdz" exact="@event.param3.$mdz"/>
             <do_if value="typeof $weapon != datatype.component and $weapon">
               <set_value name="$weapon" exact="component.{$weapon}"/>
             </do_if>
@@ -161,6 +183,16 @@
               <append_to_list name="EngageabilityService.$arcknown" exact="$arcknow"/>
               <append_to_list name="EngageabilityService.$arcmins" exact="$arcmin"/>
               <append_to_list name="EngageabilityService.$arcmaxs" exact="$arcmax"/>
+              <append_to_list name="EngageabilityService.$muzzleknown" exact="$muzzleknow"/>
+              <append_to_list name="EngageabilityService.$muzzleox" exact="$mox"/>
+              <append_to_list name="EngageabilityService.$muzzleoy" exact="$moy"/>
+              <append_to_list name="EngageabilityService.$muzzleoz" exact="$moz"/>
+              <append_to_list name="EngageabilityService.$muzzlepx" exact="$mpx"/>
+              <append_to_list name="EngageabilityService.$muzzlepy" exact="$mpy"/>
+              <append_to_list name="EngageabilityService.$muzzlepz" exact="$mpz"/>
+              <append_to_list name="EngageabilityService.$muzzledx" exact="$mdx"/>
+              <append_to_list name="EngageabilityService.$muzzledy" exact="$mdy"/>
+              <append_to_list name="EngageabilityService.$muzzledz" exact="$mdz"/>
             </do_if>
           </actions>
         </cue>
@@ -319,14 +351,33 @@
                             <position object="$weapon" space="$weapon"/>
                           </create_orientation>
                           <create_rotation name="$prospectivepitchrotation" pitch="$prospectivebearing.pitch"/>
-                          <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
-                            <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
-                          </transform_position>
-                          <create_position name="$prospectiveyaworigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
                           <create_rotation name="$prospectiveyawrotation" yaw="$prospectivebearing.yaw"/>
-                          <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
-                            <position x="$prospectivepitcheddownstream.x - 1.730653e-6m" y="$prospectivepitcheddownstream.y + 2.926126m" z="$prospectivepitcheddownstream.z - 16.11956m"/>
-                          </transform_position>
+                          <do_if value="EngageabilityService.$muzzleknown.{$weaponindex} == 1">
+                            <!-- Prospective muzzle from the generated source-resolved
+                                 record (ui/turret_muzzle_geometry.lua), delivered as
+                                 flat per-weapon scalars. Same accepted construction
+                                 O + Ry(yaw) * (P + Rx(-pitch) * D); the O/P/D vectors
+                                 are derived from authored layers/transforms in UI Lua
+                                 rather than hand-copied here. -->
+                            <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
+                              <position x="EngageabilityService.$muzzledx.{$weaponindex} * 1m" y="EngageabilityService.$muzzledy.{$weaponindex} * 1m" z="EngageabilityService.$muzzledz.{$weaponindex} * 1m"/>
+                            </transform_position>
+                            <create_position name="$prospectiveyaworigin" x="EngageabilityService.$muzzleox.{$weaponindex} * 1m" y="EngageabilityService.$muzzleoy.{$weaponindex} * 1m" z="EngageabilityService.$muzzleoz.{$weaponindex} * 1m"/>
+                            <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
+                              <position x="$prospectivepitcheddownstream.x + EngageabilityService.$muzzlepx.{$weaponindex} * 1m" y="$prospectivepitcheddownstream.y + EngageabilityService.$muzzlepy.{$weaponindex} * 1m" z="$prospectivepitcheddownstream.z + EngageabilityService.$muzzlepz.{$weaponindex} * 1m"/>
+                            </transform_position>
+                          </do_if>
+                          <do_else>
+                            <!-- Retained hardcoded reference construction; A2 removes
+                                 this once the generated path is fully proven. -->
+                            <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
+                              <position x="-0.36177411330546533m" y="0.4829345992763463m" z="55.87084740617998m"/>
+                            </transform_position>
+                            <create_position name="$prospectiveyaworigin" x="1.877547e-6m" y="2.018104m + 6.145042419433594m" z="-1.043081e-5m"/>
+                            <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
+                              <position x="$prospectivepitcheddownstream.x - 1.730653e-6m" y="$prospectivepitcheddownstream.y + 2.926126m" z="$prospectivepitcheddownstream.z - 16.11956m"/>
+                            </transform_position>
+                          </do_else>
                           <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"/>
                           <do_if value="not $lineoffireclear">
                             <do_for_each name="$prospectivefrac" in="$surfacexfracs" counter="$prospectivei">

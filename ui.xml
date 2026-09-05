@@ -7,6 +7,7 @@
     <file name="ui/turret_arc_limits.lua"/>
     <file name="ui/gunnery_state.lua"/>
     <file name="ui/gunnery_persistence.lua"/>
+    <file name="ui/turret_muzzle_geometry.lua"/>
     <file name="ui/gunnery_control.lua"/>
   </environment>
 </addon>

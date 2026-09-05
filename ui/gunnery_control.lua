@@ -5,6 +5,81 @@ local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
 local TurretArcLimits = X4GunneryTurretArcLimits or {}
+local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
+
+-- Prospective-muzzle geometry for the one supported self-masking macro (#74).
+-- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
+-- Rather than hand-copy the Beam constants, derive O/P/D from the generated
+-- source-resolved record (ui/turret_muzzle_geometry.lua) and hand MD the three
+-- fixed vectors as flat scalars. This walks the authored layer/transform chain
+-- exactly as tests/test_turret_muzzle_geometry.lua evaluates it, but factors the
+-- two runtime rotations (yaw rotator, pitch gun) back out into constants.
+local PROSPECTIVE_MACRO = "turret_par_l_beam_01_mk1_macro"
+local PROSPECTIVE_ENDPOINT = "con_laser_02"
+
+local function vadd(a, b)
+    return { a[1] + b[1], a[2] + b[2], a[3] + b[3] }
+end
+
+local function qrotate(q, v)
+    local x, y, z, w = q[1], q[2], q[3], q[4]
+    local vx, vy, vz = v[1], v[2], v[3]
+    local tx = 2 * (y * vz - z * vy)
+    local ty = 2 * (z * vx - x * vz)
+    local tz = 2 * (x * vy - y * vx)
+    return {
+        vx + w * tx + y * tz - z * ty,
+        vy + w * ty + z * tx - x * tz,
+        vz + w * tz + x * ty - y * tx,
+    }
+end
+
+local function rotateInFrame(rotations, vector)
+    for index = #rotations, 1, -1 do
+        vector = qrotate(rotations[index], vector)
+    end
+    return vector
+end
+
+-- ponytail: handles only the depth4_dual_translation topology (one y rotator,
+-- one x gun); returns nil for anything else so the MD literal fallback stands.
+local function deriveProspectiveMuzzle(geometry, endpointConnection)
+    local fixed = {}
+    local segment = { 0, 0, 0 }
+    local origin, pivot
+    for _, layer in ipairs(geometry.layers) do
+        segment = vadd(segment, rotateInFrame(fixed, layer.connection_transform.position))
+        if layer.settled_position then
+            segment = vadd(segment, rotateInFrame(fixed, layer.settled_position))
+        end
+        if layer.runtime_rotation then
+            if layer.runtime_rotation.axis == "y" then
+                origin = segment
+                segment = { 0, 0, 0 }
+            elseif layer.runtime_rotation.axis == "x" then
+                pivot = segment
+                segment = { 0, 0, 0 }
+            end
+        end
+        fixed[#fixed + 1] = layer.connection_transform.quaternion
+        fixed[#fixed + 1] = layer.part_transform.quaternion
+    end
+    local endpoint
+    for _, candidate in ipairs(geometry.endpoints) do
+        if candidate.connection == endpointConnection then endpoint = candidate end
+    end
+    if not (origin and pivot and endpoint) then return nil end
+    local downstream = vadd(segment, rotateInFrame(fixed, endpoint.transform.position))
+    return { origin = origin, pivot = pivot, downstream = downstream }
+end
+
+local prospectiveMuzzle
+do
+    local geometry = TurretMuzzleGeometry[PROSPECTIVE_MACRO]
+    if geometry then
+        prospectiveMuzzle = deriveProspectiveMuzzle(geometry, PROSPECTIVE_ENDPOINT)
+    end
+end
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
@@ -1185,9 +1260,18 @@ local function requestEngageabilities(targets, purpose)
             local macro = tostring(member.macro or "")
             if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
             local arc = TurretArcLimits[macro]
+            local muzzle = (macro == PROSPECTIVE_MACRO) and prospectiveMuzzle or nil
+            local origin = muzzle and muzzle.origin or nil
+            local pivot = muzzle and muzzle.pivot or nil
+            local downstream = muzzle and muzzle.downstream or nil
             AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
                 nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
-                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0 })
+                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0,
+                muzzleknow = muzzle and 1 or 0,
+                mox = origin and origin[1] or 0, moy = origin and origin[2] or 0, moz = origin and origin[3] or 0,
+                mpx = pivot and pivot[1] or 0, mpy = pivot and pivot[2] or 0, mpz = pivot and pivot[3] or 0,
+                mdx = downstream and downstream[1] or 0, mdy = downstream and downstream[2] or 0,
+                mdz = downstream and downstream[3] or 0 })
         end
         for index = first, last do
             local entry = pending[index]

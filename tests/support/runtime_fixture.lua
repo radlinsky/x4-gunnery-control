@@ -488,6 +488,7 @@ function M.load()
     -- X4GunneryState must be set before gunnery_control.lua loads
     -- (line 5: local State = X4GunneryState).
     dofile("ui/turret_arc_limits.lua")
+    dofile("ui/turret_muzzle_geometry.lua")
     X4GunneryState = dofile("ui/gunnery_state.lua")
     X4GunneryPersistence = dofile("ui/gunnery_persistence.lua")
     -- The control module deliberately reuses this table in game across a UI
