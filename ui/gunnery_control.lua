@@ -7,14 +7,18 @@ local Persistence = X4GunneryPersistence
 local TurretArcLimits = X4GunneryTurretArcLimits or {}
 local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
 
--- Prospective-muzzle geometry for the one supported self-masking macro (#74).
+-- Prospective-muzzle geometry for the supported self-masking macros (#74, #98).
 -- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
--- Rather than hand-copy the Beam constants, derive O/P/D from the generated
+-- Rather than hand-copy the constants, derive O/P/D from the generated
 -- source-resolved record (ui/turret_muzzle_geometry.lua) and hand MD the three
 -- fixed vectors as flat scalars. This walks the authored layer/transform chain
 -- exactly as tests/test_turret_muzzle_geometry.lua evaluates it, but factors the
 -- two runtime rotations (yaw rotator, pitch gun) back out into constants.
-local PROSPECTIVE_MACRO = "turret_par_l_beam_01_mk1_macro"
+-- ponytail: an explicit allowlist, not every generated record.
+local PROSPECTIVE_MACROS = {
+    turret_par_l_beam_01_mk1_macro = true,
+    turret_par_m_laser_01_mk1_macro = true,
+}
 local PROSPECTIVE_ENDPOINT = "con_laser_02"
 
 local function vadd(a, b)
@@ -41,16 +45,28 @@ local function rotateInFrame(rotations, vector)
     return vector
 end
 
--- ponytail: handles only the depth4_dual_translation topology (one y rotator,
--- one x gun); returns nil for anything else, so no known prospective geometry is
--- streamed and the prospective generated-geometry path is not entered.
+-- ponytail: handles the depth4_dual_translation and depth5_additive_x_rotation
+-- topologies (one y rotator, one x gun); returns nil for anything else, so no
+-- known prospective geometry is streamed and the prospective generated-geometry
+-- path is not entered. Layer order per case mirrors
+-- tests/test_turret_muzzle_geometry.lua exactly.
 local function deriveProspectiveMuzzle(geometry, endpointConnection)
     local fixed = {}
     local segment = { 0, 0, 0 }
     local origin, pivot
+    local depth5 = geometry.semantic_case == "depth5_additive_x_rotation"
+    if not depth5 and geometry.semantic_case ~= "depth4_dual_translation" then return nil end
     for _, layer in ipairs(geometry.layers) do
         segment = vadd(segment, rotateInFrame(fixed, layer.connection_transform.position))
-        if layer.settled_position then
+        if depth5 then
+            fixed[#fixed + 1] = layer.connection_transform.quaternion
+            segment = vadd(segment, rotateInFrame(fixed, layer.part_transform.position))
+            fixed[#fixed + 1] = layer.part_transform.quaternion
+            if layer.settled_rotation_x_radians then
+                local half = layer.settled_rotation_x_radians / 2
+                fixed[#fixed + 1] = { math.sin(half), 0, 0, math.cos(half) }
+            end
+        elseif layer.settled_position then
             segment = vadd(segment, rotateInFrame(fixed, layer.settled_position))
         end
         if layer.runtime_rotation then
@@ -62,9 +78,11 @@ local function deriveProspectiveMuzzle(geometry, endpointConnection)
                 segment = { 0, 0, 0 }
             end
         end
-        fixed[#fixed + 1] = layer.connection_transform.quaternion
-        segment = vadd(segment, rotateInFrame(fixed, layer.part_transform.position))
-        fixed[#fixed + 1] = layer.part_transform.quaternion
+        if not depth5 then
+            fixed[#fixed + 1] = layer.connection_transform.quaternion
+            segment = vadd(segment, rotateInFrame(fixed, layer.part_transform.position))
+            fixed[#fixed + 1] = layer.part_transform.quaternion
+        end
     end
     local endpoint
     for _, candidate in ipairs(geometry.endpoints) do
@@ -75,11 +93,11 @@ local function deriveProspectiveMuzzle(geometry, endpointConnection)
     return { origin = origin, pivot = pivot, downstream = downstream }
 end
 
-local prospectiveMuzzle
-do
-    local geometry = TurretMuzzleGeometry[PROSPECTIVE_MACRO]
+local prospectiveMuzzles = {}
+for macroName in pairs(PROSPECTIVE_MACROS) do
+    local geometry = TurretMuzzleGeometry[macroName]
     if geometry then
-        prospectiveMuzzle = deriveProspectiveMuzzle(geometry, PROSPECTIVE_ENDPOINT)
+        prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry, PROSPECTIVE_ENDPOINT)
     end
 end
 
@@ -1262,7 +1280,7 @@ local function requestEngageabilities(targets, purpose)
             local macro = tostring(member.macro or "")
             if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
             local arc = TurretArcLimits[macro]
-            local muzzle = (macro == PROSPECTIVE_MACRO) and prospectiveMuzzle or nil
+            local muzzle = prospectiveMuzzles[macro]
             local origin = muzzle and muzzle.origin or nil
             local pivot = muzzle and muzzle.pivot or nil
             local downstream = muzzle and muzzle.downstream or nil

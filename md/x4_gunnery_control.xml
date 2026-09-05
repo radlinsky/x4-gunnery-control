@@ -338,15 +338,16 @@
                             <break/>
                           </do_if>
                         </do_for_each>
-                        <!-- The exact Paranid L Beam can still be self-masked at
-                             its resting/current barrelposition while its authored
-                             deployed muzzle has a clear ray. Only after the
-                             current-origin fast query and all six current-origin
-                             witnesses remain blocked, use the accepted per-macro
-                             prospective construction. This is not generic turret
-                             geometry: O + Ry(runtime aim yaw) *
-                             (P + Rx(-runtime aim pitch) * D). -->
-                        <do_if value="not $lineoffireclear and $weapon.macro == macro.turret_par_l_beam_01_mk1_macro and EngageabilityService.$muzzleknown.{$weaponindex} == 1">
+                        <!-- A turret can still be self-masked at its resting/current
+                             barrelposition while its authored deployed muzzle has a
+                             clear ray. Only after the current-origin fast query and
+                             all six current-origin witnesses remain blocked, use the
+                             accepted per-macro prospective construction. This is not
+                             generic turret geometry: O + Ry(runtime aim yaw) *
+                             (P + Rx(-runtime aim pitch) * D). The muzzle-known flag
+                             is the gate: UI Lua streams O/P/D only for the macros it
+                             explicitly supports. -->
+                        <do_if value="not $lineoffireclear and EngageabilityService.$muzzleknown.{$weaponindex} == 1">
                           <!-- Prospective muzzle from the generated source-resolved
                                record (ui/turret_muzzle_geometry.lua), delivered as
                                flat per-weapon scalars. Accepted construction

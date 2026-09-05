@@ -144,16 +144,28 @@ current_surface_breaks=$(printf '%s\n' "$current_surface_scan" | grep -Fc "<brea
 [ "$current_surface_breaks" -eq 1 ] \
   || note "current-origin surface witness loop must break only on its first clear sample (found $current_surface_breaks)"
 
-# 9. Issue #69 production prospective origin. It is a second, Beam-only chance
-#    after the unchanged current-barrel fast ray and all six current-barrel
-#    witnesses remain blocked. Unsupported conventional macros must never enter
-#    this asset-specific geometry.
-prospective_gate="not \$lineoffireclear and \$weapon.macro == macro.turret_par_l_beam_01_mk1_macro and EngageabilityService.\$muzzleknown.{\$weaponindex} == 1"
+# 9. Issue #69 production prospective origin. It is a second chance after the
+#    unchanged current-barrel fast ray and all six current-barrel witnesses
+#    remain blocked. Unsupported conventional macros must never enter this
+#    asset-specific geometry: the muzzle-known flag is the only gate, and UI Lua
+#    raises it solely for the macros on its explicit allowlist (#98 A1).
+prospective_gate="not \$lineoffireclear and EngageabilityService.\$muzzleknown.{\$weaponindex} == 1"
 has "$prospective_gate" \
-  || note "exact blocked + Paranid-L-Beam-only + generated-geometry-known prospective gate is missing"
-macro_mentions=$(printf '%s\n' "$block" | grep -Fc 'macro.turret_par_l_beam_01_mk1_macro')
-[ "$macro_mentions" -eq 1 ] \
-  || note "prospective geometry must have exactly one exact Beam macro gate (found $macro_mentions mentions)"
+  || note "exact blocked + generated-geometry-known prospective gate is missing"
+macro_mentions=$(printf '%s\n' "$block" | grep -Ec 'macro\.turret_[a-z0-9_]+_macro' || true)
+[ "$macro_mentions" -eq 0 ] \
+  || note "prospective geometry must gate on muzzleknown, not a macro branch (found $macro_mentions mentions)"
+
+# 9-lua. The supported-macro allowlist lives in UI Lua and stays exactly the
+#        accepted Paranid L Beam plus M Laser.
+lua_allowlist=$(awk '/^local PROSPECTIVE_MACROS = \{/, /^\}/' ui/gunnery_control.lua)
+for supported in turret_par_l_beam_01_mk1_macro turret_par_m_laser_01_mk1_macro; do
+  printf '%s\n' "$lua_allowlist" | grep -Fq "$supported" \
+    || note "UI Lua prospective allowlist is missing $supported"
+done
+allowlist_entries=$(printf '%s\n' "$lua_allowlist" | grep -Ec '^\s+turret_[a-z0-9_]+_macro = true,' || true)
+[ "$allowlist_entries" -eq 2 ] \
+  || note "UI Lua prospective allowlist must hold exactly the two accepted macros (found $allowlist_entries)"
 
 # 9a. The accepted construction is applied to the GENERATED per-weapon geometry
 #     only (#74 A2): a separate weapon-local fast-target bearing, then the O/P/D
