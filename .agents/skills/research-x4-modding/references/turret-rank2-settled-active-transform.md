@@ -4,16 +4,15 @@
 
 The seven rank-2 turret components have enough mutually corroborating offline
 source evidence to define one rule for their settled `turret_active` pose. A
-controlled X4 9.00 discriminator has now independently corroborated the
-additive local-X channel-1 composition on the exact Paranid M laser
-representative. That live result validates the semantic choice for this exact
-rank-2 topology; it is not the later nine-pose runtime-position validation for
-every source-resolved topology.
+controlled X4 9.00 discriminator independently corroborated additive local-X
+channel-1 composition on the exact Paranid M laser representative. A later
+nine-pose live re-evaluation validated that representative's corrected
+absolute endpoint-2 positions without fitting a runtime constant.
 
-This reference closes the source-semantics question needed for the settled
-pose and records the representative runtime discriminator. It does not
-establish arbitrary ANI channels, transition interpolation, or a global
-runtime telemetry sign convention.
+This reference closes the source-semantics and representative absolute-position
+questions needed for the settled pose. It does not establish arbitrary ANI
+channels, transition interpolation, or a global runtime telemetry sign
+convention.
 
 ## Scope and sources
 
@@ -52,9 +51,11 @@ Offline sources checked:
    binary ANI channel layout or its composition rule. An Egosoft-forum
    community guide supplied only a workflow lead, not an official semantic.
 
-The original source pass did not run X4. The later live discriminator is
-recorded below and used the exact source chain in this file without fitting
-runtime constants.
+The original source pass did not run X4. The later live discriminator and
+nine-pose absolute-position re-evaluation are recorded below and used the exact
+source chain in this file without fitting runtime constants. The accepted
+ANI-to-authored conversion is implemented at
+`ed25ee0bcf527afa5d8034254ef4625e1c3da7ee`.
 
 ## Exact authored topology
 
@@ -165,12 +166,21 @@ At the pinned commit, X4Converter:
   being replaced by the ANI value;
 - likewise adds candidate-channel-0 values to the part object's starting
   `location`;
-- flips the X contribution while crossing to Blender handedness, for both
-  location X and Euler X.
+- reads authored XML positions and quaternions directly, but applies
+  `start - value` for ANI location X and ANI Euler X while applying
+  `start + value` for ANI Y/Z.
 
-That is `third-party-technique`, not X4 proof. It nevertheless gives an exact,
-testable composition hypothesis and is independently corroborated by the
-cross-family construction of the shipped assets.
+Accordingly, accepted ANI position and rotation triples enter authored/native
+geometry as:
+
+```text
+(x, y, z)_ANI-stored → (-x, y, z)_authored/native
+```
+
+The converter behavior is `third-party-technique`, not X4 proof. It gives an
+exact, testable conversion and composition hypothesis; the corrected
+Paranid M laser absolute-position result below independently corroborates its
+material local-X rotation consequence.
 
 ## Generic settled-transform rule
 
@@ -179,10 +189,12 @@ and part transform as separate layers. Under the source-derived rule:
 
 1. Apply the authored connection transform from the parent part to the named
    connection.
-2. At the child part, add its settled channel-0 triple to local position and
-   its settled channel-1 triple, in radians, to local Euler X/Y/Z rotation.
-   Preserve any authored part offset at this layer. Only X is non-zero here,
-   so Euler order is irrelevant.
+2. Convert each accepted settled ANI triple from stored coordinates to the
+   authored/native convention as `(-x, y, z)`. At the child part, add the
+   converted channel-0 triple to local position and the converted channel-1
+   triple, in radians, to local Euler X/Y/Z rotation. Preserve any authored
+   part offset at this layer. Only X is non-zero in the accepted rotation
+   records, so Euler order is irrelevant for this cohort.
 3. Attach the next connection below that animated part, so the ANI contribution
    moves the whole downstream subtree.
 4. Apply live `rotation_y` at `part_rotator` and live `rotation_x` at
@@ -217,16 +229,18 @@ anim_base:
   ANI position       (0,0,0)
 
 part_arm:
-  connection position (0,-0.008089185,0)
-  authored rotation   identity
-  ANI Euler            (-α,0,0)
+  connection position  (0,-0.008089185,0)
+  authored rotation    identity
+  stored ANI Euler     (-α,0,0)
+  applied native Euler (+α,0,0)
 
 rotator-base:
-  connection position (0,0.003018975,-3.745065)
-  authored rotation   X(-35°)
-  part offset          (0,5.96e-8,-1.192e-7)
-  ANI Euler            (+α,0,0)
-  active local rotation X(-35°)+X(+35°) = identity
+  connection position  (0,0.003018975,-3.745065)
+  authored rotation    X(-35°)
+  part offset           (0,5.96e-8,-1.192e-7)
+  stored ANI Euler      (+α,0,0)
+  applied native Euler  (-α,0,0)
+  active local rotation X(-35°)+X(-35°) = X(-70°)
 
 part_rotator:
   connection position (0,1.039598,0.6400551)
@@ -245,9 +259,9 @@ endpoint 2: (-0.3138258,0.2704595,5.609009)
 ```
 
 Thus its fixed active orientation before live yaw/pitch is
-`X(-35°) · identity · X(+35°) = identity`. The arm moves the downstream base
-pivot and the compensated rotator-base/rotator relationship restores the live
-joint frame; this is mechanically coherent rather than two disconnected mesh
+`X(+35°) · X(-70°) · X(+35°) = identity`. The arm moves the downstream base
+pivot and the compensated arm/base/rotator relationship restores the live
+joint frame; this is mechanically coherent rather than disconnected mesh
 rotations.
 
 ## Cross-component corroboration and grouping
@@ -256,19 +270,19 @@ The strongest independent source-pattern check is the authored-family split:
 
 ```text
 Paranid/Terran:
-  -35° ANI arm + (-35° authored base + 35° ANI base)
+  +35° applied ANI arm + (-35° authored base -35° applied ANI base)
   + 35° authored rotator = 0° net fixed X rotation
 
 Teladi:
-  -35° ANI arm + 0° authored base + 35° ANI base
+  +35° applied ANI arm + 0° authored base -35° applied ANI base
   + 0° authored rotator = 0° net fixed X rotation
 ```
 
 Exact exported residues remain in the literal matrices, but the authored
 35-degree construction is common. A replacement interpretation would instead
 leave Paranid/Terran at +35° while Teladi remains at 0°, despite their identical
-active ANI triples and shared topology. The additive interpretation therefore
-explains both authored families with one rule and is the mechanically coherent
+active ANI triples and shared topology. The converted additive interpretation therefore explains both
+authored families with one rule and is the mechanically coherent
 source-derived rule.
 
 One generic algorithm covers all seven. They do **not** require separate
@@ -362,33 +376,82 @@ endpoint 1 or the endpoint midpoint still leaves the additive displacement
 magnitude within about `0.0051 m` or `0.0152 m` respectively, while the
 replacement controls miss by about `0.5831 m` or `0.6118 m`.
 
-The live discriminator therefore selects the additive local-X channel-1
+The live discriminator therefore selects additive local-X channel-1
 composition and rejects the replacement interpretation for this exact Paranid
-rank-2 representative.
+rank-2 representative. Because both the old raw-X composition and the corrected
+ANI-X conversion leave the net pre-joint orientation at identity, this
+right-minus-left displacement test did not materially discriminate their fixed
+upstream translation.
+
+Re-evaluating the same B2 session out of sample with the corrected absolute
+source chain gives endpoint-2 position errors of approximately `6.11e-6 m`
+and `5.95e-6 m` for the left and right samples respectively.
+
+## X4 9.00 nine-pose absolute-position validation
+
+A separate captured B4 run on X4 9.00 build 611726 exercised the exact
+`turret_par_m_laser_01_mk1_macro` representative at nine materially distinct
+poses. Each pose had a settled runtime `barrelposition`, a later exact-turret
+firing record that returned to that position within the accepted sampling
+contract, and correlated target-hit evidence. The corrected source chain was
+instantiated from the corresponding projectile bore direction; no runtime
+constant was fitted.
+
+Before correcting the ANI-X convention, runtime minus source prediction was a
+nearly pose-invariant approximately `(0, +4.296162, +0.003464) m`. Shipped
+source explains that residual directly:
+
+```text
+[Rx(+35°) - Rx(-35°)] * (0, 0.003018975, -3.745065)
+  ≈ (0, +4.296162073, +0.003463226) m
+```
+
+With stored ANI triples converted as `(-x, y, z)`, the nine corrected
+endpoint-2 errors are:
+
+| pose | error (m) |
+|---|---:|
+| center | `0.0000070` |
+| yaw right | `0.0000069` |
+| yaw left | `0.0000108` |
+| pitch low | `0.0000064` |
+| pitch high | `0.0000147` |
+| right low | `0.0000033` |
+| right high | `0.0000157` |
+| left low | `0.0000073` |
+| left high | `0.0000125` |
+
+The observed range is approximately `3.3e-6..1.57e-5 m`, far below the
+`0.5 m` validation cap. This completes the absolute-position validation for
+the exact rank-2 representative.
 
 ## Decision and proof boundary
 
-**SOURCE-SEMANTICS RESOLVED; REPRESENTATIVE RUNTIME DISCRIMINATOR PASSED.**
+**SOURCE-SEMANTICS RESOLVED; REPRESENTATIVE NINE-POSE ABSOLUTE-POSITION
+VALIDATION PASSED.**
 
-The shipped hierarchy/numeric construction and the pinned converter's additive
-Euler interpretation independently converge on one exact source rule for all
-seven components. X4 9.00 then independently selected that additive rule over
-the replacement control on the Paranid M laser representative using actual
-firing and hit evidence at two materially distinct bearings.
+The shipped hierarchy/numeric construction and pinned converter converge on
+one exact source rule for all seven components: accepted ANI position and
+rotation triples are normalized to `(-x, y, z)` before additive local
+composition with authored geometry. X4 9.00 selected additive channel-1
+composition over replacement in B2, and the corrected rule then reproduced all
+nine captured B4 absolute endpoint-2 positions to approximately
+`3.3e-6..1.57e-5 m` without a fitted runtime constant.
 
-This promotes the additive channel-1 composition needed by this exact rank-2
-settled topology from source-derived inference to a representative
-`live-tested` semantic. It does not claim that all seven component-specific
-geometries have separately passed runtime position validation; that remains a
-later topology-validation requirement.
+The ANI channel-0 X conversion is converter-backed but not materially
+live-discriminated: resolved channel-0 X values in this cohort are zero or
+microscopic. The material B4 correction is the nonzero channel-1 Euler X
+conversion. Nonzero Euler Y/Z and Euler order remain unproved and must fail
+closed.
 
 Not established here:
 
 - general channel-1 semantics outside this exact topology and settled state;
+- nonzero channel-0 X behavior beyond the converter-backed conversion rule;
+- nonzero Euler Y/Z or Euler order;
 - transition interpolation/control semantics;
 - a global runtime yaw/pitch telemetry-sign convention;
-- nine-pose production accuracy/tolerance for the topology;
-- runtime validation of every component-specific offset/end-point set in the
+- runtime validation of every component-specific offset/endpoint set in the
   seven-member cohort.
 
 ## Evidence records
@@ -412,7 +475,9 @@ Not established here:
   `X4ConverterBlenderAddon/importer.py`
 - Live test: no
 - Finding: candidate channel 1 is mapped to Euler rotation and added to the
-  starting local rotation, with the documented-in-code X handedness adjustment.
+  starting local rotation. Authored XML transforms are read directly, while
+  ANI position and Euler X use `start - value`; accepted ANI triples therefore
+  enter authored/native geometry as `(-x, y, z)`.
 
 ### Cohort transform synthesis
 
@@ -421,9 +486,10 @@ Not established here:
 - Source: shipped-source hierarchy/numeric agreement plus the pinned
   third-party transform technique
 - Live test: representative runtime corroboration recorded separately below
-- Finding: additive local channel-1 rotations produce one mechanically coherent
-  fixed active orientation and one generic transform rule across all seven;
-  replacement creates an unexplained authored-family split.
+- Finding: converted additive local channel-1 rotations produce one
+  mechanically coherent fixed active orientation and one generic transform
+  rule across all seven; replacement creates an unexplained authored-family
+  split.
 
 ### Paranid M laser additive channel-1 composition
 
@@ -441,7 +507,25 @@ Not established here:
   right-minus-left runtime muzzle displacement was within about `7.6e-6 m` of
   the additive endpoint-2 prediction, while the replacement control was about
   `0.693 m` away. Additive local-X channel-1 composition is therefore
-  independently corroborated for this exact rank-2 representative.
+  independently corroborated for this exact rank-2 representative. Corrected
+  absolute-source re-evaluation gives left/right endpoint-2 errors of about
+  `6.11e-6 m` and `5.95e-6 m`.
+
+### Paranid M laser corrected nine-pose absolute positions
+
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: owner-captured B4 rank-2 nine-pose `debug.log`, 2026-09-05,
+  scenario `issue-83-b4-rank2-nine-pose-r1`; shipped component and hull-mount
+  transforms;
+  accepted implementation SHA `ed25ee0bcf527afa5d8034254ef4625e1c3da7ee`
+- Live test: yes — nine settled poses with exact-turret firing and correlated
+  hit evidence, re-evaluated from projectile bore directions
+- Finding: after converting stored ANI triples to authored/native
+  `(-x, y, z)`, endpoint-2 absolute errors are approximately
+  `3.3e-6..1.57e-5 m` with no fitted runtime constant. The former fixed
+  residual is exactly explained, to logged precision, by the source-only
+  rotation-difference calculation recorded above.
 
 ### Official tooling availability
 
