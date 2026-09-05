@@ -81,7 +81,7 @@ def _settled_rotation_x(layer: dict[str, object]) -> str | None:
     values = layer.get("settled_local_euler_xyz_delta_radians")
     if values is None:
         return None
-    # ponytail: only the proven local-X case is representable; anything else
+    # Only the proven local-X case is representable; anything else
     # would need a full Euler representation nothing consumes yet.
     if float(values[1]) != 0 or float(values[2]) != 0:
         raise SystemExit("unsupported non-local-X settled rotation")

@@ -73,7 +73,21 @@ def _report(endpoint_connections):
     return {"x4_version": X4_VERSION, "component_to_macros": components}
 
 
+def _check_settled_rotation_x():
+    assert _gen._settled_rotation_x({}) is None
+    assert _gen._settled_rotation_x(
+        {"settled_local_euler_xyz_delta_radians": [0.6108652353286743, 0.0, -0.0]}
+    ) == "0.6108652353286743"
+    for bad in ([0.0, 1e-9, 0.0], [0.0, 0.0, 1e-9]):
+        try:
+            _gen._settled_rotation_x({"settled_local_euler_xyz_delta_radians": bad})
+        except SystemExit:
+            continue
+        raise AssertionError(f"nonzero Euler Y/Z must fail closed: {bad}")
+
+
 def main():
+    _check_settled_rotation_x()
     order = ("con_laser_01", "con_laser_02")
 
     first = _gen._render(_report(order), X4_VERSION)
