@@ -32,7 +32,7 @@ def _offset(pos, quat):
     }
 
 
-def _layers():
+def _layers(count):
     return [
         {
             "source_part": f"part_{index}",
@@ -41,14 +41,14 @@ def _layers():
             "part_authored_offset": _offset((0.0, index, 0.0), (0.0, 0.0, 0.0, 1.0)),
             "authored_restrictions": [],
         }
-        for index in range(4)
+        for index in range(count)
     ]
 
 
-def _endpoint_geometry(layers, connection):
+def _endpoint_geometry(layers, connection, semantic_case):
     return {
         "classification": "SOURCE_RESOLVED",
-        "semantic_case": _gen.SEMANTIC_CASE,
+        "semantic_case": semantic_case,
         "applied_authored_geometry": {
             "source_geometry_layers": layers,
             "endpoint_connection": connection,
@@ -58,18 +58,19 @@ def _endpoint_geometry(layers, connection):
 
 
 def _report(endpoint_connections):
-    layers = _layers()
-    return {
-        "x4_version": X4_VERSION,
-        "component_to_macros": [
+    components = []
+    for macro, (semantic_case, layer_count) in _gen.MACROS.items():
+        layers = _layers(layer_count)
+        components.append(
             {
-                "macros": [_gen.MACRO],
+                "macros": [macro],
                 "source_semantic_resolutions": [
-                    _endpoint_geometry(layers, connection) for connection in endpoint_connections
+                    _endpoint_geometry(layers, connection, semantic_case)
+                    for connection in endpoint_connections
                 ],
             }
-        ],
-    }
+        )
+    return {"x4_version": X4_VERSION, "component_to_macros": components}
 
 
 def main():

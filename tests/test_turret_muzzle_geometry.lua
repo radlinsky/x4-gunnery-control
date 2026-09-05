@@ -95,19 +95,21 @@ end
 X4GunneryTurretMuzzleGeometry = nil
 assert(loadfile("ui/turret_muzzle_geometry.lua"))()
 
+local expected_macros = {
+  turret_par_l_beam_01_mk1_macro = true,
+  turret_par_m_laser_01_mk1_macro = true,
+}
 local macro_count = 0
-local macro_name
 for name in pairs(X4GunneryTurretMuzzleGeometry) do
   macro_count = macro_count + 1
-  macro_name = name
+  if not expected_macros[name] then
+    fail("unexpected generated macro key " .. tostring(name))
+  end
 end
-if macro_count ~= 1 then
-  fail("expected exactly one generated macro record, got " .. macro_count)
+if macro_count ~= 2 then
+  fail("expected exactly two generated macro records, got " .. macro_count)
 end
 local expected_macro = "turret_par_l_beam_01_mk1_macro"
-if macro_name ~= expected_macro then
-  fail("unexpected generated macro key " .. tostring(macro_name))
-end
 
 local geometry = X4GunneryTurretMuzzleGeometry[expected_macro]
 local tolerance = 1e-9
