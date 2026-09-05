@@ -85,24 +85,28 @@ def _resolve_supported_endpoint_source_semantics(
     # source-identical components, distinguished by its two exact live-backed
     # channel-0 translation triples. Endpoint leaf offsets are deliberately
     # outside the signature.
-    b1_counts = (
-        (0, 0, 0, 0, 0),
-        (2, 0, 0, 0, 0),
-        (0, 0, 0, 0, 0),
-        (2, 0, 0, 0, 0),
-    )
     b1_bits = {
         1: (("0x00000000", "0x40c4a430", "0x00000000"),) * 2,
         3: (("0x00000000", "0xbe759360", "0x41ddae80"),) * 2,
     }
+    b1_keyed = (
+        {
+            edge_index: descriptor
+            for edge_index, descriptor in covered.items()
+            if _counts(descriptor) != (0, 0, 0, 0, 0)
+        }
+        if covered is not None
+        else {}
+    )
     if (
         component_endpoint_count == 2
         and depth == 4
-        and covered is not None
-        and set(covered) == set(range(4))
-        and tuple(_counts(covered[index]) for index in range(4)) == b1_counts
+        and set(b1_keyed) == {1, 3}
         and all(
-            _first_three_bits(covered[index], 0) == bits
+            _counts(b1_keyed[index]) == (2, 0, 0, 0, 0) for index in (1, 3)
+        )
+        and all(
+            _first_three_bits(b1_keyed[index], 0) == bits
             for index, bits in b1_bits.items()
         )
     ):
