@@ -52,16 +52,15 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #75: live-regress the generated prospective-muzzle path for the exact
--- Paranid L Beam accepted in #74. This keeps only the two #69 Beam cases:
--- FAR is the known self-mask discriminator, and NEAR has the external blocker.
--- The old qualifier placed the FAR surface at 0.70 Beam range astern, NEAR at
--- 0.40 range right/astern, and the blocker halfway to NEAR. Beam range is about
--- 14 km, so these fixed root positions preserve that shape without restoring
--- the deleted issue-specific qualifier machinery. Keep this copy disabled.
+-- Issue #99: live-regress the generated prospective-muzzle path for the exact
+-- Paranid M Laser accepted in #98. Reuse the #83 rank-2 shooter/loadout and two
+-- live-proven high-elevation aim positions. PITCH HIGH is the positive FAR case:
+-- the resting/current muzzle should remain self-masked while the generated
+-- target-facing muzzle clears. LEFT HIGH is the bounded negative control, with a
+-- separate blocker halfway along its ray. Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-75-par-l-beam-far-regression-r1",
+    id      = "issue-99-par-m-laser-far-regression-r1",
     enabled = false,
 
     location = {
@@ -72,45 +71,45 @@ X4GunneryTestLabScenarioSpec = {
     },
 
     setup = {
-        remote          = true,
-        shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE75 PAR L BEAM SHOOTER 1",
-        turretGroup     = "group_rear_down_mid",
-        turretLabel     = "Rear Lower Mid Beam",
-        expectedTurrets = 1,
+        remote            = true,
+        shipMacro         = "ship_par_m_trans_container_01_a_macro",
+        shipLabel         = "ISSUE99 PAR M LASER SHOOTER 1",
+        singleTurretMacro = "turret_par_m_laser_01_mk1_macro",
+        turretLabel       = "Integrated PAR M Laser",
+        expectedTurrets   = 1,
         expectedMemberMacros = {
-            "turret_par_l_beam_01_mk1_macro",
+            "turret_par_m_laser_01_mk1_macro",
         },
         selectAll = false,
     },
 
     groups = {
         {
-            label     = "ISSUE75 PAR L BEAM SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
+            label     = "ISSUE99 PAR M LASER SHOOTER",
+            macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 0,
+            distance  = 1,
             x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
             expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE75 FAR CLEAR",
+            label     = "ISSUE99 FAR PITCH HIGH",
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = -9800,
+            distance  = 1001,
             x         = 0,
-            y         = 0,
+            y         = 1732,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
@@ -129,13 +128,13 @@ X4GunneryTestLabScenarioSpec = {
         },
 
         {
-            label     = "ISSUE75 NEAR BLOCKED",
+            label     = "ISSUE99 BLOCKED LEFT HIGH",
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = -5600,
-            x         = 5600,
-            y         = 0,
+            distance  = 867,
+            x         = -500,
+            y         = 1732,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
@@ -154,13 +153,13 @@ X4GunneryTestLabScenarioSpec = {
         },
 
         {
-            label     = "ISSUE75 NEAR LOS BLOCKER",
+            label     = "ISSUE99 LEFT HIGH BLOCKER",
             macro     = "ship_xen_l_terraformer_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = -2800,
-            x         = 2800,
-            y         = 0,
+            distance  = 434,
+            x         = -250,
+            y         = 866,
             spread    = 0,
             behaviour = "wait",
             holdFire  = true,
