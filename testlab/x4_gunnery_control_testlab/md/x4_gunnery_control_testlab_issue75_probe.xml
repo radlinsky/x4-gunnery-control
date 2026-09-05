@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Issue #75 live-only evidence probe.
+
+  The production engageability service accepts the exact Paranid L Beam through
+  prospective generated muzzle geometry only after its current barrelposition
+  fast ray and all six current-origin surface witnesses remain blocked.
+
+  This Test Lab-only listener mirrors only those current-origin checks while the
+  surface browser is still open, before Gunnery Control points the Beam at the
+  chosen surface. It does not reproduce or change the prospective calculation.
+-->
+<mdscript name="X4GunneryTestLabIssue75Probe" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../../#modding/xsd/md.xsd">
+  <cues>
+    <cue name="ProbeRoot">
+      <actions>
+        <set_value name="$Nonce" exact="''"/>
+        <set_value name="$Targets" exact="[]"/>
+      </actions>
+      <cues>
+        <cue name="Begin" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_begin'"/>
+          </conditions>
+          <actions>
+            <set_value name="ProbeRoot.$Nonce" exact="@event.param3.$nonce"/>
+            <remove_value name="ProbeRoot.$Weapon"/>
+            <set_value name="ProbeRoot.$Targets" exact="[]"/>
+          </actions>
+        </cue>
+
+        <cue name="Member" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_member'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$Weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof $Weapon != datatype.component and $Weapon">
+              <set_value name="$Weapon" exact="component.{$Weapon}"/>
+            </do_if>
+            <do_if value="$Nonce == ProbeRoot.$Nonce
+                          and typeof $Weapon == datatype.component
+                          and $Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
+              <set_value name="ProbeRoot.$Weapon" exact="$Weapon"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="Target" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_target'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$Target" exact="@event.param3.$target"/>
+            <do_if value="typeof $Target != datatype.component and $Target">
+              <set_value name="$Target" exact="component.{$Target}"/>
+            </do_if>
+            <do_if value="$Nonce == ProbeRoot.$Nonce
+                          and typeof $Target == datatype.component
+                          and not ProbeRoot.$Targets.indexof.{$Target}">
+              <append_to_list name="ProbeRoot.$Targets" exact="$Target"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="Commit" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_commit'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Nonce" exact="@event.param3.$nonce"/>
+            <do_if value="$Nonce == ProbeRoot.$Nonce
+                          and ProbeRoot.$Weapon?
+                          and ProbeRoot.$Weapon.exists">
+              <set_value name="$Weapon" exact="ProbeRoot.$Weapon"/>
+              <do_for_each name="$Target" in="ProbeRoot.$Targets">
+                <do_if value="$Target.exists
+                              and $Target != $Target.defensible
+                              and $Target.macro == macro.turret_arg_l_beam_01_mk1_macro">
+                  <check_line_of_sight name="$Fast" object="$Weapon" objectoffset="$Weapon.barrelposition" target="$Target" excludeself="false" useaimtarget="true"/>
+
+                  <set_value name="$MinX" exact="2 * $Target.macro.boundingbox.center.x - $Target.macro.boundingbox.max.x"/>
+                  <set_value name="$MinY" exact="2 * $Target.macro.boundingbox.center.y - $Target.macro.boundingbox.max.y"/>
+                  <set_value name="$MinZ" exact="2 * $Target.macro.boundingbox.center.z - $Target.macro.boundingbox.max.z"/>
+                  <set_value name="$SpanX" exact="$Target.macro.boundingbox.max.x - $MinX"/>
+                  <set_value name="$SpanY" exact="$Target.macro.boundingbox.max.y - $MinY"/>
+                  <set_value name="$SpanZ" exact="$Target.macro.boundingbox.max.z - $MinZ"/>
+                  <set_value name="$XFracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
+                  <set_value name="$YFracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
+                  <set_value name="$ZFracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
+                  <set_value name="$WitnessClear" exact="0"/>
+                  <do_for_each name="$Frac" in="$XFracs" counter="$Index">
+                    <create_position name="$Sample" object="$Target" space="$Target"
+                                     x="$MinX + $XFracs.{$Index} * $SpanX"
+                                     y="$MinY + $YFracs.{$Index} * $SpanY"
+                                     z="$MinZ + $ZFracs.{$Index} * $SpanZ"/>
+                    <check_line_of_sight name="$Witness" object="$Weapon" objectoffset="$Weapon.barrelposition"
+                                         target="$Target" targetoffset="$Sample" useaimtarget="false" excludeself="false"/>
+                    <do_if value="$Witness">
+                      <set_value name="$WitnessClear" operation="add"/>
+                    </do_if>
+                  </do_for_each>
+                  <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                  <debug_text text="'[X4GC TEST ISSUE75 PROBE] nonce=' + $Nonce
+                    + ' weapon=' + $Weapon
+                    + ' target=' + $Target
+                    + ' targetname=' + $Target.knownname
+                    + ' fast=' + $Fast
+                    + ' witness_clear=' + $WitnessClear + '/6'
+                    + ' barrel_x=' + $Barrel.x
+                    + ' barrel_y=' + $Barrel.y
+                    + ' barrel_z=' + $Barrel.z"/>
+                </do_if>
+              </do_for_each>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+  </cues>
+</mdscript>
