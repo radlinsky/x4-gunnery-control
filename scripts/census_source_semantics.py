@@ -165,8 +165,8 @@ def _resolve_supported_endpoint_source_semantics(
         == (("0x3f1c61aa", "0x80000000", "0x00000000"),) * 2
         and len(rotation_y) == 1
         and rotation_y[0].get("type_token") == "rotation_y"
-        and _limit(rotation_y[0], "authored_min") is None
-        and _limit(rotation_y[0], "authored_max") is None
+        and rotation_y[0].get("authored_min") is None
+        and rotation_y[0].get("authored_max") is None
         and len(rotation_x) == 1
         and rotation_x[0].get("type_token") == "rotation_x"
         and _limit(rotation_x[0], "authored_min") == -10.0
