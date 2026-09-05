@@ -45,6 +45,8 @@ def _strip_candidate_raw_key_records(value: object) -> None:
     if isinstance(value, dict):
         value.pop("_candidate_raw_key_records", None)
         value.pop("_authored_offset", None)
+        value.pop("_direct_owned_part_transforms", None)
+        value.pop("_ancestry_covered_turret_active_descriptor_memberships", None)
         for child in value.values():
             _strip_candidate_raw_key_records(child)
     elif isinstance(value, list):

@@ -52,12 +52,15 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- The disabled fixture below is retained only as the current work-in-progress
--- input. Its A/B coordinates are known-bad for the channel discriminator; do
--- not treat them as a reusable geometry fixture.
+-- Issue #83 B4 rank-2 nine-pose fixture. The integrated Paranid M turret mount
+-- has no authored group identity, so setup selects the exact installed turret
+-- through production's kind="single" path and reuses the shipped loadout.
+-- Targets form a conservative interior grid around the already live-proven
+-- firing region: yaw -30/0/+30 degrees and elevation 20/40/60 degrees, at
+-- approximately 2 km slant range. Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-72-a3-channel0-discriminator-r1",
+    id      = "issue-83-b4-rank2-nine-pose-r1",
     enabled = false,
 
     location = {
@@ -68,22 +71,22 @@ X4GunneryTestLabScenarioSpec = {
     },
 
     setup = {
-        remote          = true,
-        shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE72 PAR L BEAM SHOOTER 1",
-        turretGroup     = "group_rear_down_mid",
-        turretLabel     = "Rear Lower Mid Beam",
-        selectAll       = false,
-        expectedTurrets = 1,
+        remote            = true,
+        shipMacro         = "ship_par_m_trans_container_01_a_macro",
+        shipLabel         = "ISSUE83 B4 RANK2 SHOOTER 1",
+        singleTurretMacro = "turret_par_m_laser_01_mk1_macro",
+        turretLabel       = "Integrated PAR M Laser",
+        expectedTurrets   = 1,
         expectedMemberMacros = {
-            "turret_par_l_beam_01_mk1_macro",
+            "turret_par_m_laser_01_mk1_macro",
         },
+        selectAll = false,
     },
 
     groups = {
         {
-            label     = "ISSUE72 PAR L BEAM SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
+            label     = "ISSUE83 B4 RANK2 SHOOTER",
+            macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "player",
             count     = 1,
             distance  = 1,
@@ -93,20 +96,20 @@ X4GunneryTestLabScenarioSpec = {
             behaviour = "wait",
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
             expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE72 CHANNEL0 TARGET A",
+            label     = "ISSUE83 B4 RANK2 CENTER",
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = 7000,
+            distance  = 1533,
             x         = 0,
-            y         = 0,
+            y         = 1286,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
@@ -116,13 +119,125 @@ X4GunneryTestLabScenarioSpec = {
         },
 
         {
-            label     = "ISSUE72 CHANNEL0 TARGET B",
+            label     = "ISSUE83 B4 RANK2 YAW RIGHT",
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = 7000,
-            x         = 2000,
-            y         = 1500,
+            distance  = 1328,
+            x         = 766,
+            y         = 1286,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 YAW LEFT",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 1328,
+            x         = -766,
+            y         = 1286,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 PITCH LOW",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 1880,
+            x         = 0,
+            y         = 684,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 PITCH HIGH",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 1001,
+            x         = 0,
+            y         = 1732,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 RIGHT LOW",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 1629,
+            x         = 940,
+            y         = 684,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 RIGHT HIGH",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 867,
+            x         = 500,
+            y         = 1732,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 LEFT LOW",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 1629,
+            x         = -940,
+            y         = 684,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        {
+            label     = "ISSUE83 B4 RANK2 LEFT HIGH",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 867,
+            x         = -500,
+            y         = 1732,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,

@@ -651,6 +651,119 @@ class CensusEndpointPipelineIntegrationTests(unittest.TestCase):
                     build_census(roots)
                 self.assertIn(code, caught.exception.codes)
 
+    @staticmethod
+    def _ancestry_descriptor(
+        index: int, part: str, subname: str, source_connection: str, path: list[str]
+    ) -> dict[str, object]:
+        return {
+            "descriptor_index": index,
+            "part": part,
+            "subname": subname,
+            "channel_counts": {},
+            "descriptor_offset_148": None,
+            "key_data": None,
+            "_candidate_raw_key_records": [f"raw-{index}"],
+            "source_connection": source_connection,
+            "root_to_source_connection_path": list(path),
+        }
+
+    def test_ancestry_covered_turret_active_descriptors_span_same_and_ancestor_connections(
+        self,
+    ) -> None:
+        connections = [
+            {"name": "Root", "parent_connection": None, "parent_part": None, "direct_owned_parts": ["RootPart"]},
+            {"name": "A", "parent_connection": "Root", "parent_part": "RootPart", "direct_owned_parts": ["APart"]},
+            {"name": "B", "parent_connection": "A", "parent_part": "APart", "direct_owned_parts": ["BPart"]},
+            {"name": "Endpoint", "parent_connection": "B", "parent_part": "BPart", "direct_owned_parts": []},
+        ]
+        d_root = self._ancestry_descriptor(0, "RootPart", "turret_active", "Root", ["Root"])
+        d_a = self._ancestry_descriptor(1, "APart", "turret_active", "A", ["Root", "A"])
+        d_b = self._ancestry_descriptor(2, "BPart", "turret_active", "B", ["Root", "A", "B"])
+        d_b_other = self._ancestry_descriptor(3, "BPart", "not_turret_active", "B", ["Root", "A", "B"])
+        # Selector authored on A: covers A itself and its descendant B, but not
+        # ancestor Root; a non-turret_active literal on B is never covered.
+        selector = {
+            "connection": "A",
+            "name": "turret_active",
+            "descriptor_match_count": 1,
+            "connection_ani_descriptors": [d_a],
+        }
+        endpoint = {"connection": "Endpoint", "root_to_endpoint_connection_path": ["Root", "A", "B", "Endpoint"]}
+
+        resolved, anomalies = _derive_endpoint_source_paths(
+            [endpoint],
+            connections,
+            [d_root, d_a, d_b, d_b_other],
+            authored_animation_selectors=[selector],
+            component="component_a",
+            source_set="base",
+            source_file="assets/component.xml",
+        )
+
+        self.assertEqual(anomalies, [])
+        covered = resolved[0]["_ancestry_covered_turret_active_descriptor_memberships"]
+        self.assertEqual(
+            [
+                (d["part"], d["subname"], d["source_connection"], d["endpoint_path_edge_index"])
+                for d in covered
+            ],
+            [("APart", "turret_active", "A", 1), ("BPart", "turret_active", "B", 2)],
+        )
+        # Private raw ANI records are preserved on the retained memberships.
+        self.assertEqual(covered[0]["_candidate_raw_key_records"], ["raw-1"])
+
+    def test_ancestry_covered_turret_active_without_selector_is_valid_empty(self) -> None:
+        connections = [
+            {"name": "Root", "parent_connection": None, "parent_part": None, "direct_owned_parts": ["RootPart"]},
+            {"name": "Endpoint", "parent_connection": "Root", "parent_part": "RootPart", "direct_owned_parts": []},
+        ]
+        d_root = self._ancestry_descriptor(0, "RootPart", "turret_active", "Root", ["Root"])
+        endpoint = {"connection": "Endpoint", "root_to_endpoint_connection_path": ["Root", "Endpoint"]}
+
+        resolved, anomalies = _derive_endpoint_source_paths(
+            [endpoint],
+            connections,
+            [d_root],
+            authored_animation_selectors=[],
+            component="component_a",
+            source_set="base",
+            source_file="assets/component.xml",
+        )
+
+        self.assertEqual(anomalies, [])
+        self.assertEqual(
+            resolved[0]["_ancestry_covered_turret_active_descriptor_memberships"], []
+        )
+
+    def test_ancestry_covered_private_field_absent_from_serialized_census(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(
+                roots["base"],
+                "assets/component.xml",
+                """<components><component name="component_a" class="turret">
+                  <source geometry="geometry/component_a"/>
+                  <connections>
+                    <connection name="Root"><animations><animation name="turret_active"/></animations><parts><part name="RootPart"/></parts></connection>
+                    <connection name="Endpoint" tags="laser" parent="RootPart"/>
+                  </connections>
+                </component></components>""",
+            )
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+            (roots["base"] / "geometry/component_a.ANI").write_bytes(
+                _ani_bytes(("RootPart", "turret_active"))
+            )
+
+            report = build_census(roots)
+            self.assertNotIn(
+                "_ancestry_covered_turret_active_descriptor_memberships",
+                render_json(report),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

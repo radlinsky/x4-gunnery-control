@@ -10,7 +10,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent))
 
+import json  # noqa: E402
+
 from census_common import CensusError  # noqa: E402
+from census_identity import _collect_xml_identities  # noqa: E402
 from census_pipeline import build_census as _build_census  # noqa: E402
 from support.census_fixture import (  # noqa: E402
     _ani_bytes,
@@ -20,6 +23,26 @@ from support.census_fixture import (  # noqa: E402
     _write,
     build_census,
 )
+
+
+_PART_OFFSET_COMPONENT = """<components>
+  <component name="component_a" class="turret">
+    <source geometry="geometry/component_a"/>
+    <connections>
+      <connection name="endpoint" tags="laser">
+        <parts>
+          <part name="muzzle">
+            <offset>
+              <position x="11.5" y="-22.0" z="33.25"/>
+              <quaternion qx="0.101" qy="0.202" qz="0.303" qw="0.909"/>
+            </offset>
+          </part>
+          <part name="plain_part"/>
+        </parts>
+      </connection>
+    </connections>
+  </component>
+</components>"""
 
 
 class CensusIdentityPipelineIntegrationTests(unittest.TestCase):
@@ -233,6 +256,60 @@ class CensusIdentityPipelineIntegrationTests(unittest.TestCase):
             split = next(r for r in report["equipment_macros"] if r["name"] == "missile_macro")
             self.assertEqual(split["source_set"], "ego_dlc_split")
             self.assertEqual(split["component"], "missile_component")
+
+    def test_direct_owned_part_authored_offset_is_preserved_internally(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(roots["base"], "assets/component.xml", _PART_OFFSET_COMPONENT)
+
+            component_definitions, _macros, _wares, anomalies = _collect_xml_identities(
+                roots
+            )
+
+            self.assertEqual(anomalies, [])
+            (record,) = component_definitions["component_a"][0]["connection_records"]
+            transforms = {
+                part["name"]: part["_authored_offset"]
+                for part in record["_direct_owned_part_transforms"]
+            }
+            # (1) part with an authored offset keeps its position/quaternion.
+            self.assertEqual(
+                {
+                    axis: transforms["muzzle"]["position"][axis]["candidate_numeric_value"]
+                    for axis in ("x", "y", "z")
+                },
+                {"x": 11.5, "y": -22.0, "z": 33.25},
+            )
+            self.assertEqual(
+                transforms["muzzle"]["quaternion"]["qw"]["candidate_numeric_value"],
+                0.909,
+            )
+            # (2) part without an authored offset is represented safely.
+            self.assertEqual(
+                transforms["plain_part"],
+                {"position": None, "quaternion": None},
+            )
+
+    def test_direct_owned_part_transforms_are_stripped_from_census_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(roots["base"], "assets/component.xml", _PART_OFFSET_COMPONENT)
+            _write(
+                roots["base"],
+                "assets/macros.xml",
+                _macros(("a_macro", "turret", "component_a")),
+            )
+
+            report = build_census(roots)
+
+            # (3) the private part-transform data never reaches serialized output,
+            # while the unchanged public part names still do.
+            serialized = json.dumps(report)
+            self.assertNotIn("_direct_owned_part_transforms", serialized)
+            self.assertNotIn("33.25", serialized)
+            self.assertNotIn("0.909", serialized)
+            connection = report["component_to_macros"][0]["connections"][0]
+            self.assertEqual(connection["direct_owned_parts"], ["muzzle", "plain_part"])
 
     def test_missing_component_reference_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

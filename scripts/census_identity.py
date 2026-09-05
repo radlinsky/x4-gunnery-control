@@ -205,6 +205,19 @@ def _collect_xml_identities(
                                         for parts in _direct_children(connection, "parts")
                                         for part in _direct_children(parts, "part")
                                     ],
+                                    # Private, stripped before serialization: keeps each
+                                    # direct part's exact name plus optional authored
+                                    # <offset> for later B3 transform extraction.
+                                    "_direct_owned_part_transforms": [
+                                        {
+                                            "name": part.get("name", ""),
+                                            "_authored_offset": (
+                                                _parse_authored_connection_offset(part)
+                                            ),
+                                        }
+                                        for parts in _direct_children(connection, "parts")
+                                        for part in _direct_children(parts, "part")
+                                    ],
                                 }
                                 for connections in _direct_children(component, "connections")
                                 for connection in _direct_children(connections, "connection")
