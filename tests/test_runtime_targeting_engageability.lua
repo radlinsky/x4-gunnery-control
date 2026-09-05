@@ -322,29 +322,35 @@ do
         return vadd(O, qrotate(axisRotation("y", yaw), vadd(P, pitched)))
     end
 
-    local sess58 = API.getSession()
-    sess58.phase, sess58.controlMode = "console", nil
-    sess58.groups = {
-        { key = "selected", members = { { componentID = 581, operational = true } } },
-    }
-    sess58.checkedGroupKeys = { selected = true }
-    gcMenu.shown = true
-    local savedAdd58, member58 = AddUITriggeredEvent, nil
-    local savedComponentData58 = GetComponentData
-    GetComponentData = function(component, ...)
-        local values = {}
-        for _, key in ipairs({...}) do
-            values[#values + 1] = (key == "macro")
-                and "turret_par_l_beam_01_mk1_macro" or false
+    -- Stream one engageability_member for a turret of the given macro and hand
+    -- back the parameters the production consumer itself produced.
+    local function streamMember(macroName, componentID, targetID)
+        local sess = API.getSession()
+        sess.phase, sess.controlMode = "console", nil
+        sess.groups = {
+            { key = "selected", members = { { componentID = componentID, operational = true } } },
+        }
+        sess.checkedGroupKeys = { selected = true }
+        gcMenu.shown = true
+        local savedAdd, member = AddUITriggeredEvent, nil
+        local savedComponentData = GetComponentData
+        GetComponentData = function(component, ...)
+            local values = {}
+            for _, key in ipairs({...}) do
+                values[#values + 1] = (key == "macro") and macroName or false
+            end
+            return unpack(values)
         end
-        return unpack(values)
+        AddUITriggeredEvent = function(screen, control, params)
+            if control == "engageability_member" then member = params end
+        end
+        API.requestEngageability(targetID)
+        AddUITriggeredEvent = savedAdd
+        GetComponentData = savedComponentData
+        return member
     end
-    AddUITriggeredEvent = function(screen, control, params)
-        if control == "engageability_member" then member58 = params end
-    end
-    API.requestEngageability(800)
-    AddUITriggeredEvent = savedAdd58
-    GetComponentData = savedComponentData58
+
+    local member58 = streamMember("turret_par_l_beam_01_mk1_macro", 581, 800)
 
     assert(member58 ~= nil, "58: no engageability_member streamed for the Beam turret")
     assert(member58.muzzleknow == 1,
@@ -360,6 +366,38 @@ do
                     yaw, pitch, axis, got[axis], want[axis]))
             end
         end
+    end
+
+    -- ── 59. the same production consumer reproduces the accepted #83 M Laser
+    -- live aim poses (issue #98 A2). Poses are the never-fitted witnesses from
+    -- tests/test_turret_muzzle_geometry.lua; yaw/pitch are radians there.
+    local laserPoses = {
+        { "center", 0, 0.747567, -0.313826, 5.19057, 2.90662 },
+        { "yaw right", 0.592892, 0.736931, 1.66678, 5.14855, 2.53582 },
+        { "yaw left", -0.592892, 0.736930, -2.1873, 5.14855, 2.18511 },
+        { "pitch low", 0, 0.363425, -0.313826, 3.42557, 4.12367 },
+        { "pitch high", 0, 1.12376, -0.313826, 6.35365, 1.15801 },
+        { "right low", 0.578989, 0.357808, 2.27399, 3.39663, 3.55235 },
+        { "right high", 0.636900, 1.10904, 0.778724, 6.32098, 1.08071 },
+        { "left low", -0.578989, 0.357808, -2.79934, 3.39663, 3.20892 },
+        { "left high", -0.636900, 1.10904, -1.28332, 6.32098, 0.707438 },
+    }
+    local member59 = streamMember("turret_par_m_laser_01_mk1_macro", 591, 900)
+    assert(member59 ~= nil, "59: no engageability_member streamed for the M Laser turret")
+    assert(member59.muzzleknow == 1,
+        "59: the generated M Laser member must stream muzzleknow=1")
+    for _, pose in ipairs(laserPoses) do
+        local name, yaw, pitch = pose[1], math.deg(pose[2]), math.deg(pose[3])
+        local got = generatedMuzzle(member59, yaw, pitch)
+        local squared = 0
+        for axis = 1, 3 do
+            local difference = got[axis] - pose[axis + 3]
+            squared = squared + difference * difference
+        end
+        local distance = math.sqrt(squared)
+        assert(distance <= 2e-5, string.format(
+            "59: streamed M Laser muzzle misses accepted pose %s by %.9g m "
+            .. "(%.9g, %.9g, %.9g)", name, distance, got[1], got[2], got[3]))
     end
 end
 
