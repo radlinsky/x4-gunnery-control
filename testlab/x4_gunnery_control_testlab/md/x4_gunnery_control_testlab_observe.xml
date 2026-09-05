@@ -208,6 +208,7 @@
                   <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>
                   <set_value name="$Relative" exact="$Target.relativeposition.{$Weapon}"/>
                   <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                  <set_value name="$Origin" exact="$Weapon.relativeposition.{player.ship}"/>
                   <!-- Compare the raw component-origin bearing with the XSD's
                        weapon-consistent aim-target bearing. The local-space
                        form is the candidate production pitch predicate; this
@@ -238,6 +239,9 @@
                     + ' barrel_x=' + $Barrel.x
                     + ' barrel_y=' + $Barrel.y
                     + ' barrel_z=' + $Barrel.z
+                    + ' origin_ship_x=' + $Origin.x
+                    + ' origin_ship_y=' + $Origin.y
+                    + ' origin_ship_z=' + $Origin.z
                     + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
                     + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
