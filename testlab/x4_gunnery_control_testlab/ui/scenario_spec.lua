@@ -52,7 +52,7 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #99 r3: live-regress the generated prospective-muzzle path for the
+-- Issue #99 r4: live-regress the generated prospective-muzzle path for the
 -- exact Paranid M Laser accepted in #98.
 --
 -- r1 was a bad fixture: it reused a #83 ship-root firing pose and assumed the
@@ -60,21 +60,24 @@
 -- disproved that assumption: the exact surface itself stayed 0/1 and never
 -- fired.
 --
--- r3 starts from Issue #67 A100's exact Behemoth/ARG-L-Beam surface geometry,
--- which was live-proven 1/1 ENGAGEABLE with exact FIRED/HIT evidence. #67's
--- shooter weapon frame is tilted, so the A100 root/orientation are first moved
--- into weapon-local coordinates, then rigidly rotated onto exact M-Laser bore
--- directions already live-proven by #83. This preserves the known-good target
--- surface/hull relationship instead of copying #67 world coordinates.
+-- r3 corrected the target geometry and live-proved the intended-pass FAR case:
+-- the exact surface returned 1/1 and the exact M Laser fired/hit it. The r3
+-- blocked control was too narrow: its center ray was blocked, but one of six
+-- surface witness rays remained clear (witness_clear=1/6), so 1/1 was valid for
+-- that control too.
+--
+-- r4 keeps both r3 target placements unchanged. It moves the same player-owned
+-- M-freighter blocker from halfway to one-quarter of BLOCKED SURFACE's exact
+-- hittable-aim ray. That halves the witness bundle's spread at the blocker plane
+-- while keeping the blocker well separated from FAR CLEAR SURFACE.
 --
 -- FAR CLEAR SURFACE is aligned to #83 PITCH HIGH (yaw 0, pitch 1.12376 rad),
 -- at about 1.5 km. BLOCKED SURFACE is aligned to #83 RIGHT HIGH
--- (yaw 0.636900, pitch 1.10904 rad), then moved outward to about 3.0 km; a
--- separate player-owned M freighter sits halfway down that exact surface-aim
--- ray. Keep this repository copy disabled.
+-- (yaw 0.636900, pitch 1.10904 rad), then moved outward to about 3.0 km.
+-- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-99-par-m-laser-far-regression-r3",
+    id      = "issue-99-par-m-laser-far-regression-r4",
     enabled = false,
 
     location = {
@@ -179,10 +182,12 @@ X4GunneryTestLabScenarioSpec = {
             macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "player",
             count     = 1,
-            -- Centered halfway along BLOCKED SURFACE's exact hittable-aim ray.
-            distance  = 493.445716,
-            x         = 397.007680,
-            y         = 1355.833218,
+            -- One-quarter of BLOCKED SURFACE's exact hittable-aim ray from the
+            -- live/source-proven M-Laser origin. r3's halfway placement blocked
+            -- the center plus five witnesses but left one witness ray clear.
+            distance  = 225.101708,
+            x         = 198.503841,
+            y         = 685.095259,
             spread    = 0,
             behaviour = "wait",
             holdFire  = true,
