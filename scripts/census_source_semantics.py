@@ -13,21 +13,31 @@ def _counts(descriptor: dict[str, object]) -> tuple[int, ...]:
     )
 
 
-def _first_three_bits(
+def _channel_records(
     descriptor: dict[str, object], channel_index: int
-) -> tuple[tuple[str, str, str], ...]:
+) -> list[dict[str, object]]:
+    """Return one channel's key records for a descriptor, in stored order."""
     field = _ANI_CHANNEL_COUNT_FIELDS[channel_index]
-    record_range = descriptor["key_data"]["channels"][field]["record_range"]
-    records = sorted(
+    channel = descriptor.get("key_data", {}).get("channels", {}).get(field)
+    if channel is None:
+        return []
+    record_range = channel["record_range"]
+    return sorted(
         (
             record
-            for record in descriptor["_candidate_raw_key_records"]
+            for record in descriptor.get("_candidate_raw_key_records", [])
             if int(record_range["start"])
             <= int(record["record_index"])
             < int(record_range["end_exclusive"])
         ),
         key=lambda record: int(record["record_index"]),
     )
+
+
+def _first_three_bits(
+    descriptor: dict[str, object], channel_index: int
+) -> tuple[tuple[str, str, str], ...]:
+    records = _channel_records(descriptor, channel_index)
     return tuple(
         tuple(str(raw_bit) for raw_bit in record["raw_bits"][:3])
         for record in records
@@ -153,29 +163,149 @@ def _resolve_supported_endpoint_source_semantics(
             ),
         }
 
-    # Accepted one-key barrel case (Issue #79): the same depth-4 rotator/barrel
-    # composition, where the barrel stores a single settled turret_active
-    # channel-0 key instead of the doubled form. Accepted only for the exact
-    # proved bits, so nearby one-key records stay unsupported.
+    # Accepted one-key barrel case (Issue #79 / #125 A2): the depth-4
+    # rotator/barrel composition where the barrel stores a single settled
+    # turret_active channel-0 key instead of the doubled form. The barrel rule
+    # is structural/name-free; the rotator remains bounded to its separately
+    # accepted repeated source value.
+    one_key_barrel_match = False
+    one_key_rotator_pos: list[float] = []
+    one_key_barrel_pos: list[float] = []
     if (
         component_endpoint_count == 2
         and depth == 4
         and set(keyed) == {1, 3}
         and _counts(keyed[1]) == (2, 0, 0, 0, 0)
         and _counts(keyed[3]) == (1, 0, 0, 0, 0)
-        and _first_three_bits(keyed[1], 0)
-        == (("0x00000000", "0x403d92e4", "0x00000000"),) * 2
-        and _first_three_bits(keyed[3], 0)
-        == (("0x00000000", "0xb4bffc2b", "0x40574ede"),)
     ):
+        # The accepted A1 evidence resolves this exact repeated rotator value;
+        # repeated storage alone does not justify arbitrary translations.
+        accepted_rotator_bits = (
+            ("0x00000000", "0x403d92e4", "0x00000000"),
+        ) * 2
+        rotator_match = _first_three_bits(keyed[1], 0) == accepted_rotator_bits
+
+        # Rule 4: barrel active key must use STEP interpolation:
+        # raw_bits indexes 3, 4, 5 are all "0x00000001".
+        barrel_records = _channel_records(keyed[3], 0)
+        barrel_step = (
+            len(barrel_records) == 1
+            and len(barrel_records[0]["raw_bits"]) >= 6
+            and barrel_records[0]["raw_bits"][3] == "0x00000001"
+            and barrel_records[0]["raw_bits"][4] == "0x00000001"
+            and barrel_records[0]["raw_bits"][5] == "0x00000001"
+        )
+
+        # Rule 5: turret_active must be a one-frame authored selector —
+        # exactly one occurrence in authored_animation_selector_occurrences
+        # with animation_name == "turret_active" whose _authored_frame_span
+        # has non-empty start and end that parse as equal integers.
+        selector_occurrences = endpoint.get(
+            "authored_animation_selector_occurrences", []
+        )
+        turret_active_occurrences = [
+            occ
+            for occ in selector_occurrences
+            if occ.get("animation_name") == "turret_active"
+        ]
+        one_frame = False
+        if len(turret_active_occurrences) == 1:
+            span = turret_active_occurrences[0].get("_authored_frame_span") or {}
+            start_raw = span.get("start", "")
+            end_raw = span.get("end", "")
+            if start_raw and end_raw:
+                try:
+                    one_frame = int(start_raw) == int(end_raw)
+                except (ValueError, TypeError):
+                    one_frame = False
+
+        # Rule 6: boundary match on edge 3.
+        # turret_activating and turret_deactivating descriptors with non-empty
+        # channel-0 must exist; last activating rec[0:3] == barrel active
+        # rec[0:3] == first deactivating rec[0:3].
+        boundary_match = False
+        all_memberships = endpoint.get("ani_descriptor_memberships")
+        if all_memberships is not None:
+            edge3_memberships = [
+                m
+                for m in all_memberships
+                if int(m.get("endpoint_path_edge_index", -1)) == 3
+            ]
+            activating_descs = [
+                m
+                for m in edge3_memberships
+                if m.get("subname") == "turret_activating"
+                and _channel_records(m, 0)
+            ]
+            deactivating_descs = [
+                m
+                for m in edge3_memberships
+                if m.get("subname") == "turret_deactivating"
+                and _channel_records(m, 0)
+            ]
+            if len(activating_descs) == 1 and len(deactivating_descs) == 1:
+                act_recs = _channel_records(activating_descs[0], 0)
+                deact_recs = _channel_records(deactivating_descs[0], 0)
+                barrel_bits_0_3 = tuple(
+                    str(b) for b in barrel_records[0]["raw_bits"][:3]
+                )
+                act_last_bits = tuple(
+                    str(b) for b in act_recs[-1]["raw_bits"][:3]
+                )
+                deact_first_bits = tuple(
+                    str(b) for b in deact_recs[0]["raw_bits"][:3]
+                )
+                boundary_match = (
+                    act_last_bits == barrel_bits_0_3 == deact_first_bits
+                )
+
+        # Rule 7: authored yaw/pitch layout.
+        one_key_layers = authored_geometry.get("source_geometry_layers", [])
+        rot_y_restrictions = (
+            one_key_layers[1]["authored_restrictions"]
+            if len(one_key_layers) > 1
+            else []
+        )
+        rot_x_restrictions = (
+            one_key_layers[2]["authored_restrictions"]
+            if len(one_key_layers) > 2
+            else []
+        )
+        geo_match = (
+            len(rot_y_restrictions) == 1
+            and rot_y_restrictions[0].get("type_token") == "rotation_y"
+            and rot_y_restrictions[0].get("authored_min") is None
+            and rot_y_restrictions[0].get("authored_max") is None
+            and len(rot_x_restrictions) == 1
+            and rot_x_restrictions[0].get("type_token") == "rotation_x"
+            and _limit(rot_x_restrictions[0], "authored_min") == -10.0
+            and _limit(rot_x_restrictions[0], "authored_max") == 90.0
+        )
+
+        if (
+            rotator_match
+            and barrel_step
+            and one_frame
+            and boundary_match
+            and geo_match
+        ):
+            one_key_barrel_match = True
+            # Read the accepted translations from the verified source records
+            # after the evidence-bounded guards have matched.
+            one_key_rotator_pos = list(
+                _channel_records(keyed[1], 0)[0]["raw_values"][:3]
+            )
+            one_key_barrel_pos = list(barrel_records[0]["raw_values"][:3])
+
+    if one_key_barrel_match:
         return {
             "classification": "SOURCE_RESOLVED",
             "semantic_case": "depth4_one_key_barrel_translation",
             "applied_authored_geometry": _apply(
                 authored_geometry,
                 positions={
-                    1: [0.0, 2.962090492248535, 0.0],
-                    3: [0.0, -3.575999869553925e-07, 3.3641886711120605],
+                    1: one_key_rotator_pos,
+                    3: one_key_barrel_pos,
                 },
             ),
         }
