@@ -48,7 +48,7 @@ The situations that matter for this mod. Each is checked against **your target**
 - the turret has known arc data and its traverse arc contains the aim direction;
 - the target is within weapon range, measured as bounding-box distance (`bboxdistanceto`) against the weapon's max fire range rather than center-to-center distance, so reachable hull or modules on a large ship or station count as in range even when the center is far; and
 - the applicable direct-line policy passes:
-  - a conventional turret requires a clear muzzle-to-target line of fire that includes its own ship, so its own hull or an external object can mask the shot;
+  - a conventional turret requires a clear muzzle-to-target line of fire that includes its own ship, so its own hull or an external object can mask the shot. The line is checked first from where the barrel sits right now. If that line is blocked and the mod has generated barrel geometry for that turret, the check is retried from where the barrel would sit once the turret has swung onto the target, so a shot that is only masked by the turret's current resting position still counts. A conventional turret without generated barrel geometry keeps the current-position check alone;
   - an unguided missile turret requires a clear direct line that excludes its own ship, so its own hull does not mask a viable launch but terrain or another object still does; ammunition with missing or unrecognized guidance data takes this conservative unguided path; and
   - a missile turret with affirmatively guided loaded ammunition does not require a direct muzzle-to-target line, because the missile can steer after launch. Bearing and range remain mandatory.
 

@@ -148,7 +148,7 @@ current_surface_breaks=$(printf '%s\n' "$current_surface_scan" | grep -Fc "<brea
 #    unchanged current-barrel fast ray and all six current-barrel witnesses
 #    remain blocked. Unsupported conventional macros must never enter this
 #    asset-specific geometry: the muzzle-known flag is the only gate, and UI Lua
-#    raises it solely for the macros on its explicit allowlist (#98 A1).
+#    raises it solely for generated records whose geometry it understands (#106).
 prospective_gate="not \$lineoffireclear and EngageabilityService.\$muzzleknown.{\$weaponindex} == 1"
 has "$prospective_gate" \
   || note "exact blocked + generated-geometry-known prospective gate is missing"
@@ -156,18 +156,14 @@ macro_mentions=$(printf '%s\n' "$block" | grep -Ec 'macro\.turret_[a-z0-9_]+_mac
 [ "$macro_mentions" -eq 0 ] \
   || note "prospective geometry must gate on muzzleknown, not a macro branch (found $macro_mentions mentions)"
 
-# 9-lua. The supported-macro allowlist lives in UI Lua and stays exactly the
-#        ten accepted production macros.
-lua_allowlist=$(awk '/^local PROSPECTIVE_MACROS = \{/, /^\}/' ui/gunnery_control.lua)
-for supported in turret_par_l_beam_01_mk1_macro turret_par_m_laser_01_mk1_macro turret_par_l_laser_01_mk1_macro turret_par_l_plasma_01_mk1_macro \
-                 turret_par_m_beam_01_mk1_macro turret_par_m_plasma_01_mk1_macro turret_tel_m_beam_01_mk1_macro \
-                 turret_tel_m_laser_01_mk1_macro turret_tel_m_plasma_01_mk1_macro turret_ter_m_laser_01_mk1_macro; do
-  printf '%s\n' "$lua_allowlist" | grep -Fq "$supported" \
-    || note "UI Lua prospective allowlist is missing $supported"
-done
-allowlist_entries=$(printf '%s\n' "$lua_allowlist" | grep -Ec '^\s+turret_[a-z0-9_]+_macro = true,' || true)
-[ "$allowlist_entries" -eq 10 ] \
-  || note "UI Lua prospective allowlist must hold exactly the ten accepted macros (found $allowlist_entries)"
+# 9-lua. Supported macros are exactly what the generated geometry contains and
+#        deriveProspectiveMuzzle understands (#106 A2). UI Lua must consume
+#        TurretMuzzleGeometry directly and keep no second macro allow-list.
+grep -Eq '^for macroName, geometry in pairs\(TurretMuzzleGeometry\) do' ui/gunnery_control.lua \
+  || note "UI Lua must build prospective muzzles directly from TurretMuzzleGeometry"
+lua_macro_literals=$(grep -Ec '^\s*turret_[a-z0-9_]+_macro = ' ui/gunnery_control.lua || true)
+[ "$lua_macro_literals" -eq 0 ] \
+  || note "UI Lua must not keep a separate prospective-macro allow-list (found $lua_macro_literals entries)"
 
 # 9a. The accepted construction is applied to the GENERATED per-weapon geometry
 #     only (#74 A2): a separate weapon-local fast-target bearing, then the O/P/D

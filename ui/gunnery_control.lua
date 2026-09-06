@@ -14,19 +14,8 @@ local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
 -- fixed vectors as flat scalars. This walks the authored layer/transform chain
 -- exactly as tests/test_turret_muzzle_geometry.lua evaluates it, but factors the
 -- two runtime rotations (yaw rotator, pitch gun) back out into constants.
--- ponytail: an explicit allowlist, not every generated record.
-local PROSPECTIVE_MACROS = {
-    turret_par_l_beam_01_mk1_macro = true,
-    turret_par_m_laser_01_mk1_macro = true,
-    turret_par_l_laser_01_mk1_macro = true,
-    turret_par_l_plasma_01_mk1_macro = true,
-    turret_par_m_beam_01_mk1_macro = true,
-    turret_par_m_plasma_01_mk1_macro = true,
-    turret_tel_m_beam_01_mk1_macro = true,
-    turret_tel_m_laser_01_mk1_macro = true,
-    turret_tel_m_plasma_01_mk1_macro = true,
-    turret_ter_m_laser_01_mk1_macro = true,
-}
+-- ponytail: support is whatever deriveProspectiveMuzzle understands in the
+-- generated data; no second allow-list to keep in sync (#106).
 
 local function vadd(a, b)
     return { a[1] + b[1], a[2] + b[2], a[3] + b[3] }
@@ -99,11 +88,8 @@ local function deriveProspectiveMuzzle(geometry)
 end
 
 local prospectiveMuzzles = {}
-for macroName in pairs(PROSPECTIVE_MACROS) do
-    local geometry = TurretMuzzleGeometry[macroName]
-    if geometry then
-        prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry)
-    end
+for macroName, geometry in pairs(TurretMuzzleGeometry) do
+    prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry)
 end
 
 ffi.cdef[[
