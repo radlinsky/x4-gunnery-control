@@ -102,6 +102,8 @@ assert(loadfile("ui/turret_muzzle_geometry.lua"))()
 local expected_macros = {
   turret_par_l_beam_01_mk1_macro = true,
   turret_par_m_laser_01_mk1_macro = true,
+  turret_par_l_laser_01_mk1_macro = true,
+  turret_par_l_plasma_01_mk1_macro = true,
 }
 local macro_count = 0
 for name in pairs(X4GunneryTurretMuzzleGeometry) do
@@ -110,8 +112,8 @@ for name in pairs(X4GunneryTurretMuzzleGeometry) do
     fail("unexpected generated macro key " .. tostring(name))
   end
 end
-if macro_count ~= 2 then
-  fail("expected exactly two generated macro records, got " .. macro_count)
+if macro_count ~= 4 then
+  fail("expected exactly four generated macro records, got " .. macro_count)
 end
 local expected_macro = "turret_par_l_beam_01_mk1_macro"
 
