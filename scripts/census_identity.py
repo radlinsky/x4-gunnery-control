@@ -226,6 +226,10 @@ def _collect_xml_identities(
                                 {
                                     "connection": connection.get("name", ""),
                                     "name": animation.get("name", ""),
+                                    "_authored_frame_span": {
+                                        "start": animation.get("start", ""),
+                                        "end": animation.get("end", ""),
+                                    },
                                 }
                                 for connections in _direct_children(component, "connections")
                                 for connection in _direct_children(connections, "connection")
@@ -439,7 +443,13 @@ def _validate_authored_animation_selectors(
                 )
             )
             continue
-        authored_animations.append({"connection": connection, "name": name})
+        authored_animations.append(
+            {
+                "connection": connection,
+                "name": name,
+                "_authored_frame_span": animation.get("_authored_frame_span"),
+            }
+        )
     authored_animation_identity_counts = Counter(
         (animation["connection"], animation["name"])
         for animation in authored_animations
