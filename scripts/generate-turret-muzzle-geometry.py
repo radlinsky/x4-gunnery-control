@@ -5,10 +5,57 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import NotRequired, Sequence, TypedDict, cast
 
 from census_common import CensusError
 from census_pipeline import build_census
+
+
+# Only the census-report shape this generator reads; the real report carries more.
+class _Number(TypedDict):
+    candidate_numeric_value: float
+
+
+# offset -> "position"/"quaternion" -> component name -> numeric record
+_Offset = dict[str, dict[str, _Number]]
+
+
+class _Restriction(TypedDict):
+    type_token: str
+    authored_min: NotRequired[_Number]
+    authored_max: NotRequired[_Number]
+
+
+class _Layer(TypedDict):
+    source_part: str
+    owning_connection: str
+    connection_authored_offset: _Offset
+    part_authored_offset: _Offset
+    authored_restrictions: list[_Restriction]
+    settled_local_position_delta: NotRequired[list[float]]
+    settled_local_euler_xyz_delta_radians: NotRequired[list[float]]
+
+
+class _Geometry(TypedDict):
+    source_geometry_layers: list[_Layer]
+    endpoint_connection: str
+    endpoint_authored_offset: _Offset
+
+
+class _Resolution(TypedDict):
+    classification: str
+    semantic_case: str
+    applied_authored_geometry: _Geometry
+
+
+class _Component(TypedDict):
+    macros: list[str]
+    source_semantic_resolutions: list[_Resolution]
+
+
+class _Report(TypedDict):
+    x4_version: str
+    component_to_macros: list[_Component]
 
 
 # macro -> (accepted semantic case, expected source-part layer count)
@@ -44,14 +91,14 @@ def _mapping(values: list[tuple[str, Path]], option: str) -> dict[str, Path]:
     return result
 
 
-def _number(value: object) -> str:
+def _number(value: float) -> str:
     number = float(value)
     if number == 0:
         return "0"
     return repr(number)
 
 
-def _vector(offset: dict[str, object], key: str, names: tuple[str, ...]) -> str:
+def _vector(offset: _Offset, key: str, names: tuple[str, ...]) -> str:
     record = offset.get(key)
     if record is None:
         defaults = (0.0, 0.0, 0.0, 1.0) if key == "quaternion" else (0.0, 0.0, 0.0)
@@ -61,14 +108,14 @@ def _vector(offset: dict[str, object], key: str, names: tuple[str, ...]) -> str:
     return "{ " + ", ".join(_number(value) for value in values) + " }"
 
 
-def _transform(offset: dict[str, object]) -> str:
+def _transform(offset: _Offset) -> str:
     return "{ position = %s, quaternion = %s }" % (
         _vector(offset, "position", ("x", "y", "z")),
         _vector(offset, "quaternion", ("qx", "qy", "qz", "qw")),
     )
 
 
-def _rotation(restrictions: list[dict[str, object]]) -> str | None:
+def _rotation(restrictions: list[_Restriction]) -> str | None:
     if not restrictions:
         return None
     if len(restrictions) != 1:
@@ -78,14 +125,16 @@ def _rotation(restrictions: list[dict[str, object]]) -> str | None:
     if token not in ("rotation_x", "rotation_y"):
         raise SystemExit(f"unsupported runtime rotation role: {token}")
     fields = [f'axis = "{token[-1]}"']
-    for source, target in (("authored_min", "minimum_degrees"), ("authored_max", "maximum_degrees")):
-        bound = restriction.get(source)
+    for bound, target in (
+        (restriction.get("authored_min"), "minimum_degrees"),
+        (restriction.get("authored_max"), "maximum_degrees"),
+    ):
         if bound is not None:
             fields.append(f'{target} = {_number(bound["candidate_numeric_value"])}')
     return "{ " + ", ".join(fields) + " }"
 
 
-def _settled_rotation_x(layer: dict[str, object]) -> str | None:
+def _settled_rotation_x(layer: _Layer) -> str | None:
     values = layer.get("settled_local_euler_xyz_delta_radians")
     if values is None:
         return None
@@ -96,7 +145,7 @@ def _settled_rotation_x(layer: dict[str, object]) -> str | None:
     return _number(values[0])
 
 
-def _record(report: dict[str, object], macro: str) -> list[str]:
+def _record(report: _Report, macro: str) -> list[str]:
     semantic_case, layer_count = MACROS[macro]
     matches = [
         record
@@ -160,7 +209,7 @@ def _record(report: dict[str, object], macro: str) -> list[str]:
     return lines
 
 
-def _render(report: dict[str, object], x4_version: str) -> str:
+def _render(report: _Report, x4_version: str) -> str:
     if str(report["x4_version"]) != x4_version:
         raise SystemExit(
             f"census X4 version {report['x4_version']} does not match {x4_version}"
@@ -187,10 +236,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        report = build_census(
-            _mapping(args.source_set, "source-set"),
-            _mapping(args.resource_set, "resource-set"),
-            include_source_semantic_resolutions=True,
+        report = cast(
+            _Report,
+            build_census(
+                _mapping(args.source_set, "source-set"),
+                _mapping(args.resource_set, "resource-set"),
+                include_source_semantic_resolutions=True,
+            ),
         )
     except CensusError as error:
         print(error, file=sys.stderr)
