@@ -20,8 +20,13 @@ local PROSPECTIVE_MACROS = {
     turret_par_m_laser_01_mk1_macro = true,
     turret_par_l_laser_01_mk1_macro = true,
     turret_par_l_plasma_01_mk1_macro = true,
+    turret_par_m_beam_01_mk1_macro = true,
+    turret_par_m_plasma_01_mk1_macro = true,
+    turret_tel_m_beam_01_mk1_macro = true,
+    turret_tel_m_laser_01_mk1_macro = true,
+    turret_tel_m_plasma_01_mk1_macro = true,
+    turret_ter_m_laser_01_mk1_macro = true,
 }
-local PROSPECTIVE_ENDPOINT = "con_laser_02"
 
 local function vadd(a, b)
     return { a[1] + b[1], a[2] + b[2], a[3] + b[3] }
@@ -52,7 +57,8 @@ end
 -- known prospective geometry is streamed and the prospective generated-geometry
 -- path is not entered. Layer order per case mirrors
 -- tests/test_turret_muzzle_geometry.lua exactly.
-local function deriveProspectiveMuzzle(geometry, endpointConnection)
+-- ponytail: the generated endpoints are an ordered pair; take the second.
+local function deriveProspectiveMuzzle(geometry)
     local fixed = {}
     local segment = { 0, 0, 0 }
     local origin, pivot
@@ -86,10 +92,7 @@ local function deriveProspectiveMuzzle(geometry, endpointConnection)
             fixed[#fixed + 1] = layer.part_transform.quaternion
         end
     end
-    local endpoint
-    for _, candidate in ipairs(geometry.endpoints) do
-        if candidate.connection == endpointConnection then endpoint = candidate end
-    end
+    local endpoint = geometry.endpoints[2]
     if not (origin and pivot and endpoint) then return nil end
     local downstream = vadd(segment, rotateInFrame(fixed, endpoint.transform.position))
     return { origin = origin, pivot = pivot, downstream = downstream }
@@ -99,7 +102,7 @@ local prospectiveMuzzles = {}
 for macroName in pairs(PROSPECTIVE_MACROS) do
     local geometry = TurretMuzzleGeometry[macroName]
     if geometry then
-        prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry, PROSPECTIVE_ENDPOINT)
+        prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry)
     end
 end
 

@@ -157,15 +157,17 @@ macro_mentions=$(printf '%s\n' "$block" | grep -Ec 'macro\.turret_[a-z0-9_]+_mac
   || note "prospective geometry must gate on muzzleknown, not a macro branch (found $macro_mentions mentions)"
 
 # 9-lua. The supported-macro allowlist lives in UI Lua and stays exactly the
-#        four accepted production macros.
+#        ten accepted production macros.
 lua_allowlist=$(awk '/^local PROSPECTIVE_MACROS = \{/, /^\}/' ui/gunnery_control.lua)
-for supported in turret_par_l_beam_01_mk1_macro turret_par_m_laser_01_mk1_macro turret_par_l_laser_01_mk1_macro turret_par_l_plasma_01_mk1_macro; do
+for supported in turret_par_l_beam_01_mk1_macro turret_par_m_laser_01_mk1_macro turret_par_l_laser_01_mk1_macro turret_par_l_plasma_01_mk1_macro \
+                 turret_par_m_beam_01_mk1_macro turret_par_m_plasma_01_mk1_macro turret_tel_m_beam_01_mk1_macro \
+                 turret_tel_m_laser_01_mk1_macro turret_tel_m_plasma_01_mk1_macro turret_ter_m_laser_01_mk1_macro; do
   printf '%s\n' "$lua_allowlist" | grep -Fq "$supported" \
     || note "UI Lua prospective allowlist is missing $supported"
 done
 allowlist_entries=$(printf '%s\n' "$lua_allowlist" | grep -Ec '^\s+turret_[a-z0-9_]+_macro = true,' || true)
-[ "$allowlist_entries" -eq 4 ] \
-  || note "UI Lua prospective allowlist must hold exactly the four accepted macros (found $allowlist_entries)"
+[ "$allowlist_entries" -eq 10 ] \
+  || note "UI Lua prospective allowlist must hold exactly the ten accepted macros (found $allowlist_entries)"
 
 # 9a. The accepted construction is applied to the GENERATED per-weapon geometry
 #     only (#74 A2): a separate weapon-local fast-target bearing, then the O/P/D
