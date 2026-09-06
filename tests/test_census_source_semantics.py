@@ -272,19 +272,29 @@ class SourceSemanticTests(unittest.TestCase):
         self,
         barrel: tuple[float, float, float],
     ) -> list[dict[str, object]]:
-        """Boundary descriptors at edge 3 consistent with the given barrel value."""
-        # turret_activating: two keys, last one matches barrel
+        """Boundary descriptors at edge 3 consistent with the given barrel value.
+
+        The non-boundary keys hold a decoy value, so a resolver reading the
+        first activating key or the last deactivating key fails to match.
+        """
+        decoy = (7.5, -3.25, 11.0)
+
+        # turret_activating: two keys, only the LAST one matches barrel
         activating = _descriptor(
             3, (2, 0, 0, 0, 0),
             {0: barrel},
             subname="turret_activating",
         )
-        # turret_deactivating: two keys, first one matches barrel
+        activating["_candidate_raw_key_records"][0] = _record(0, decoy)
+
+        # turret_deactivating: two keys, only the FIRST one matches barrel
         deactivating = _descriptor(
             3, (2, 0, 0, 0, 0),
             {0: barrel},
             subname="turret_deactivating",
         )
+        deactivating["_candidate_raw_key_records"][1] = _record(1, decoy)
+
         return [activating, deactivating]
 
     def _one_key_barrel_endpoint(
