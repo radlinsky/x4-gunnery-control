@@ -52,16 +52,24 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #99: live-regress the generated prospective-muzzle path for the exact
--- Paranid M Laser accepted in #98. Reuse the #83 rank-2 shooter/loadout and two
--- live-proven high-elevation aim positions. PITCH HIGH is the candidate FAR
--- positive: A2 passes only if its current-origin fast ray and all six witnesses
--- are blocked while production still makes the surface ENGAGEABLE. LEFT HIGH is
--- the bounded negative control, with a separate blocker halfway along its ray.
--- Keep this repository copy disabled.
+-- Issue #99 r2: live-regress the generated prospective-muzzle path for the
+-- exact Paranid M Laser accepted in #98.
+--
+-- r1 was a bad fixture: it reused a #83 ship-root firing pose and assumed the
+-- Behemoth's child Beam-turret surface would also be reachable there. Live X4
+-- disproved that assumption: the exact surface itself stayed 0/1 and never
+-- fired.
+--
+-- The r2 intended-pass target instead reuses the exact Behemoth transform from
+-- Issue #67 A100. That exact ARG L Beam surface was live-proven 1/1 ENGAGEABLE
+-- and received correlated FIRED/HIT evidence. Its root is translated so the
+-- same P*-relative transform is measured from the live/source-proven M-Laser
+-- mount origin on the Demeter shooter. The blocked control uses the already
+-- proven #75 external-blocker shape, scaled to 40% so it stays inside the
+-- M-Laser's 3.5 km range. Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-99-par-m-laser-far-regression-r1",
+    id      = "issue-99-par-m-laser-far-regression-r2",
     enabled = false,
 
     location = {
@@ -104,13 +112,42 @@ X4GunneryTestLabScenarioSpec = {
         },
 
         {
-            label     = "ISSUE99 FAR PITCH HIGH",
+            label     = "ISSUE99 FAR CLEAR SURFACE",
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = 1001,
-            x         = 0,
-            y         = 1732,
+            -- #67 A100 final root was P* + (-223.612, +1788.313, -163.698).
+            -- M-Laser P* is source/live-proven at approximately
+            -- (0, +14.3573, -44.2423) from this zero-oriented shooter root.
+            distance  = -206.940,
+            x         = -223.612,
+            y         = 1802.670,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+            yaw   = 214.0265,
+            pitch = 68.9246,
+            roll  = -166.8782,
+            preserveOrientation = true,
+
+            loadout   = "x4gc_testlab_arg_l_destroyer_02_beam",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE99 BLOCKED SURFACE",
+            macro     = "ship_arg_l_destroyer_02_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            -- #75 NEAR geometry scaled from (x=5600,z=-5600) to 40%.
+            distance  = -2240,
+            x         = 2240,
+            y         = 0,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
@@ -129,38 +166,14 @@ X4GunneryTestLabScenarioSpec = {
         },
 
         {
-            label     = "ISSUE99 BLOCKED LEFT HIGH",
-            macro     = "ship_arg_l_destroyer_02_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 867,
-            x         = -500,
-            y         = 1732,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-            yaw = 90,
-            pitch = 0,
-            roll = 0,
-            preserveOrientation = true,
-
-            loadout   = "x4gc_testlab_arg_l_destroyer_02_beam",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE99 LEFT HIGH BLOCKER",
+            label     = "ISSUE99 LOS BLOCKER",
             macro     = "ship_xen_l_terraformer_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 434,
-            x         = -250,
-            y         = 866,
+            -- Halfway along the blocked-control root ray, matching #75.
+            distance  = -1120,
+            x         = 1120,
+            y         = 0,
             spread    = 0,
             behaviour = "wait",
             holdFire  = true,
