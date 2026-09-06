@@ -15,6 +15,8 @@ from census_pipeline import build_census
 MACROS = {
     "turret_par_l_beam_01_mk1_macro": ("depth4_dual_translation", 4),
     "turret_par_m_laser_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_par_l_laser_01_mk1_macro": ("depth4_dual_translation", 4),
+    "turret_par_l_plasma_01_mk1_macro": ("depth4_dual_translation", 4),
 }
 
 

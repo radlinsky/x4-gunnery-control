@@ -102,6 +102,8 @@ assert(loadfile("ui/turret_muzzle_geometry.lua"))()
 local expected_macros = {
   turret_par_l_beam_01_mk1_macro = true,
   turret_par_m_laser_01_mk1_macro = true,
+  turret_par_l_laser_01_mk1_macro = true,
+  turret_par_l_plasma_01_mk1_macro = true,
 }
 local macro_count = 0
 for name in pairs(X4GunneryTurretMuzzleGeometry) do
@@ -110,8 +112,8 @@ for name in pairs(X4GunneryTurretMuzzleGeometry) do
     fail("unexpected generated macro key " .. tostring(name))
   end
 end
-if macro_count ~= 2 then
-  fail("expected exactly two generated macro records, got " .. macro_count)
+if macro_count ~= 4 then
+  fail("expected exactly four generated macro records, got " .. macro_count)
 end
 local expected_macro = "turret_par_l_beam_01_mk1_macro"
 
@@ -208,4 +210,75 @@ for _, pose in ipairs(laser_poses) do
   end
 end
 
+-- The remaining Paranid L records use the same accepted depth-4 composition
+-- as the Beam. Build the expected result directly from the accepted source
+-- transforms and each authored endpoint, rather than from generated fields.
+local function evaluate_depth4_source_oracle(endpoint_position, yaw, pitch)
+  local yaw_origin = add(
+    { 1.877547e-6, 2.018104, -1.043081e-5 },
+    { 0, 6.145042419433594, 0 }
+  )
+  local pivot = { -1.730653e-6, 2.926126, -16.11956 }
+  local gun_rotation = {
+    -0.004327158, 3.273904e-12, -7.565876e-10, 0.9999906,
+  }
+  local barrel_connection = { -1.113896e-6, 0.06259775, 17.45395 }
+  local barrel_settled = { 0, -0.23982000350952148, 27.710205078125 }
+  local barrel_rotation = {
+    0.004327045, -6.547686e-12, 2.825544e-14, 0.9999906,
+  }
+  local downstream = rotate(gun_rotation, add(
+    barrel_connection,
+    add(barrel_settled, rotate(barrel_rotation, endpoint_position))
+  ))
+  local pitched = rotate(axis_rotation("x", -pitch), downstream)
+  return add(yaw_origin, rotate(axis_rotation("y", yaw), add(pivot, pitched)))
+end
+
+local depth4_cases = {
+  {
+    macro = "turret_par_l_laser_01_mk1_macro",
+    endpoints = {
+      { "con_laser_01", { 2.039967, 0.2692852, 16.88073 } },
+      { "con_laser_02", { -2.063906, 0.3998489, 16.88074 } },
+    },
+  },
+  {
+    macro = "turret_par_l_plasma_01_mk1_macro",
+    endpoints = {
+      { "con_laser_01", { 0.5374919, 0.2692828, 28.04837 } },
+      { "con_laser_02", { -0.5369991, 0.2692828, 28.04837 } },
+    },
+  },
+}
+
+for _, depth4_case in ipairs(depth4_cases) do
+  local depth4_geometry = X4GunneryTurretMuzzleGeometry[depth4_case.macro]
+  if depth4_geometry.semantic_case ~= "depth4_dual_translation" then
+    fail("unexpected depth-4 semantic case for " .. depth4_case.macro)
+  end
+  for _, endpoint in ipairs(depth4_case.endpoints) do
+    for _, yaw in ipairs({ -90, 0, 90 }) do
+      for _, pitch in ipairs({ -5, 30, 80 }) do
+        local actual = evaluate_geometry(depth4_geometry, endpoint[1], {
+          yaw = yaw,
+          pitch = pitch,
+        })
+        local expected = evaluate_depth4_source_oracle(endpoint[2], yaw, pitch)
+        for axis = 1, 3 do
+          local difference = math.abs(actual[axis] - expected[axis])
+          if difference > tolerance then
+            fail(string.format(
+              "%s %s yaw=%g pitch=%g axis=%d differs by %.17g",
+              depth4_case.macro, endpoint[1], yaw, pitch, axis, difference
+            ))
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Generator determinism is covered by test_turret_muzzle_geometry_generation.py,
+-- which iterates every entry in the generator's MACROS table.
 print("turret muzzle geometry tests passed")
