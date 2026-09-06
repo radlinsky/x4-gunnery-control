@@ -95,7 +95,7 @@ def _resolve_supported_endpoint_source_semantics(
         1: (("0x00000000", "0x40c4a430", "0x00000000"),) * 2,
         3: (("0x00000000", "0xbe759360", "0x41ddae80"),) * 2,
     }
-    b1_keyed = (
+    keyed = (
         {
             edge_index: descriptor
             for edge_index, descriptor in covered.items()
@@ -107,12 +107,12 @@ def _resolve_supported_endpoint_source_semantics(
     if (
         component_endpoint_count == 2
         and depth == 4
-        and set(b1_keyed) == {1, 3}
+        and set(keyed) == {1, 3}
         and all(
-            _counts(b1_keyed[index]) == (2, 0, 0, 0, 0) for index in (1, 3)
+            _counts(keyed[index]) == (2, 0, 0, 0, 0) for index in (1, 3)
         )
         and all(
-            _first_three_bits(b1_keyed[index], 0) == bits
+            _first_three_bits(keyed[index], 0) == bits
             for index, bits in b1_bits.items()
         )
     ):
@@ -124,6 +124,58 @@ def _resolve_supported_endpoint_source_semantics(
                 positions={
                     1: [0.0, 6.145042419433594, 0.0],
                     3: [0.0, -0.23982000350952148, 27.710205078125],
+                },
+            ),
+        }
+
+    # Accepted Split L semantic case (Issue #79): the same depth-4 composition,
+    # keyed instead on the gun and barrel edges, where both channel-0 records
+    # store exact zeros. Channel-0 composition is additive (Issue #83), so these
+    # settled translations are no-ops and the authored offsets carry the muzzle.
+    zero_bits = (("0x00000000", "0x00000000", "0x00000000"),) * 2
+    if (
+        component_endpoint_count == 2
+        and depth == 4
+        and set(keyed) == {2, 3}
+        and all(
+            _counts(keyed[index]) == (2, 0, 0, 0, 0) for index in (2, 3)
+        )
+        and all(
+            _first_three_bits(keyed[index], 0) == zero_bits for index in (2, 3)
+        )
+    ):
+        return {
+            "classification": "SOURCE_RESOLVED",
+            "semantic_case": "depth4_zero_translation",
+            "applied_authored_geometry": _apply(
+                authored_geometry,
+                positions={2: [0.0, 0.0, 0.0], 3: [0.0, 0.0, 0.0]},
+            ),
+        }
+
+    # Accepted one-key barrel case (Issue #79): the same depth-4 rotator/barrel
+    # composition, where the barrel stores a single settled turret_active
+    # channel-0 key instead of the doubled form. Accepted only for the exact
+    # proved bits, so nearby one-key records stay unsupported.
+    if (
+        component_endpoint_count == 2
+        and depth == 4
+        and set(keyed) == {1, 3}
+        and _counts(keyed[1]) == (2, 0, 0, 0, 0)
+        and _counts(keyed[3]) == (1, 0, 0, 0, 0)
+        and _first_three_bits(keyed[1], 0)
+        == (("0x00000000", "0x403d92e4", "0x00000000"),) * 2
+        and _first_three_bits(keyed[3], 0)
+        == (("0x00000000", "0xb4bffc2b", "0x40574ede"),)
+    ):
+        return {
+            "classification": "SOURCE_RESOLVED",
+            "semantic_case": "depth4_one_key_barrel_translation",
+            "applied_authored_geometry": _apply(
+                authored_geometry,
+                positions={
+                    1: [0.0, 2.962090492248535, 0.0],
+                    3: [0.0, -3.575999869553925e-07, 3.3641886711120605],
                 },
             ),
         }

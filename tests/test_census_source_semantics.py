@@ -147,6 +147,112 @@ class SourceSemanticTests(unittest.TestCase):
             "settled_local_position_delta", geometry["source_geometry_layers"][1]
         )
 
+    def test_depth4_zero_translation_signature_is_recognized(self) -> None:
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+            _descriptor(3, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(covered, depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+        self.assertEqual(result["semantic_case"], "depth4_zero_translation")
+        applied = result["applied_authored_geometry"]["source_geometry_layers"]
+        for index in (2, 3):
+            self.assertEqual(
+                applied[index]["settled_local_position_delta"], [0.0, 0.0, 0.0]
+            )
+        for index in (0, 1):
+            self.assertNotIn("settled_local_position_delta", applied[index])
+
+    def test_single_key_zero_translation_fails_closed(self) -> None:
+        # The *_m_plasma_02 one-key groups share the zero values but not the
+        # proved two-record signature.
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (1, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+            _descriptor(3, (1, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(covered, depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_nonzero_translation_on_zero_signature_fails_closed(self) -> None:
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+            _descriptor(3, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 1e-7)}),
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(covered, depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def _one_key_barrel_covered(
+        self, barrel: tuple[float, float, float], barrel_count: int = 1
+    ) -> list[dict[str, object]]:
+        return [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (2, 0, 0, 0, 0), {0: (0.0, 2.962090492248535, 0.0)}),
+            _descriptor(2, (0, 0, 0, 0, 0)),
+            _descriptor(3, (barrel_count, 0, 0, 0, 0), {0: barrel}),
+        ]
+
+    def test_depth4_one_key_barrel_translation_is_recognized(self) -> None:
+        barrel = (0.0, -3.575999869553925e-07, 3.3641886711120605)
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(self._one_key_barrel_covered(barrel), depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+        self.assertEqual(result["semantic_case"], "depth4_one_key_barrel_translation")
+        applied = result["applied_authored_geometry"]["source_geometry_layers"]
+        self.assertEqual(
+            applied[1]["settled_local_position_delta"],
+            [0.0, 2.962090492248535, 0.0],
+        )
+        self.assertEqual(applied[3]["settled_local_position_delta"], list(barrel))
+
+    def test_nearby_one_key_barrel_forms_fail_closed(self) -> None:
+        proved = (0.0, -3.575999869553925e-07, 3.3641886711120605)
+        for name, covered in (
+            ("other_value", self._one_key_barrel_covered((0.0, 0.0, 3.0))),
+            # gun_firing recoil displaces the same barrel channel-0 Z; a record
+            # storing that value is not the settled active pose.
+            (
+                "recoil_value",
+                self._one_key_barrel_covered((0.0, 0.0, 0.2962638735771179)),
+            ),
+            ("two_keys", self._one_key_barrel_covered(proved, barrel_count=2)),
+        ):
+            with self.subTest(name):
+                result = _resolve_supported_endpoint_source_semantics(
+                    _endpoint(covered, depth=4),
+                    _geometry(4),
+                    component_endpoint_count=2,
+                )
+                self.assertEqual(result["classification"], "UNSUPPORTED")
+
     def test_rank2_signature_applies_rotation_and_optional_channel0_residue(self) -> None:
         for with_residue in (False, True):
             with self.subTest(with_residue=with_residue):

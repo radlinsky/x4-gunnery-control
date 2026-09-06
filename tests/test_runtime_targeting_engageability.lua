@@ -419,6 +419,11 @@ do
         { "turret_tel_m_laser_01_mk1_macro" },
         { "turret_tel_m_plasma_01_mk1_macro" },
         { "turret_ter_m_laser_01_mk1_macro" },
+        -- The three one-key barrel records added by #79; these fail here if the
+        -- production semantic-case dispatch does not cover their case.
+        { "turret_arg_m_plasma_02_mk1_macro" },
+        { "turret_par_m_plasma_02_mk1_macro" },
+        { "turret_tel_m_plasma_02_mk1_macro" },
     }
     local componentID60 = 600
     for _, case in ipairs(supportedMacros) do

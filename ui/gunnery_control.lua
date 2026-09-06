@@ -41,50 +41,86 @@ local function rotateInFrame(rotations, vector)
     return vector
 end
 
--- ponytail: handles the depth4_dual_translation and depth5_additive_x_rotation
--- topologies (one y rotator, one x gun); returns nil for anything else, so no
--- known prospective geometry is streamed and the prospective generated-geometry
--- path is not entered. Layer order per case mirrors
+-- Shared chain math. `fixed` is the accumulated frame rotation stack, `segment`
+-- the translation accumulated since the last runtime-rotation split.
+local function chainTranslate(chain, position)
+    chain.segment = vadd(chain.segment, rotateInFrame(chain.fixed, position))
+end
+
+local function chainRotate(chain, quaternion)
+    chain.fixed[#chain.fixed + 1] = quaternion
+end
+
+-- The authored connection/part transform pair every layer carries.
+local function chainAuthoredLayer(chain, layer)
+    chainRotate(chain, layer.connection_transform.quaternion)
+    chainTranslate(chain, layer.part_transform.position)
+    chainRotate(chain, layer.part_transform.quaternion)
+end
+
+-- Close off the segment feeding a runtime rotation (yaw rotator, pitch gun).
+local function chainSplit(chain, layer)
+    local rotation = layer.runtime_rotation
+    if not rotation then return end
+    if rotation.axis == "y" then
+        chain.origin = chain.segment
+        chain.segment = { 0, 0, 0 }
+    elseif rotation.axis == "x" then
+        chain.pivot = chain.segment
+        chain.segment = { 0, 0, 0 }
+    end
+end
+
+-- ponytail: the semantic case names a turret movement rule, so dispatch on it
+-- explicitly (#79). Each behavior only orders the per-layer steps around the
+-- runtime-rotation split; all math above stays shared, and every turret-specific
+-- value still comes from the generated record. Layer order per case mirrors
 -- tests/test_turret_muzzle_geometry.lua exactly.
+local semanticCaseBehaviors = {
+    -- Settled translation applies before the split; authored rotations follow it.
+    depth4_dual_translation = function(chain, layer)
+        if layer.settled_position then
+            chainTranslate(chain, layer.settled_position)
+        end
+        chainSplit(chain, layer)
+        chainAuthoredLayer(chain, layer)
+    end,
+    -- Authored rotations plus the settled local-X rotation all precede the split.
+    depth5_additive_x_rotation = function(chain, layer)
+        chainAuthoredLayer(chain, layer)
+        if layer.settled_rotation_x_radians then
+            local half = layer.settled_rotation_x_radians / 2
+            chainRotate(chain, { math.sin(half), 0, 0, math.cos(half) })
+        end
+        chainSplit(chain, layer)
+    end,
+}
+
+-- Split L stores the same depth-4 composition with zero settled translations
+-- (#79), so it reuses that behavior rather than restating the layer order.
+semanticCaseBehaviors.depth4_zero_translation =
+    semanticCaseBehaviors.depth4_dual_translation
+
+-- The one-key barrel case (#79) is the same depth-4 composition with a settled
+-- translation on each of the same two edges, so it reuses that behavior too.
+semanticCaseBehaviors.depth4_one_key_barrel_translation =
+    semanticCaseBehaviors.depth4_dual_translation
+
+-- Returns nil for an unknown semantic case, so no prospective geometry is
+-- streamed and the prospective generated-geometry path is not entered.
 -- ponytail: the generated endpoints are an ordered pair; take the second.
 local function deriveProspectiveMuzzle(geometry)
-    local fixed = {}
-    local segment = { 0, 0, 0 }
-    local origin, pivot
-    local depth5 = geometry.semantic_case == "depth5_additive_x_rotation"
-    if not depth5 and geometry.semantic_case ~= "depth4_dual_translation" then return nil end
+    local behavior = semanticCaseBehaviors[geometry.semantic_case]
+    if not behavior then return nil end
+    local chain = { fixed = {}, segment = { 0, 0, 0 } }
     for _, layer in ipairs(geometry.layers) do
-        segment = vadd(segment, rotateInFrame(fixed, layer.connection_transform.position))
-        if depth5 then
-            fixed[#fixed + 1] = layer.connection_transform.quaternion
-            segment = vadd(segment, rotateInFrame(fixed, layer.part_transform.position))
-            fixed[#fixed + 1] = layer.part_transform.quaternion
-            if layer.settled_rotation_x_radians then
-                local half = layer.settled_rotation_x_radians / 2
-                fixed[#fixed + 1] = { math.sin(half), 0, 0, math.cos(half) }
-            end
-        elseif layer.settled_position then
-            segment = vadd(segment, rotateInFrame(fixed, layer.settled_position))
-        end
-        if layer.runtime_rotation then
-            if layer.runtime_rotation.axis == "y" then
-                origin = segment
-                segment = { 0, 0, 0 }
-            elseif layer.runtime_rotation.axis == "x" then
-                pivot = segment
-                segment = { 0, 0, 0 }
-            end
-        end
-        if not depth5 then
-            fixed[#fixed + 1] = layer.connection_transform.quaternion
-            segment = vadd(segment, rotateInFrame(fixed, layer.part_transform.position))
-            fixed[#fixed + 1] = layer.part_transform.quaternion
-        end
+        chainTranslate(chain, layer.connection_transform.position)
+        behavior(chain, layer)
     end
     local endpoint = geometry.endpoints[2]
-    if not (origin and pivot and endpoint) then return nil end
-    local downstream = vadd(segment, rotateInFrame(fixed, endpoint.transform.position))
-    return { origin = origin, pivot = pivot, downstream = downstream }
+    if not (chain.origin and chain.pivot and endpoint) then return nil end
+    local downstream = vadd(chain.segment, rotateInFrame(chain.fixed, endpoint.transform.position))
+    return { origin = chain.origin, pivot = chain.pivot, downstream = downstream }
 end
 
 local prospectiveMuzzles = {}
