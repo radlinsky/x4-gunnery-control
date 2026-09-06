@@ -1,12 +1,17 @@
 # Rank-1 one-key `turret_active` channel-0 settled value (X4 9.00)
 
-**SOURCE-RESOLVED STRUCTURAL RULE — NOT A GLOBAL ANI RULE OR LIVE-TESTED COHORT**
+**SOURCE-RESOLVED STRUCTURAL RULE — NOT A GLOBAL ANI RULE OR TURRET INVENTORY**
 
 This reference records a reusable source-resolution rule for one narrow ANI
 shape: a single candidate-channel-0 key on a one-frame `turret_active` state.
 The rule is identified by source structure and state behavior, not by turret
-macro name. Concrete X4 9.00 components below are the evidence cohort for the
-rule, not a permanent membership list.
+macro name.
+
+The concrete X4 9.00 files cited under **Evidence records** are the proof source
+used to establish this rule. They are **not** a membership list. Do not add a
+turret to this reference merely because it later matches the rule; applicability
+is determined from the structural signature below, while exact supported-macro
+membership belongs in the census/generator and generated production data.
 
 ## Resolved signature
 
@@ -27,21 +32,14 @@ channels must still be resolved independently. A new macro therefore does not
 need a new KB entry merely because its name differs, but it also does not gain
 support merely because it has one key.
 
-## X4 9.00 evidence cohort
+## Proof source
 
-The audited rank-1 source currently contains this proved form on the
-`part_barrel` `turret_active` descriptor for:
+The shipped X4 9.00 source used to establish this rule is the
+`turret_{arg,par,tel}_m_plasma_02_mk1` component family. These names identify
+the proof source only; this section is not an inventory and should not be
+extended when another component independently matches the resolved signature.
 
-- `turret_arg_m_plasma_02_mk1`
-- `turret_par_m_plasma_02_mk1`
-- `turret_tel_m_plasma_02_mk1`
-
-Their equipment macros are respectively
-`turret_arg_m_plasma_02_mk1_macro`, `turret_par_m_plasma_02_mk1_macro`, and
-`turret_tel_m_plasma_02_mk1_macro`. These concrete identities are recorded for
-traceability; the reusable claim is the structural rule above.
-
-These components are rank-1 depth-4 profiles P7 (`arg`) and P4 (`par`, `tel`)
+Those components are rank-1 depth-4 profiles P7 (`arg`) and P4 (`par`, `tel`)
 in [turret-rank1-animation-profile.md](turret-rank1-animation-profile.md).
 Their shared muzzle path is:
 
@@ -54,7 +52,7 @@ one-key `part_barrel` channel-0 record only.
 
 ## The one-key record
 
-For the evidence cohort, `(part_barrel, turret_active)` has key-count family
+In the proof source, `(part_barrel, turret_active)` has key-count family
 `[1, 0, 0, 0, 0]`: descriptor index 22 for `par`/`tel` and 27 for `arg`. Its
 single 128-byte channel-0 record is at file byte offset `8048` in all three
 `assets/props/WeaponSystems/heavy/TURRET_{ARG,PAR,TEL}_M_PLASMA_02_MK1_DATA.ANI`
@@ -76,7 +74,7 @@ field is `0x3d088889` (float32 `0.03333333507180214` = 1/30).
 
 ##### Single-frame active state
 
-All three evidence components author the same selector frames:
+The proof-source components author the same selector frames:
 
 | selector | frames |
 |---|---|
@@ -97,7 +95,7 @@ the first `turret_deactivating` key, and the first and last `gun_firing` keys.
 The neighbouring states therefore enter and leave the active state at exactly
 the stored active value.
 
-The same authored idiom appears on the cohort's `part_rotator`: its active
+The same authored idiom appears on the proof source's `part_rotator`: its active
 channel-0 Y value `0x403d92e4` (`2.962090492248535`) is stored twice in a
 `[2, 0, 0, 0, 0]` descriptor. The inactive one-key forms likewise carry the
 rest values from which `turret_activating` starts.
@@ -109,8 +107,8 @@ per-axis interpolation values as
 `{UNKNOWN, STEP, LINEAR, QUADRATIC, CUBIC, BEZIER, BEZIER_LINEARTIME, TCB}` in
 `X4ConverterTools/src/ani/Keyframe.cpp`. Stored value `1` is therefore named
 `STEP`, and `X4ConverterBlenderAddon/importer.py` maps `STEP` to constant
-interpolation. The evidence cohort's single active key stores `1` on all three
-axes. This is `third-party-technique`, not engine proof.
+interpolation. The proof-source active key stores `1` on all three axes. This
+is `third-party-technique`, not engine proof.
 
 ##### Channel-0 field meaning
 
@@ -129,24 +127,26 @@ additive local translation for that one-frame active state. No timing lookup,
 ramp-in, or rest-pose default is required for that descriptor.
 
 This is a reusable field/state rule, not a macro allow-list. Source resolution
-of the rest of any turret remains a separate requirement.
+of the rest of any turret remains a separate requirement. Discovering another
+matching turret does not require editing this reference unless new evidence
+changes the rule or its proof boundary.
 
 ## Boundary
 
 - This rule does not generalize to arbitrary one-key ANI channels, multi-frame
   one-key states, other selectors, or records whose boundary/interpolation facts
   differ. Those cases remain unproved and must fail closed.
-- For the current plasma-02 evidence cohort, `gun_firing` (frames 50–55) overlaps
-  active frame 50 and moves the same `part_barrel` channel-0 Z from
+- In the plasma-02 proof source, `gun_firing` (frames 50–55) overlaps active
+  frame 50 and moves the same `part_barrel` channel-0 Z from
   `3.3641886711120605` through `0.2962638735771179` and back within about 1/6 s.
   A runtime barrel-position sample taken at a `FIRED` instant is therefore not
   automatically the settled `turret_active` position; recoil can displace it by
   up to about 3.07 m along the barrel axis.
-- This reference does not establish the evidence cohort's remaining authored
+- This reference does not establish the proof source's remaining authored
   transforms, endpoint composition, candidate channels 1–4, or final runtime
   muzzle position.
-- The evidence cohort is **not** live-tested. Do not classify it alongside the
-  live-tested Paranid representatives.
+- The proof-source components are **not** live-tested, and this rule is not a
+  claim that every independently matching component has been live-tested.
 
 ## Evidence records
 
@@ -156,10 +156,10 @@ of the rest of any turret remains a separate requirement.
 - Status: shipped-source
 - Source: `assets/props/WeaponSystems/heavy/turret_{arg,par,tel}_m_plasma_02_mk1.xml` and `assets/props/WeaponSystems/heavy/TURRET_{ARG,PAR,TEL}_M_PLASMA_02_MK1_DATA.ANI`
 - Live test: no — offline source verification only
-- Finding: the current evidence cohort supplies the one-frame active selector,
-  one-key barrel channel-0 record, record bytes, matching adjacent-state values,
-  and recoil overlap described above. These components are evidence carriers
-  for the structural rule rather than the identity of the rule itself.
+- Finding: these files supply the one-frame active selector, one-key barrel
+  channel-0 record, record bytes, matching adjacent-state values, and recoil
+  overlap used to establish the structural rule. They are proof sources, not
+  a maintained list of components to which the rule applies.
 
 ### STEP interpolation decoding
 
