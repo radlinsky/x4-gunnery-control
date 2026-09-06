@@ -225,7 +225,9 @@ def _resolve_supported_endpoint_source_semantics(
         # rec[0:3] == first deactivating rec[0:3].
         boundary_match = False
         all_memberships = endpoint.get("ani_descriptor_memberships")
-        if all_memberships is not None:
+        # barrel_step also guarantees barrel_records[0] exists; a declared
+        # channel-0 count with no usable raw record must fail closed here.
+        if barrel_step and all_memberships is not None:
             edge3_memberships = [
                 m
                 for m in all_memberships

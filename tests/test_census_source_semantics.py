@@ -367,6 +367,27 @@ class SourceSemanticTests(unittest.TestCase):
             )
             self.assertEqual(result["classification"], "UNSUPPORTED")
 
+        # Declared channel-0 barrel key with no usable raw record evidence
+        for label, records in (
+            ("missing_barrel_raw_records", None),
+            ("empty_barrel_raw_records", []),
+        ):
+            with self.subTest(label):
+                endpoint = self._one_key_barrel_endpoint(barrel)
+                edge3 = endpoint[
+                    "_ancestry_covered_turret_active_descriptor_memberships"
+                ][3]
+                if records is None:
+                    del edge3["_candidate_raw_key_records"]
+                else:
+                    edge3["_candidate_raw_key_records"] = records
+                result = _resolve_supported_endpoint_source_semantics(
+                    endpoint,
+                    _geometry(4, one_key_barrel_restrictions=True),
+                    component_endpoint_count=2,
+                )
+                self.assertEqual(result["classification"], "UNSUPPORTED")
+
         # Multi-frame turret_active selector (start != end)
         with self.subTest("multi_frame_selector"):
             result = _resolve_supported_endpoint_source_semantics(
