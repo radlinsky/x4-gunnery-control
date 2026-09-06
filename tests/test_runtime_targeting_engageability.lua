@@ -399,6 +399,53 @@ do
             "59: streamed M Laser muzzle misses accepted pose %s by %.9g m "
             .. "(%.9g, %.9g, %.9g)", name, distance, got[1], got[2], got[3]))
     end
+
+    -- ── 60. every supported macro's streamed O/P/D reproduces direct evaluation
+    -- of its own generated record (issue #104 A2). The oracle is the shared
+    -- generated-record evaluator the geometry test uses; nothing here copies a
+    -- source transform or a per-turret muzzle value.
+    local geometryEval = dofile("tests/support/muzzle_geometry_eval.lua")
+    local supportedMacros = {
+        -- The four already-supported turrets, whose production endpoint must
+        -- stay the con_laser_02 the pre-generated code selected.
+        { "turret_par_l_beam_01_mk1_macro", "con_laser_02" },
+        { "turret_par_m_laser_01_mk1_macro", "con_laser_02" },
+        { "turret_par_l_laser_01_mk1_macro", "con_laser_02" },
+        { "turret_par_l_plasma_01_mk1_macro", "con_laser_02" },
+        -- The six added by #104.
+        { "turret_par_m_beam_01_mk1_macro" },
+        { "turret_par_m_plasma_01_mk1_macro" },
+        { "turret_tel_m_beam_01_mk1_macro" },
+        { "turret_tel_m_laser_01_mk1_macro" },
+        { "turret_tel_m_plasma_01_mk1_macro" },
+        { "turret_ter_m_laser_01_mk1_macro" },
+    }
+    local componentID60 = 600
+    for _, case in ipairs(supportedMacros) do
+        local macro, endpointConnection = case[1], case[2]
+        local record = X4GunneryTurretMuzzleGeometry[macro]
+        assert(record ~= nil, "60: no generated record for " .. macro)
+        if endpointConnection then
+            assert(record.endpoints[2].connection == endpointConnection,
+                "60: " .. macro .. " production endpoint moved off " .. endpointConnection)
+        end
+        componentID60 = componentID60 + 1
+        local member = streamMember(macro, componentID60, componentID60 + 1000)
+        assert(member ~= nil and member.muzzleknow == 1,
+            "60: " .. macro .. " must stream a known prospective muzzle")
+        for _, yaw in ipairs({ -90, 0, 90 }) do
+            for _, pitch in ipairs({ -5, 30, 80 }) do
+                local got = generatedMuzzle(member, yaw, pitch)
+                local want = geometryEval.evaluate_record(record, yaw, pitch)
+                for axis = 1, 3 do
+                    assert(math.abs(got[axis] - want[axis]) <= 1e-6, string.format(
+                        "60: %s streamed muzzle diverges from its generated record at "
+                        .. "yaw=%g pitch=%g axis=%d (got %.17g want %.17g)",
+                        macro, yaw, pitch, axis, got[axis], want[axis]))
+                end
+            end
+        end
+    end
 end
 
 

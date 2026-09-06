@@ -1,83 +1,17 @@
+local eval = dofile("tests/support/muzzle_geometry_eval.lua")
+
 local function fail(message)
   error(message, 2)
 end
 
-local function add(left, right)
-  return {
-    left[1] + right[1],
-    left[2] + right[2],
-    left[3] + right[3],
-  }
-end
-
-local function rotate(rotation, vector)
-  local x, y, z, w = rotation[1], rotation[2], rotation[3], rotation[4]
-  local vx, vy, vz = vector[1], vector[2], vector[3]
-  local tx = 2 * (y * vz - z * vy)
-  local ty = 2 * (z * vx - x * vz)
-  local tz = 2 * (x * vy - y * vx)
-  return {
-    vx + w * tx + y * tz - z * ty,
-    vy + w * ty + z * tx - x * tz,
-    vz + w * tz + x * ty - y * tx,
-  }
-end
-
-local function axis_rotation(axis, degrees)
-  local radians = math.rad(degrees) / 2
-  local sine = math.sin(radians)
-  if axis == "x" then
-    return { sine, 0, 0, math.cos(radians) }
-  elseif axis == "y" then
-    return { 0, sine, 0, math.cos(radians) }
-  end
-  fail("unsupported rotation axis " .. tostring(axis))
-end
-
-local function axis_rotation_radians(axis, radians)
-  return axis_rotation(axis, math.deg(radians))
-end
-
-local function rotate_in_frame(rotations, vector)
-  for index = #rotations, 1, -1 do
-    vector = rotate(rotations[index], vector)
-  end
-  return vector
-end
-
-local function apply_transform(position, rotations, transform)
-  position = add(position, rotate_in_frame(rotations, transform.position))
-  rotations[#rotations + 1] = transform.quaternion
-  return position
-end
-
-local function evaluate_geometry(geometry, endpoint_connection, pose)
-  local position = { 0, 0, 0 }
-  local rotations = {}
-
-  for _, layer in ipairs(geometry.layers) do
-    position = add(position,
-      rotate_in_frame(rotations, layer.connection_transform.position))
-    if layer.settled_position then
-      position = add(position,
-        rotate_in_frame(rotations, layer.settled_position))
-    end
-    if layer.runtime_rotation then
-      local axis = layer.runtime_rotation.axis
-      local degrees = axis == "x" and -pose.pitch or pose.yaw
-      rotations[#rotations + 1] = axis_rotation(axis, degrees)
-    end
-    rotations[#rotations + 1] = layer.connection_transform.quaternion
-    position = apply_transform(position, rotations, layer.part_transform)
-  end
-
-  for _, endpoint in ipairs(geometry.endpoints) do
-    if endpoint.connection == endpoint_connection then
-      return apply_transform(position, rotations, endpoint.transform)
-    end
-  end
-  fail("missing endpoint " .. endpoint_connection)
-end
+local add = eval.add
+local rotate = eval.rotate
+local axis_rotation = eval.axis_rotation
+local axis_rotation_radians = eval.axis_rotation_radians
+local rotate_in_frame = eval.rotate_in_frame
+local apply_transform = eval.apply_transform
+local evaluate_geometry = eval.evaluate_geometry
+local evaluate_depth5 = eval.evaluate_depth5
 
 -- Independent oracle: the accepted production O + Ry(yaw) *
 -- (P + Rx(-pitch) * D) construction recorded in census_anchor_evidence.py.
@@ -142,37 +76,6 @@ for _, yaw in ipairs({ -90, 0, 90 }) do
       end
     end
   end
-end
-
--- depth5_additive_x_rotation composition (issue #83 accepted rule):
--- C_i, then P_i, then the additive settled local-X rotation, then the
--- layer's live rotation. Yaw/pitch come from the projectile bore.
-local function evaluate_depth5(geometry, endpoint_connection, yaw, pitch)
-  local position = { 0, 0, 0 }
-  local rotations = {}
-  for _, layer in ipairs(geometry.layers) do
-    position = apply_transform(position, rotations, layer.connection_transform)
-    position = apply_transform(position, rotations, layer.part_transform)
-    if layer.settled_position then
-      position = add(position,
-        rotate_in_frame(rotations, layer.settled_position))
-    end
-    if layer.settled_rotation_x_radians then
-      rotations[#rotations + 1] =
-        axis_rotation_radians("x", layer.settled_rotation_x_radians)
-    end
-    if layer.runtime_rotation then
-      local axis = layer.runtime_rotation.axis
-      rotations[#rotations + 1] =
-        axis_rotation_radians(axis, axis == "x" and -pitch or yaw)
-    end
-  end
-  for _, endpoint in ipairs(geometry.endpoints) do
-    if endpoint.connection == endpoint_connection then
-      return add(position, rotate_in_frame(rotations, endpoint.transform.position))
-    end
-  end
-  fail("missing endpoint " .. endpoint_connection)
 end
 
 -- Accepted issue #83 nine-pose live witnesses; never fitted, never derived.
