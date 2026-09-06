@@ -73,6 +73,9 @@ MACROS = {
     "turret_spl_l_beam_01_mk1_macro": ("depth4_zero_translation", 4),
     "turret_spl_l_laser_01_mk1_macro": ("depth4_zero_translation", 4),
     "turret_spl_l_plasma_01_mk1_macro": ("depth4_zero_translation", 4),
+    "turret_arg_m_plasma_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
+    "turret_par_m_plasma_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
+    "turret_tel_m_plasma_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
 }
 
 

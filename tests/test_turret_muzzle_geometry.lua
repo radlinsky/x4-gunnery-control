@@ -238,6 +238,87 @@ for _, spl_l_case in ipairs(spl_l_cases) do
   end
 end
 
+-- The three *_m_plasma_02 records use the same depth-4 composition with the
+-- one-key settled barrel translation (#79). All authored quaternions on these
+-- components are identity, so the oracle is the authored connection offsets
+-- plus the two accepted settled translations.
+local plasma02_yaw_origin = add(
+  { 0, 2.803713, -7.008048e-08 },
+  { 0, 2.962090492248535, 0 }
+)
+local plasma02_pivot = { -6.984919e-09, 0.2649388, -0.02317694 }
+local plasma02_barrel_settled = { 0, -3.575999869553925e-07, 3.3641886711120605 }
+
+local function evaluate_plasma02_source_oracle(
+  barrel_connection, endpoint_position, yaw, pitch
+)
+  local downstream = add(
+    barrel_connection,
+    add(plasma02_barrel_settled, endpoint_position)
+  )
+  local pitched = rotate(axis_rotation("x", -pitch), downstream)
+  return add(
+    plasma02_yaw_origin,
+    rotate(axis_rotation("y", yaw), add(plasma02_pivot, pitched))
+  )
+end
+
+local plasma02_cases = {
+  {
+    macro = "turret_arg_m_plasma_02_mk1_macro",
+    barrel_connection = { 0.005224779, -0.5929401, 0.8884583 },
+    endpoints = {
+      { "con_standard_01", { -2.450636, -4.768372e-07, 2.544146 } },
+      { "con_standard_02", { 2.487201, -1.907349e-06, 2.544143 } },
+    },
+  },
+  {
+    macro = "turret_par_m_plasma_02_mk1_macro",
+    barrel_connection = { 0.005224779, -0.592941, 0.8884583 },
+    endpoints = {
+      { "con_standard_01", { -2.450636, 4.768372e-07, 2.544146 } },
+      { "con_standard_02", { 2.487201, 0, 2.544145 } },
+    },
+  },
+  {
+    macro = "turret_tel_m_plasma_02_mk1_macro",
+    barrel_connection = { 0.005224779, -0.592941, 0.8884583 },
+    endpoints = {
+      { "con_standard_01", { -2.450636, 4.768372e-07, 2.544146 } },
+      { "con_standard_02", { 2.487201, 0, 2.544145 } },
+    },
+  },
+}
+
+for _, plasma02_case in ipairs(plasma02_cases) do
+  local plasma02_geometry = X4GunneryTurretMuzzleGeometry[plasma02_case.macro]
+  if plasma02_geometry.semantic_case ~= "depth4_one_key_barrel_translation" then
+    fail("unexpected one-key semantic case for " .. plasma02_case.macro)
+  end
+  for _, endpoint in ipairs(plasma02_case.endpoints) do
+    for _, yaw in ipairs({ -90, 0, 90 }) do
+      for _, pitch in ipairs({ -5, 30, 80 }) do
+        local actual = evaluate_geometry(plasma02_geometry, endpoint[1], {
+          yaw = yaw,
+          pitch = pitch,
+        })
+        local expected = evaluate_plasma02_source_oracle(
+          plasma02_case.barrel_connection, endpoint[2], yaw, pitch
+        )
+        for axis = 1, 3 do
+          local difference = math.abs(actual[axis] - expected[axis])
+          if difference > tolerance then
+            fail(string.format(
+              "%s %s yaw=%g pitch=%g axis=%d differs by %.17g",
+              plasma02_case.macro, endpoint[1], yaw, pitch, axis, difference
+            ))
+          end
+        end
+      end
+    end
+  end
+end
+
 -- The remaining six rank-2 records reconstructed from the accepted source
 -- transforms in turret-rank2-settled-active-transform.md and the Teladi
 -- channel-0 vector in turret-rank2-teladi-channel0-resolution.md. Nothing here

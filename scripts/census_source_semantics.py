@@ -153,6 +153,33 @@ def _resolve_supported_endpoint_source_semantics(
             ),
         }
 
+    # Accepted one-key barrel case (Issue #79): the same depth-4 rotator/barrel
+    # composition, where the barrel stores a single settled turret_active
+    # channel-0 key instead of the doubled form. Accepted only for the exact
+    # proved bits, so nearby one-key records stay unsupported.
+    if (
+        component_endpoint_count == 2
+        and depth == 4
+        and set(keyed) == {1, 3}
+        and _counts(keyed[1]) == (2, 0, 0, 0, 0)
+        and _counts(keyed[3]) == (1, 0, 0, 0, 0)
+        and _first_three_bits(keyed[1], 0)
+        == (("0x00000000", "0x403d92e4", "0x00000000"),) * 2
+        and _first_three_bits(keyed[3], 0)
+        == (("0x00000000", "0xb4bffc2b", "0x40574ede"),)
+    ):
+        return {
+            "classification": "SOURCE_RESOLVED",
+            "semantic_case": "depth4_one_key_barrel_translation",
+            "applied_authored_geometry": _apply(
+                authored_geometry,
+                positions={
+                    1: [0.0, 2.962090492248535, 0.0],
+                    3: [0.0, -3.575999869553925e-07, 3.3641886711120605],
+                },
+            ),
+        }
+
     # Accepted rank-2 case. The selector-selected guard is the existing
     # corpus-uniqueness guard; the five ancestry-covered records then have one
     # descriptor per edge. Only the exact optional channel-0 residue is allowed.

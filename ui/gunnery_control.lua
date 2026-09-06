@@ -101,6 +101,11 @@ local semanticCaseBehaviors = {
 semanticCaseBehaviors.depth4_zero_translation =
     semanticCaseBehaviors.depth4_dual_translation
 
+-- The one-key barrel case (#79) is the same depth-4 composition with a settled
+-- translation on each of the same two edges, so it reuses that behavior too.
+semanticCaseBehaviors.depth4_one_key_barrel_translation =
+    semanticCaseBehaviors.depth4_dual_translation
+
 -- Returns nil for an unknown semantic case, so no prospective geometry is
 -- streamed and the prospective generated-geometry path is not entered.
 -- ponytail: the generated endpoints are an ordered pair; take the second.
