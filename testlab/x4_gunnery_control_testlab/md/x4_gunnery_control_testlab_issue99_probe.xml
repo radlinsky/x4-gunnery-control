@@ -7,9 +7,10 @@
   barrelposition fast ray and all six current-origin surface witnesses remain
   blocked.
 
-  This Test Lab-only listener mirrors only those current-origin checks while the
-  surface browser is still open, before Gunnery Control points the M Laser at the
-  chosen surface. It does not reproduce or change the prospective calculation.
+  This Test Lab-only listener mirrors those current-origin checks and, when UI
+  Lua actually streamed generated M-Laser O/P/D geometry, mirrors production's
+  prospective construction and rays as diagnostics. It never changes the
+  production result.
 -->
 <mdscript name="X4GunneryTestLabIssue99Probe" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../../#modding/xsd/md.xsd">
   <cues>
@@ -26,6 +27,7 @@
           <actions>
             <set_value name="ProbeRoot.$Nonce" exact="@event.param3.$nonce"/>
             <remove_value name="ProbeRoot.$Weapon"/>
+            <set_value name="ProbeRoot.$MuzzleKnown" exact="0"/>
             <set_value name="ProbeRoot.$Targets" exact="[]"/>
           </actions>
         </cue>
@@ -44,6 +46,16 @@
                           and typeof $Weapon == datatype.component
                           and $Weapon.macro == macro.turret_par_m_laser_01_mk1_macro">
               <set_value name="ProbeRoot.$Weapon" exact="$Weapon"/>
+              <set_value name="ProbeRoot.$MuzzleKnown" exact="@event.param3.$muzzleknow"/>
+              <set_value name="ProbeRoot.$MuzzleOX" exact="@event.param3.$mox"/>
+              <set_value name="ProbeRoot.$MuzzleOY" exact="@event.param3.$moy"/>
+              <set_value name="ProbeRoot.$MuzzleOZ" exact="@event.param3.$moz"/>
+              <set_value name="ProbeRoot.$MuzzlePX" exact="@event.param3.$mpx"/>
+              <set_value name="ProbeRoot.$MuzzlePY" exact="@event.param3.$mpy"/>
+              <set_value name="ProbeRoot.$MuzzlePZ" exact="@event.param3.$mpz"/>
+              <set_value name="ProbeRoot.$MuzzleDX" exact="@event.param3.$mdx"/>
+              <set_value name="ProbeRoot.$MuzzleDY" exact="@event.param3.$mdy"/>
+              <set_value name="ProbeRoot.$MuzzleDZ" exact="@event.param3.$mdz"/>
             </do_if>
           </actions>
         </cue>
@@ -104,15 +116,65 @@
                     </do_if>
                   </do_for_each>
                   <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
-                  <debug_text text="'[X4GC TEST ISSUE99 PROBE] nonce=' + $Nonce
-                    + ' weapon=' + $Weapon
-                    + ' target=' + $Target
-                    + ' targetname=' + $Target.knownname
-                    + ' fast=' + $Fast
-                    + ' witness_clear=' + $WitnessClear + '/6'
-                    + ' barrel_x=' + $Barrel.x
-                    + ' barrel_y=' + $Barrel.y
-                    + ' barrel_z=' + $Barrel.z"/>
+
+                  <do_if value="ProbeRoot.$MuzzleKnown == 1">
+                    <create_orientation name="$ProspectiveBearing" orientation="look_at" refobject="$Target" useaimtarget="true">
+                      <position object="$Weapon" space="$Weapon"/>
+                    </create_orientation>
+                    <create_rotation name="$ProspectivePitchRotation" pitch="$ProspectiveBearing.pitch"/>
+                    <create_rotation name="$ProspectiveYawRotation" yaw="$ProspectiveBearing.yaw"/>
+                    <transform_position name="$ProspectivePitchedDownstream" refposition="position.[0m,0m,0m]" refrotation="$ProspectivePitchRotation">
+                      <position x="ProbeRoot.$MuzzleDX * 1m" y="ProbeRoot.$MuzzleDY * 1m" z="ProbeRoot.$MuzzleDZ * 1m"/>
+                    </transform_position>
+                    <create_position name="$ProspectiveYawOrigin" x="ProbeRoot.$MuzzleOX * 1m" y="ProbeRoot.$MuzzleOY * 1m" z="ProbeRoot.$MuzzleOZ * 1m"/>
+                    <transform_position name="$ProspectiveMuzzle" refposition="$ProspectiveYawOrigin" refrotation="$ProspectiveYawRotation">
+                      <position x="$ProspectivePitchedDownstream.x + ProbeRoot.$MuzzlePX * 1m"
+                                y="$ProspectivePitchedDownstream.y + ProbeRoot.$MuzzlePY * 1m"
+                                z="$ProspectivePitchedDownstream.z + ProbeRoot.$MuzzlePZ * 1m"/>
+                    </transform_position>
+                    <check_line_of_sight name="$ProspectiveFast" object="$Weapon" objectoffset="$ProspectiveMuzzle" target="$Target" excludeself="false" useaimtarget="true"/>
+                    <set_value name="$ProspectiveWitnessClear" exact="0"/>
+                    <do_for_each name="$ProspectiveFrac" in="$XFracs" counter="$ProspectiveIndex">
+                      <create_position name="$ProspectiveSample" object="$Target" space="$Target"
+                                       x="$MinX + $XFracs.{$ProspectiveIndex} * $SpanX"
+                                       y="$MinY + $YFracs.{$ProspectiveIndex} * $SpanY"
+                                       z="$MinZ + $ZFracs.{$ProspectiveIndex} * $SpanZ"/>
+                      <check_line_of_sight name="$ProspectiveWitness" object="$Weapon" objectoffset="$ProspectiveMuzzle"
+                                           target="$Target" targetoffset="$ProspectiveSample" useaimtarget="false" excludeself="false"/>
+                      <do_if value="$ProspectiveWitness">
+                        <set_value name="$ProspectiveWitnessClear" operation="add"/>
+                      </do_if>
+                    </do_for_each>
+                    <debug_text text="'[X4GC TEST ISSUE99 PROBE] nonce=' + $Nonce
+                      + ' weapon=' + $Weapon
+                      + ' target=' + $Target
+                      + ' targetname=' + $Target.knownname
+                      + ' fast=' + $Fast
+                      + ' witness_clear=' + $WitnessClear + '/6'
+                      + ' muzzleknown=' + ProbeRoot.$MuzzleKnown
+                      + ' prospective_fast=' + $ProspectiveFast
+                      + ' prospective_witness_clear=' + $ProspectiveWitnessClear + '/6'
+                      + ' aim_yaw=' + $ProspectiveBearing.yaw
+                      + ' aim_pitch=' + $ProspectiveBearing.pitch
+                      + ' prospective_x=' + $ProspectiveMuzzle.x
+                      + ' prospective_y=' + $ProspectiveMuzzle.y
+                      + ' prospective_z=' + $ProspectiveMuzzle.z
+                      + ' barrel_x=' + $Barrel.x
+                      + ' barrel_y=' + $Barrel.y
+                      + ' barrel_z=' + $Barrel.z"/>
+                  </do_if>
+                  <do_else>
+                    <debug_text text="'[X4GC TEST ISSUE99 PROBE] nonce=' + $Nonce
+                      + ' weapon=' + $Weapon
+                      + ' target=' + $Target
+                      + ' targetname=' + $Target.knownname
+                      + ' fast=' + $Fast
+                      + ' witness_clear=' + $WitnessClear + '/6'
+                      + ' muzzleknown=' + ProbeRoot.$MuzzleKnown
+                      + ' barrel_x=' + $Barrel.x
+                      + ' barrel_y=' + $Barrel.y
+                      + ' barrel_z=' + $Barrel.z"/>
+                  </do_else>
                 </do_if>
               </do_for_each>
             </do_if>
