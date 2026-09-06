@@ -1,36 +1,60 @@
 # Rank-1 one-key `turret_active` channel-0 settled value (X4 9.00)
 
-**SOURCE-RESOLVED FOR THE EXACT PLASMA 02 MK1 GROUP — NOT LIVE-TESTED**
+**SOURCE-RESOLVED STRUCTURAL RULE — NOT A GLOBAL ANI RULE OR LIVE-TESTED COHORT**
 
-One muzzle-path `turret_active` candidate-channel-0 descriptor in this group
-stores exactly one key rather than the repeated pair recorded for the rank-2
-cohort. This reference records why that single key is the constant settled
-local translation for the whole `turret_active` state, and where the result
-stops.
+This reference records a reusable source-resolution rule for one narrow ANI
+shape: a single candidate-channel-0 key on a one-frame `turret_active` state.
+The rule is identified by source structure and state behavior, not by turret
+macro name. Concrete X4 9.00 components below are the evidence cohort for the
+rule, not a permanent membership list.
 
-## Scope
+## Resolved signature
 
-Exactly three macros and their components:
+This rule resolves one descriptor only. It may be reused for another component
+only after shipped source independently confirms all of the relevant conditions:
 
-- `turret_arg_m_plasma_02_mk1_macro` / `turret_arg_m_plasma_02_mk1`
-- `turret_par_m_plasma_02_mk1_macro` / `turret_par_m_plasma_02_mk1`
-- `turret_tel_m_plasma_02_mk1_macro` / `turret_tel_m_plasma_02_mk1`
+- the descriptor is on a muzzle-endpoint ancestry path;
+- it is the `turret_active` candidate-channel-0 record for the animated part;
+- the record contains exactly one channel-0 key and no keys in channels 1–4 for
+  that descriptor;
+- the authored `turret_active` selector is a single frame;
+- the active key matches the value at the adjacent state boundaries; and
+- the stored interpolation is the STEP form described below.
 
-These are rank-1 depth-4 profiles P4 (`par`, `tel`) and P7 (`arg`) in
-[turret-rank1-animation-profile.md](turret-rank1-animation-profile.md). The
-shared muzzle path is:
+Matching this rule does **not** source-resolve an entire turret. Other authored
+transforms, animated parts, endpoint composition, runtime restrictions, and ANI
+channels must still be resolved independently. A new macro therefore does not
+need a new KB entry merely because its name differs, but it also does not gain
+support merely because it has one key.
+
+## X4 9.00 evidence cohort
+
+The audited rank-1 source currently contains this proved form on the
+`part_barrel` `turret_active` descriptor for:
+
+- `turret_arg_m_plasma_02_mk1`
+- `turret_par_m_plasma_02_mk1`
+- `turret_tel_m_plasma_02_mk1`
+
+Their equipment macros are respectively
+`turret_arg_m_plasma_02_mk1_macro`, `turret_par_m_plasma_02_mk1_macro`, and
+`turret_tel_m_plasma_02_mk1_macro`. These concrete identities are recorded for
+traceability; the reusable claim is the structural rule above.
+
+These components are rank-1 depth-4 profiles P7 (`arg`) and P4 (`par`, `tel`)
+in [turret-rank1-animation-profile.md](turret-rank1-animation-profile.md).
+Their shared muzzle path is:
 
 ```text
 part_socket → part_rotator → part_gun → part_barrel → con_standard_01/02
 ```
 
-`part_rotator` carries the `rotation_y` restriction. This reference covers the
-`part_barrel` channel-0 record only; it does not resolve the group's remaining
-transform layers, endpoints, or channels 1–4.
+`part_rotator` carries the `rotation_y` restriction. This reference resolves the
+one-key `part_barrel` channel-0 record only.
 
 ## The one-key record
 
-The `(part_barrel, turret_active)` descriptor has key-count family
+For the evidence cohort, `(part_barrel, turret_active)` has key-count family
 `[1, 0, 0, 0, 0]`: descriptor index 22 for `par`/`tel` and 27 for `arg`. Its
 single 128-byte channel-0 record is at file byte offset `8048` in all three
 `assets/props/WeaponSystems/heavy/TURRET_{ARG,PAR,TEL}_M_PLASMA_02_MK1_DATA.ANI`
@@ -45,15 +69,14 @@ resources and is bit-identical across them
 | InterpolationX/Y/Z | `0x00000001` ×3 | — |
 | `Time` | `0x34000000` | 1.1920928955078125e-07 |
 
-The stored Z value is material at metre scale, unlike the ~1e-7 rank-2 Teladi
-rotator-base vector. The descriptor's offset-148 field is `0x3d088889`
-(float32 `0.03333333507180214` = 1/30).
+The stored Z value is material at metre scale. The descriptor's offset-148
+field is `0x3d088889` (float32 `0.03333333507180214` = 1/30).
 
 ## Why one key is the settled value
 
-##### 1. `turret_active` is authored as a single frame
+##### Single-frame active state
 
-All three components author the same selector set on the animated connection:
+All three evidence components author the same selector frames:
 
 | selector | frames |
 |---|---|
@@ -63,108 +86,97 @@ All three components author the same selector set on the animated connection:
 | `turret_deactivating` | 55–100 |
 | `gun_firing` | 50–55 |
 
-`turret_active` is a zero-length, one-frame state. A single stored key is the
-complete description of a one-frame span: there is no second time sample to
-interpolate toward and no sub-span over which a different default could apply.
-Key count tracks the authored span, consistent with the rank-2 cohort's 30–31
-span and two stored keys.
+`turret_active` is a one-frame state. Its single stored key is therefore the
+complete active-state sample; there is no second sample or active sub-span over
+which a different value could be selected.
 
-##### 2. The active key equals the activating and deactivating boundary values
+##### Matching state boundaries
 
-The same bits `0x40574ede` appear as:
+The same barrel Z bits `0x40574ede` appear as the last `turret_activating` key,
+the first `turret_deactivating` key, and the first and last `gun_firing` keys.
+The neighbouring states therefore enter and leave the active state at exactly
+the stored active value.
 
-- the last key of `turret_activating` (`Time` 1.5 s = frame 45);
-- the first key of `turret_deactivating` (`Time` 0.0);
-- the first and last keys of `gun_firing`.
+The same authored idiom appears on the cohort's `part_rotator`: its active
+channel-0 Y value `0x403d92e4` (`2.962090492248535`) is stored twice in a
+`[2, 0, 0, 0, 0]` descriptor. The inactive one-key forms likewise carry the
+rest values from which `turret_activating` starts.
 
-The neighbouring states enter and leave `turret_active` at exactly this value.
-Any reading other than a constant hold would introduce a discontinuity at every
-state boundary the shipped data explicitly matches.
-
-The same continuity holds for the group's `part_rotator` channel-0 Y value
-`0x403d92e4` (`2.962090492248535`), whose `[2, 0, 0, 0, 0]` active descriptor
-stores that constant twice. The one-key and two-key forms are therefore the
-same authored idiom, one written redundantly.
-
-The one-key form is also unambiguous in `turret_inactive`: both `part_barrel`
-and `part_rotator` store a single channel-0 key there carrying exactly the
-rest values that `turret_activating` starts from.
-
-##### 3. The stored interpolation value is STEP
+##### STEP interpolation corroboration
 
 Pinned X4Converter commit `0be4b494089ba7719d4c5d351e63160ef3843ef5` decodes
-the three per-axis interpolation members with the enumeration
-`{UNKNOWN, STEP, LINEAR, QUADRATIC, CUBIC, BEZIER, BEZIER_LINEARTIME, TCB}`
-(`X4ConverterTools/src/ani/Keyframe.cpp`), so stored value `1` is `STEP`, and
-its Blender importer maps `STEP` to constant interpolation
-(`X4ConverterBlenderAddon/importer.py`). The single active key stores `1` on
-all three axes. Across these files the terminal key of every descriptor is
-`STEP` while intermediate keys are `BEZIER` (`5`).
+per-axis interpolation values as
+`{UNKNOWN, STEP, LINEAR, QUADRATIC, CUBIC, BEZIER, BEZIER_LINEARTIME, TCB}` in
+`X4ConverterTools/src/ani/Keyframe.cpp`. Stored value `1` is therefore named
+`STEP`, and `X4ConverterBlenderAddon/importer.py` maps `STEP` to constant
+interpolation. The evidence cohort's single active key stores `1` on all three
+axes. This is `third-party-technique`, not engine proof.
 
-##### 4. Channel 0 is already an accepted additive local translation
+##### Channel-0 field meaning
 
 Candidate channel 0 as an additive local translation is established by
 [paranid-l-beam-channel0-semantics.md](paranid-l-beam-channel0-semantics.md)
-(live-tested for that exact path) and applied within a separately
-source-resolved hierarchy by
+(live-tested for that exact path) and reused inside a separately source-resolved
+hierarchy by
 [turret-rank2-teladi-channel0-resolution.md](turret-rank2-teladi-channel0-resolution.md).
 This reference does not re-derive that field meaning.
 
 ## Decision
 
-For these three components, the single `(part_barrel, turret_active)`
-channel-0 key is source-resolved as the constant settled additive local
-translation applied throughout `turret_active`. No timing lookup, ramp-in, or
-rest-pose default is required.
+For a descriptor that independently matches the resolved signature above, the
+single `turret_active` channel-0 key may be treated as the constant settled
+additive local translation for that one-frame active state. No timing lookup,
+ramp-in, or rest-pose default is required for that descriptor.
+
+This is a reusable field/state rule, not a macro allow-list. Source resolution
+of the rest of any turret remains a separate requirement.
 
 ## Boundary
 
-- `gun_firing` (frames 50–55) overlaps the single active frame 50 and moves the
-  same `part_barrel` channel-0 Z from `3.3641886711120605` through
-  `0.2962638735771179` and back within about 1/6 s. A runtime barrel-position
-  sample taken at a `FIRED` instant is therefore not automatically the settled
-  `turret_active` position; recoil can displace it by up to about 3.07 m along
-  the barrel axis.
-- Not established: this group's remaining authored transforms, endpoint
-  composition, or candidate channels 1–4; any runtime validation of the
-  resulting muzzle position; and any generalisation of the one-key rule to
-  arbitrary ANI channels, other selectors, or other components. Unproved cases
-  must still fail closed.
-- This group is **not** live-tested. Do not classify it alongside the
+- This rule does not generalize to arbitrary one-key ANI channels, multi-frame
+  one-key states, other selectors, or records whose boundary/interpolation facts
+  differ. Those cases remain unproved and must fail closed.
+- For the current plasma-02 evidence cohort, `gun_firing` (frames 50–55) overlaps
+  active frame 50 and moves the same `part_barrel` channel-0 Z from
+  `3.3641886711120605` through `0.2962638735771179` and back within about 1/6 s.
+  A runtime barrel-position sample taken at a `FIRED` instant is therefore not
+  automatically the settled `turret_active` position; recoil can displace it by
+  up to about 3.07 m along the barrel axis.
+- This reference does not establish the evidence cohort's remaining authored
+  transforms, endpoint composition, candidate channels 1–4, or final runtime
+  muzzle position.
+- The evidence cohort is **not** live-tested. Do not classify it alongside the
   live-tested Paranid representatives.
 
 ## Evidence records
 
-### Authored selectors, path, and stored one-key record
+### Authored state/signature and stored one-key record
 
 - X4: 9.00
 - Status: shipped-source
-- Source: `assets/props/WeaponSystems/heavy/turret_{arg,par,tel}_m_plasma_02_mk1.xml`
-  and `assets/props/WeaponSystems/heavy/TURRET_{ARG,PAR,TEL}_M_PLASMA_02_MK1_DATA.ANI`
+- Source: `assets/props/WeaponSystems/heavy/turret_{arg,par,tel}_m_plasma_02_mk1.xml` and `assets/props/WeaponSystems/heavy/TURRET_{ARG,PAR,TEL}_M_PLASMA_02_MK1_DATA.ANI`
 - Live test: no — offline source verification only
-- Finding: the muzzle path, the 0–0 / 0–45 / 50–50 / 55–100 / 50–55 selector
-  frames, the `[1, 0, 0, 0, 0]` active `part_barrel` family, the record bytes
-  and offset above, their bit-identity across the three resources, and the
-  activating/deactivating/`gun_firing` boundary value matches.
+- Finding: the current evidence cohort supplies the one-frame active selector,
+  one-key barrel channel-0 record, record bytes, matching adjacent-state values,
+  and recoil overlap described above. These components are evidence carriers
+  for the structural rule rather than the identity of the rule itself.
 
 ### STEP interpolation decoding
 
 - X4: technique applied to X4 assets; not engine proof
 - Status: third-party-technique
-- Source: X4Converter commit `0be4b494089ba7719d4c5d351e63160ef3843ef5`,
-  `X4ConverterTools/src/ani/Keyframe.cpp` and
-  `X4ConverterBlenderAddon/importer.py`
+- Source: X4Converter commit `0be4b494089ba7719d4c5d351e63160ef3843ef5`, `X4ConverterTools/src/ani/Keyframe.cpp` and `X4ConverterBlenderAddon/importer.py`
 - Live test: no
 - Finding: per-axis interpolation value `1` is named `STEP` and is imported as
-  constant interpolation; the single active key stores `1` on all three axes.
+  constant interpolation.
 
-### One-key settled value resolution
+### One-key settled-value rule
 
 - X4: 9.00
 - Status: inference
-- Source: the shipped-source facts above plus the accepted channel-0
-  translation meaning
+- Source: the shipped-source signature above plus the accepted channel-0 translation meaning
 - Live test: no — untested as of 2026-09-06
-- Finding: for this exact three-component group the single active channel-0
-  key is the constant settled additive local translation for the whole
-  `turret_active` state. Bounded to this group and this state.
+- Finding: a descriptor independently matching the resolved signature may use
+  its single active channel-0 key as the constant settled additive local
+  translation for that one-frame `turret_active` state. This resolves that
+  descriptor only, not an arbitrary component or ANI record.
