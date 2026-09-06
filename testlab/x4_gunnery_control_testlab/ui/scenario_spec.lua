@@ -60,18 +60,10 @@
 -- an eligible Direct target. Capitals are used deliberately - their turrets
 -- give X4 its own clickable surface markers for the surface-element click.
 -- Placement is fixed and lateral so the owner can tell the three apart on
--- screen without flying.
---
--- A fourth hostile sits astern as a setup-only capture sink. Test Lab has a
--- separate one-shot ownership-change experiment whose armed flag can survive
--- scenario replacement (tracked by issue #32). Before the real mouse-click
--- sequence, Direct-engage this sink once and leave it engaged for 11 seconds.
--- If that old one-shot is armed, it is consumed on the disposable sink instead
--- of corrupting LEFT or RIGHT. Do not use the sink again during the contract
--- run. Keep this copy disabled.
+-- screen without flying. Keep this copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-110-mouse-target-contract-r2",
+    id      = "issue-110-mouse-target-contract-r1",
     enabled = false,
 
     setup = {
@@ -129,24 +121,6 @@ X4GunneryTestLabScenarioSpec = {
             hostile   = false,
             holdFire  = true,
             stripDefenceUnits = true,
-        },
-
-        -- Setup-only stale-capture sink. It is deliberately astern so it does
-        -- not overlap the three world-click subjects ahead of the player.
-        {
-            label     = "ISSUE110 CAPTURE SINK - SETUP ONLY",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = -4500,
-            x         = 0,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
         },
     },
 }

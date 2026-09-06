@@ -3138,18 +3138,6 @@ function menu.onCloseElement(dueToClose)
         local controlMode, previousTarget = session.controlMode, session.viewSofttargetKey
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) or session.phase ~= "engaged" then return end
-            local softtarget = C.GetSofttarget2()
-            -- issue #110: compare X4's selection with our stored Direct target.
-            log("issue110 world click: dueToClose=" .. tostring(dueToClose)
-                .. "; prevKey=" .. tostring(previousTarget)
-                .. "; softID=" .. tostring(softtarget.softtargetID)
-                .. "; softConnection=" .. str(softtarget.softtargetConnectionName)
-                .. "; controlMode=" .. tostring(session.controlMode)
-                .. "; directMode=" .. tostring(session.directMode)
-                .. "; aimTargetID=" .. tostring(session.aimTargetID)
-                .. "; targetObjectID=" .. tostring(session.targetObjectID)
-                .. "; povAnchor=" .. tostring(session.povAnchor)
-                .. "; povMode=" .. tostring(session.povMode))
             local targetClick = dueToClose == "auto" or softtargetKey() ~= previousTarget
             if targetClick then
                 menu.display()
