@@ -18,6 +18,8 @@ local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
 local PROSPECTIVE_MACROS = {
     turret_par_l_beam_01_mk1_macro = true,
     turret_par_m_laser_01_mk1_macro = true,
+    turret_par_l_laser_01_mk1_macro = true,
+    turret_par_l_plasma_01_mk1_macro = true,
 }
 local PROSPECTIVE_ENDPOINT = "con_laser_02"
 
