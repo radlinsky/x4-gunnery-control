@@ -353,7 +353,6 @@ def _join_authored_animation_selectors(
             {
                 "connection": connection,
                 "name": name,
-                "_authored_frame_span": animation.get("_authored_frame_span"),
                 "descriptor_match_count": len(matches),
                 "connection_ani_descriptors": matches,
             }
@@ -541,7 +540,6 @@ def _derive_endpoint_source_paths(
                 {
                     "source_connection": source_connection,
                     "animation_name": selector["name"],
-                    "_authored_frame_span": selector.get("_authored_frame_span"),
                     "endpoint_path_edge_index": edge_index,
                     "authored_selector_evidence": evidence,
                     "selector_connection_descriptor_match_count": selector[
