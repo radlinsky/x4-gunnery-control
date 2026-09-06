@@ -52,7 +52,7 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #99 r2: live-regress the generated prospective-muzzle path for the
+-- Issue #99 r3: live-regress the generated prospective-muzzle path for the
 -- exact Paranid M Laser accepted in #98.
 --
 -- r1 was a bad fixture: it reused a #83 ship-root firing pose and assumed the
@@ -60,16 +60,21 @@
 -- disproved that assumption: the exact surface itself stayed 0/1 and never
 -- fired.
 --
--- The r2 intended-pass target instead reuses the exact Behemoth transform from
--- Issue #67 A100. That exact ARG L Beam surface was live-proven 1/1 ENGAGEABLE
--- and received correlated FIRED/HIT evidence. Its root is translated so the
--- same P*-relative transform is measured from the live/source-proven M-Laser
--- mount origin on the Demeter shooter. The blocked control uses the already
--- proven #75 external-blocker shape, scaled to 40% so it stays inside the
--- M-Laser's 3.5 km range. Keep this repository copy disabled.
+-- r3 starts from Issue #67 A100's exact Behemoth/ARG-L-Beam surface geometry,
+-- which was live-proven 1/1 ENGAGEABLE with exact FIRED/HIT evidence. #67's
+-- shooter weapon frame is tilted, so the A100 root/orientation are first moved
+-- into weapon-local coordinates, then rigidly rotated onto exact M-Laser bore
+-- directions already live-proven by #83. This preserves the known-good target
+-- surface/hull relationship instead of copying #67 world coordinates.
+--
+-- FAR CLEAR SURFACE is aligned to #83 PITCH HIGH (yaw 0, pitch 1.12376 rad),
+-- at about 1.5 km. BLOCKED SURFACE is aligned to #83 RIGHT HIGH
+-- (yaw 0.636900, pitch 1.10904 rad), then moved outward to about 3.0 km; a
+-- separate player-owned M freighter sits halfway down that exact surface-aim
+-- ray. Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-99-par-m-laser-far-regression-r2",
+    id      = "issue-99-par-m-laser-far-regression-r3",
     enabled = false,
 
     location = {
@@ -116,21 +121,22 @@ X4GunneryTestLabScenarioSpec = {
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            -- #67 A100 final root was P* + (-223.612, +1788.313, -163.698).
-            -- M-Laser P* is source/live-proven at approximately
-            -- (0, +14.3573, -44.2423) from this zero-oriented shooter root.
-            distance  = -206.940,
-            x         = -223.612,
-            y         = 1802.670,
+            -- Rigid transplant of #67 A100 into the identity M-Laser mount
+            -- frame, rotated so this exact ARG L Beam surface's hittable aim
+            -- point lies on #83 PITCH HIGH. Relative to the live/source-proven
+            -- M-Laser origin, surface aim ~= (0, 1349.715, 647.060) m.
+            distance  = 724.211593,
+            x         = -7.209009,
+            y         = 1653.206073,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
             holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw   = 214.0265,
-            pitch = 68.9246,
-            roll  = -166.8782,
+            yaw   = -23.106996,
+            pitch = 75.831285,
+            roll  = -45.918598,
             preserveOrientation = true,
 
             loadout   = "x4gc_testlab_arg_l_destroyer_02_beam",
@@ -144,19 +150,22 @@ X4GunneryTestLabScenarioSpec = {
             macro     = "ship_arg_l_destroyer_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            -- #75 NEAR geometry scaled from (x=5600,z=-5600) to 40%.
-            distance  = -2240,
-            x         = 2240,
-            y         = 0,
+            -- Same proven target-surface construction, rigidly aligned to the
+            -- #83 RIGHT HIGH bore and shifted 1.5 km farther along that ray.
+            -- Surface aim is about 2.997 km from the M-Laser origin, within the
+            -- exact weapon's 3.5 km live range.
+            distance  = 1126.815327,
+            x         = 871.653208,
+            y         = 2985.006447,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
             holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw = 90,
-            pitch = 0,
-            roll = 0,
+            yaw   = 52.055513,
+            pitch = 76.249477,
+            roll  = 30.272988,
             preserveOrientation = true,
 
             loadout   = "x4gc_testlab_arg_l_destroyer_02_beam",
@@ -167,19 +176,19 @@ X4GunneryTestLabScenarioSpec = {
 
         {
             label     = "ISSUE99 LOS BLOCKER",
-            macro     = "ship_xen_l_terraformer_01_a_macro",
+            macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "player",
             count     = 1,
-            -- Halfway along the blocked-control root ray, matching #75.
-            distance  = -1120,
-            x         = 1120,
-            y         = 0,
+            -- Centered halfway along BLOCKED SURFACE's exact hittable-aim ray.
+            distance  = 493.445716,
+            x         = 397.007680,
+            y         = 1355.833218,
             spread    = 0,
             behaviour = "wait",
             holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw = 90,
+            yaw = 0,
             pitch = 0,
             roll = 0,
             preserveOrientation = true,
