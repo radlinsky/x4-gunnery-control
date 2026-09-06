@@ -96,6 +96,11 @@ local semanticCaseBehaviors = {
     end,
 }
 
+-- Split L stores the same depth-4 composition with zero settled translations
+-- (#79), so it reuses that behavior rather than restating the layer order.
+semanticCaseBehaviors.depth4_zero_translation =
+    semanticCaseBehaviors.depth4_dual_translation
+
 -- Returns nil for an unknown semantic case, so no prospective geometry is
 -- streamed and the prospective generated-geometry path is not entered.
 -- ponytail: the generated endpoints are an ordered pair; take the second.

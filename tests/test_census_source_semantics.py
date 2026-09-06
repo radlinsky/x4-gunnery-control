@@ -147,6 +147,64 @@ class SourceSemanticTests(unittest.TestCase):
             "settled_local_position_delta", geometry["source_geometry_layers"][1]
         )
 
+    def test_depth4_zero_translation_signature_is_recognized(self) -> None:
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+            _descriptor(3, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(covered, depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+        self.assertEqual(result["semantic_case"], "depth4_zero_translation")
+        applied = result["applied_authored_geometry"]["source_geometry_layers"]
+        for index in (2, 3):
+            self.assertEqual(
+                applied[index]["settled_local_position_delta"], [0.0, 0.0, 0.0]
+            )
+        for index in (0, 1):
+            self.assertNotIn("settled_local_position_delta", applied[index])
+
+    def test_single_key_zero_translation_fails_closed(self) -> None:
+        # The *_m_plasma_02 one-key groups share the zero values but not the
+        # proved two-record signature.
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (1, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+            _descriptor(3, (1, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(covered, depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_nonzero_translation_on_zero_signature_fails_closed(self) -> None:
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 0.0)}),
+            _descriptor(3, (2, 0, 0, 0, 0), {0: (0.0, 0.0, 1e-7)}),
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            _endpoint(covered, depth=4),
+            _geometry(4),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
     def test_rank2_signature_applies_rotation_and_optional_channel0_residue(self) -> None:
         for with_residue in (False, True):
             with self.subTest(with_residue=with_residue):

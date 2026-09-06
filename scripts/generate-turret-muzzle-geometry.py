@@ -70,6 +70,9 @@ MACROS = {
     "turret_tel_m_laser_01_mk1_macro": ("depth5_additive_x_rotation", 5),
     "turret_tel_m_plasma_01_mk1_macro": ("depth5_additive_x_rotation", 5),
     "turret_ter_m_laser_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_spl_l_beam_01_mk1_macro": ("depth4_zero_translation", 4),
+    "turret_spl_l_laser_01_mk1_macro": ("depth4_zero_translation", 4),
+    "turret_spl_l_plasma_01_mk1_macro": ("depth4_zero_translation", 4),
 }
 
 
