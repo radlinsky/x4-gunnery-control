@@ -388,6 +388,15 @@ class SourceSemanticTests(unittest.TestCase):
                 )
                 self.assertEqual(result["classification"], "UNSUPPORTED")
 
+        # Arbitrary repeated rotator value outside the supported signatures
+        with self.subTest("arbitrary_repeated_rotator"):
+            result = _resolve_supported_endpoint_source_semantics(
+                self._one_key_barrel_endpoint(barrel, rotator=(0.0, 3.0, 0.0)),
+                _geometry(4, one_key_barrel_restrictions=True),
+                component_endpoint_count=2,
+            )
+            self.assertEqual(result["classification"], "UNSUPPORTED")
+
         # Multi-frame turret_active selector (start != end)
         with self.subTest("multi_frame_selector"):
             result = _resolve_supported_endpoint_source_semantics(
