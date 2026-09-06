@@ -94,12 +94,14 @@ def _selector_record(
     connection: str,
     name: str,
     connection_descriptors: list[dict[str, object]],
+    frame_span: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Build one in-memory authored selector record shaped like the real join output."""
 
     return {
         "connection": connection,
         "name": name,
+        "_authored_frame_span": frame_span,
         "descriptor_match_count": len(connection_descriptors),
         "connection_ani_descriptors": list(connection_descriptors),
     }
@@ -158,7 +160,10 @@ class EndpointAnimationMembershipContractTests(unittest.TestCase):
         ]
         selectors = [
             _selector_record(
-                "Root", "ExactSelector", [exact_selector_path, exact_selector_sibling]
+                "Root",
+                "ExactSelector",
+                [exact_selector_path, exact_selector_sibling],
+                frame_span={"start": "3", "end": "3"},
             ),
             _selector_record("Root", "SiblingOnly", [sibling_only]),
             _selector_record("Child", "ExactSelector", [child_exact]),
@@ -286,6 +291,9 @@ class EndpointAnimationMembershipContractTests(unittest.TestCase):
             child_exact["authored_selector_evidence"],
             {"connection": "Child", "name": "ExactSelector"},
         )
+        # Authored frame-span evidence rides along per occurrence.
+        self.assertEqual(root_exact["_authored_frame_span"], {"start": "3", "end": "3"})
+        self.assertIsNone(child_exact["_authored_frame_span"])
         # Connection-local match evidence is preserved as authored: Root's
         # ExactSelector still counts its SiblingPart connection-local match
         # even though that part is not on the traversed path.

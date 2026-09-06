@@ -39,6 +39,9 @@ _PART_OFFSET_COMPONENT = """<components>
           </part>
           <part name="plain_part"/>
         </parts>
+        <animations>
+          <animation name="turret_active" start="7" end="7"/>
+        </animations>
       </connection>
     </connections>
   </component>
@@ -289,6 +292,19 @@ class CensusIdentityPipelineIntegrationTests(unittest.TestCase):
                 transforms["plain_part"],
                 {"position": None, "quaternion": None},
             )
+            # (3) authored animation frame spans are kept as internal evidence.
+            self.assertEqual(
+                component_definitions["component_a"][0][
+                    "authored_connection_animations"
+                ],
+                [
+                    {
+                        "connection": "endpoint",
+                        "name": "turret_active",
+                        "_authored_frame_span": {"start": "7", "end": "7"},
+                    }
+                ],
+            )
 
     def test_direct_owned_part_transforms_are_stripped_from_census_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -306,6 +322,7 @@ class CensusIdentityPipelineIntegrationTests(unittest.TestCase):
             # while the unchanged public part names still do.
             serialized = json.dumps(report)
             self.assertNotIn("_direct_owned_part_transforms", serialized)
+            self.assertNotIn("_authored_frame_span", serialized)
             self.assertNotIn("33.25", serialized)
             self.assertNotIn("0.909", serialized)
             connection = report["component_to_macros"][0]["connections"][0]
