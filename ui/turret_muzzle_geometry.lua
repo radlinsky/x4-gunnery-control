@@ -601,6 +601,43 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_02", transform = { position = { -3.254139, 0.1923494, 17.77146 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
     },
+    ["turret_ter_l_beam_01_mk1_macro"] = {
+        semantic_case = "depth4_p8_translation",
+        layers = {
+            {
+                source_part = "part_socket",
+                owning_connection = "Connection01",
+                connection_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+            },
+            {
+                source_part = "part_rotator",
+                owning_connection = "Connection02",
+                connection_transform = { position = { 0, 8.5, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 0, 0, 0 },
+                runtime_rotation = { axis = "y" },
+            },
+            {
+                source_part = "anim_gun",
+                owning_connection = "Connection04",
+                connection_transform = { position = { 0, 2.064657, -6.057116 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                runtime_rotation = { axis = "x", minimum_degrees = -5.0, maximum_degrees = 80.0 },
+            },
+            {
+                source_part = "anim_barrel",
+                owning_connection = "Connection05",
+                connection_transform = { position = { 0, 0.6179247, 45.60182 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 0, 0, 3.8145999496919103e-06 },
+            },
+        },
+        endpoints = {
+            { connection = "con_laser_01", transform = { position = { 2.003361, 0.00462532, 17.78848 }, quaternion = { 0, 0, 0, 1.0 } } },
+            { connection = "con_laser_02", transform = { position = { -2.000694, 0.135191, 17.78848 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+    },
     ["turret_arg_m_plasma_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
         layers = {
