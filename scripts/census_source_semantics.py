@@ -86,6 +86,26 @@ def _limit(restriction: dict[str, object], field: str) -> float | None:
     return float(record["candidate_numeric_value"])
 
 
+def _offset_matches(
+    offset: dict[str, object],
+    position: tuple[float, float, float],
+    quaternion: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+) -> bool:
+    """Match an authored transform numerically without relying on asset names."""
+    try:
+        actual_position = tuple(
+            float(offset["position"][axis]["candidate_numeric_value"])
+            for axis in "xyz"
+        )
+        actual_quaternion = tuple(
+            float(offset["quaternion"][axis]["candidate_numeric_value"])
+            for axis in ("qx", "qy", "qz", "qw")
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return actual_position == position and actual_quaternion == quaternion
+
+
 def _resolve_supported_endpoint_source_semantics(
     endpoint: dict[str, object],
     authored_geometry: dict[str, object],
@@ -250,6 +270,16 @@ def _resolve_supported_endpoint_source_semantics(
     p6_layers = authored_geometry.get("source_geometry_layers", [])
     p6_yaw = p6_layers[1]["authored_restrictions"] if len(p6_layers) == 4 else []
     p6_pitch = p6_layers[2]["authored_restrictions"] if len(p6_layers) == 4 else []
+    p6_connection_positions = (
+        (0.0, 0.0, 0.0),
+        (-0.0244168, 17.52643, -0.1001702),
+        (2.980232e-8, -0.02269363, -5.565336),
+        (-4.023314e-6, 0.1448975, 11.62085),
+    )
+    p6_endpoint_positions = {
+        (4.560871, -0.1317711, 23.71955),
+        (-4.823473, -0.001207352, 23.71955),
+    }
     p6_geometry_match = (
         len(p6_yaw) == 1
         and p6_yaw[0].get("type_token") == "rotation_y"
@@ -259,6 +289,19 @@ def _resolve_supported_endpoint_source_semantics(
         and p6_pitch[0].get("type_token") == "rotation_x"
         and _limit(p6_pitch[0], "authored_min") == -5.0
         and _limit(p6_pitch[0], "authored_max") == 90.0
+        and all(
+            _offset_matches(layer.get("connection_authored_offset", {}), position)
+            and _offset_matches(
+                layer.get("part_authored_offset", {}), (0.0, 0.0, 0.0)
+            )
+            for layer, position in zip(p6_layers, p6_connection_positions)
+        )
+        and any(
+            _offset_matches(
+                authored_geometry.get("endpoint_authored_offset", {}), position
+            )
+            for position in p6_endpoint_positions
+        )
     )
     if (
         component_endpoint_count == 2

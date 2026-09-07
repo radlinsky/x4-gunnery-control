@@ -125,6 +125,22 @@ def _restriction(
     }
 
 
+def _offset(
+    position: tuple[float, float, float],
+    quaternion: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
+) -> dict[str, object]:
+    return {
+        "position": {
+            axis: {"candidate_numeric_value": value}
+            for axis, value in zip("xyz", position)
+        },
+        "quaternion": {
+            axis: {"candidate_numeric_value": value}
+            for axis, value in zip(("qx", "qy", "qz", "qw"), quaternion)
+        },
+    }
+
+
 def _geometry(
     depth: int,
     *,
@@ -154,6 +170,15 @@ def _geometry(
             _restriction("rotation_x", -10.0, one_key_barrel_pitch_max)
         ]
     if p6_restrictions and depth >= 3:
+        connection_positions = (
+            (0.0, 0.0, 0.0),
+            (-0.0244168, 17.52643, -0.1001702),
+            (2.980232e-8, -0.02269363, -5.565336),
+            (-4.023314e-6, 0.1448975, 11.62085),
+        )
+        for layer, position in zip(layers, connection_positions):
+            layer["connection_authored_offset"] = _offset(position)
+            layer["part_authored_offset"] = _offset((0.0, 0.0, 0.0))
         layers[1]["authored_restrictions"] = [_restriction("rotation_y")]
         layers[2]["authored_restrictions"] = [
             _restriction("rotation_x", -5.0, 90.0)
@@ -161,7 +186,11 @@ def _geometry(
     return {
         "endpoint_connection": "endpoint",
         "source_geometry_layers": layers,
-        "endpoint_authored_offset": {"marker": "endpoint"},
+        "endpoint_authored_offset": (
+            _offset((4.560871, -0.1317711, 23.71955))
+            if p6_restrictions
+            else {"marker": "endpoint"}
+        ),
     }
 
 
@@ -230,6 +259,20 @@ class SourceSemanticTests(unittest.TestCase):
         result = _resolve_supported_endpoint_source_semantics(
             endpoint,
             _geometry(4, p6_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p6_authored_endpoint_geometry_near_miss_fails_closed(self) -> None:
+        geometry = _geometry(4, p6_restrictions=True)
+        geometry["endpoint_authored_offset"] = _offset(
+            (4.560872, -0.1317711, 23.71955)
+        )
+
+        result = _resolve_supported_endpoint_source_semantics(
+            self._p6_endpoint(),
+            geometry,
             component_endpoint_count=2,
         )
 
