@@ -84,6 +84,17 @@ def _one_frame_selector(animation_name: str = "turret_active", frame: int = 0) -
     }
 
 
+def _selector(animation_name: str, start: int, end: int) -> dict[str, object]:
+    selected = _descriptor(0, (0, 0, 0, 0, 0), subname=animation_name)
+    return {
+        "animation_name": animation_name,
+        "_authored_frame_span": {"start": str(start), "end": str(end)},
+        "selector_connection_descriptor_match_count": 1,
+        "selector_connection_ani_descriptors": [selected],
+        "selected_endpoint_path_ani_descriptor_memberships": [selected],
+    }
+
+
 def _endpoint(
     covered: list[dict[str, object]],
     *,
@@ -120,6 +131,7 @@ def _geometry(
     rank2_restrictions: bool = False,
     one_key_barrel_restrictions: bool = False,
     one_key_barrel_pitch_max: float = 90.0,
+    p6_restrictions: bool = False,
 ) -> dict[str, object]:
     layers = [
         {
@@ -141,6 +153,11 @@ def _geometry(
         layers[2]["authored_restrictions"] = [
             _restriction("rotation_x", -10.0, one_key_barrel_pitch_max)
         ]
+    if p6_restrictions and depth >= 3:
+        layers[1]["authored_restrictions"] = [_restriction("rotation_y")]
+        layers[2]["authored_restrictions"] = [
+            _restriction("rotation_x", -5.0, 90.0)
+        ]
     return {
         "endpoint_connection": "endpoint",
         "source_geometry_layers": layers,
@@ -149,6 +166,75 @@ def _geometry(
 
 
 class SourceSemanticTests(unittest.TestCase):
+    _P6_GUN = {
+        0: (0.0, 0.0, 0.0),
+        1: (0.0, -0.0, 0.0),
+        2: (1.0, 1.0, 1.0),
+    }
+    _P6_BARREL = (0.0, -1.9072999748459551e-6, 0.0)
+
+    def _p6_endpoint(self) -> dict[str, object]:
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (0, 0, 0, 0, 0)),
+            _descriptor(2, (2, 2, 2, 0, 0), self._P6_GUN),
+            _descriptor(3, (2, 0, 0, 0, 0), {0: self._P6_BARREL}),
+        ]
+        boundaries = []
+        for subname in ("turret_activating", "turret_deactivating"):
+            boundaries.extend(
+                [
+                    _descriptor(2, (2, 2, 2, 0, 0), self._P6_GUN, subname=subname),
+                    _descriptor(
+                        3,
+                        (2, 0, 0, 0, 0),
+                        {0: self._P6_BARREL},
+                        subname=subname,
+                    ),
+                ]
+            )
+        return _endpoint(
+            covered,
+            depth=4,
+            ani_descriptor_memberships=boundaries,
+            authored_animation_selector_occurrences=[
+                _selector("turret_active", 60, 61)
+            ],
+        )
+
+    def test_p6_signature_is_name_free_and_applies_channel0_only(self) -> None:
+        result = _resolve_supported_endpoint_source_semantics(
+            self._p6_endpoint(),
+            _geometry(4, p6_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+        self.assertEqual(result["semantic_case"], "depth4_p6_translation")
+        layers = result["applied_authored_geometry"]["source_geometry_layers"]
+        self.assertEqual(layers[2]["settled_local_position_delta"], [-0.0, 0.0, 0.0])
+        self.assertEqual(
+            layers[3]["settled_local_position_delta"],
+            [-0.0, -1.9072999748459551e-6, 0.0],
+        )
+        for layer in layers:
+            self.assertNotIn("settled_local_euler_xyz_delta_radians", layer)
+
+    def test_p6_companion_near_miss_fails_closed(self) -> None:
+        endpoint = self._p6_endpoint()
+        gun = endpoint["_ancestry_covered_turret_active_descriptor_memberships"][2]
+        scale_range = gun["key_data"]["channels"]["scale"]["record_range"]
+        scale_second = int(scale_range["start"]) + 1
+        gun["_candidate_raw_key_records"][scale_second]["raw_bits"][0] = "0x40000000"
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p6_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
     def test_depth4_translation_signature_is_name_free_and_applied(self) -> None:
         covered = [
             _descriptor(0, (0, 0, 0, 0, 0)),

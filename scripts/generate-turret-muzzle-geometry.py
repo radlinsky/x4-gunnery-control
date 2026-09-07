@@ -60,6 +60,8 @@ class _Report(TypedDict):
 
 # macro -> (accepted semantic case, expected source-part layer count)
 MACROS = {
+    "turret_pir_l_battleship_01_laser_01_mk1_macro": ("depth4_p6_translation", 4),
+    "turret_tel_l_laser_01_mk1_macro": ("depth4_p6_translation", 4),
     "turret_par_l_beam_01_mk1_macro": ("depth4_dual_translation", 4),
     "turret_par_m_laser_01_mk1_macro": ("depth5_additive_x_rotation", 5),
     "turret_par_l_laser_01_mk1_macro": ("depth4_dual_translation", 4),

@@ -163,6 +163,135 @@ def _resolve_supported_endpoint_source_semantics(
             ),
         }
 
+    # Accepted P6 semantic case (Issue #132): the depth-4 gun/barrel
+    # composition with exact identity-valued gun companions. The live-backed
+    # conclusion that channels 1 and 2 add no material settled transform is
+    # bounded to this complete signature; only channel-0 translations are
+    # applied.
+    p6_active_bits = {
+        (2, 0): (("0x00000000", "0x00000000", "0x00000000"),) * 2,
+        (2, 1): (("0x00000000", "0x80000000", "0x00000000"),) * 2,
+        (2, 2): (("0x3f800000", "0x3f800000", "0x3f800000"),) * 2,
+        (3, 0): (("0x00000000", "0xb5fffe54", "0x00000000"),) * 2,
+    }
+    selector_occurrences = endpoint.get(
+        "authored_animation_selector_occurrences", []
+    )
+    turret_active_occurrences = [
+        occurrence
+        for occurrence in selector_occurrences
+        if occurrence.get("animation_name") == "turret_active"
+    ]
+    p6_selector_match = False
+    if len(turret_active_occurrences) == 1:
+        occurrence = turret_active_occurrences[0]
+        span = occurrence.get("_authored_frame_span") or {}
+        selector_descriptors = occurrence.get(
+            "selector_connection_ani_descriptors", []
+        )
+        selected_path_descriptors = occurrence.get(
+            "selected_endpoint_path_ani_descriptor_memberships", []
+        )
+        p6_selector_match = (
+            str(span.get("start", "")) == "60"
+            and str(span.get("end", "")) == "61"
+            and occurrence.get("selector_connection_descriptor_match_count") == 1
+            and len(selector_descriptors) == 1
+            and selector_descriptors[0].get("subname") == "turret_active"
+            and _counts(selector_descriptors[0]) == (0, 0, 0, 0, 0)
+            and len(selected_path_descriptors) == 1
+            and selected_path_descriptors[0].get("subname") == "turret_active"
+            and selected_path_descriptors[0].get("endpoint_path_edge_index") == 0
+            and _counts(selected_path_descriptors[0]) == (0, 0, 0, 0, 0)
+        )
+
+    p6_boundary_match = False
+    all_memberships = endpoint.get("ani_descriptor_memberships")
+    if all_memberships is not None:
+        p6_boundary_match = True
+        for (edge_index, channel_index), active_bits in p6_active_bits.items():
+            edge_memberships = [
+                membership
+                for membership in all_memberships
+                if int(membership.get("endpoint_path_edge_index", -1)) == edge_index
+            ]
+            activating = [
+                membership
+                for membership in edge_memberships
+                if membership.get("subname") == "turret_activating"
+                and _channel_records(membership, channel_index)
+            ]
+            deactivating = [
+                membership
+                for membership in edge_memberships
+                if membership.get("subname") == "turret_deactivating"
+                and _channel_records(membership, channel_index)
+            ]
+            if len(activating) != 1 or len(deactivating) != 1:
+                p6_boundary_match = False
+                break
+            active_value = active_bits[0]
+            activating_value = tuple(
+                str(bit)
+                for bit in _channel_records(activating[0], channel_index)[-1][
+                    "raw_bits"
+                ][:3]
+            )
+            deactivating_value = tuple(
+                str(bit)
+                for bit in _channel_records(deactivating[0], channel_index)[0][
+                    "raw_bits"
+                ][:3]
+            )
+            if activating_value != active_value or deactivating_value != active_value:
+                p6_boundary_match = False
+                break
+
+    p6_layers = authored_geometry.get("source_geometry_layers", [])
+    p6_yaw = p6_layers[1]["authored_restrictions"] if len(p6_layers) == 4 else []
+    p6_pitch = p6_layers[2]["authored_restrictions"] if len(p6_layers) == 4 else []
+    p6_geometry_match = (
+        len(p6_yaw) == 1
+        and p6_yaw[0].get("type_token") == "rotation_y"
+        and p6_yaw[0].get("authored_min") is None
+        and p6_yaw[0].get("authored_max") is None
+        and len(p6_pitch) == 1
+        and p6_pitch[0].get("type_token") == "rotation_x"
+        and _limit(p6_pitch[0], "authored_min") == -5.0
+        and _limit(p6_pitch[0], "authored_max") == 90.0
+    )
+    if (
+        component_endpoint_count == 2
+        and depth == 4
+        and covered is not None
+        and set(covered) == {0, 1, 2, 3}
+        and tuple(_counts(covered[index]) for index in range(4))
+        == (
+            (0, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0),
+            (2, 2, 2, 0, 0),
+            (2, 0, 0, 0, 0),
+        )
+        and all(
+            _first_three_bits(covered[edge_index], channel_index) == bits
+            for (edge_index, channel_index), bits in p6_active_bits.items()
+        )
+        and p6_selector_match
+        and p6_boundary_match
+        and p6_geometry_match
+    ):
+        return {
+            "classification": "SOURCE_RESOLVED",
+            "semantic_case": "depth4_p6_translation",
+            "applied_authored_geometry": _apply(
+                authored_geometry,
+                positions={
+                    2: [0.0, 0.0, 0.0],
+                    3: [0.0, -1.9072999748459551e-6, 0.0],
+                },
+            ),
+        }
+
     # Accepted one-key barrel case (Issue #79 / #125 A2, Issue #128 P2): the
     # depth-4 rotator/barrel composition where the barrel stores a single
     # settled turret_active channel-0 key instead of the doubled form. The
