@@ -353,28 +353,6 @@ local function viewSummary()
     return #parts .. (#parts > 0 and ("[" .. table.concat(parts, ",") .. "]") or "")
 end
 
--- ponytail: temporary Issue #118 Task 1 probe. One shot per menu show, logged
--- immediately before the first frame:display() so it captures exactly the View
--- state View.registerMenu is about to branch on (viewhelper.lua:162 -- empty
--- View.frames means createView, otherwise updateMenu). Delete with the issue.
-local entryDiagPending = false
-local function logEntryDiagnostic()
-    if not entryDiagPending then return end
-    entryDiagPending = false
-    local frames = View and View.frames
-    local menus = View and View.menus
-    local parts = {}
-    if menus then
-        for _, entry in ipairs(menus) do
-            parts[#parts + 1] = tostring(entry.id) .. "/" .. tostring(entry.type)
-        end
-    end
-    log("event=entry_diag origin=" .. tostring(session and session.origin)
-        .. " frames_nonempty=" .. tostring(frames ~= nil and next(frames) ~= nil)
-        .. " currentFrames=" .. tostring(View and View.currentFrames)
-        .. " menus=" .. (menus and ("[" .. table.concat(parts, ",") .. "]") or "<unavailable>"))
-end
-
 -- The engine's own "is a fullscreen menu up" test (helptext.lua:536). A menu
 -- that stays tracked after ours is gone would take the Esc that should open the
 -- game menu, which is the reported symptom. Named per candidate because the fix
@@ -2408,7 +2386,6 @@ function menu.onShowMenu()
         session.repointTargetID = session.aimTargetID
         session.repointResumeRetry = session.aimTargetID
     end
-    entryDiagPending = true
     menu.display()
 end
 
@@ -2576,7 +2553,6 @@ function menu.display()
         end
         -- Auto-size frame height like the old direct panel (contract grep).
         viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
-        logEntryDiagnostic()
         viewFrame:display()
         -- Element panel: top-left, only for direct mode with an engaged object.
         if session.controlMode == "direct" and session.targetObjectID then
@@ -2793,7 +2769,6 @@ function menu.display()
                 noSurfRow[1]:setColSpan(5):createText(text(61))
             end
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
-            logEntryDiagnostic()
             elemFrame:display()
         end
         return
@@ -2910,7 +2885,6 @@ function menu.display()
         actions[6].handlers.onClick = function()
             returnToConsole("target browser back button")
         end
-        logEntryDiagnostic()
         frame:display()
         return
     end
@@ -3068,7 +3042,6 @@ function menu.display()
     local canUpdate = State.isStagedDirty(session)
     updateRow[1]:setColSpan(8):createButton({ active = canUpdate }):setText(text(83))
     updateRow[1].handlers.onClick = commitStagedTurretBehavior
-    logEntryDiagnostic()
     frame:display()
 end
 
