@@ -923,6 +923,27 @@ class P8SourceSemanticTests(unittest.TestCase):
 
         self.assertEqual(result["classification"], "UNSUPPORTED")
 
+    def test_p8_companion_channel_on_other_selector_fails_closed(self) -> None:
+        endpoint = self._p8_endpoint()
+        # turret_active signature untouched; a non-active selector carries a
+        # companion-channel record on the same on-path edge.
+        endpoint["ani_descriptor_memberships"].append(
+            _descriptor(
+                3,
+                (2, 2, 0, 0, 0),
+                {0: self._P8_BARREL, 1: (0.0, 0.0, 0.0)},
+                subname="turret_idle",
+            )
+        )
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
     def test_p8_missing_state_boundary_agreement_fails_closed(self) -> None:
         endpoint = self._p8_endpoint()
         # Drop the barrel's turret_deactivating boundary descriptor.

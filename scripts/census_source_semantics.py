@@ -439,6 +439,18 @@ def _resolve_supported_endpoint_source_semantics(
         _state_boundary_bits(endpoint, edge_index, 0) == (bits[0], bits[0])
         for edge_index, bits in p8_active_bits.items()
     )
+    # Accepted A1 proof boundary (Issue #135): the muzzle path stores no key at
+    # all in candidate channels 1-4, under every animation selector -- not just
+    # turret_active. Any such record puts a settled transform outside the
+    # applied channel-0 math, so the case fails closed.
+    p8_channel0_only = all(
+        _counts(descriptor)[1:] == (0, 0, 0, 0)
+        and not any(
+            _channel_records(descriptor, channel) for channel in range(1, 5)
+        )
+        for descriptor in list(covered.values() if covered else [])
+        + list(endpoint.get("ani_descriptor_memberships") or [])
+    )
     if (
         component_endpoint_count == 2
         and depth == 4
@@ -455,6 +467,7 @@ def _resolve_supported_endpoint_source_semantics(
             _first_three_bits(covered[edge_index], 0) == bits
             for edge_index, bits in p8_active_bits.items()
         )
+        and p8_channel0_only
         and p8_selector_match
         and p8_boundary_match
         and p8_geometry_match
