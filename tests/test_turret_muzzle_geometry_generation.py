@@ -86,8 +86,51 @@ def _check_settled_rotation_x():
         raise AssertionError(f"nonzero Euler Y/Z must fail closed: {bad}")
 
 
+def _shared_report(aliases):
+    """One census component backing several macro aliases."""
+    macro = aliases[0]
+    semantic_case, layer_count = _gen.MACROS[macro]
+    layers = _layers(layer_count)
+    return {
+        "x4_version": X4_VERSION,
+        "component_to_macros": [
+            {
+                "macros": list(aliases),
+                "source_semantic_resolutions": [
+                    _endpoint_geometry(layers, connection, semantic_case)
+                    for connection in ("con_a", "con_b")
+                ],
+            }
+        ],
+    }
+
+
+def _check_shared_component():
+    # Both Xenon aliases are backed by one component under one contract.
+    shared = ("turret_xen_m_beam_02_mk1_macro", "turret_xen_m_laser_02_mk1_macro")
+    report = _shared_report(shared)
+    first, second = (_gen._record(report, macro) for macro in shared)
+    assert first[0] != second[0], "each alias must key its own record"
+    assert first[1:] == second[1:], "aliases on one component must share geometry"
+
+    near_misses = {
+        "unsupported alias": shared + ("turret_xen_m_unknown_mk1_macro",),
+        # depth5_additive_x_rotation / 5 layers: a different contract.
+        "contract mismatch": shared + ("turret_par_m_laser_01_mk1_macro",),
+        "duplicate alias": shared + (shared[1],),
+    }
+    for label, aliases in near_misses.items():
+        bad = _shared_report(aliases)
+        try:
+            _gen._record(bad, shared[0])
+        except SystemExit:
+            continue
+        raise AssertionError(f"{label} must fail closed")
+
+
 def main():
     _check_settled_rotation_x()
+    _check_shared_component()
     order = ("con_laser_01", "con_laser_02")
 
     first = _gen._render(_report(order), X4_VERSION)
