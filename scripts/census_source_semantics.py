@@ -91,19 +91,62 @@ def _offset_matches(
     position: tuple[float, float, float],
     quaternion: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0),
 ) -> bool:
-    """Match an authored transform numerically without relying on asset names."""
+    """Match an authored transform numerically without relying on asset names.
+
+    An authored component may store a present-but-empty <position> or
+    <quaternion> record; that is exactly the zero offset and identity rotation
+    the generator emits, so it is matched as such. A key that is missing
+    outright is absent source data, not an authored zero, and fails closed.
+    """
+    if "position" not in offset or "quaternion" not in offset:
+        return False
     try:
-        actual_position = tuple(
-            float(offset["position"][axis]["candidate_numeric_value"])
-            for axis in "xyz"
+        actual_position = (
+            tuple(
+                float(offset["position"][axis]["candidate_numeric_value"])
+                for axis in "xyz"
+            )
+            if offset["position"] is not None
+            else (0.0, 0.0, 0.0)
         )
-        actual_quaternion = tuple(
-            float(offset["quaternion"][axis]["candidate_numeric_value"])
-            for axis in ("qx", "qy", "qz", "qw")
+        actual_quaternion = (
+            tuple(
+                float(offset["quaternion"][axis]["candidate_numeric_value"])
+                for axis in ("qx", "qy", "qz", "qw")
+            )
+            if offset["quaternion"] is not None
+            else (0.0, 0.0, 0.0, 1.0)
         )
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, AttributeError):
         return False
     return actual_position == position and actual_quaternion == quaternion
+
+
+def _state_boundary_bits(
+    endpoint: dict[str, object], edge_index: int, channel_index: int
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """Last turret_activating and first turret_deactivating value on one edge."""
+    memberships = endpoint.get("ani_descriptor_memberships")
+    if memberships is None:
+        return None
+    edges = [
+        membership
+        for membership in memberships
+        if int(membership.get("endpoint_path_edge_index", -1)) == edge_index
+    ]
+    bounds: list[tuple[str, ...]] = []
+    for subname, index in (("turret_activating", -1), ("turret_deactivating", 0)):
+        matches = [
+            membership
+            for membership in edges
+            if membership.get("subname") == subname
+            and _channel_records(membership, channel_index)
+        ]
+        if len(matches) != 1:
+            return None
+        records = _channel_records(matches[0], channel_index)
+        bounds.append(tuple(str(bit) for bit in records[index]["raw_bits"][:3]))
+    return bounds[0], bounds[1]
 
 
 def _resolve_supported_endpoint_source_semantics(
@@ -331,6 +374,112 @@ def _resolve_supported_endpoint_source_semantics(
                 positions={
                     2: [0.0, 0.0, 0.0],
                     3: [0.0, -1.9072999748459551e-6, 0.0],
+                },
+            ),
+        }
+
+    # Accepted P8 semantic case (Issue #135): the depth-4 rotator/barrel
+    # composition where the muzzle path stores no key at all in candidate
+    # channels 1-4, both keyed edges carry two bit-identical channel-0 records,
+    # and those values also hold at both adjacent state boundaries. Bounded to
+    # this component's own exact stored bits and authored transforms; the
+    # applied math is the existing depth-4 channel-0 translation.
+    p8_active_bits = {
+        1: (("0x00000000", "0x00000000", "0x00000000"),) * 2,
+        3: (("0x00000000", "0x00000000", "0x367ffe54"),) * 2,
+    }
+    p8_connection_positions = (
+        (0.0, 0.0, 0.0),
+        (0.0, 8.5, 0.0),
+        (0.0, 2.064657, -6.057116),
+        (0.0, 0.6179247, 45.60182),
+    )
+    p8_endpoint_positions = {
+        (2.003361, 4.62532e-3, 17.78848),
+        (-2.000694, 0.135191, 17.78848),
+    }
+    p8_layers = authored_geometry.get("source_geometry_layers", [])
+    p8_yaw = p8_layers[1]["authored_restrictions"] if len(p8_layers) == 4 else []
+    p8_pitch = p8_layers[2]["authored_restrictions"] if len(p8_layers) == 4 else []
+    p8_geometry_match = (
+        len(p8_yaw) == 1
+        and p8_yaw[0].get("type_token") == "rotation_y"
+        and p8_yaw[0].get("authored_min") is None
+        and p8_yaw[0].get("authored_max") is None
+        and len(p8_pitch) == 1
+        and p8_pitch[0].get("type_token") == "rotation_x"
+        and _limit(p8_pitch[0], "authored_min") == -5.0
+        and _limit(p8_pitch[0], "authored_max") == 80.0
+        and all(
+            _offset_matches(layer.get("connection_authored_offset", {}), position)
+            and _offset_matches(
+                layer.get("part_authored_offset", {}), (0.0, 0.0, 0.0)
+            )
+            for layer, position in zip(p8_layers, p8_connection_positions)
+        )
+        and any(
+            _offset_matches(
+                authored_geometry.get("endpoint_authored_offset", {}), position
+            )
+            for position in p8_endpoint_positions
+        )
+    )
+    p8_selector_match = False
+    p8_occurrences = [
+        occurrence
+        for occurrence in endpoint.get("authored_animation_selector_occurrences", [])
+        if occurrence.get("animation_name") == "turret_active"
+    ]
+    if len(p8_occurrences) == 1:
+        span = p8_occurrences[0].get("_authored_frame_span") or {}
+        p8_selector_match = (
+            str(span.get("start", "")) == "60" and str(span.get("end", "")) == "61"
+        )
+    p8_boundary_match = all(
+        _state_boundary_bits(endpoint, edge_index, 0) == (bits[0], bits[0])
+        for edge_index, bits in p8_active_bits.items()
+    )
+    # Accepted A1 proof boundary (Issue #135): the muzzle path stores no key at
+    # all in candidate channels 1-4, under every animation selector -- not just
+    # turret_active. Any such record puts a settled transform outside the
+    # applied channel-0 math, so the case fails closed.
+    p8_channel0_only = all(
+        _counts(descriptor)[1:] == (0, 0, 0, 0)
+        and not any(
+            _channel_records(descriptor, channel) for channel in range(1, 5)
+        )
+        for descriptor in list(covered.values() if covered else [])
+        + list(endpoint.get("ani_descriptor_memberships") or [])
+    )
+    if (
+        component_endpoint_count == 2
+        and depth == 4
+        and covered is not None
+        and set(covered) == {0, 1, 2, 3}
+        and tuple(_counts(covered[index]) for index in range(4))
+        == (
+            (0, 0, 0, 0, 0),
+            (2, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0),
+            (2, 0, 0, 0, 0),
+        )
+        and all(
+            _first_three_bits(covered[edge_index], 0) == bits
+            for edge_index, bits in p8_active_bits.items()
+        )
+        and p8_channel0_only
+        and p8_selector_match
+        and p8_boundary_match
+        and p8_geometry_match
+    ):
+        return {
+            "classification": "SOURCE_RESOLVED",
+            "semantic_case": "depth4_p8_translation",
+            "applied_authored_geometry": _apply(
+                authored_geometry,
+                positions={
+                    1: [0.0, 0.0, 0.0],
+                    3: [0.0, 0.0, 3.8145999496919103e-06],
                 },
             ),
         }

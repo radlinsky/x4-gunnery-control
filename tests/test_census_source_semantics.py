@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from census_ani_parser import _ANI_CHANNEL_COUNT_FIELDS  # noqa: E402
 from census_source_semantics import (  # noqa: E402
+    _offset_matches,
     _resolve_supported_endpoint_source_semantics,
 )
 
@@ -148,6 +149,7 @@ def _geometry(
     one_key_barrel_restrictions: bool = False,
     one_key_barrel_pitch_max: float = 90.0,
     p6_restrictions: bool = False,
+    p8_restrictions: bool = False,
 ) -> dict[str, object]:
     layers = [
         {
@@ -169,6 +171,20 @@ def _geometry(
         layers[2]["authored_restrictions"] = [
             _restriction("rotation_x", -10.0, one_key_barrel_pitch_max)
         ]
+    if p8_restrictions and depth >= 3:
+        connection_positions = (
+            (0.0, 0.0, 0.0),
+            (0.0, 8.5, 0.0),
+            (0.0, 2.064657, -6.057116),
+            (0.0, 0.6179247, 45.60182),
+        )
+        for layer, position in zip(layers, connection_positions):
+            layer["connection_authored_offset"] = _offset(position)
+            layer["part_authored_offset"] = _offset((0.0, 0.0, 0.0))
+        layers[1]["authored_restrictions"] = [_restriction("rotation_y")]
+        layers[2]["authored_restrictions"] = [
+            _restriction("rotation_x", -5.0, 80.0)
+        ]
     if p6_restrictions and depth >= 3:
         connection_positions = (
             (0.0, 0.0, 0.0),
@@ -189,6 +205,8 @@ def _geometry(
         "endpoint_authored_offset": (
             _offset((4.560871, -0.1317711, 23.71955))
             if p6_restrictions
+            else _offset((2.003361, 4.62532e-3, 17.78848))
+            if p8_restrictions
             else {"marker": "endpoint"}
         ),
     }
@@ -805,6 +823,231 @@ class SourceSemanticTests(unittest.TestCase):
                 "reason": "no_accepted_source_semantic_signature",
             },
         )
+
+
+
+class P8SourceSemanticTests(unittest.TestCase):
+    _P8_ROTATOR = (0.0, 0.0, 0.0)
+    _P8_BARREL = (0.0, 0.0, 3.8145999496919103e-06)
+
+    def _p8_endpoint(self) -> dict[str, object]:
+        covered = [
+            _descriptor(0, (0, 0, 0, 0, 0)),
+            _descriptor(1, (2, 0, 0, 0, 0), {0: self._P8_ROTATOR}),
+            _descriptor(2, (0, 0, 0, 0, 0)),
+            _descriptor(3, (2, 0, 0, 0, 0), {0: self._P8_BARREL}),
+        ]
+        boundaries = []
+        for subname in ("turret_activating", "turret_deactivating"):
+            boundaries.extend(
+                [
+                    _descriptor(
+                        1, (2, 0, 0, 0, 0), {0: self._P8_ROTATOR}, subname=subname
+                    ),
+                    _descriptor(
+                        3, (2, 0, 0, 0, 0), {0: self._P8_BARREL}, subname=subname
+                    ),
+                ]
+            )
+        return _endpoint(
+            covered,
+            depth=4,
+            ani_descriptor_memberships=boundaries,
+            authored_animation_selector_occurrences=[
+                _selector("turret_active", 60, 61)
+            ],
+        )
+
+    def test_p8_signature_resolves_and_applies_channel0_translations(self) -> None:
+        result = _resolve_supported_endpoint_source_semantics(
+            self._p8_endpoint(),
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+        self.assertEqual(result["semantic_case"], "depth4_p8_translation")
+        layers = result["applied_authored_geometry"]["source_geometry_layers"]
+        self.assertEqual(layers[1]["settled_local_position_delta"], [-0.0, 0.0, 0.0])
+        self.assertEqual(
+            layers[3]["settled_local_position_delta"],
+            [-0.0, 0.0, 3.8145999496919103e-06],
+        )
+        for index in (0, 2):
+            self.assertNotIn("settled_local_position_delta", layers[index])
+        for layer in layers:
+            self.assertNotIn("settled_local_euler_xyz_delta_radians", layer)
+
+    def test_p8_second_endpoint_leaf_also_resolves(self) -> None:
+        geometry = _geometry(4, p8_restrictions=True)
+        geometry["endpoint_authored_offset"] = _offset(
+            (-2.000694, 0.135191, 17.78848)
+        )
+
+        result = _resolve_supported_endpoint_source_semantics(
+            self._p8_endpoint(), geometry, component_endpoint_count=2
+        )
+
+        self.assertEqual(result["semantic_case"], "depth4_p8_translation")
+
+    def test_p8_near_miss_barrel_bits_fail_closed(self) -> None:
+        endpoint = self._p8_endpoint()
+        barrel = endpoint[
+            "_ancestry_covered_turret_active_descriptor_memberships"
+        ][3]
+        # One ulp away from the accepted settled barrel translation.
+        barrel["_candidate_raw_key_records"][1]["raw_bits"][2] = "0x367ffe55"
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p8_populated_companion_channel_fails_closed(self) -> None:
+        endpoint = self._p8_endpoint()
+        covered = endpoint[
+            "_ancestry_covered_turret_active_descriptor_memberships"
+        ]
+        covered[3] = _descriptor(
+            3, (2, 2, 0, 0, 0), {0: self._P8_BARREL, 1: (0.0, 0.0, 0.0)}
+        )
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p8_companion_channel_on_other_selector_fails_closed(self) -> None:
+        endpoint = self._p8_endpoint()
+        # turret_active signature untouched; a non-active selector carries a
+        # companion-channel record on the same on-path edge.
+        endpoint["ani_descriptor_memberships"].append(
+            _descriptor(
+                3,
+                (2, 2, 0, 0, 0),
+                {0: self._P8_BARREL, 1: (0.0, 0.0, 0.0)},
+                subname="turret_idle",
+            )
+        )
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p8_missing_state_boundary_agreement_fails_closed(self) -> None:
+        endpoint = self._p8_endpoint()
+        # Drop the barrel's turret_deactivating boundary descriptor.
+        endpoint["ani_descriptor_memberships"] = [
+            membership
+            for membership in endpoint["ani_descriptor_memberships"]
+            if not (
+                membership["subname"] == "turret_deactivating"
+                and membership["endpoint_path_edge_index"] == 3
+            )
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p8_authored_offset_near_miss_fails_closed(self) -> None:
+        geometry = _geometry(4, p8_restrictions=True)
+        geometry["source_geometry_layers"][1][
+            "connection_authored_offset"
+        ] = _offset((0.0, 8.6, 0.0))
+
+        result = _resolve_supported_endpoint_source_semantics(
+            self._p8_endpoint(), geometry, component_endpoint_count=2
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p8_pitch_limit_near_miss_fails_closed(self) -> None:
+        geometry = _geometry(4, p8_restrictions=True)
+        geometry["source_geometry_layers"][2]["authored_restrictions"] = [
+            _restriction("rotation_x", -5.0, 90.0)
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            self._p8_endpoint(), geometry, component_endpoint_count=2
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+    def test_p8_wrong_active_selector_span_fails_closed(self) -> None:
+        endpoint = self._p8_endpoint()
+        endpoint["authored_animation_selector_occurrences"] = [
+            _selector("turret_active", 60, 62)
+        ]
+
+        result = _resolve_supported_endpoint_source_semantics(
+            endpoint,
+            _geometry(4, p8_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "UNSUPPORTED")
+
+class OffsetMatchingTests(unittest.TestCase):
+    """_offset_matches treats an omitted XML element as zero, absent data as failure."""
+
+    def test_present_none_position_is_zero(self) -> None:
+        offset = _offset((0.0, 0.0, 0.0))
+        offset["position"] = None
+
+        self.assertTrue(_offset_matches(offset, (0.0, 0.0, 0.0)))
+        self.assertFalse(_offset_matches(offset, (1.0, 0.0, 0.0)))
+
+    def test_present_none_quaternion_is_identity(self) -> None:
+        offset = _offset((1.0, 2.0, 3.0))
+        offset["quaternion"] = None
+
+        self.assertTrue(_offset_matches(offset, (1.0, 2.0, 3.0)))
+
+    def test_missing_position_key_fails_closed(self) -> None:
+        offset = _offset((0.0, 0.0, 0.0))
+        del offset["position"]
+
+        self.assertFalse(_offset_matches(offset, (0.0, 0.0, 0.0)))
+
+    def test_missing_quaternion_key_fails_closed(self) -> None:
+        offset = _offset((0.0, 0.0, 0.0))
+        del offset["quaternion"]
+
+        self.assertFalse(_offset_matches(offset, (0.0, 0.0, 0.0)))
+
+    def test_empty_offset_fails_closed(self) -> None:
+        self.assertFalse(_offset_matches({}, (0.0, 0.0, 0.0)))
+
+    def test_malformed_data_fails_closed(self) -> None:
+        missing_axis = _offset((0.0, 0.0, 0.0))
+        del missing_axis["position"]["z"]
+        non_numeric = _offset((0.0, 0.0, 0.0))
+        non_numeric["position"]["x"]["candidate_numeric_value"] = "nan-ish"
+        wrong_shape = _offset((0.0, 0.0, 0.0))
+        wrong_shape["quaternion"] = "identity"
+
+        for name, offset in (
+            ("missing_axis", missing_axis),
+            ("non_numeric", non_numeric),
+            ("wrong_shape", wrong_shape),
+        ):
+            with self.subTest(name):
+                self.assertFalse(_offset_matches(offset, (0.0, 0.0, 0.0)))
 
 
 if __name__ == "__main__":
