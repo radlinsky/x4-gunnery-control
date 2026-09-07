@@ -17,9 +17,9 @@ local GUN_CONNECTION = { -1.754811e-06, -0.09415483, -5.053287e-04 }
 local BARREL_CONNECTION = { -2.474098e-08, -0.7722228, 1.42531 }
 -- Stored channel-0 translation; the ANI-to-native boundary flips X.
 local BARREL_SETTLED = {
-    4.470348358154297e-07,
-    1.1920928955078125e-07,
-    3.4313702583312988,
+    4.4730001036441536e-07,
+    1.1920000275722487e-07,
+    3.431370258331299,
 }
 
 local endpoints = {
@@ -51,8 +51,9 @@ for _, macro in ipairs(macros) do
         macro .. " lost the accepted rotator settled translation")
     local barrelSettled = record.layers[4].settled_position
     assert(barrelSettled ~= nil, macro .. " lost the barrel settled translation")
+    -- Stored source values: exact match, no tolerance.
     for axis = 1, 3 do
-        assert(math.abs(barrelSettled[axis] - BARREL_SETTLED[axis]) <= 1e-9,
+        assert(barrelSettled[axis] == BARREL_SETTLED[axis],
             macro .. " barrel settled translation axis " .. axis
             .. " does not match the X-flipped source channel-0 key")
     end
