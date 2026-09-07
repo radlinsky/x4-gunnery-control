@@ -749,4 +749,115 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
     },
+    ["turret_arg_m_beam_02_mk1_macro"] = {
+        semantic_case = "depth4_one_key_barrel_translation",
+        layers = {
+            {
+                source_part = "part_socket",
+                owning_connection = "Connection01",
+                connection_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+            },
+            {
+                source_part = "detail_xl_rotator",
+                owning_connection = "Connection03",
+                connection_transform = { position = { 0, 3.464102, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 0, 2.3680334091186523, 0 },
+                runtime_rotation = { axis = "y" },
+            },
+            {
+                source_part = "detail_xl_gun",
+                owning_connection = "Connection04",
+                connection_transform = { position = { -1.754811e-06, -0.09415483, -0.0005053287 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                runtime_rotation = { axis = "x", minimum_degrees = -10.0, maximum_degrees = 90.0 },
+            },
+            {
+                source_part = "detail_xl_barrel",
+                owning_connection = "Connection05",
+                connection_transform = { position = { -2.474098e-08, -0.7722228, 1.42531 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 4.4730001036441536e-07, 1.1920000275722487e-07, 3.431370258331299 },
+            },
+        },
+        endpoints = {
+            { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
+            { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+    },
+    ["turret_par_m_beam_02_mk1_macro"] = {
+        semantic_case = "depth4_one_key_barrel_translation",
+        layers = {
+            {
+                source_part = "part_socket",
+                owning_connection = "Connection01",
+                connection_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+            },
+            {
+                source_part = "detail_xl_rotator",
+                owning_connection = "Connection03",
+                connection_transform = { position = { 0, 3.464102, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 0, 2.3680334091186523, 0 },
+                runtime_rotation = { axis = "y" },
+            },
+            {
+                source_part = "detail_xl_gun",
+                owning_connection = "Connection04",
+                connection_transform = { position = { -1.754811e-06, -0.09415483, -0.0005053287 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                runtime_rotation = { axis = "x", minimum_degrees = -10.0, maximum_degrees = 90.0 },
+            },
+            {
+                source_part = "detail_xl_barrel",
+                owning_connection = "Connection05",
+                connection_transform = { position = { -2.474098e-08, -0.7722228, 1.42531 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 4.4730001036441536e-07, 1.1920000275722487e-07, 3.431370258331299 },
+            },
+        },
+        endpoints = {
+            { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
+            { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+    },
+    ["turret_tel_m_beam_02_mk1_macro"] = {
+        semantic_case = "depth4_one_key_barrel_translation",
+        layers = {
+            {
+                source_part = "part_socket",
+                owning_connection = "Connection01",
+                connection_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+            },
+            {
+                source_part = "detail_xl_rotator",
+                owning_connection = "Connection03",
+                connection_transform = { position = { 0, 3.464102, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 0, 2.3680334091186523, 0 },
+                runtime_rotation = { axis = "y" },
+            },
+            {
+                source_part = "detail_xl_gun",
+                owning_connection = "Connection04",
+                connection_transform = { position = { -1.754811e-06, -0.09415483, -0.0005053287 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                runtime_rotation = { axis = "x", minimum_degrees = -10.0, maximum_degrees = 90.0 },
+            },
+            {
+                source_part = "detail_xl_barrel",
+                owning_connection = "Connection05",
+                connection_transform = { position = { -2.474098e-08, -0.7722228, 1.42531 }, quaternion = { 0, 0, 0, 1.0 } },
+                part_transform = { position = { 0, 0, 0 }, quaternion = { 0, 0, 0, 1.0 } },
+                settled_position = { 4.4730001036441536e-07, 1.1920000275722487e-07, 3.431370258331299 },
+            },
+        },
+        endpoints = {
+            { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
+            { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+    },
 }
