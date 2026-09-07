@@ -18,9 +18,10 @@ Extend reusable Test Lab behavior only when the experiment cannot be expressed
 with the existing scenario spec. Do not add helpers, fixture APIs, logging, or
 tests merely to make one scenario more convenient.
 
-Work from the exact branch/SHA under test. Keep PR-specific live fixtures
-uncommitted where practical. Keep the repository `scenario_spec.lua` disabled;
-the Test Lab development installer enables only the installed copy.
+Work from the exact branch/SHA under test. Commit and push the PR-specific live
+fixture with the work that used it so that checking out the commit restores the
+exact scenario. Keep the repository `scenario_spec.lua` disabled; the Test Lab
+development installer enables only the installed copy.
 
 Read specialized guidance only when the requested fixture needs it:
 
@@ -90,6 +91,11 @@ Run the relevant repository validation for the files changed, including
 `./scripts/validate.sh` and `git diff --check` before accepting repository
 changes. Do not weaken valid tests to accommodate a fixture.
 
+Scenario-specific fixture data does not need a dedicated unit test. When the
+work changes reusable Test Lab validation, transport, safety, selection,
+observation, or lifecycle behavior, add the smallest appropriate regression
+test for that behavior instead of testing the live fixture's exact data.
+
 Follow [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for installation,
 reload, and restart decisions. Apply it to the exact state not yet loaded in X4.
 For repeat runs, compute the reset from the files changed since the exact head
@@ -154,9 +160,8 @@ changing behavior unless other evidence already proves the bug.
 After the live run:
 
 - keep the repository `scenario_spec.lua` disabled;
-- run relevant validation again before committing reusable changes;
-- commit only reusable Test Lab behavior or documentation intended to remain;
-- do not commit a PR-specific live fixture unless it is intentionally reusable
-  infrastructure;
+- keep the exact PR-specific fixture in the commit and push it with the branch;
+- run relevant validation again before committing the fixture, reusable Test
+  Lab changes, and documentation intended to remain;
 - use **Despawn test scenario** only as explicit post-test cleanup, not as a
   routine prerequisite for creating the next fixture.
