@@ -45,33 +45,6 @@ Verified from the generated report:
 
 The generated report stays untracked at `.x4-research-cache/issue72-a3-topology-priorities-census.json`.
 
-## Current prospective-muzzle production coverage boundary
-
-Reproduced on 2026-09-07 at repository starting SHA
-`7f4fa73eae967b83a844190d76c920655745bec9`. The census command above was rerun
-unchanged against the same accepted eight X4 9.00 source sets and eight ANI
-resource sets, with output kept untracked at
-`.x4-research-cache/issue137-a1-census.json`. The accepted changing-case guard
-passed, the report remained schema 25 with no anomalies, and its exact
-`COMBAT_CANDIDATE` identity set contained 92 macros.
-
-The exact keys of `MACROS` in `scripts/generate-turret-muzzle-geometry.py` were
-compared as a set with those 92 census identities. All 27 generator keys were
-members of the combat-candidate set, leaving exactly 65 identities in the set
-difference and no generator key outside the candidate set. Sorted newline-delimited
-identity hashes make the three sets independently checkable without duplicating
-their inventories here:
-
-- 92 combat candidates: SHA-256 `32b5e5e86075d0cedf0914426f17322db58c3ac03a975c18e2651eb37386d838`
-- 27 generated production records: SHA-256 `109c20901bac68668dd179efdfe273f130e8d6bf2aa379e1c76a3fcf5d67177d`
-- 65 remaining unsupported identities: SHA-256 `cf60d5b7d27c63cdfefe25325e20ef407c84d659385284ef59a41a7b70f7c959`
-
-The production generator was also rerun against those same source/resource
-sets with X4 version `9.00`. It wrote 27 records, and its ignored output was
-byte-identical to `ui/turret_muzzle_geometry.lua`. This records only the current
-coverage boundary; it does not classify the 65 unsupported macros or extend
-production support.
-
 ## Boundaries
 
 - **Evidence classification: shipped-source.** Every group below is a structural fact about
