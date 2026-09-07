@@ -2,6 +2,8 @@
 --
 -- THIS FILE IS AGENT-AUTHORED INPUT. Keep it plain: literal fields only, no
 -- logic and no requires. Ordinary live fixtures should change this file only.
+-- Commit and push each PR-specific fixture with the work that used it so the
+-- commit preserves the exact live-test setup.
 -- Keep the repository copy disabled; scripts/launch-x4-test-lab-dev.bat enables
 -- the installed copy when launching the development Test Lab.
 --

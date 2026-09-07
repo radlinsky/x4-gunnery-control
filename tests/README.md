@@ -31,15 +31,17 @@ particular, avoid tests whose only purpose is preserving:
 - implementation details already covered by a stronger behavior-level test.
 
 `testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua` is mutable live-test
-input. A normal fixture change should require **no unit-test edit**. The Test
-Lab validator and transport should be tested with small synthetic specs; the
-actual live fixture is reviewed as part of preparing that live run and then
-proved or rejected by X4 evidence.
+input. Commit and push each PR-specific fixture, disabled in the repository, so
+the commit preserves the exact live-test setup. That historical record does not
+make the fixture data a permanent CI contract: a normal fixture change should
+require **no unit-test edit**. Test reusable Test Lab behavior with small
+synthetic specs; review the actual live fixture while preparing the run, then
+prove or reject it with X4 evidence.
 
 When a live experiment settles a question, record the durable result in the
 owning GitHub issue and, when it is reusable X4 knowledge, in
-`.agents/skills/research-x4-modding/references/`. The historical fixture does
-not become a permanent CI contract by default.
+`.agents/skills/research-x4-modding/references/`. Keep the disabled historical
+fixture in the commit that used it without adding fixture-specific tests.
 
 Before updating a brittle historical test, ask what current regression it
 prevents. If there is no continuing contract, delete the test instead of

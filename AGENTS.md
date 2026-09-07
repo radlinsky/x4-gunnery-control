@@ -32,15 +32,17 @@ Tests protect stable behavior, not temporary experiment setup. See
   returned. Do not snapshot implementation details or duplicate the code under
   test when a real behavior can be exercised instead.
 - `testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua` is mutable live-test
-  input. Changing a live fixture must not require changing unit tests. Test the
-  Test Lab validator and transport with small synthetic specs instead.
+  input. Commit and push each PR-specific fixture with the work that used it,
+  with the repository copy disabled, so the exact live-test setup remains in
+  that commit. Changing fixture data does not require changing unit tests. Test
+  reusable Test Lab behavior with small synthetic specs instead.
 - Do not make exact live scenario ids, labels, coordinates, rotations, target
   macros, or historical operator setups permanent CI contracts unless that
   exact identity is itself required product behavior.
 - After a live experiment is settled, preserve its durable result in the owning
-  issue and, when reusable, the X4 research knowledge base. Retire
-  fixture-specific CI tests unless they still protect a continuing product or
-  reusable Test Lab contract.
+  issue and, when reusable, the X4 research knowledge base. Keep the disabled
+  fixture in the commit that used it, but retire fixture-specific CI tests
+  unless they still protect a continuing product or reusable Test Lab contract.
 - When an existing test is expensive or brittle, first identify the regression
   it prevents. If no current behavior depends on it, delete it rather than
   updating it.
