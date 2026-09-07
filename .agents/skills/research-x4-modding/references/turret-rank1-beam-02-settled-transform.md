@@ -83,6 +83,33 @@ minimum on both sides. Additive-radian treatment therefore makes the stored −2
 effectively identity for this structural family, and a degree reading is
 decisively rejected.
 
+### What the intended-column residuals do and do not mean
+
+The ~`0.0035`–`0.018` m intended figures are residuals from scoring **every**
+post-settled `FIRED` sample while using the projectile bore direction as a proxy
+for the instantaneous turret joint pose. They are **not** evidence that the
+settled source geometry is millimetres or centimetres wrong. Projectile
+direction varies slightly shot to shot, and that proxy uncertainty is amplified
+over the several-metre muzzle chain, so these numbers bound live measurement
+noise, not model error. The ~`0.53` m column belongs to the deliberately wrong
+degree-control model, not to the intended model.
+
+One clean post-settled RIGHT sample at `t=248997.956`, turret `0x17add8`, shows
+the underlying model accuracy:
+
+| quantity | value |
+|---|---|
+| runtime `barrelposition` | ~`(4.95009, 9.60552, 2.11518)` |
+| source-model prediction | ~`(4.95008816, 9.60551670, 2.11518568)` |
+| absolute residual | ~`6.8e-6` m |
+| bore-perpendicular residual | ~`5.6e-6` m |
+
+That micrometre-scale agreement is consistent with the prior rank-2 absolute
+validation and is strong evidence against a missing fixed transform. Note that
+the rank-2 micrometre figures came from a more controlled settled-pose
+comparison, so its reported accuracy numbers are not directly comparable with
+the all-`FIRED`-sample median/max statistics tabulated above.
+
 ## Decision
 
 For the P2 `detail_xl_barrel` descriptor, the settled `turret_active` transform
@@ -138,6 +165,15 @@ live result establishes this for the shared beam_02 animation behavior.
   max ~`0.0130` m against a degree-control median ~`0.5399` m and min
   ~`0.5289` m; post-settled RIGHT (10 FIRED samples) intended median ~`0.0035` m
   and max ~`0.0180` m against a degree-control median ~`0.5357` m and min
-  ~`0.5284` m. Additive-radian treatment makes the stored −2π effectively
+  ~`0.5284` m. The intended-column figures score every post-settled `FIRED`
+  sample using projectile bore direction as a proxy for the instantaneous turret
+  joint pose, so they bound live measurement uncertainty over the several-metre
+  muzzle chain rather than settled source-geometry error; one clean post-settled
+  RIGHT sample at `t=248997.956`, turret `0x17add8`, gives runtime
+  `barrelposition` ~`(4.95009,9.60552,2.11518)` against source-model prediction
+  ~`(4.95008816,9.60551670,2.11518568)`, absolute residual ~`6.8e-6` m and
+  bore-perpendicular residual ~`5.6e-6` m, consistent with the prior rank-2
+  absolute validation and strong evidence against a missing fixed transform.
+  Additive-radian treatment makes the stored −2π effectively
   identity for this structural family and decisively rejects a degree reading;
   the channel-1/2 companions add no material settled transform.
