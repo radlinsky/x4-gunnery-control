@@ -93,17 +93,20 @@ def _offset_matches(
 ) -> bool:
     """Match an authored transform numerically without relying on asset names.
 
-    An authored component may omit the <position> or <quaternion> element
-    entirely; that is exactly the zero offset and identity rotation the
-    generator emits for an absent record, so it is matched as such.
+    An authored component may store a present-but-empty <position> or
+    <quaternion> record; that is exactly the zero offset and identity rotation
+    the generator emits, so it is matched as such. A key that is missing
+    outright is absent source data, not an authored zero, and fails closed.
     """
+    if "position" not in offset or "quaternion" not in offset:
+        return False
     try:
         actual_position = (
             tuple(
                 float(offset["position"][axis]["candidate_numeric_value"])
                 for axis in "xyz"
             )
-            if offset.get("position") is not None
+            if offset["position"] is not None
             else (0.0, 0.0, 0.0)
         )
         actual_quaternion = (
@@ -111,7 +114,7 @@ def _offset_matches(
                 float(offset["quaternion"][axis]["candidate_numeric_value"])
                 for axis in ("qx", "qy", "qz", "qw")
             )
-            if offset.get("quaternion") is not None
+            if offset["quaternion"] is not None
             else (0.0, 0.0, 0.0, 1.0)
         )
     except (KeyError, TypeError, ValueError, AttributeError):

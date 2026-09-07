@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from census_ani_parser import _ANI_CHANNEL_COUNT_FIELDS  # noqa: E402
 from census_source_semantics import (  # noqa: E402
+    _offset_matches,
     _resolve_supported_endpoint_source_semantics,
 )
 
@@ -979,6 +980,53 @@ class P8SourceSemanticTests(unittest.TestCase):
         )
 
         self.assertEqual(result["classification"], "UNSUPPORTED")
+
+class OffsetMatchingTests(unittest.TestCase):
+    """_offset_matches treats an omitted XML element as zero, absent data as failure."""
+
+    def test_present_none_position_is_zero(self) -> None:
+        offset = _offset((0.0, 0.0, 0.0))
+        offset["position"] = None
+
+        self.assertTrue(_offset_matches(offset, (0.0, 0.0, 0.0)))
+        self.assertFalse(_offset_matches(offset, (1.0, 0.0, 0.0)))
+
+    def test_present_none_quaternion_is_identity(self) -> None:
+        offset = _offset((1.0, 2.0, 3.0))
+        offset["quaternion"] = None
+
+        self.assertTrue(_offset_matches(offset, (1.0, 2.0, 3.0)))
+
+    def test_missing_position_key_fails_closed(self) -> None:
+        offset = _offset((0.0, 0.0, 0.0))
+        del offset["position"]
+
+        self.assertFalse(_offset_matches(offset, (0.0, 0.0, 0.0)))
+
+    def test_missing_quaternion_key_fails_closed(self) -> None:
+        offset = _offset((0.0, 0.0, 0.0))
+        del offset["quaternion"]
+
+        self.assertFalse(_offset_matches(offset, (0.0, 0.0, 0.0)))
+
+    def test_empty_offset_fails_closed(self) -> None:
+        self.assertFalse(_offset_matches({}, (0.0, 0.0, 0.0)))
+
+    def test_malformed_data_fails_closed(self) -> None:
+        missing_axis = _offset((0.0, 0.0, 0.0))
+        del missing_axis["position"]["z"]
+        non_numeric = _offset((0.0, 0.0, 0.0))
+        non_numeric["position"]["x"]["candidate_numeric_value"] = "nan-ish"
+        wrong_shape = _offset((0.0, 0.0, 0.0))
+        wrong_shape["quaternion"] = "identity"
+
+        for name, offset in (
+            ("missing_axis", missing_axis),
+            ("non_numeric", non_numeric),
+            ("wrong_shape", wrong_shape),
+        ):
+            with self.subTest(name):
+                self.assertFalse(_offset_matches(offset, (0.0, 0.0, 0.0)))
 
 
 if __name__ == "__main__":
