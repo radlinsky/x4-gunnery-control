@@ -317,4 +317,147 @@ do
         "no DockedMenu at all is still a plain timeout")
 end
 
+-- ── 118. physical-chair ingress reopens Gunnery from DockedMenu cleanup ──────
+-- Opening X4GunneryMenu from closeMenuAndOpenNewMenu raced DockedMenu's own
+-- teardown. The chair redirect now closes DockedMenu with the TopLevelMenu
+-- auto-fallback suppressed, calls its cleanup(), and opens Gunnery Control
+-- from the UI Extensions "cleanup" callback after a defer + chair recheck.
+do
+    local fix118 = dofile("tests/support/runtime_fixture.lua").load()
+
+    local trace, opens = {}, 0
+    OpenMenu = function(name)
+        if name == "X4GunneryMenu" then
+            opens = opens + 1
+            trace[#trace + 1] = "open"
+        end
+    end
+    local closeArgs
+    Helper.closeMenu = function(m, reason, a, b)
+        trace[#trace + 1] = "close"
+        closeArgs = { m = m, reason = reason, a = a, b = b }
+    end
+
+    -- Stands in for UI Extensions: registerCallback stores the hooks, and
+    -- cleanup() fires the "cleanup" hook the way the patched menu_docked does.
+    -- One menu object for the whole block, since registerUIHooks registers its
+    -- callbacks exactly once; per-case behaviour comes from `opts`.
+    local cleanupHooks, opts = {}, {}
+    local docked = {
+        name = "DockedMenu",
+        registerCallback = function(event, fn)
+            if event == "cleanup" then cleanupHooks[#cleanupHooks + 1] = fn end
+        end,
+        cleanup = function()
+            trace[#trace + 1] = "cleanup"
+            if opts.skipHooks then return end
+            for _, fn in ipairs(cleanupHooks) do fn() end
+            if opts.afterCleanup then opts.afterCleanup() end
+        end,
+    }
+    Helper.getMenu = function(name)
+        if name == "DockedMenu" then return docked end
+    end
+
+    local function chair(inChair)
+        fix118.C.GetPlayerCurrentControlGroup =
+            function() return inChair and "gunnercontrol" or "cockpit" end
+    end
+
+    -- Drives the chair redirect exactly as the gameplanchange fallback does.
+    local function redirect()
+        local mark = fix118.callbackCheckpoint()
+        fix118.fireUIEvent("gameplanchange", "cockpit")
+        fix118.drainCallbacksSince(mark)
+    end
+
+    chair(true)
+    -- gameLoadingDone re-runs registerUIHooks now that DockedMenu exists.
+    fix118.fireUIEvent("gameLoadingDone")
+    assert(#cleanupHooks == 1,
+        "the chair path must register exactly one DockedMenu \"cleanup\" callback; got "
+        .. tostring(#cleanupHooks))
+
+    -- 118a: close (auto-fallback suppressed) -> cleanup -> open, in that order.
+    redirect()
+    assert(table.concat(trace, ",") == "close,cleanup,open",
+        "chair ingress must close DockedMenu, run its cleanup, and only then open "
+        .. "Gunnery Control; trace was " .. table.concat(trace, ","))
+    assert(closeArgs and closeArgs.reason == "close"
+        and closeArgs.a == false and closeArgs.b == false,
+        "DockedMenu must be closed with the TopLevelMenu auto-fallback suppressed "
+        .. "(closeMenu(docked, \"close\", false, false)); got reason="
+        .. tostring(closeArgs and closeArgs.reason) .. " a="
+        .. tostring(closeArgs and closeArgs.a) .. " b=" .. tostring(closeArgs and closeArgs.b))
+
+    -- 118c: an ordinary DockedMenu cleanup with no chair redirect pending is inert.
+    trace, opens = {}, 0
+    opts = {}
+    local markC = fix118.callbackCheckpoint()
+    docked.cleanup()
+    fix118.drainCallbacksSince(markC)
+    assert(opens == 0,
+        "a DockedMenu cleanup with no chair redirect pending must not open Gunnery "
+        .. "Control; opened " .. tostring(opens) .. " time(s)")
+
+    -- 118d: leaving the chair before the deferred reopen aborts it.
+    trace, opens = {}, 0
+    opts = { afterCleanup = function() chair(false) end }
+    redirect()
+    assert(opens == 0,
+        "losing the gunner chair before the deferred reopen must abort it; opened "
+        .. tostring(opens) .. " time(s)")
+
+    -- 118e: a redirect aborted before it reaches DockedMenu leaves nothing armed,
+    -- and a later fresh chair redirect still opens Gunnery Control.
+    trace, opens = {}, 0
+    opts = {}
+    local markE = fix118.callbackCheckpoint()
+    chair(true)
+    fix118.fireUIEvent("gameplanchange", "cockpit")
+    chair(false)                       -- out of the seat before the deferred redirect
+    fix118.drainCallbacksSince(markE)
+    local markE2 = fix118.callbackCheckpoint()
+    docked.cleanup()               -- ordinary teardown after the aborted redirect
+    fix118.drainCallbacksSince(markE2)
+    assert(opens == 0,
+        "an aborted chair redirect must leave no reopen armed; opened "
+        .. tostring(opens) .. " time(s)")
+    chair(true)
+    redirect()
+    assert(opens == 1,
+        "a fresh chair redirect after an aborted one must open Gunnery Control exactly "
+        .. "once; opened " .. tostring(opens) .. " time(s)")
+    -- 118g: no DockedMenu to close is reported and leaves nothing armed.
+    trace, opens = {}, 0
+    opts = {}
+    chair(true)
+    Helper.getMenu = function() return nil end
+    redirect()
+    assert(fix118.logContains("could not redirect: DockedMenu is unavailable"),
+        "a chair redirect with no DockedMenu must say so in the log")
+    Helper.getMenu = function(name)
+        if name == "DockedMenu" then return docked end
+    end
+    local markG = fix118.callbackCheckpoint()
+    docked.cleanup()
+    fix118.drainCallbacksSince(markG)
+    assert(opens == 0,
+        "a redirect that found no DockedMenu must leave no reopen armed; opened "
+        .. tostring(opens) .. " time(s)")
+
+    -- 118f: the registered "cleanup" callback is what schedules the reopen.
+    -- A DockedMenu teardown that never fires the hook must not open anything.
+    -- Runs last: it deliberately leaves the redirect armed, since nothing ever
+    -- fires the hook that would clear it.
+    trace, opens = {}, 0
+    chair(true)
+    opts = { skipHooks = true }
+    redirect()
+    assert(opens == 0,
+        "with the \"cleanup\" hook never fired, nothing else may open Gunnery Control; "
+        .. "opened " .. tostring(opens) .. " time(s)")
+
+end
+
 print("runtime lifecycle tests passed")

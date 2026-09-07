@@ -2,5 +2,5 @@
 # Format: ui/gunnery_control.lua:LINE # durable reason
 # Keep this list empty unless a line cannot execute under the stock-Lua runtime
 # fixture; the checker rejects stale, broad, or undocumented exclusions.
-ui/gunnery_control.lua:365 # temporary Issue #118 entry probe; View.menus loop only runs in-game, removed with the issue
-ui/gunnery_control.lua:366 # temporary Issue #118 entry probe; View.menus loop only runs in-game, removed with the issue
+ui/gunnery_control.lua:368 # temporary Issue #118 entry probe; View.menus loop only runs in-game, removed with the issue
+ui/gunnery_control.lua:369 # temporary Issue #118 entry probe; View.menus loop only runs in-game, removed with the issue
