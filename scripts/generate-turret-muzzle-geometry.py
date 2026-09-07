@@ -82,6 +82,10 @@ MACROS = {
     "turret_arg_m_beam_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
     "turret_par_m_beam_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
     "turret_tel_m_beam_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
+    # Both Xenon aliases are backed by the one shared component
+    # turret_xen_m_laser_02_mk1, so they must share one contract.
+    "turret_xen_m_beam_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
+    "turret_xen_m_laser_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
 }
 
 
@@ -167,7 +171,13 @@ def _record(report: _Report, macro: str) -> list[str]:
     if len(matches) != 1 or matches[0]["macros"].count(macro) != 1:
         raise SystemExit(f"expected exactly one census identity for {macro}")
     component = matches[0]
-    if component["macros"] != [macro]:
+    # One census component may back several macros. That is only safe when every
+    # alias on it is generated here under the same semantic case and layer-count
+    # contract, so the one shared geometry is correct for all of them.
+    aliases = component["macros"]
+    if len(set(aliases)) != len(aliases):
+        raise SystemExit(f"duplicate macro alias on the census component for {macro}")
+    if any(MACROS.get(alias) != MACROS[macro] for alias in aliases):
         raise SystemExit(f"unsupported shared component for {macro}")
     resolutions = component["source_semantic_resolutions"]
     if len(resolutions) != 2 or any(
