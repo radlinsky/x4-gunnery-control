@@ -179,6 +179,9 @@ local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
+-- Set only by the chair redirect, so an ordinary DockedMenu cleanup (any other
+-- way that menu closes) never reopens Gunnery Control.
+local chairReopenPending = false
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -3233,13 +3236,19 @@ local function redirectDockedMenu()
         if isInGunnerChair() then
             local docked = Helper.getMenu("DockedMenu")
             if docked then
-                -- Open the replacement before closing DockedMenu and suppress
-                -- its automatic vanilla-menu fallback. Calling closeMenu()
-                -- directly races TopLevelMenu against this custom menu.
-                Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu", { 0, 0 }, true)
+                -- Same ordering as the Map path: let the host menu finish its
+                -- own teardown, then open ours from its cleanup callback. The
+                -- false/false suppresses TopLevelMenu auto-fallback, and
+                -- cleanup() unregisters DockedMenu's events and fires the hook.
+                chairReopenPending = true
+                Helper.closeMenu(docked, "close", false, false)
+                docked.cleanup()
             else
+                chairReopenPending = false
                 log("could not redirect: DockedMenu is unavailable")
             end
+        else
+            chairReopenPending = false
         end
     end, false, getElapsedTime() + 0.05)
 end
@@ -3266,6 +3275,17 @@ local function registerUIHooks()
         local docked = Helper.getMenu("DockedMenu")
         if docked and docked.registerCallback then
             docked.registerCallback("display_on_after_main_interactions", redirectDockedMenu, menu.uixID)
+            docked.registerCallback("cleanup", function()
+                if not chairReopenPending then return end
+                chairReopenPending = false
+                -- Defer as the Map path does, so DockedMenu is fully gone
+                -- before a second menu opens in the same update.
+                Helper.addDelayedOneTimeCallbackOnUpdate(function()
+                    if isInGunnerChair() then
+                        OpenMenu("X4GunneryMenu", { 0, 0 }, nil)
+                    end
+                end, false, getElapsedTime() + 0.02)
+            end, menu.uixID)
             dockedHookRegistered = true
         end
     end

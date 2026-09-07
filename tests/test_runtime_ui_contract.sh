@@ -223,7 +223,15 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"
+# Chair ingress matches the Map path: close DockedMenu with the auto-fallback
+# suppressed, run its cleanup, and open ours from the gated cleanup callback.
+grep -Fq 'Helper.closeMenu(docked, "close", false, false)' "$main"
+grep -Fq 'docked.cleanup()' "$main"
+grep -Fq 'docked.registerCallback("cleanup"' "$main"
+if grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"; then
+  echo "chair ingress still opens Gunnery Control before DockedMenu cleanup" >&2
+  exit 1
+fi
 grep -Fq 'local function registerUIHooks()' "$main"
 grep -Fq 'if isInGunnerChair() and not menu.shown and not activeExternalMenuName()' "$main"
 grep -Fq 'redirectDockedMenu()' "$main"
