@@ -252,20 +252,36 @@ class SourceSemanticTests(unittest.TestCase):
     _LASER_02_ROTATOR = (0.0, 2.962090492248535, 0.0)
     _LASER_02_BARREL = (0.0, 0.0, 3.521183967590332)
 
+    _BEAM_02_ROTATOR = (0.0, 2.3680334091186523, 0.0)
+    _BEAM_02_BARREL = (-4.470348358154297e-07, 1.1920928955078125e-07, 3.4313702583312988)
+    _BEAM_02_COMPANIONS = {
+        1: (-6.2831854820251465, -0.0, 0.0),
+        2: (0.9999998211860657, 1.0, 1.000000238418579),
+    }
+
     def _one_key_barrel_covered(
         self,
         barrel: tuple[float, float, float],
         rotator: tuple[float, float, float] | None = None,
         barrel_count: int = 1,
         barrel_interp_bits: str = _STEP_BITS,
+        barrel_companions: dict[int, tuple[float, float, float]] | None = None,
     ) -> list[dict[str, object]]:
         if rotator is None:
             rotator = self._PLASMA_02_ROTATOR
+        barrel_companions = barrel_companions or {}
+        counts = (
+            barrel_count,
+            2 if 1 in barrel_companions else 0,
+            2 if 2 in barrel_companions else 0,
+            0,
+            0,
+        )
         return [
             _descriptor(0, (0, 0, 0, 0, 0)),
             _descriptor(1, (2, 0, 0, 0, 0), {0: rotator}),
             _descriptor(2, (0, 0, 0, 0, 0)),
-            _descriptor(3, (barrel_count, 0, 0, 0, 0), {0: barrel}, interp_bits=barrel_interp_bits),
+            _descriptor(3, counts, {0: barrel, **barrel_companions}, interp_bits=barrel_interp_bits),
         ]
 
     def _one_key_barrel_boundary_memberships(
@@ -305,12 +321,14 @@ class SourceSemanticTests(unittest.TestCase):
         barrel_interp_bits: str = _STEP_BITS,
         selector_occurrences: list | None = None,
         boundary_memberships: list | None = None,
+        barrel_companions: dict[int, tuple[float, float, float]] | None = None,
     ) -> dict[str, object]:
         covered = self._one_key_barrel_covered(
             barrel,
             rotator=rotator,
             barrel_count=barrel_count,
             barrel_interp_bits=barrel_interp_bits,
+            barrel_companions=barrel_companions,
         )
         if selector_occurrences is None:
             selector_occurrences = [_one_frame_selector("turret_active")]
@@ -361,6 +379,58 @@ class SourceSemanticTests(unittest.TestCase):
             [0.0, 2.962090492248535, 0.0],
         )
         self.assertEqual(applied[3]["settled_local_position_delta"], list(barrel))
+
+    def test_beam_02_companion_channels_resolve_channel0_translations(self) -> None:
+        """P2 keeps the one-key semantic and applies channel-0 only."""
+        result = _resolve_supported_endpoint_source_semantics(
+            self._one_key_barrel_endpoint(
+                self._BEAM_02_BARREL,
+                rotator=self._BEAM_02_ROTATOR,
+                barrel_companions=self._BEAM_02_COMPANIONS,
+            ),
+            _geometry(4, one_key_barrel_restrictions=True),
+            component_endpoint_count=2,
+        )
+
+        self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+        self.assertEqual(result["semantic_case"], "depth4_one_key_barrel_translation")
+        applied = result["applied_authored_geometry"]["source_geometry_layers"]
+        # ANI X is negated at the authored-geometry boundary.
+        self.assertEqual(
+            applied[1]["settled_local_position_delta"],
+            [-0.0, 2.3680334091186523, 0.0],
+        )
+        self.assertEqual(
+            applied[3]["settled_local_position_delta"],
+            [4.470348358154297e-07, 1.1920928955078125e-07, 3.4313702583312988],
+        )
+        for index in (1, 3):
+            self.assertNotIn(
+                "settled_local_euler_xyz_delta_radians", applied[index]
+            )
+
+    def test_beam_02_altered_companion_evidence_fails_closed(self) -> None:
+        """Only the exact proved companion values are accepted."""
+        base = self._BEAM_02_COMPANIONS
+        for label, companions in (
+            ("degree_sized_channel1", {**base, 1: (-360.0, -0.0, 0.0)}),
+            ("half_turn_channel1", {**base, 1: (-3.1415927410125732, -0.0, 0.0)}),
+            ("non_identity_channel2", {**base, 2: (0.5, 1.0, 1.000000238418579)}),
+            ("channel1_dropped", {2: base[2]}),
+            ("channel2_dropped", {1: base[1]}),
+            ("companions_absent", {}),
+        ):
+            with self.subTest(label):
+                result = _resolve_supported_endpoint_source_semantics(
+                    self._one_key_barrel_endpoint(
+                        self._BEAM_02_BARREL,
+                        rotator=self._BEAM_02_ROTATOR,
+                        barrel_companions=companions,
+                    ),
+                    _geometry(4, one_key_barrel_restrictions=True),
+                    component_endpoint_count=2,
+                )
+                self.assertEqual(result["classification"], "UNSUPPORTED")
 
     def test_one_key_barrel_fail_closed_subtests(self) -> None:
         """Each subtest flips exactly one structural condition."""

@@ -163,11 +163,31 @@ def _resolve_supported_endpoint_source_semantics(
             ),
         }
 
-    # Accepted one-key barrel case (Issue #79 / #125 A2): the depth-4
-    # rotator/barrel composition where the barrel stores a single settled
-    # turret_active channel-0 key instead of the doubled form. The barrel rule
-    # is structural/name-free; the rotator remains bounded to its separately
-    # accepted repeated source value.
+    # Accepted one-key barrel case (Issue #79 / #125 A2, Issue #128 P2): the
+    # depth-4 rotator/barrel composition where the barrel stores a single
+    # settled turret_active channel-0 key instead of the doubled form. The
+    # barrel rule is structural/name-free; each accepted variant stays bounded
+    # to its own live-backed rotator value and companion-channel evidence.
+    #
+    # (rotator channel-0 bits, edge-3 counts, {edge-3 channel: bits}). The
+    # beam_02 companions are a full-turn additive rotation and a unit scale,
+    # both proved to add no material settled transform, so the applied math is
+    # the channel-0 translations either way.
+    one_key_barrel_signatures = (
+        (
+            (("0x00000000", "0x403d92e4", "0x00000000"),) * 2,
+            (1, 0, 0, 0, 0),
+            {},
+        ),
+        (
+            (("0x00000000", "0x40178ddc", "0x00000000"),) * 2,
+            (1, 2, 2, 0, 0),
+            {
+                1: (("0xc0c90fdb", "0x80000000", "0x00000000"),) * 2,
+                2: (("0x3f7ffffd", "0x3f800000", "0x3f800002"),) * 2,
+            },
+        ),
+    )
     one_key_barrel_match = False
     one_key_rotator_pos: list[float] = []
     one_key_barrel_pos: list[float] = []
@@ -176,14 +196,20 @@ def _resolve_supported_endpoint_source_semantics(
         and depth == 4
         and set(keyed) == {1, 3}
         and _counts(keyed[1]) == (2, 0, 0, 0, 0)
-        and _counts(keyed[3]) == (1, 0, 0, 0, 0)
     ):
-        # The accepted A1 evidence resolves this exact repeated rotator value;
-        # repeated storage alone does not justify arbitrary translations.
-        accepted_rotator_bits = (
-            ("0x00000000", "0x403d92e4", "0x00000000"),
-        ) * 2
-        rotator_match = _first_three_bits(keyed[1], 0) == accepted_rotator_bits
+        # Repeated rotator storage alone does not justify arbitrary
+        # translations; only the accepted signatures pass.
+        rotator_match = any(
+            _first_three_bits(keyed[1], 0) == rotator_bits
+            and _counts(keyed[3]) == barrel_counts
+            and all(
+                _first_three_bits(keyed[3], channel) == bits
+                for channel, bits in companions.items()
+            )
+            for rotator_bits, barrel_counts, companions in (
+                one_key_barrel_signatures
+            )
+        )
 
         # Rule 4: barrel active key must use STEP interpolation:
         # raw_bits indexes 3, 4, 5 are all "0x00000001".
