@@ -719,6 +719,56 @@
       </cues>
     </cue>
 
+    <!-- #118 physical gunnery-console ingress. Sitting down in a gunner seat
+         puts the player in a control position; a session created from there is
+         torn down by the normal get-up handling. So release the seat first with
+         the engine's own leave_control_position, wait for the completion event,
+         and only then hand the same ship to the existing onboard ingress. -->
+    <cue name="ChairIngress">
+      <cues>
+        <cue name="Release" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'chair_release'"/>
+          </conditions>
+          <actions>
+            <!-- Lua names the exact ship it observed; keys may be $-prefixed by
+                 the transport, hence the two forms. -->
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <do_if value="not $ship">
+              <set_value name="$ship" exact="@event.param3.{'ship'}"/>
+            </do_if>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <!-- One release in flight at a time, and only while the player is
+                 actually in a control position aboard that exact owned ship. -->
+            <do_if value="player.controlled and $ship and $ship == player.container and $ship.owner == faction.player and not @ChairIngress.$pending">
+              <set_value name="ChairIngress.$pending" exact="$ship"/>
+              <leave_control_position/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="Stopped" instantiate="true">
+          <conditions>
+            <event_player_stopped_control/>
+          </conditions>
+          <actions>
+            <do_if value="@ChairIngress.$pending">
+              <set_value name="$ship" exact="ChairIngress.$pending"/>
+              <!-- One-shot: clear before handing off, so a later stopped-control
+                   event (or a second one for the same release) is inert. -->
+              <remove_value name="ChairIngress.$pending"/>
+              <!-- Re-validate against the ship the release was requested for.
+                   Any drift (left the ship, ownership change) drops the handoff. -->
+              <do_if value="$ship and $ship == player.container and $ship.owner == faction.player">
+                <raise_lua_event name="'X4GunneryControl.OpenOnboard'" param="$ship"/>
+              </do_if>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
     <!-- #68 onboard Map ingress. Adds a "Gunnery Control" action to the Map
          right-click menu of the one ship the player is physically inside via
          SirNukes Mod Support APIs' Interact Menu API. If that API is absent,

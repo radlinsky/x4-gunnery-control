@@ -3227,19 +3227,20 @@ local function redirectDockedMenu()
     local ship = playerShip()
     if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
     redirectPending = true
-    -- Deferring avoids opening two menus in the same DockedMenu render pass.
+    -- Deferring leaves the DockedMenu render pass before anything moves the player.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         redirectPending = false
-        if isInGunnerChair() then
-            local docked = Helper.getMenu("DockedMenu")
-            if docked then
-                -- Open the replacement before closing DockedMenu and suppress
-                -- its automatic vanilla-menu fallback. Calling closeMenu()
-                -- directly races TopLevelMenu against this custom menu.
-                Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu", { 0, 0 }, true)
-            else
-                log("could not redirect: DockedMenu is unavailable")
-            end
+        -- #118: sitting at a gunner console puts the player in a control
+        -- position, and a session created from there is torn down by the normal
+        -- get-up handling. So no session is created here. MD releases the
+        -- control position, waits for event_player_stopped_control, and hands
+        -- this exact ship back through the existing onboard ingress
+        -- (X4GunneryControl.OpenOnboard) -- the same path Map entry uses.
+        -- MD is the one-shot: a duplicate request while a release is pending, or
+        -- once the player is no longer controlling, is dropped there.
+        if isInGunnerChair() and sameID(playerShip(), ship) and not session then
+            AddUITriggeredEvent("X4GunneryControl", "chair_release",
+                { ship = ConvertStringToLuaID(State.normID(ship)) })
         end
     end, false, getElapsedTime() + 0.05)
 end

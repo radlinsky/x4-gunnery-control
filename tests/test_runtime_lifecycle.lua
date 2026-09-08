@@ -317,4 +317,37 @@ do
         "no DockedMenu at all is still a plain timeout")
 end
 
+
+-- ── 56 (#118). physical chair ingress releases the seat instead of opening ────
+-- Sitting at a gunner console puts the player in a control position, and a
+-- session created from there is torn down by the normal get-up handling. The
+-- redirect must therefore create nothing: it asks MD to release the control
+-- position and names the exact ship, and MD re-enters through the onboard
+-- ingress after event_player_stopped_control.
+do
+    if API.getSession() then gcMenu.onCloseElement("close") end
+    gcMenu.shown = false
+    -- Earlier tests replaced AddUITriggeredEvent with their own capture.
+    local captured56 = {}
+    AddUITriggeredEvent = function(screen, control, params)
+        captured56[#captured56 + 1] = { screen = screen, control = control, params = params }
+    end
+    local mark = fix.callbackCheckpoint()
+    fix.fireUIEvent("gameplanchange", "cockpit")
+    fix.drainCallbacksSince(mark)
+    local release
+    for _, e in ipairs(captured56) do
+        if e.control == "chair_release" then
+            assert(not release, "chair ingress must request exactly one release")
+            release = e
+        end
+    end
+    assert(release, "chair ingress must request leave_control_position via MD")
+    assert(release.params.ship == 42,
+        "the release must name the exact ship the redirect observed; got "
+        .. tostring(release.params.ship))
+    assert(API.getSession() == nil,
+        "no session may exist before the control position is released")
+end
+
 print("runtime lifecycle tests passed")

@@ -223,7 +223,13 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"
+# #118: physical chair ingress releases the control position via MD and re-enters
+# through the onboard ingress; it must never open the console from the chair.
+grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "chair_release"' "$main"
+if grep -Fq 'closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"; then
+  echo "chair ingress still opens Gunnery Control before releasing the seat" >&2
+  exit 1
+fi
 grep -Fq 'local function registerUIHooks()' "$main"
 grep -Fq 'if isInGunnerChair() and not menu.shown and not activeExternalMenuName()' "$main"
 grep -Fq 'redirectDockedMenu()' "$main"
