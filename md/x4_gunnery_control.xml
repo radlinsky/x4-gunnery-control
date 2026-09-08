@@ -761,7 +761,9 @@
               <!-- Re-validate against the ship the release was requested for.
                    Any drift (left the ship, ownership change) drops the handoff. -->
               <do_if value="$ship and $ship == player.container and $ship.owner == faction.player">
-                <raise_lua_event name="'X4GunneryControl.OpenOnboard'" param="$ship"/>
+                <!-- Distinct from Map ingress: Lua must not run Map teardown for
+                     a physical release whose predecessor is vanilla DockedMenu. -->
+                <raise_lua_event name="'X4GunneryControl.OpenOnboardReleased'" param="$ship"/>
               </do_if>
             </do_if>
           </actions>

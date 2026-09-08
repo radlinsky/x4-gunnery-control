@@ -1,77 +1,90 @@
--- Issue #118 Task 3: only regression gaps not already covered by
--- test_runtime_lifecycle.lua and test_runtime_onboard_ingress.lua.
-
-local function countRelease(fix)
-    local count, event = 0, nil
-    for _, item in ipairs(fix.uiTriggeredEvents) do
-        if item.screen == "X4GunneryControl" and item.control == "chair_release" then
-            count, event = count + 1, item
-        end
-    end
-    return count, event
+-- Issue #118: the one lifecycle gap not covered by existing onboard tests.
+local fix = dofile("tests/support/runtime_fixture.lua").load()
+local State = X4GunneryState
+local control, replacements = "cockpit", 0
+local map = { name = "MapMenu", shown = false }
+local docked = { name = "DockedMenu", shown = false }
+map.onCloseElement = function() map.shown = false end
+table.insert(Menus, map); table.insert(Menus, docked)
+fix.C.GetPlayerCurrentControlGroup = function() return control end
+GetComponentData = function(_, key) if key == "isplayerowned" then return true end end
+fix.C.GetNumUpgradeGroups = function() return 1 end
+fix.C.GetUpgradeGroups2 = function() return 1 end
+fix.C.GetUpgradeGroupInfo2 = function()
+    return { count = 1, currentcomponent = 27, currentmacro = "", slotsize = "", total = 1, operational = 1 }
+end
+fix.C.IsComponentOperational = function() return true end
+fix.ffiStub.new = function() return { [0] = { path = "p", group = "g", contextid = 5 } } end
+Helper.getMenu = function(name) return name == "MapMenu" and map or name == "DockedMenu" and docked or nil end
+OpenMenu = function(name)
+    assert(name == "X4GunneryMenu")
+    fix.gcMenu.shown = true
+    fix.gcMenu.onShowMenu()
+end
+Helper.closeMenuAndOpenNewMenu = function(from, name)
+    assert(from == docked and name == "X4GunneryMenu")
+    replacements = replacements + 1
+    docked.shown, fix.gcMenu.shown = false, true
+    fix.gcMenu.onShowMenu()
 end
 
-local function installOneGroup(fix)
-    fix.C.GetNumUpgradeGroups = function() return 1 end
-    fix.C.GetUpgradeGroups2 = function() return 1 end
-    fix.C.GetUpgradeGroupInfo2 = function()
-        return { count = 1, currentcomponent = 27, currentmacro = "", slotsize = "", total = 1, operational = 1 }
-    end
-    fix.C.IsComponentOperational = function() return true end
-    fix.ffiStub.new = function() return { [0] = { path = "p", group = "g", contextid = 5 } } end
-end
-
--- Same redirect window: one physical release request, no pre-release session.
-do
-    local fix = dofile("tests/support/runtime_fixture.lua").load()
-    fix.gcMenu.shown = false
+local function openViaMap()
+    map.shown = true
     local mark = fix.callbackCheckpoint()
-    fix.fireUIEvent("gameplanchange", "cockpit")
-    fix.fireUIEvent("gameplanchange", "cockpit")
-    fix.drainCallbacksSince(mark)
-    local count, event = countRelease(fix)
-    assert(count == 1, "duplicate chair ingress must emit exactly one chair_release")
-    assert(event.params.ship == 42, "chair_release must keep the observed ship")
-    assert(fix.API.getSession() == nil, "chair ingress must not create a pre-release session")
-end
-
--- After onboard exit, both natural launchers can start a fresh onboard session.
-do
-    local fix = dofile("tests/support/runtime_fixture.lua").load()
-    local State = X4GunneryState
-    local control = "cockpit"
-    fix.C.GetPlayerCurrentControlGroup = function() return control end
-    GetComponentData = function(_, key) if key == "isplayerowned" then return true end end
-    installOneGroup(fix)
-    Helper.getMenu = function() return nil end
-
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
     local session = fix.API.getSession()
-    assert(session and session.origin == "onboard", "precondition: onboard session")
-    session.lifecycle, session.phase = State.lifecycle.owned, "console"
-    fix.gcMenu.onCloseElement("close")
-    assert(fix.API.getSession() == nil, "onboard exit must clear the session")
-
-    control = "gunnercontrol"
-    fix.resetUITriggeredEvents()
-    fix.gcMenu.shown = false
-    local mark = fix.callbackCheckpoint()
-    fix.fireUIEvent("gameplanchange", "cockpit")
+    assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.suspendedMap)
     fix.drainCallbacksSince(mark)
-    local count, event = countRelease(fix)
-    assert(count == 1, "physical re-entry after exit must emit one chair_release")
-
-    control = "cockpit"
-    fix.fireEvent("X4GunneryControl.OpenOnboard", event.params.ship)
+    assert(not map.shown)
+    fix.API.runSessionWatchdog()
     session = fix.API.getSession()
-    assert(session and session.origin == "onboard", "physical re-entry must converge to onboard origin")
-    session.lifecycle, session.phase = State.lifecycle.owned, "console"
-    fix.gcMenu.onCloseElement("close")
-    assert(fix.API.getSession() == nil, "physical-origin onboard exit must clear the session")
-
-    fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
-    session = fix.API.getSession()
-    assert(session and session.origin == "onboard", "Map re-entry after exit must create onboard origin")
+    assert(session and session.lifecycle == State.lifecycle.owned)
+    return session
 end
+
+-- Known failing sequence: Map -> exit -> physical console while vanilla DockedMenu is visible.
+local session = openViaMap()
+session.phase = "console"
+fix.gcMenu.onCloseElement("close")
+assert(fix.API.getSession() == nil)
+fix.gcMenu.shown = false
+
+control, docked.shown = "gunnercontrol", true
+fix.resetUITriggeredEvents()
+local mark = fix.callbackCheckpoint()
+fix.API.runSessionWatchdog(); fix.API.runSessionWatchdog()
+fix.drainCallbacksSince(mark)
+local releases, release = 0, nil
+for _, event in ipairs(fix.uiTriggeredEvents) do
+    if event.screen == "X4GunneryControl" and event.control == "chair_release" then
+        releases, release = releases + 1, event
+    end
+end
+assert(releases == 1 and release.params.ship == 42, "physical ingress must emit one release for the observed ship")
+assert(fix.API.getSession() == nil, "no session may exist before stopped-control")
+
+control = "cockpit"
+fix.fireEvent("X4GunneryControl.OpenOnboardReleased", release.params.ship)
+session = fix.API.getSession()
+assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.reopening,
+    "released physical ingress must create a standing onboard handoff")
+assert(replacements == 0, "MD release event must not replace DockedMenu directly")
+fix.fireEvent("playerGetUp")
+assert(fix.API.getSession() == session, "playerGetUp must not destroy a standing onboard handoff")
+fix.API.runSessionWatchdog()
+assert(replacements == 1 and session.lifecycle == State.lifecycle.owned,
+    "DockedMenu must be replaced once and converge to normal owned lifecycle")
+fix.API.runSessionWatchdog()
+assert(replacements == 1, "physical replacement must remain one-shot")
+
+session.phase = "console"
+fix.gcMenu.onCloseElement("close")
+assert(fix.API.getSession() == nil)
+fix.gcMenu.shown = false
+session = openViaMap()
+fix.fireEvent("playerGetUp")
+assert(fix.API.getSession() == session, "Map-origin onboard session must not become seat-bound")
+fix.fireEvent("playerUndock")
+assert(fix.API.getSession() == nil, "playerUndock must remain an unconditional teardown")
 
 print("Issue #118 entry lifecycle regression tests passed")

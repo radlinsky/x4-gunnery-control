@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
+local runtimeBuild = "2026-09-08-issue118-released-onboard-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -195,6 +195,8 @@ local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
+local redirectDockedMenu
+local completeReleasedOnboardHandoff
 local activeExternalMenuName
 local suggestedTestEngagement
 local cameraMismatchLogged = false
@@ -3195,7 +3197,35 @@ function menu.onCloseElement(dueToClose)
     end
 end
 
-local function redirectDockedMenu()
+completeReleasedOnboardHandoff = function(reason)
+    if not session or not session.physicalReleasePending or menu.shown then return false end
+    if session.origin ~= "onboard" or session.lifecycle ~= State.lifecycle.reopening
+            or not resumePending then return false end
+    if not sessionContextValid() or controlGroup() == "gunnercontrol" then
+        endSession("released onboard context invalid")
+        return false
+    end
+    local docked = Helper.getMenu("DockedMenu")
+    if not docked or not docked.shown then return false end
+    -- This replacement is deliberately after MD's event_player_stopped_control
+    -- boundary. The old chair path used the same Helper transition while still
+    -- in gunnercontrol; doing it only from this released-onboard marker keeps
+    -- vanilla's DockedMenu fallback from winning without recreating chair state.
+    session.physicalReleasePending = nil
+    logSession("physical release replacing DockedMenu: " .. tostring(reason))
+    Helper.closeMenuAndOpenNewMenu(docked, menu.name, { 0, 0 }, true)
+    return true
+end
+
+redirectDockedMenu = function()
+    -- After the control position is gone, this same DockedMenu callback becomes
+    -- the completion point for the physical launcher rather than another chair
+    -- request. The watchdog below provides the same observed-state fallback when
+    -- UI Extensions is absent.
+    if session and session.physicalReleasePending then
+        completeReleasedOnboardHandoff("DockedMenu callback")
+        return
+    end
     local observedGroup = controlGroup()
     local ship = playerShip()
     if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
@@ -3205,10 +3235,8 @@ local function redirectDockedMenu()
         redirectPending = false
         -- #118: sitting at a gunner console puts the player in a control
         -- position, and a session created from there is torn down by the normal
-        -- get-up handling. So no session is created here. MD releases the
-        -- control position, waits for event_player_stopped_control, and hands
-        -- this exact ship back through the existing onboard ingress
-        -- (X4GunneryControl.OpenOnboard) -- the same path Map entry uses.
+        -- get-up handling. No session is created until MD has released the
+        -- control position and raised OpenOnboardReleased for this exact ship.
         -- MD is the one-shot: a duplicate request while a release is pending, or
         -- once the player is no longer controlling, is dropped there.
         if isInGunnerChair() and sameID(playerShip(), ship) and not session then
@@ -3340,6 +3368,15 @@ end
 TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
+    -- UIX normally delivers DockedMenu's display callback. Polling the same
+    -- concrete menu/control state here keeps physical ingress working when UIX
+    -- is absent or its callback registered late; no timer is used to decide that
+    -- the control position has been released -- MD's stopped-control event did.
+    if not session and isInGunnerChair() then
+        redirectDockedMenu()
+    elseif session and session.physicalReleasePending then
+        completeReleasedOnboardHandoff("watchdog")
+    end
     if session then
         -- The resume re-point retry grant is bound to the exact aim target and
         -- Direct control mode it was granted for (attemptRepoint). Any drift
@@ -3417,6 +3454,30 @@ end
 
 TestAPI.onOpenOnboard = onOpenOnboard
 
+-- Physical-console ingress has a different predecessor menu than Map ingress.
+-- MD raises this only after leave_control_position completed. Create the same
+-- standing onboard session, but park it for the actual vanilla DockedMenu
+-- replacement instead of pretending a Map exists and invoking Map teardown.
+local function onOpenOnboardReleased(_, shipComponent)
+    if session then return end
+    local ship = id(shipComponent)
+    if ship == 0 then return end
+    if not sameID(playerShip(), ship) then return end
+    if not ownedByPlayer(ship) then return end
+    local groups = readGroups(ship)
+    if #groups == 0 then return end
+    session = newSession(ship, "onboard")
+    session.groups = groups
+    State.seedBaseline(session, groups)
+    if persistence then persistence.request() end
+    session.physicalReleasePending = true
+    resumePending = true
+    transitionLifecycle(State.lifecycle.reopening, "physical control position released")
+    logSession("physical release accepted; awaiting DockedMenu replacement")
+end
+
+TestAPI.onOpenOnboardReleased = onOpenOnboardReleased
+
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     if Helper then Helper.registerMenu(menu) end
@@ -3427,6 +3488,14 @@ local function init()
         seatLeaving = true
         endSession("global movement event")
         seatLeaving = false
+    end
+    local function onPlayerGetUp()
+        -- Onboard sessions are deliberately not seat-bound (#118). The physical
+        -- launcher can deliver playerGetUp around the same release that creates
+        -- the onboard session, and a normal Map-origin onboard session is also
+        -- valid while standing. Only chair-origin sessions use get-up as teardown.
+        if session and session.origin == "onboard" then return end
+        endForMovement()
     end
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.
@@ -3440,7 +3509,7 @@ local function init()
     -- Exposed for unit tests only: the missing-UI-Extensions diagnosis, without
     -- having to drive registerUIHooks through all 40 retries.
     TestAPI.hookTimeoutMessage = hookTimeoutMessage
-    RegisterEvent("playerGetUp", endForMovement)
+    RegisterEvent("playerGetUp", onPlayerGetUp)
     RegisterEvent("playerUndock", endForMovement)
     -- Ownership-change replacement for vanilla's cease_fire. MD fires this when
     -- the engaged target's owner changes to a faction the ship can no longer
@@ -3448,6 +3517,7 @@ local function init()
     -- so directed turrets roll to the next hostile instead of holding fire.
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
+    RegisterEvent("X4GunneryControl.OpenOnboardReleased", onOpenOnboardReleased)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
