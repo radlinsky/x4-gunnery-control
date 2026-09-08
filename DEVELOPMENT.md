@@ -131,19 +131,17 @@ enclosing `container`, as X4 9.00's shipped `DockedMenu` does, and verify that
 the container is a ship before using it.
 
 **The leave-seat helptext popup is load-bearing — do not suppress it.**
-An X4 engine bug (confirmed by three in-game trials) leaves Esc dead after
-`SetPlayerCameraTargetView` is called from a turret seat. The only observed cure
-is a subsequent menu that calls `CreateView`/`DisplayView` (i.e.
-`View.createView()` in `ego_viewhelper/viewhelper.lua:38`, which only runs when
-`View.frames` is empty). The `show_help` action in the `Notify` MD cue forces
-that path on every seat exit. Making the popup conditional or "tidying it away"
-without re-testing Esc after a camera session would silently re-introduce the
-bug. Known ceiling: if the player has hints/help disabled in game options the
-popup may not display and the Esc bug would return. See
-`.agents/skills/research-x4-modding/references/ui-lua-menu-camera.md` ("Engine
-bug: SetPlayerCameraTargetView leaves Esc dead after get-up") for the full
-three-arm trial record, the list of every candidate cure that was ruled out, and
-the diagnosis methodology.
+Live X4 9.00 testing showed `Esc` can remain dead after
+`SetPlayerCameraTargetView` from a gunnery seat. The mod's **Get Up** route was
+then live-verified with `Esc` restored after the `Notify` cue's helptext popup.
+Shipped-source tracing shows that popup reaches `CreateView`/`DisplayView`; X4's
+underlying input state is not exposed, so that diagnosis remains inference.
+Other exit routes share the recovery path but were not individually proven in
+the original trial. No global Help Text game option was found in the scoped X4
+9.00 source search; that absence is an inference, so do not use such a setting
+as a test prerequisite. Keep the popup and its ordering intact unless
+live-retested. See `.agents/skills/research-x4-modding/references/ui-lua-menu-camera.md`
+for the evidence record.
 
 Read [README.md](README.md) for the user-facing behavior and
 [TESTING.md](TESTING.md) for the current in-game test matrix before making a
