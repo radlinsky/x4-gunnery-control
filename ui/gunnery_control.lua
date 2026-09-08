@@ -179,7 +179,6 @@ local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
-local pendingChairMapShip
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -196,7 +195,6 @@ local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
-local onOpenOnboard
 local activeExternalMenuName
 local suggestedTestEngagement
 local cameraMismatchLogged = false
@@ -350,6 +348,28 @@ local function viewSummary()
         parts[#parts + 1] = tostring(entry.id) .. "/" .. tostring(entry.name)
     end
     return #parts .. (#parts > 0 and ("[" .. table.concat(parts, ",") .. "]") or "")
+end
+
+-- ponytail: temporary Issue #118 Task 1 probe. One shot per menu show, logged
+-- immediately before the first frame:display() so it captures exactly the View
+-- state View.registerMenu is about to branch on (viewhelper.lua:162 -- empty
+-- View.frames means createView, otherwise updateMenu). Delete with the issue.
+local entryDiagPending = false
+local function logEntryDiagnostic()
+    if not entryDiagPending then return end
+    entryDiagPending = false
+    local frames = View and View.frames
+    local menus = View and View.menus
+    local parts = {}
+    if menus then
+        for _, entry in ipairs(menus) do
+            parts[#parts + 1] = tostring(entry.id) .. "/" .. tostring(entry.type)
+        end
+    end
+    log("event=entry_diag origin=" .. tostring(session and session.origin)
+        .. " frames_nonempty=" .. tostring(frames ~= nil and next(frames) ~= nil)
+        .. " currentFrames=" .. tostring(View and View.currentFrames)
+        .. " menus=" .. (menus and ("[" .. table.concat(parts, ",") .. "]") or "<unavailable>"))
 end
 
 -- The engine's own "is a fullscreen menu up" test (helptext.lua:536). A menu
@@ -2385,6 +2405,7 @@ function menu.onShowMenu()
         session.repointTargetID = session.aimTargetID
         session.repointResumeRetry = session.aimTargetID
     end
+    entryDiagPending = true
     menu.display()
 end
 
@@ -2552,6 +2573,7 @@ function menu.display()
         end
         -- Auto-size frame height like the old direct panel (contract grep).
         viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
+        logEntryDiagnostic()
         viewFrame:display()
         -- Element panel: top-left, only for direct mode with an engaged object.
         if session.controlMode == "direct" and session.targetObjectID then
@@ -2768,6 +2790,7 @@ function menu.display()
                 noSurfRow[1]:setColSpan(5):createText(text(61))
             end
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
+            logEntryDiagnostic()
             elemFrame:display()
         end
         return
@@ -2884,6 +2907,7 @@ function menu.display()
         actions[6].handlers.onClick = function()
             returnToConsole("target browser back button")
         end
+        logEntryDiagnostic()
         frame:display()
         return
     end
@@ -3041,6 +3065,7 @@ function menu.display()
     local canUpdate = State.isStagedDirty(session)
     updateRow[1]:setColSpan(8):createButton({ active = canUpdate }):setText(text(83))
     updateRow[1].handlers.onClick = commitStagedTurretBehavior
+    logEntryDiagnostic()
     frame:display()
 end
 
@@ -3200,8 +3225,7 @@ end
 local function redirectDockedMenu()
     local observedGroup = controlGroup()
     local ship = playerShip()
-    if redirectPending or pendingChairMapShip or session
-            or observedGroup ~= "gunnercontrol" or ship == 0 then return end
+    if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
     redirectPending = true
     -- Deferring avoids opening two menus in the same DockedMenu render pass.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -3209,15 +3233,10 @@ local function redirectDockedMenu()
         if isInGunnerChair() then
             local docked = Helper.getMenu("DockedMenu")
             if docked then
-                -- Experimental Issue #118 route: tear down DockedMenu, then
-                -- pass chair ingress through the real Map and the existing
-                -- onboard/suspended-Map lifecycle.
-                Helper.closeMenu(docked, "close", false, false)
-                docked.cleanup()
-                pendingChairMapShip = ship
-                log("event=chair_map_probe stage=map_open_requested control="
-                    .. observedGroup .. " ship=" .. tostring(ship))
-                OpenMenu("MapMenu", { 0, 0 }, nil)
+                -- Open the replacement before closing DockedMenu and suppress
+                -- its automatic vanilla-menu fallback. Calling closeMenu()
+                -- directly races TopLevelMenu against this custom menu.
+                Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu", { 0, 0 }, true)
             else
                 log("could not redirect: DockedMenu is unavailable")
             end
@@ -3255,24 +3274,6 @@ local function registerUIHooks()
         if map and map.registerCallback then
             -- Kuertee UI Extensions exposes this Map-only lifecycle callback.
             -- It is deliberately not generalized to arbitrary menus.
-            map.registerCallback("on_create_main_frame", function()
-                if not pendingChairMapShip then return end
-                local pendingShip = pendingChairMapShip
-                pendingChairMapShip = nil
-                local currentGroup = controlGroup()
-                if currentGroup ~= "gunnercontrol" then
-                    log("event=chair_map_probe stage=map_frame_aborted reason=left_gunnercontrol")
-                    return
-                end
-                local currentShip = playerShip()
-                if currentShip == 0 or not sameID(currentShip, pendingShip) then
-                    log("event=chair_map_probe stage=map_frame_aborted reason=ship_changed")
-                    return
-                end
-                log("event=chair_map_probe stage=map_frame_created control="
-                    .. currentGroup .. " ship=" .. tostring(pendingShip))
-                onOpenOnboard(nil, pendingShip)
-            end, menu.uixID)
             map.registerCallback("on_menu_cleanup", function()
                 local expectedSession, expectedEpoch = session, sessionEpoch
                 if not expectedSession or expectedSession.lifecycle ~= State.lifecycle.suspendedMap then return end
@@ -3413,7 +3414,7 @@ TestAPI.sessionContextValid = function() return sessionContextValid() end
 -- Map ingress is revalidated in Lua before a fresh onboard session is parked.
 -- The existing suspended-Map lifecycle opens Gunnery Control only after the Map
 -- has fully closed.
-onOpenOnboard = function(_, shipComponent)
+local function onOpenOnboard(_, shipComponent)
     if session then return end
     local ship = id(shipComponent)
     if ship == 0 then return end
