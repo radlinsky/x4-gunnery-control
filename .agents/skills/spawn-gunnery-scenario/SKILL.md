@@ -118,8 +118,8 @@ Always state:
 4. exactly one **Create test scenario** action for setup;
 5. the exact turret group and spawned object names/roles the fixture should
    prepare automatically;
-6. whether the gameplay order is **Attack my current enemy** or the default
-   **Attack any enemy**;
+6. whether gameplay uses **Attack my current enemy** or default **Attack any enemy**
+   (selector: **Attack all enemies**);
 7. the owner's exact clicks/actions in order and expected visible result;
 8. exactly when to stop and upload the debug log;
 9. what ChatGPT will inspect in that log;

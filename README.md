@@ -40,7 +40,7 @@ Saving and loading keeps your seat. Save while engaged and loading that save put
 - This is not manual aiming. Direct-control tells the turrets what to hit, not how to aim.
 - Some S/M ships use a ship camera instead of a turret camera. When a turret camera is not available, Gunnery Control uses a ship camera instead. This is often the case for S/M ships. Direct-control, target selection, and Auto-engage still work normally.
 - Turret POV cinematic can clip the camera into your own hull. Target POV cinematic usually looks better.
-- The confirmation popup that appears when you stand up also works around an X4 bug that can leave `Esc` unresponsive after a camera session. If help texts are disabled in the game options, that workaround is also disabled. Opening and closing another menu, such as the map, restores `Esc`.
+- The confirmation popup shown when you stand up works around an X4 bug that can leave `Esc` unresponsive after a camera session. Opening and closing another menu, such as the map, also restores `Esc`.
 - ENGAGEABLE is a targeting aid, not a firing guarantee. A turret can pass the geometry check and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. UNKNOWN turrets may still fire when their arc data are unavailable to the mod.
 - Duplicate-named groups can mislabel members in the UI. Commands still reach the correct group.
 

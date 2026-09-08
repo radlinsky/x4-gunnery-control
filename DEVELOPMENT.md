@@ -8,9 +8,9 @@ fixtures, or development scripts.
 ## 1. Know the scope before changing code
 
 X4 Gunnery Control is a fire-control console, not a replacement for X4's turret
-simulation. **Auto-engage** is camera-only and must not change any turret
-setting. **Direct-control** temporarily overrides every checked mutable group
-and must restore all of them on exit.
+simulation. **Auto-engage** temporarily applies staged settings.
+**Direct-control** applies the selected turret mode to every checked mutable
+group. Session exit restores the baseline.
 
 Both modes land in a compact upper-right live panel with four POV buttons
 (Turret/Target × manual/cinematic) and Next/Prev turret cycling.
@@ -84,12 +84,11 @@ must capture the session object and epoch; abort stale work after suspension,
 cleanup, or a later re-seat. A suspended callback must not restore an earlier
 soft target over a target the player selected in Map.
 
-**Direct-control never re-issues the turret order by itself.** The order is a
-soft target set once at engage time; when that target is destroyed the camera
-follows on to the next candidate but the turrets fall back to autoassist. Next
-Target / Previous Target is how the player re-orders them. Auto-engage is
-unaffected — its turrets pick their own targets and the camera re-checks on the
-5 s cadence.
+Direct-control uses selected `attackenemies` (enemy fallback) or `autoassist`
+(strict soft-target) policy. With **Auto-next Target** enabled, target loss
+re-engages automatically; a lost surface element searches ENGAGEABLE same-root
+surfaces before hull/object fallback. With Auto-next off, choose the next target
+manually.
 
 **ID normalisation.** Raw FFI values such as the return of `targetRoot()`
 stringify with a `ULL` suffix; `id()`-converted values do not. A bare
@@ -108,13 +107,14 @@ id; route every call through the `componentData()` wrapper, which applies
   value (`session.directSnapshots` is a list, one entry per overridden group).
 - `restoreDirect` loops over every snapshot. A per-entry failure (group
   destroyed or unresolvable) is logged and skipped; the loop never aborts.
-  One destroyed group must not strand the remaining groups on armed `autoassist`.
+  One destroyed group must not strand the remaining groups in Direct-control.
 - Only groups passing `State.canMutate` (non-ambiguous, at least one operational
   member) are snapshotted. An ambiguous group is never written.
-- Restore when Direct-control is ceased, the console is closed, the player
-  chooses Get Up (which leaves the chair), the player changes ship, the game
-  plan changes, or a save is loaded. Do not treat `Esc` as a release event.
-- Auto-engage never snapshots and never restores; it mutates nothing.
+- Restore on Cease, console close, Get Up, ship change, or game-plan change.
+  Save/load resumes the active session and retained baseline. Do not treat `Esc`
+  as a release event.
+- Auto-engage temporarily applies staged settings and restores the session
+  baseline on exit; the Direct-control policy selector does not affect it.
 - Do not mutate a group when physical-turret-to-group mapping is ambiguous.
 - Test the selected target directly: a whole object and a surface element are
   distinct engagement cases. Preserve the target ID/connection across camera
@@ -131,19 +131,17 @@ enclosing `container`, as X4 9.00's shipped `DockedMenu` does, and verify that
 the container is a ship before using it.
 
 **The leave-seat helptext popup is load-bearing — do not suppress it.**
-An X4 engine bug (confirmed by three in-game trials) leaves Esc dead after
-`SetPlayerCameraTargetView` is called from a turret seat. The only observed cure
-is a subsequent menu that calls `CreateView`/`DisplayView` (i.e.
-`View.createView()` in `ego_viewhelper/viewhelper.lua:38`, which only runs when
-`View.frames` is empty). The `show_help` action in the `Notify` MD cue forces
-that path on every seat exit. Making the popup conditional or "tidying it away"
-without re-testing Esc after a camera session would silently re-introduce the
-bug. Known ceiling: if the player has hints/help disabled in game options the
-popup may not display and the Esc bug would return. See
-`.agents/skills/research-x4-modding/references/ui-lua-menu-camera.md` ("Engine
-bug: SetPlayerCameraTargetView leaves Esc dead after get-up") for the full
-three-arm trial record, the list of every candidate cure that was ruled out, and
-the diagnosis methodology.
+Live X4 9.00 testing showed `Esc` can remain dead after
+`SetPlayerCameraTargetView` from a gunnery seat. The mod's **Get Up** route was
+then live-verified with `Esc` restored after the `Notify` cue's helptext popup.
+Shipped-source tracing shows that popup reaches `CreateView`/`DisplayView`; X4's
+underlying input state is not exposed, so that diagnosis remains inference.
+Other exit routes share the recovery path but were not individually proven in
+the original trial. No global Help Text game option was found in the scoped X4
+9.00 source search; that absence is an inference, so do not use such a setting
+as a test prerequisite. Keep the popup and its ordering intact unless
+live-retested. See `.agents/skills/research-x4-modding/references/ui-lua-menu-camera.md`
+for the evidence record.
 
 Read [README.md](README.md) for the user-facing behavior and
 [TESTING.md](TESTING.md) for the current in-game test matrix before making a
@@ -459,13 +457,10 @@ the current loose XML/Lua/text files. Wiping first ensures files deleted from
 the repository do not linger in the installed copy. It does not install
 Test Lab.
 
-Re-run the installer after every source change that must be tested in X4. You do
-not need to restart X4 for Lua or MD changes; the Test Lab has Reload UI /
-Reload MD / Reload AI buttons.
-
-**[docs/RELOADING.md](docs/RELOADING.md) is the authoritative answer to "reload
-or restart?"** — which button for which file, what needs a full restart, and why.
-Do not restate that table here; it exists in one place so it cannot drift.
+Install the exact loose files under test before reload/restart, then follow
+**[docs/RELOADING.md](docs/RELOADING.md)** as the single source of truth.
+Verify the resulting `[X4GC] UI initialized; build=<runtimeBuild>` line matches
+the build just installed; a checkout SHA alone is not runtime proof.
 
 On Windows, the launcher (`launch-x4-dev.bat`) runs `install-dev.sh`
 automatically before starting X4, so you do not need to run it by hand first
@@ -620,9 +615,8 @@ For each small change:
    through Lua.
 6. Run the focused Lua test.
 7. Run `./scripts/validate.sh`.
-8. Re-run `install-dev.sh` (or just launch via `launch-x4-dev.bat`, which
-   runs the install automatically), then either restart X4 or use the Test Lab
-   reload buttons for an in-game check.
+8. Install the exact loose files, follow [docs/RELOADING.md](docs/RELOADING.md),
+   and verify the runtime build marker before recording an in-game result.
 9. Inspect `debug.log`, even when the menu appears to work.
 10. Run the relevant lifecycle and target-preservation cases from
     [TESTING.md](TESTING.md).
@@ -654,31 +648,24 @@ Do a quick manual smoke test before the wider sweep:
    until at least one mutable group is checked.
 5. Check one group. Confirm both action buttons become active. Note the group's
    current mode and armed state for later comparison.
-6. Press **Auto-engage**. Confirm the live panel opens with the current turret
-   name, four POV buttons, and Next/Prev. Verify the group's mode and armed
-   state are unchanged (Auto-engage must not mutate anything). Try all four POV
-   buttons. If more than one operational turret is available, confirm Next and
-   Prev cycle the camera and wrap around; confirm both buttons are greyed when
-   only one turret qualifies.
+6. Press **Auto-engage**. Confirm checked mutable groups use `attackenemies`
+   with staged Armed, unchecked mutable groups use staged Mode/Armed, and the
+   Direct-control policy has no effect. Try all four POV buttons; when multiple
+   operational turrets qualify, confirm Next/Prev cycle and wrap.
 7. Press `Esc` from the manual panel. Confirm the Gunnery Control console
    returns and the camera view ends.
 8. Press **Auto-engage** again, then switch to a cinematic POV. Confirm the game
    UI is hidden. Press `Esc`; confirm the manual panel returns (not the console
    and not the X4 options menu).
-9. Return to the console. Check two groups. Press **Direct-control**. Confirm
-   the target browser opens and lists known ships/stations in the current sector
-   within radar range; confirm the occupied ship is absent. Click a hostile
-   ship; confirm the browser immediately collapses to the compact panel — no
-   intermediate hull/element picker screen. Confirm **every checked mutable
-   group** changed to armed `autoassist`, not just one. Confirm the upper-left
-   element panel appears with the target's name as its header, listing Hull
-   (greyed, as the default) plus any operational surface elements. Confirm the
-   upper-right panel has a Next Target / Previous Target row; it should be
-   greyed when only one candidate exists and active otherwise. Confirm X4, not
-   this mod, aims and fires only when `mayattack`/its other safety checks allow
-   it.
-10. Kill the engaged target while in a cinematic POV. Confirm the camera
-    restarts on the next target (brief cut expected).
+9. Return to the console. Check two groups and leave **Attack all enemies**
+   selected. Press **Direct-control**, choose a hostile target, and confirm the
+   browser collapses to the compact panel. Confirm every checked group is armed
+   in `attackenemies`; switch to **Attack my current enemy** and confirm every
+   checked group remains armed in `autoassist`. Confirm the element panel and
+   Next/Previous Target controls appear, and X4 still owns aiming/firing safety.
+10. With **Auto-next Target** enabled, kill the engaged target in a cinematic
+    POV. Confirm Direct-control re-engages and the camera restarts on the next
+    target (brief cut expected).
 11. Press `Esc` from a cinematic POV. Confirm the manual panel returns.
 12. Choose **Cease Engagement** and confirm every previously checked group has
     its exact prior mode and armed state restored.
@@ -689,8 +676,9 @@ Do a quick manual smoke test before the wider sweep:
 14. Choose **Get Up** from the live panel. Confirm the player leaves the chair
     and every overridden group is restored. Sit again and verify a fresh
     Gunnery Control console opens without a blank transparent frame.
-15. Enter Direct-control, save the game, reload it. Confirm every group is
-    restored on load (not just one).
+15. While Direct-control is engaged, save and reload. Confirm the same checked
+    groups, selected policy, turret POV, and target resume; Cease must still
+    restore the baseline.
 16. Repeat Direct-control with an operational hostile turret, shield, and engine.
     Repeat against a station module surface; verify its surfaces appear in the
     picker. Whole-object and surface-element targets are distinct cases.
@@ -757,7 +745,7 @@ paths. Cover at least:
 | Hostile turret | Exact turret component ID and any returned connection both survive |
 | Hostile shield | Exact shield component ID and any returned connection both survive |
 | Hostile station module | Exact module-surface component ID and any returned connection both survive |
-| Target destroyed during Direct-control | Failure and cleanup are logged without stale state |
+| Target destroyed during Direct-control | Auto-next/manual fallback completes without stale state |
 
 Safe Cheat Panel can provide an NPC-faction ship or station, but not a free
 floating engine, turret, or shield generator. Spawn the containing ship or
@@ -837,7 +825,7 @@ the in-game camera, lifecycle, target-preservation, or live-fire checks.
 |---|---|
 | `validate.sh` says a check was skipped | Install the named Lua or ShellCheck dependency and run it again. |
 | `install-dev.sh` rejects the game path | Point it at the directory containing `X4.exe`/`X4` and `extensions`, not at the extension folder. |
-| Changes do not appear in X4 | On Windows the launcher runs `install-dev.sh` automatically; on Linux run it manually. Use `launch-x4-dev.bat` on Windows or add `-prefersinglefiles` on Linux, verify the enabled extension, and either use the Test Lab reload buttons or fully restart X4. Reloads read from disk, so the installer must run first. |
+| Changes do not appear in X4 | Confirm the exact loose files were installed, follow `docs/RELOADING.md`, and verify `[X4GC] UI initialized; build=<runtimeBuild>` matches the installed build. |
 | `launch-x4-dev.bat` cannot find X4 | Pass the installation folder or full `X4.exe` path, or set `X4GC_GAME_ROOT` for a custom Steam library. |
 | No development log can be found | Use the directory printed by `launch-x4-dev.bat`; `debug.log` lands in X4's userdata folder under `Documents\Egosoft\X4\<numeric-id>\`. Confirm `-logfile debug.log` is present and unquoted: X4 writes nothing at all when it is missing or quoted. A stale `INVALID.FILENAME` beside it means an absolute path was passed instead of a bare filename. Remember that each launch truncates the previous log. |
 | Gunnery Control does not open | Confirm UI Extensions 9.00+, follow its current Protected UI Mode guidance, fully restart X4, and inspect `[X4GC]`/Lua errors. |
