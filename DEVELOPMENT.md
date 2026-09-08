@@ -110,9 +110,9 @@ id; route every call through the `componentData()` wrapper, which applies
   One destroyed group must not strand the remaining groups in Direct-control.
 - Only groups passing `State.canMutate` (non-ambiguous, at least one operational
   member) are snapshotted. An ambiguous group is never written.
-- Restore when Direct-control is ceased, the console is closed, the player
-  chooses Get Up (which leaves the chair), the player changes ship, the game
-  plan changes, or a save is loaded. Do not treat `Esc` as a release event.
+- Restore on Cease, console close, Get Up, ship change, or game-plan change.
+  Save/load resumes the active session and retained baseline. Do not treat `Esc`
+  as a release event.
 - Auto-engage temporarily applies staged settings and restores the session
   baseline on exit; the Direct-control policy selector does not affect it.
 - Do not mutate a group when physical-turret-to-group mapping is ambiguous.
@@ -659,9 +659,9 @@ Do a quick manual smoke test before the wider sweep:
    and not the X4 options menu).
 9. Return to the console. Check two groups and leave **Attack all enemies**
    selected. Press **Direct-control**, choose a hostile target, and confirm the
-   browser collapses to the compact panel. Confirm every checked group uses
-   `attackenemies`; switch the panel to **Attack my current enemy** and confirm
-   every checked group changes to `autoassist`. Confirm the element panel and
+   browser collapses to the compact panel. Confirm every checked group is armed
+   in `attackenemies`; switch to **Attack my current enemy** and confirm every
+   checked group remains armed in `autoassist`. Confirm the element panel and
    Next/Previous Target controls appear, and X4 still owns aiming/firing safety.
 10. With **Auto-next Target** enabled, kill the engaged target in a cinematic
     POV. Confirm Direct-control re-engages and the camera restarts on the next

@@ -233,8 +233,8 @@ ticker-only mode. Persistent notification settings are unchanged.
 **Direct-control** first opens a smaller, unblurred browser of known ships and
 stations in the current sector within the player ship's radar range. It excludes
 the occupied ship and its surfaces. Clicking a target engages its hull directly
-and collapses the browser to the compact panel. The selected **Direct-control
-turret mode** applies to every checked mutable group: **Attack all enemies**
+and collapses the browser to the compact panel. Every checked mutable group is
+armed and uses the selected **Direct-control turret mode**: **Attack all enemies**
 (`attackenemies`, default) or **Attack my current enemy** (`autoassist`). Changing
 the selector while engaged updates all checked groups.
 
@@ -306,7 +306,7 @@ camera and clears the in-memory sweep.
 | Motion | stationary, player ship turning, NPC captain moving the ship |
 | Checkbox gate | Auto-engage and Direct-control greyed with no checked groups; activated once at least one mutable group is checked |
 | Auto-engage | Checked mutable groups temporarily use `attackenemies` + staged Armed; unchecked mutable groups use staged Mode/Armed; Direct-control policy ignored; session exit restores baseline; Next/Prev cycles/wraps; both greyed with one operational turret |
-| Direct-control | Browser engages the hull directly; both Direct-control turret modes apply to every checked group and can switch while engaged; element panel retargets groups; Next/Previous Target follows browser order; Auto-next handles target loss, with same-root ENGAGEABLE surfaces before hull/object fallback; Cease restores all groups; active-session save/load resumes groups, policy, POV and target, then Cease restores baseline. |
+| Direct-control | Browser engages the hull directly; all checked groups are armed; both Direct-control turret modes apply to every checked group and can switch while engaged; element panel retargets groups; Next/Previous Target follows browser order; Auto-next handles target loss, with same-root ENGAGEABLE surfaces before hull/object fallback; Cease restores all groups; active-session save/load resumes groups, policy, POV and target, then Cease restores baseline. |
 | Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; with Auto-next on, kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
 | Lifecycle | Cease Engagement, close console/Get Up, undock, teleport/ship change, save/load, retry, skip |
 | Menu lifecycle | From console and live panel: open/close Map and verify documented resume/fallback; try Player Information and another hotkey and verify safe teardown, not assumed resume |
@@ -372,10 +372,10 @@ Run one sequence without improvising so visible transitions can be compared:
    then wait two seconds.
 5. Check a second mutable group. Leave **Attack all enemies** selected, press
    **Direct-control**, click a target, and confirm the browser collapses to the
-   compact panel. Confirm both groups use `attackenemies`; switch to **Attack my
-   current enemy** and confirm both change to `autoassist`. Confirm the element
-   panel lists Hull plus surface elements and Next/Previous Target is active
-   when more than one candidate exists.
+   compact panel. Confirm both groups are armed in `attackenemies`; switch to
+   **Attack my current enemy** and confirm both remain armed in `autoassist`.
+   Confirm the element panel lists Hull plus surface elements and Next/Previous
+   Target is active when more than one candidate exists.
 6. With the panel showing, press `M`, close Map, then choose **Cease
    Engagement**. Confirm both groups are restored to their original mode and
    armed state.
