@@ -10,6 +10,7 @@ before relying on any claim.
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
 | MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
+| Control-position release and standing onboard handoff | [control-position-release.md](control-position-release.md) | X4 9.00 shipped-source `leave_control_position` + `event_player_stopped_control` synchronization; existing standing onboard target-view path is reusable, with final entry parity still live-test-gated |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
 | Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
