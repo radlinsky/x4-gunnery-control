@@ -336,15 +336,12 @@ turret-centered operation for that bridge.
 
 ## Seat-exit popup and Esc-cure checklist
 
-**Prerequisite:** hints/help texts must be enabled in X4 game options
-(**Settings → Interaction → Help Texts** or equivalent). If help texts are
-disabled the `show_help` MD action is a no-op: the popup does not appear and
-the Esc-cure does not fire. Enable them before this checklist and record
-whether they were on or off if any step fails.
+Existing live evidence confirms the mod's **Get Up** route restores `Esc` after
+this camera bug. The other exit routes below share the recovery path but remain
+cases to verify.
 
-For each row, sit in the gunnery chair, enter the listed mode, leave the seat
-via the listed route, and check both the popup text and that `Esc` opens the
-game menu immediately after standing up.
+For each row, enter the mode, leave by the listed route, then confirm the popup
+text and that `Esc` immediately opens the game menu after standing.
 
 | Mode entered | Exit route | Expected popup text | Esc opens game menu |
 |---|---|---|---|
@@ -355,11 +352,9 @@ game menu immediately after standing up.
 | Auto-engage | Undock (if applicable to the ship) | "Gunnery Control disengaged." | Yes — immediately |
 | Direct-control | Undock (if applicable to the ship) | "Turret groups restored to their previous settings." | Yes — immediately |
 
-**Failure mode to watch for:** if the popup appears but `Esc` is still dead,
-the `show_help` MD action ran but did not reach `View.createView/DisplayView`.
-If the popup does not appear at all, confirm help texts are enabled and inspect
-the filtered log for any MD or Lua error during the `Notify` cue. The normal
-notification-emission diagnostic is intentionally silent.
+**Failure:** if either check fails, stop and upload `debug.log`; ChatGPT will
+inspect the `Notify` cue and related MD/Lua errors. This test proves the observed
+popup/`Esc` result, not X4's hidden input state.
 
 ## Deterministic lifecycle reproduction
 
