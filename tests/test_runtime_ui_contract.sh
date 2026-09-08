@@ -223,11 +223,12 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-# Chair ingress matches the Map path: close DockedMenu with the auto-fallback
-# suppressed, run its cleanup, and open ours from the gated cleanup callback.
+# The temporary Issue #118 chair probe closes DockedMenu with the auto-fallback
+# suppressed, runs its cleanup, and enters the real Map/onboard lifecycle.
 grep -Fq 'Helper.closeMenu(docked, "close", false, false)' "$main"
 grep -Fq 'docked.cleanup()' "$main"
-grep -Fq 'docked.registerCallback("cleanup"' "$main"
+grep -Fq 'OpenMenu("MapMenu", { 0, 0 }, nil)' "$main"
+grep -Fq 'onOpenOnboard(nil, ship)' "$main"
 if grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"; then
   echo "chair ingress still opens Gunnery Control before DockedMenu cleanup" >&2
   exit 1

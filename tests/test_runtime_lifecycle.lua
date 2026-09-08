@@ -317,19 +317,21 @@ do
         "no DockedMenu at all is still a plain timeout")
 end
 
--- ── 118. physical-chair ingress reopens Gunnery from DockedMenu cleanup ──────
--- Opening X4GunneryMenu from closeMenuAndOpenNewMenu raced DockedMenu's own
--- teardown. The chair redirect now closes DockedMenu with the TopLevelMenu
--- auto-fallback suppressed, calls its cleanup(), and opens Gunnery Control
--- from the UI Extensions "cleanup" callback after a defer + chair recheck.
+-- ── 118. physical-chair ingress probes the real Map/onboard lifecycle ────────
+-- This temporary experiment closes DockedMenu, opens the real MapMenu, and
+-- immediately reuses onOpenOnboard so the existing suspended-Map lifecycle
+-- owns the handoff. DockedMenu cleanup must not independently open Gunnery.
 do
     local fix118 = dofile("tests/support/runtime_fixture.lua").load()
 
-    local trace, opens = {}, 0
+    local trace, mapOpens, gunneryOpens = {}, 0, 0
     OpenMenu = function(name)
-        if name == "X4GunneryMenu" then
-            opens = opens + 1
-            trace[#trace + 1] = "open"
+        if name == "MapMenu" then
+            mapOpens = mapOpens + 1
+            trace[#trace + 1] = "map_open"
+        elseif name == "X4GunneryMenu" then
+            gunneryOpens = gunneryOpens + 1
+            trace[#trace + 1] = "gunnery_open"
         end
     end
     local closeArgs
@@ -338,126 +340,99 @@ do
         closeArgs = { m = m, reason = reason, a = a, b = b }
     end
 
-    -- Stands in for UI Extensions: registerCallback stores the hooks, and
-    -- cleanup() fires the "cleanup" hook the way the patched menu_docked does.
-    -- One menu object for the whole block, since registerUIHooks registers its
-    -- callbacks exactly once; per-case behaviour comes from `opts`.
-    local cleanupHooks, opts = {}, {}
+    -- Stands in for UI Extensions: each host menu records the lifecycle hook
+    -- registered by registerUIHooks and fires it from its cleanup.
+    local dockedCleanupHooks, mapCleanupHooks = {}, {}
     local docked = {
         name = "DockedMenu",
         registerCallback = function(event, fn)
-            if event == "cleanup" then cleanupHooks[#cleanupHooks + 1] = fn end
+            if event == "cleanup" then
+                dockedCleanupHooks[#dockedCleanupHooks + 1] = fn
+            end
         end,
         cleanup = function()
-            trace[#trace + 1] = "cleanup"
-            if opts.skipHooks then return end
-            for _, fn in ipairs(cleanupHooks) do fn() end
-            if opts.afterCleanup then opts.afterCleanup() end
+            trace[#trace + 1] = "docked_cleanup"
+            for _, fn in ipairs(dockedCleanupHooks) do fn() end
+        end,
+    }
+    local map = {
+        name = "MapMenu",
+        registerCallback = function(event, fn)
+            if event == "on_menu_cleanup" then
+                mapCleanupHooks[#mapCleanupHooks + 1] = fn
+            end
+        end,
+        onCloseElement = function(reason)
+            trace[#trace + 1] = "map_close"
+            assert(reason == "close", "onOpenOnboard must close MapMenu with reason=close")
+            for _, fn in ipairs(mapCleanupHooks) do fn() end
         end,
     }
     Helper.getMenu = function(name)
         if name == "DockedMenu" then return docked end
+        if name == "MapMenu" then return map end
     end
 
-    local function chair(inChair)
-        fix118.C.GetPlayerCurrentControlGroup =
-            function() return inChair and "gunnercontrol" or "cockpit" end
+    fix118.C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
+    fix118.C.GetNumUpgradeGroups = function() return 0 end
+    fix118.C.GetNumUpgradeSlots = function() return 1 end
+    fix118.C.GetUpgradeSlotCurrentComponent = function() return 27 end
+    fix118.C.GetUpgradeSlotGroup = function()
+        return { path = "..", group = "group01" }
+    end
+    fix118.C.GetWeaponMode = function() return "defend" end
+    fix118.C.IsWeaponArmed = function() return true end
+    fix118.C.IsComponentOperational = function() return true end
+    fix118.C.IsPlayerCameraTargetViewPossible = function() return true end
+    GetComponentData = function(_, key)
+        if key == "isplayerowned" then return true end
     end
 
-    -- Drives the chair redirect exactly as the gameplanchange fallback does.
-    local function redirect()
-        local mark = fix118.callbackCheckpoint()
-        fix118.fireUIEvent("gameplanchange", "cockpit")
-        fix118.drainCallbacksSince(mark)
-    end
-
-    chair(true)
-    -- gameLoadingDone re-runs registerUIHooks now that DockedMenu exists.
+    -- gameLoadingDone re-runs registerUIHooks now that both host menus exist.
     fix118.fireUIEvent("gameLoadingDone")
-    assert(#cleanupHooks == 1,
-        "the chair path must register exactly one DockedMenu \"cleanup\" callback; got "
-        .. tostring(#cleanupHooks))
+    assert(#dockedCleanupHooks == 0,
+        "the chair Map probe must not register the old DockedMenu reopen callback; got "
+        .. tostring(#dockedCleanupHooks))
+    assert(#mapCleanupHooks == 1,
+        "the existing Map lifecycle must register exactly one on_menu_cleanup callback; got "
+        .. tostring(#mapCleanupHooks))
 
-    -- 118a: close (auto-fallback suppressed) -> cleanup -> open, in that order.
-    redirect()
-    assert(table.concat(trace, ",") == "close,cleanup,open",
-        "chair ingress must close DockedMenu, run its cleanup, and only then open "
-        .. "Gunnery Control; trace was " .. table.concat(trace, ","))
+    -- Run only the redirect callback first. This exposes the state before the
+    -- existing onOpenOnboard delayed Map close is allowed to run.
+    local mark = fix118.callbackCheckpoint()
+    fix118.fireUIEvent("gameplanchange", "cockpit")
+    local redirectCallback = fix118.pendingCallbacks[#fix118.pendingCallbacks]
+    fix118.runCallback(redirectCallback)
+
+    assert(table.concat(trace, ",") == "close,docked_cleanup,map_open",
+        "chair ingress must close/clean DockedMenu and request the real MapMenu; trace was "
+        .. table.concat(trace, ","))
     assert(closeArgs and closeArgs.reason == "close"
         and closeArgs.a == false and closeArgs.b == false,
         "DockedMenu must be closed with the TopLevelMenu auto-fallback suppressed "
         .. "(closeMenu(docked, \"close\", false, false)); got reason="
         .. tostring(closeArgs and closeArgs.reason) .. " a="
         .. tostring(closeArgs and closeArgs.a) .. " b=" .. tostring(closeArgs and closeArgs.b))
+    assert(mapOpens == 1, "chair ingress must request real MapMenu exactly once")
+    local session118 = fix118.API.getSession()
+    assert(session118 and session118.origin == "onboard"
+        and session118.lifecycle == X4GunneryState.lifecycle.suspendedMap,
+        "chair Map probe must reuse onOpenOnboard and create an onboard/suspended-Map session")
+    assert(gunneryOpens == 0,
+        "DockedMenu cleanup must not independently open Gunnery on the Map probe path")
+    assert(fix118.logContains(
+        "event=chair_map_probe stage=map_open_requested control=gunnercontrol ship=42"),
+        "chair Map probe must log its control group and current ship")
 
-    -- 118c: an ordinary DockedMenu cleanup with no chair redirect pending is inert.
-    trace, opens = {}, 0
-    opts = {}
-    local markC = fix118.callbackCheckpoint()
+    -- A later ordinary DockedMenu cleanup remains inert while Map owns the
+    -- suspended session; only Map cleanup may trigger the Gunnery reopen.
     docked.cleanup()
-    fix118.drainCallbacksSince(markC)
-    assert(opens == 0,
-        "a DockedMenu cleanup with no chair redirect pending must not open Gunnery "
-        .. "Control; opened " .. tostring(opens) .. " time(s)")
+    assert(gunneryOpens == 0,
+        "ordinary DockedMenu cleanup must remain inert during the Map handoff")
 
-    -- 118d: leaving the chair before the deferred reopen aborts it.
-    trace, opens = {}, 0
-    opts = { afterCleanup = function() chair(false) end }
-    redirect()
-    assert(opens == 0,
-        "losing the gunner chair before the deferred reopen must abort it; opened "
-        .. tostring(opens) .. " time(s)")
-
-    -- 118e: a redirect aborted before it reaches DockedMenu leaves nothing armed,
-    -- and a later fresh chair redirect still opens Gunnery Control.
-    trace, opens = {}, 0
-    opts = {}
-    local markE = fix118.callbackCheckpoint()
-    chair(true)
-    fix118.fireUIEvent("gameplanchange", "cockpit")
-    chair(false)                       -- out of the seat before the deferred redirect
-    fix118.drainCallbacksSince(markE)
-    local markE2 = fix118.callbackCheckpoint()
-    docked.cleanup()               -- ordinary teardown after the aborted redirect
-    fix118.drainCallbacksSince(markE2)
-    assert(opens == 0,
-        "an aborted chair redirect must leave no reopen armed; opened "
-        .. tostring(opens) .. " time(s)")
-    chair(true)
-    redirect()
-    assert(opens == 1,
-        "a fresh chair redirect after an aborted one must open Gunnery Control exactly "
-        .. "once; opened " .. tostring(opens) .. " time(s)")
-    -- 118g: no DockedMenu to close is reported and leaves nothing armed.
-    trace, opens = {}, 0
-    opts = {}
-    chair(true)
-    Helper.getMenu = function() return nil end
-    redirect()
-    assert(fix118.logContains("could not redirect: DockedMenu is unavailable"),
-        "a chair redirect with no DockedMenu must say so in the log")
-    Helper.getMenu = function(name)
-        if name == "DockedMenu" then return docked end
-    end
-    local markG = fix118.callbackCheckpoint()
-    docked.cleanup()
-    fix118.drainCallbacksSince(markG)
-    assert(opens == 0,
-        "a redirect that found no DockedMenu must leave no reopen armed; opened "
-        .. tostring(opens) .. " time(s)")
-
-    -- 118f: the registered "cleanup" callback is what schedules the reopen.
-    -- A DockedMenu teardown that never fires the hook must not open anything.
-    -- Runs last: it deliberately leaves the redirect armed, since nothing ever
-    -- fires the hook that would clear it.
-    trace, opens = {}, 0
-    chair(true)
-    opts = { skipHooks = true }
-    redirect()
-    assert(opens == 0,
-        "with the \"cleanup\" hook never fired, nothing else may open Gunnery Control; "
-        .. "opened " .. tostring(opens) .. " time(s)")
-
+    fix118.drainCallbacksSince(mark)
+    assert(gunneryOpens == 1,
+        "the existing onOpenOnboard close and Map cleanup callback must reopen Gunnery once")
 end
 
 print("runtime lifecycle tests passed")

@@ -179,9 +179,6 @@ local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
--- Set only by the chair redirect, so an ordinary DockedMenu cleanup (any other
--- way that menu closes) never reopens Gunnery Control.
-local chairReopenPending = false
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -198,6 +195,7 @@ local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
+local onOpenOnboard
 local activeExternalMenuName
 local suggestedTestEngagement
 local cameraMismatchLogged = false
@@ -3209,19 +3207,18 @@ local function redirectDockedMenu()
         if isInGunnerChair() then
             local docked = Helper.getMenu("DockedMenu")
             if docked then
-                -- Same ordering as the Map path: let the host menu finish its
-                -- own teardown, then open ours from its cleanup callback. The
-                -- false/false suppresses TopLevelMenu auto-fallback, and
-                -- cleanup() unregisters DockedMenu's events and fires the hook.
-                chairReopenPending = true
+                -- Experimental Issue #118 route: tear down DockedMenu, then
+                -- pass chair ingress through the real Map and the existing
+                -- onboard/suspended-Map lifecycle.
                 Helper.closeMenu(docked, "close", false, false)
                 docked.cleanup()
+                log("event=chair_map_probe stage=map_open_requested control="
+                    .. observedGroup .. " ship=" .. tostring(ship))
+                OpenMenu("MapMenu", { 0, 0 }, nil)
+                onOpenOnboard(nil, ship)
             else
-                chairReopenPending = false
                 log("could not redirect: DockedMenu is unavailable")
             end
-        else
-            chairReopenPending = false
         end
     end, false, getElapsedTime() + 0.05)
 end
@@ -3248,17 +3245,6 @@ local function registerUIHooks()
         local docked = Helper.getMenu("DockedMenu")
         if docked and docked.registerCallback then
             docked.registerCallback("display_on_after_main_interactions", redirectDockedMenu, menu.uixID)
-            docked.registerCallback("cleanup", function()
-                if not chairReopenPending then return end
-                chairReopenPending = false
-                -- Defer as the Map path does, so DockedMenu is fully gone
-                -- before a second menu opens in the same update.
-                Helper.addDelayedOneTimeCallbackOnUpdate(function()
-                    if isInGunnerChair() then
-                        OpenMenu("X4GunneryMenu", { 0, 0 }, nil)
-                    end
-                end, false, getElapsedTime() + 0.02)
-            end, menu.uixID)
             dockedHookRegistered = true
         end
     end
@@ -3407,7 +3393,7 @@ TestAPI.sessionContextValid = function() return sessionContextValid() end
 -- Map ingress is revalidated in Lua before a fresh onboard session is parked.
 -- The existing suspended-Map lifecycle opens Gunnery Control only after the Map
 -- has fully closed.
-local function onOpenOnboard(_, shipComponent)
+onOpenOnboard = function(_, shipComponent)
     if session then return end
     local ship = id(shipComponent)
     if ship == 0 then return end
