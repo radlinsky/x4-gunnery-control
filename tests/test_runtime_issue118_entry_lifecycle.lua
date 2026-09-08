@@ -2,6 +2,7 @@
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local State = X4GunneryState
 local control, opens, mapCloses = "cockpit", 0, 0
+local getUps, getUpResult = 0, true
 local map = { name = "MapMenu", shown = false }
 local docked = { name = "DockedMenu", shown = false }
 local dockedCallback
@@ -9,6 +10,11 @@ docked.registerCallback = function(_, callback) dockedCallback = callback end
 map.onCloseElement = function() mapCloses = mapCloses + 1; map.shown = false end
 table.insert(Menus, map); table.insert(Menus, docked)
 fix.C.GetPlayerCurrentControlGroup = function() return control end
+fix.C.GetUp = function()
+    getUps = getUps + 1
+    if getUpResult then control = "" end
+    return getUpResult
+end
 GetComponentData = function(_, key) if key == "isplayerowned" then return true end end
 fix.C.GetNumUpgradeGroups = function() return 1 end
 fix.C.GetUpgradeGroups2 = function() return 1 end
@@ -28,6 +34,12 @@ end
 fix.fireUIEvent("gameLoadingDone")
 Helper.closeMenuAndOpenNewMenu = function()
     error("physical release must not replace DockedMenu during the get-up transition")
+end
+
+local function assertNoChairRelease(message)
+    for _, event in ipairs(fix.uiTriggeredEvents) do
+        assert(not (event.screen == "X4GunneryControl" and event.control == "chair_release"), message)
+    end
 end
 
 local function openViaMap()
@@ -52,27 +64,21 @@ assert(fix.API.getSession() == nil)
 fix.gcMenu.shown = false
 
 control, docked.shown = "gunnercontrol", true
+getUps, getUpResult = 0, true
 fix.resetUITriggeredEvents()
 local mark = fix.callbackCheckpoint()
 fix.fireUIEvent("gameplanchange", "cockpit")
 fix.fireUIEvent("gameplanchange", "cockpit")
 fix.drainCallbacksSince(mark)
-local releases, release = 0, nil
-for _, event in ipairs(fix.uiTriggeredEvents) do
-    if event.screen == "X4GunneryControl" and event.control == "chair_release" then
-        releases, release = releases + 1, event
-    end
-end
-assert(releases == 1 and release.params.ship == 42, "physical ingress must emit one release for the observed ship")
-assert(opens == 1, "physical ingress must not open Gunnery Control before stopped-control")
-assert(fix.API.getSession() == nil, "no session may exist before stopped-control")
-
--- MD's event_player_stopped_control is the release boundary; stale Lua
--- control-group readback is not a second gate.
-fix.fireEvent("X4GunneryControl.OpenOnboardReleased", release.params.ship)
+assert(getUps == 1, "physical ingress must use vanilla Get Up exactly once")
+assertNoChairRelease("physical ingress must not depend on the unproven chair_release MD bridge")
+assert(opens == 1, "physical ingress must not open Gunnery Control before DockedMenu cleanup")
 session = fix.API.getSession()
 assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.reopening,
-    "released physical ingress must create a standing onboard handoff")
+    "successful Get Up must create the standing onboard handoff")
+assert(session.physicalReleasePending == true,
+    "successful Get Up must leave exactly one physical handoff pending")
+
 -- Vanilla closes DockedMenu from playerGetUp; until then the handoff waits
 -- rather than replacing it mid-transition.
 fix.API.runSessionWatchdog()
@@ -104,9 +110,25 @@ fix.fireEvent("playerGetUp")
 assert(fix.API.getSession() == session, "Map-origin onboard session must not become seat-bound")
 fix.fireEvent("playerUndock")
 assert(fix.API.getSession() == nil, "playerUndock must remain an unconditional teardown")
-
--- An unrelated menu is not the vanilla DockedMenu cleanup: cancel the one-shot.
 fix.gcMenu.shown = false
+
+-- If the engine refuses Get Up, do not create a standing session or fall back
+-- to the old MD bridge. The next physical interaction must start cleanly.
+control, docked.shown = "gunnercontrol", true
+getUps, getUpResult = 0, false
+fix.resetUITriggeredEvents()
+mark = fix.callbackCheckpoint()
+fix.fireUIEvent("gameplanchange", "cockpit")
+fix.drainCallbacksSince(mark)
+assert(getUps == 1, "a physical ingress attempt must call Get Up once even when X4 refuses it")
+assertNoChairRelease("Get Up refusal must not fall back to chair_release")
+assert(fix.API.getSession() == nil, "Get Up refusal must not leave a ghost onboard session")
+assert(opens == 3, "Get Up refusal must not open Gunnery Control")
+getUpResult, docked.shown = true, false
+
+-- Keep the old uniquely named MD completion event as a compatibility receiver:
+-- an already-pending release from a save may still arrive after this correction.
+-- An unrelated menu is not the vanilla DockedMenu cleanup: cancel the one-shot.
 control = "gunnercontrol"
 fix.fireEvent("X4GunneryControl.OpenOnboardReleased", 42)
 session = fix.API.getSession()
