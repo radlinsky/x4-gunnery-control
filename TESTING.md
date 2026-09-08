@@ -213,19 +213,18 @@ When testing the main Gunnery Control modes, confirm the following for the
   group is checked.
 - Checking at least one mutable group activates both buttons.
 
-**Auto-engage** is camera-only. Verify that no turret group's mode or armed
-state changes after pressing it. The live panel opens with the current turret
-name, four POV buttons (Turret POV manual, Target POV manual, Turret POV
-cinematic, Target POV cinematic), and Next Turret / Previous Turret. Next/Prev
-cycle through every operational turret of all checked groups in console order
-and wrap around; both buttons are greyed when only one operational turret
-qualifies. Cycling changes only the camera focus, never what is engaged.
-The camera-view frames request `keepHUDVisible=false` and
-`showTickerPermanently=false`; verify live that the HUD/ticker are actually
-suppressed for the installed game/UI combination. Record transient mission
-updates, notifications, and the bottom-left Messages area separately: X4 can
-still show them in ticker-only mode. This does not change persistent
-notification settings.
+**Auto-engage** temporarily applies staged settings: checked mutable groups use
+`attackenemies` with staged Armed; unchecked mutable groups use their staged
+Mode/Armed. The Direct-control policy selector does not affect Auto-engage.
+These settings remain live when returning to the console; ending the Gunnery
+Control session restores its baseline. The live panel shows the current turret,
+four POV buttons, and Next/Previous Turret. Next/Prev cycle through operational
+turrets in checked groups, wrap around, and are greyed when only one qualifies.
+Cycling changes only camera focus. Verify the camera-view frames suppress the
+HUD/ticker as requested by `keepHUDVisible=false` and
+`showTickerPermanently=false`. Record transient mission updates, notifications,
+and the bottom-left Messages area separately; X4 can still show them in
+ticker-only mode. Persistent notification settings are unchanged.
 
 **Direct-control** first opens a smaller, unblurred browser of known ships and
 stations in the current sector within the player ship's radar range. It excludes
@@ -303,7 +302,7 @@ camera and clears the in-memory sweep.
 | Grouping | ungrouped turret (appears as its own single-member group), linked group, fully destroyed group (camera only) |
 | Motion | stationary, player ship turning, NPC captain moving the ship |
 | Checkbox gate | Auto-engage and Direct-control greyed with no checked groups; activated once at least one mutable group is checked |
-| Auto-engage | Mode and armed state of every checked group unchanged after entering and exiting; Next/Prev cycles and wraps when two or more groups are checked; Next/Prev greyed when only one operational turret qualifies |
+| Auto-engage | Checked mutable groups temporarily use `attackenemies` + staged Armed; unchecked mutable groups use staged Mode/Armed; Direct-control policy ignored; session exit restores baseline; Next/Prev cycles/wraps; both greyed with one operational turret |
 | Direct-control | Clicking a target in the browser engages its hull immediately with no intermediate picker; every checked mutable group set to armed `autoassist`; upper-left element panel lists Hull (greyed) plus surface elements; clicking a non-active element re-points all groups; Next/Previous Target cycles in browser order and is greyed when ≤1 candidate; Cease Engagement restores all groups. Save/load restores the session as of 2026-08-08: the console reopens engaged, same groups checked, same turret POV, same target, and Cease afterwards still returns every group to its original mode. |
 | Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
 | Lifecycle | Cease Engagement, close console/Get Up, undock, teleport/ship change, save/load, retry, skip |
@@ -347,7 +346,7 @@ game menu immediately after standing up.
 
 | Mode entered | Exit route | Expected popup text | Esc opens game menu |
 |---|---|---|---|
-| Auto-engage (camera only, no group override) | Our **Get Up** button | "Gunnery Control disengaged." | Yes — immediately |
+| Auto-engage | Our **Get Up** button | "Gunnery Control disengaged." | Yes — immediately |
 | Direct-control (at least one group overridden) | Our **Get Up** button | "Turret groups restored to their previous settings." | Yes — immediately |
 | Auto-engage | Stand up via `Shift+D` or the vanilla stand-up interaction (not our button) | "Gunnery Control disengaged." | Yes — immediately |
 | Direct-control | Stand up via `Shift+D` or the vanilla stand-up interaction (not our button) | "Turret groups restored to their previous settings." | Yes — immediately |
