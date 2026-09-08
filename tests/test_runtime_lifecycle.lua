@@ -319,120 +319,188 @@ end
 
 -- ── 118. physical-chair ingress probes the real Map/onboard lifecycle ────────
 -- This temporary experiment closes DockedMenu, opens the real MapMenu, and
--- immediately reuses onOpenOnboard so the existing suspended-Map lifecycle
--- owns the handoff. DockedMenu cleanup must not independently open Gunnery.
+-- waits for Kuertee's Map frame-created callback before reusing onOpenOnboard.
+-- DockedMenu cleanup must not independently open Gunnery.
 do
-    local fix118 = dofile("tests/support/runtime_fixture.lua").load()
+    local function setupIssue118()
+        local fix = dofile("tests/support/runtime_fixture.lua").load()
+        local probe = {
+            fix = fix,
+            trace = {},
+            mapOpens = 0,
+            gunneryOpens = 0,
+            control = "gunnercontrol",
+            ship = 42,
+            dockedRedirectHooks = {},
+            mapFrameHooks = {},
+            mapCleanupHooks = {},
+        }
 
-    local trace, mapOpens, gunneryOpens = {}, 0, 0
-    OpenMenu = function(name)
-        if name == "MapMenu" then
-            mapOpens = mapOpens + 1
-            trace[#trace + 1] = "map_open"
-        elseif name == "X4GunneryMenu" then
-            gunneryOpens = gunneryOpens + 1
-            trace[#trace + 1] = "gunnery_open"
+        OpenMenu = function(name)
+            if name == "MapMenu" then
+                probe.mapOpens = probe.mapOpens + 1
+                probe.trace[#probe.trace + 1] = "map_open"
+            elseif name == "X4GunneryMenu" then
+                probe.gunneryOpens = probe.gunneryOpens + 1
+                probe.trace[#probe.trace + 1] = "gunnery_open"
+            end
         end
-    end
-    local closeArgs
-    Helper.closeMenu = function(m, reason, a, b)
-        trace[#trace + 1] = "close"
-        closeArgs = { m = m, reason = reason, a = a, b = b }
+        Helper.closeMenu = function(m, reason, a, b)
+            probe.trace[#probe.trace + 1] = "close"
+            probe.closeArgs = { m = m, reason = reason, a = a, b = b }
+        end
+
+        -- Stand in for UI Extensions and retain each registered host callback
+        -- so the test controls the exact lifecycle ordering.
+        local docked = {
+            name = "DockedMenu",
+            registerCallback = function(event, fn)
+                if event == "display_on_after_main_interactions" then
+                    probe.dockedRedirectHooks[#probe.dockedRedirectHooks + 1] = fn
+                end
+            end,
+            cleanup = function()
+                probe.trace[#probe.trace + 1] = "docked_cleanup"
+            end,
+        }
+        local map = {
+            name = "MapMenu",
+            registerCallback = function(event, fn)
+                if event == "on_create_main_frame" then
+                    probe.mapFrameHooks[#probe.mapFrameHooks + 1] = fn
+                elseif event == "on_menu_cleanup" then
+                    probe.mapCleanupHooks[#probe.mapCleanupHooks + 1] = fn
+                end
+            end,
+            onCloseElement = function(reason)
+                probe.trace[#probe.trace + 1] = "map_close"
+                assert(reason == "close", "onOpenOnboard must close MapMenu with reason=close")
+                probe.trace[#probe.trace + 1] = "map_cleanup"
+                for _, fn in ipairs(probe.mapCleanupHooks) do fn() end
+            end,
+        }
+        Helper.getMenu = function(name)
+            if name == "DockedMenu" then return docked end
+            if name == "MapMenu" then return map end
+        end
+
+        fix.C.GetPlayerCurrentControlGroup = function() return probe.control end
+        fix.C.GetPlayerOccupiedShipID = function() return probe.ship end
+        fix.C.GetNumUpgradeGroups = function() return 0 end
+        fix.C.GetNumUpgradeSlots = function() return 1 end
+        fix.C.GetUpgradeSlotCurrentComponent = function() return 27 end
+        fix.C.GetUpgradeSlotGroup = function()
+            return { path = "..", group = "group01" }
+        end
+        fix.C.GetWeaponMode = function() return "defend" end
+        fix.C.IsWeaponArmed = function() return true end
+        fix.C.IsComponentOperational = function() return true end
+        fix.C.IsPlayerCameraTargetViewPossible = function() return true end
+        GetComponentData = function(_, key)
+            if key == "isplayerowned" then return true end
+        end
+
+        -- gameLoadingDone re-runs registerUIHooks now that both host menus exist.
+        fix.fireUIEvent("gameLoadingDone")
+        assert(#probe.dockedRedirectHooks == 1,
+            "chair ingress must register exactly one DockedMenu redirect callback")
+        assert(#probe.mapFrameHooks == 1,
+            "chair ingress must register exactly one Map on_create_main_frame callback")
+        assert(#probe.mapCleanupHooks == 1,
+            "the existing Map lifecycle must register exactly one on_menu_cleanup callback")
+        return probe
     end
 
-    -- Stands in for UI Extensions: each host menu records the lifecycle hook
-    -- registered by registerUIHooks and fires it from its cleanup.
-    local dockedCleanupHooks, mapCleanupHooks = {}, {}
-    local docked = {
-        name = "DockedMenu",
-        registerCallback = function(event, fn)
-            if event == "cleanup" then
-                dockedCleanupHooks[#dockedCleanupHooks + 1] = fn
-            end
-        end,
-        cleanup = function()
-            trace[#trace + 1] = "docked_cleanup"
-            for _, fn in ipairs(dockedCleanupHooks) do fn() end
-        end,
-    }
-    local map = {
-        name = "MapMenu",
-        registerCallback = function(event, fn)
-            if event == "on_menu_cleanup" then
-                mapCleanupHooks[#mapCleanupHooks + 1] = fn
-            end
-        end,
-        onCloseElement = function(reason)
-            trace[#trace + 1] = "map_close"
-            assert(reason == "close", "onOpenOnboard must close MapMenu with reason=close")
-            for _, fn in ipairs(mapCleanupHooks) do fn() end
-        end,
-    }
-    Helper.getMenu = function(name)
-        if name == "DockedMenu" then return docked end
-        if name == "MapMenu" then return map end
-    end
+    local probe = setupIssue118()
+    local fix118 = probe.fix
 
-    fix118.C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
-    fix118.C.GetNumUpgradeGroups = function() return 0 end
-    fix118.C.GetNumUpgradeSlots = function() return 1 end
-    fix118.C.GetUpgradeSlotCurrentComponent = function() return 27 end
-    fix118.C.GetUpgradeSlotGroup = function()
-        return { path = "..", group = "group01" }
-    end
-    fix118.C.GetWeaponMode = function() return "defend" end
-    fix118.C.IsWeaponArmed = function() return true end
-    fix118.C.IsComponentOperational = function() return true end
-    fix118.C.IsPlayerCameraTargetViewPossible = function() return true end
-    GetComponentData = function(_, key)
-        if key == "isplayerowned" then return true end
-    end
+    -- An ordinary Map frame creation has no chair handoff and is inert.
+    probe.mapFrameHooks[1]()
+    assert(fix118.API.getSession() == nil and #probe.trace == 0,
+        "ordinary Map frame creation must not create an onboard session")
 
-    -- gameLoadingDone re-runs registerUIHooks now that both host menus exist.
-    fix118.fireUIEvent("gameLoadingDone")
-    assert(#dockedCleanupHooks == 0,
-        "the chair Map probe must not register the old DockedMenu reopen callback; got "
-        .. tostring(#dockedCleanupHooks))
-    assert(#mapCleanupHooks == 1,
-        "the existing Map lifecycle must register exactly one on_menu_cleanup callback; got "
-        .. tostring(#mapCleanupHooks))
-
-    -- Run only the redirect callback first. This exposes the state before the
-    -- existing onOpenOnboard delayed Map close is allowed to run.
     local mark = fix118.callbackCheckpoint()
-    fix118.fireUIEvent("gameplanchange", "cockpit")
+    probe.dockedRedirectHooks[1]()
     local redirectCallback = fix118.pendingCallbacks[#fix118.pendingCallbacks]
     fix118.runCallback(redirectCallback)
 
-    assert(table.concat(trace, ",") == "close,docked_cleanup,map_open",
+    assert(table.concat(probe.trace, ",") == "close,docked_cleanup,map_open",
         "chair ingress must close/clean DockedMenu and request the real MapMenu; trace was "
-        .. table.concat(trace, ","))
-    assert(closeArgs and closeArgs.reason == "close"
-        and closeArgs.a == false and closeArgs.b == false,
+        .. table.concat(probe.trace, ","))
+    assert(probe.closeArgs and probe.closeArgs.reason == "close"
+        and probe.closeArgs.a == false and probe.closeArgs.b == false,
         "DockedMenu must be closed with the TopLevelMenu auto-fallback suppressed "
         .. "(closeMenu(docked, \"close\", false, false)); got reason="
-        .. tostring(closeArgs and closeArgs.reason) .. " a="
-        .. tostring(closeArgs and closeArgs.a) .. " b=" .. tostring(closeArgs and closeArgs.b))
-    assert(mapOpens == 1, "chair ingress must request real MapMenu exactly once")
-    local session118 = fix118.API.getSession()
-    assert(session118 and session118.origin == "onboard"
-        and session118.lifecycle == X4GunneryState.lifecycle.suspendedMap,
-        "chair Map probe must reuse onOpenOnboard and create an onboard/suspended-Map session")
-    assert(gunneryOpens == 0,
+        .. tostring(probe.closeArgs and probe.closeArgs.reason) .. " a="
+        .. tostring(probe.closeArgs and probe.closeArgs.a) .. " b="
+        .. tostring(probe.closeArgs and probe.closeArgs.b))
+    assert(probe.mapOpens == 1, "chair ingress must request real MapMenu exactly once")
+    assert(fix118.API.getSession() == nil,
+        "onOpenOnboard ran before the simulated on_create_main_frame callback")
+    assert(probe.gunneryOpens == 0,
         "DockedMenu cleanup must not independently open Gunnery on the Map probe path")
     assert(fix118.logContains(
         "event=chair_map_probe stage=map_open_requested control=gunnercontrol ship=42"),
-        "chair Map probe must log its control group and current ship")
+        "chair Map probe must log its control group and requested ship")
 
-    -- A later ordinary DockedMenu cleanup remains inert while Map owns the
-    -- suspended session; only Map cleanup may trigger the Gunnery reopen.
-    docked.cleanup()
-    assert(gunneryOpens == 0,
-        "ordinary DockedMenu cleanup must remain inert during the Map handoff")
+    -- A duplicate DockedMenu/UIX callback cannot issue another request while
+    -- the exact ship handoff is pending.
+    local duplicateMark = fix118.callbackCheckpoint()
+    probe.dockedRedirectHooks[1]()
+    fix118.drainCallbacksSince(duplicateMark)
+    assert(probe.mapOpens == 1,
+        "a pending chair-Map handoff must suppress duplicate Map requests")
+
+    probe.trace[#probe.trace + 1] = "map_frame_created"
+    probe.mapFrameHooks[1]()
+    local session118 = fix118.API.getSession()
+    assert(session118 and session118.origin == "onboard"
+        and session118.lifecycle == X4GunneryState.lifecycle.suspendedMap,
+        "Map frame creation must reuse onOpenOnboard and park an onboard session")
+    assert(fix118.logContains(
+        "event=chair_map_probe stage=map_frame_created control=gunnercontrol ship=42"),
+        "chair Map probe must log the accepted Map frame handoff")
+
+    -- Once onOpenOnboard accepts the session, another UIX chair callback also
+    -- remains inert even though the pending handoff has been consumed.
+    probe.dockedRedirectHooks[1]()
+    assert(probe.mapOpens == 1,
+        "an accepted onboard session must suppress duplicate Map requests")
 
     fix118.drainCallbacksSince(mark)
-    assert(gunneryOpens == 1,
-        "the existing onOpenOnboard close and Map cleanup callback must reopen Gunnery once")
+    assert(table.concat(probe.trace, ",") ==
+            "close,docked_cleanup,map_open,map_frame_created,map_close,map_cleanup,gunnery_open",
+        "Map frame creation must precede delayed close, cleanup, and one Gunnery open; trace was "
+        .. table.concat(probe.trace, ","))
+    assert(probe.gunneryOpens == 1,
+        "the existing delayed Map cleanup lifecycle must reopen Gunnery exactly once")
+
+    -- The pending handoff is consumed even when the frame callback discovers
+    -- that chair or ship identity no longer matches. A later frame callback
+    -- cannot resurrect it after the context becomes valid again.
+    for _, invalid in ipairs({
+        { reason = "left_gunnercontrol", mutate = function(p) p.control = "cockpit" end },
+        { reason = "ship_changed", mutate = function(p) p.ship = 43 end },
+    }) do
+        local aborted = setupIssue118()
+        local abortMark = aborted.fix.callbackCheckpoint()
+        aborted.dockedRedirectHooks[1]()
+        aborted.fix.runCallback(aborted.fix.pendingCallbacks[#aborted.fix.pendingCallbacks])
+        assert(aborted.fix.API.getSession() == nil and aborted.mapOpens == 1,
+            "invalid-context setup must still be waiting for the Map frame")
+        invalid.mutate(aborted)
+        aborted.mapFrameHooks[1]()
+        assert(aborted.fix.API.getSession() == nil and aborted.gunneryOpens == 0,
+            "an invalid " .. invalid.reason .. " handoff must not create or open a session")
+        assert(aborted.fix.logContains(
+            "event=chair_map_probe stage=map_frame_aborted reason=" .. invalid.reason),
+            "invalid Map handoff must log abort reason " .. invalid.reason)
+        aborted.control, aborted.ship = "gunnercontrol", 42
+        aborted.mapFrameHooks[1]()
+        aborted.fix.drainCallbacksSince(abortMark)
+        assert(aborted.fix.API.getSession() == nil and aborted.gunneryOpens == 0,
+            "an aborted handoff must be consumed exactly once")
+    end
 end
 
 print("runtime lifecycle tests passed")

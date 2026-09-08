@@ -224,11 +224,17 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   exit 1
 fi
 # The temporary Issue #118 chair probe closes DockedMenu with the auto-fallback
-# suppressed, runs its cleanup, and enters the real Map/onboard lifecycle.
+# suppressed, runs its cleanup, and waits for the real Map frame before entering
+# the existing onboard lifecycle.
 grep -Fq 'Helper.closeMenu(docked, "close", false, false)' "$main"
 grep -Fq 'docked.cleanup()' "$main"
 grep -Fq 'OpenMenu("MapMenu", { 0, 0 }, nil)' "$main"
-grep -Fq 'onOpenOnboard(nil, ship)' "$main"
+grep -Fq 'map.registerCallback("on_create_main_frame"' "$main"
+grep -Fq 'onOpenOnboard(nil, pendingShip)' "$main"
+if grep -Fq 'onOpenOnboard(nil, ship)' "$main"; then
+  echo "chair redirect still enters onboard lifecycle before Map frame creation" >&2
+  exit 1
+fi
 if grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"; then
   echo "chair ingress still opens Gunnery Control before DockedMenu cleanup" >&2
   exit 1

@@ -179,6 +179,7 @@ local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
+local pendingChairMapShip
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -3199,7 +3200,8 @@ end
 local function redirectDockedMenu()
     local observedGroup = controlGroup()
     local ship = playerShip()
-    if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
+    if redirectPending or pendingChairMapShip or session
+            or observedGroup ~= "gunnercontrol" or ship == 0 then return end
     redirectPending = true
     -- Deferring avoids opening two menus in the same DockedMenu render pass.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -3212,10 +3214,10 @@ local function redirectDockedMenu()
                 -- onboard/suspended-Map lifecycle.
                 Helper.closeMenu(docked, "close", false, false)
                 docked.cleanup()
+                pendingChairMapShip = ship
                 log("event=chair_map_probe stage=map_open_requested control="
                     .. observedGroup .. " ship=" .. tostring(ship))
                 OpenMenu("MapMenu", { 0, 0 }, nil)
-                onOpenOnboard(nil, ship)
             else
                 log("could not redirect: DockedMenu is unavailable")
             end
@@ -3253,6 +3255,24 @@ local function registerUIHooks()
         if map and map.registerCallback then
             -- Kuertee UI Extensions exposes this Map-only lifecycle callback.
             -- It is deliberately not generalized to arbitrary menus.
+            map.registerCallback("on_create_main_frame", function()
+                if not pendingChairMapShip then return end
+                local pendingShip = pendingChairMapShip
+                pendingChairMapShip = nil
+                local currentGroup = controlGroup()
+                if currentGroup ~= "gunnercontrol" then
+                    log("event=chair_map_probe stage=map_frame_aborted reason=left_gunnercontrol")
+                    return
+                end
+                local currentShip = playerShip()
+                if currentShip == 0 or not sameID(currentShip, pendingShip) then
+                    log("event=chair_map_probe stage=map_frame_aborted reason=ship_changed")
+                    return
+                end
+                log("event=chair_map_probe stage=map_frame_created control="
+                    .. currentGroup .. " ship=" .. tostring(pendingShip))
+                onOpenOnboard(nil, pendingShip)
+            end, menu.uixID)
             map.registerCallback("on_menu_cleanup", function()
                 local expectedSession, expectedEpoch = session, sessionEpoch
                 if not expectedSession or expectedSession.lifecycle ~= State.lifecycle.suspendedMap then return end
