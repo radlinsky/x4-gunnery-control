@@ -726,7 +726,7 @@
          and only then hand the same ship to the existing onboard ingress. -->
     <cue name="ChairIngress">
       <cues>
-        <cue name="Release" instantiate="true">
+        <cue name="Issue118ChairReleaseRequest20260908" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'chair_release'"/>
           </conditions>
@@ -748,7 +748,7 @@
             </do_if>
           </actions>
         </cue>
-        <cue name="Stopped" instantiate="true">
+        <cue name="Issue118ChairStoppedControl20260908" instantiate="true">
           <conditions>
             <event_player_stopped_control/>
           </conditions>
