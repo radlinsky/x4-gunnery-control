@@ -3201,27 +3201,30 @@ completeReleasedOnboardHandoff = function(reason)
     if not session or not session.physicalReleasePending or menu.shown then return false end
     if session.origin ~= "onboard" or session.lifecycle ~= State.lifecycle.reopening
             or not resumePending then return false end
-    if not sessionContextValid() or controlGroup() == "gunnercontrol" then
+    if not sessionContextValid() then
         endSession("released onboard context invalid")
         return false
     end
-    local docked = Helper.getMenu("DockedMenu")
-    if not docked or not docked.shown then return false end
-    -- This replacement is deliberately after MD's event_player_stopped_control
-    -- boundary. The old chair path used the same Helper transition while still
-    -- in gunnercontrol; doing it only from this released-onboard marker keeps
-    -- vanilla's DockedMenu fallback from winning without recreating chair state.
+    local externalMenu = activeExternalMenuName()
+    if externalMenu then
+        -- Vanilla DockedMenu closes from playerGetUp. Wait for that normal
+        -- cleanup instead of replacing it in the middle of the seat-release
+        -- transition. Any unrelated menu cancels this one-shot handoff.
+        if externalMenu ~= "DockedMenu" then
+            endSession("released onboard blocked by " .. externalMenu)
+        end
+        return false
+    end
     session.physicalReleasePending = nil
-    logSession("physical release replacing DockedMenu: " .. tostring(reason))
-    Helper.closeMenuAndOpenNewMenu(docked, menu.name, { 0, 0 }, true)
+    logSession("physical release opening Gunnery Control: " .. tostring(reason))
+    OpenMenu(menu.name, { 0, 0 }, nil)
     return true
 end
 
 redirectDockedMenu = function()
-    -- After the control position is gone, this same DockedMenu callback becomes
-    -- the completion point for the physical launcher rather than another chair
-    -- request. The watchdog below provides the same observed-state fallback when
-    -- UI Extensions is absent.
+    -- A late DockedMenu callback after release only rechecks the handoff; while
+    -- DockedMenu is still visible completion waits for vanilla playerGetUp
+    -- cleanup. The watchdog opens Gunnery once no external menu remains.
     if session and session.physicalReleasePending then
         completeReleasedOnboardHandoff("DockedMenu callback")
         return
@@ -3368,13 +3371,10 @@ end
 TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
-    -- UIX normally delivers DockedMenu's display callback. Polling the same
-    -- concrete menu/control state here keeps physical ingress working when UIX
-    -- is absent or its callback registered late; no timer is used to decide that
-    -- the control position has been released -- MD's stopped-control event did.
-    if not session and isInGunnerChair() then
-        redirectDockedMenu()
-    elseif session and session.physicalReleasePending then
+    -- UIX normally delivers DockedMenu's display callback. Poll only a released
+    -- handoff here so module init stays inert while merely sitting in a chair.
+    -- Release completion itself is still MD's event_player_stopped_control.
+    if session and session.physicalReleasePending then
         completeReleasedOnboardHandoff("watchdog")
     end
     if session then
@@ -3525,7 +3525,9 @@ local function init()
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
         -- object after this extension's first registration attempt.
-        if isInGunnerChair() and not menu.shown and not activeExternalMenuName()
+        local externalMenu = activeExternalMenuName()
+        if isInGunnerChair() and not menu.shown
+            and (not externalMenu or externalMenu == "DockedMenu")
             and (not session or not State.isMapSuspended(session)) then
             if session then discardSession("stale session before chair redirect") end
             redirectDockedMenu()

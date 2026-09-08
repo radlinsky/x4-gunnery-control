@@ -1,10 +1,10 @@
 -- Issue #118: the one lifecycle gap not covered by existing onboard tests.
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local State = X4GunneryState
-local control, replacements = "cockpit", 0
+local control, opens, mapCloses = "cockpit", 0, 0
 local map = { name = "MapMenu", shown = false }
 local docked = { name = "DockedMenu", shown = false }
-map.onCloseElement = function() map.shown = false end
+map.onCloseElement = function() mapCloses = mapCloses + 1; map.shown = false end
 table.insert(Menus, map); table.insert(Menus, docked)
 fix.C.GetPlayerCurrentControlGroup = function() return control end
 GetComponentData = function(_, key) if key == "isplayerowned" then return true end end
@@ -18,14 +18,12 @@ fix.ffiStub.new = function() return { [0] = { path = "p", group = "g", contextid
 Helper.getMenu = function(name) return name == "MapMenu" and map or name == "DockedMenu" and docked or nil end
 OpenMenu = function(name)
     assert(name == "X4GunneryMenu")
+    opens = opens + 1
     fix.gcMenu.shown = true
     fix.gcMenu.onShowMenu()
 end
-Helper.closeMenuAndOpenNewMenu = function(from, name)
-    assert(from == docked and name == "X4GunneryMenu")
-    replacements = replacements + 1
-    docked.shown, fix.gcMenu.shown = false, true
-    fix.gcMenu.onShowMenu()
+Helper.closeMenuAndOpenNewMenu = function()
+    error("physical release must not replace DockedMenu during the get-up transition")
 end
 
 local function openViaMap()
@@ -52,7 +50,8 @@ fix.gcMenu.shown = false
 control, docked.shown = "gunnercontrol", true
 fix.resetUITriggeredEvents()
 local mark = fix.callbackCheckpoint()
-fix.API.runSessionWatchdog(); fix.API.runSessionWatchdog()
+fix.fireUIEvent("gameplanchange", "cockpit")
+fix.fireUIEvent("gameplanchange", "cockpit")
 fix.drainCallbacksSince(mark)
 local releases, release = 0, nil
 for _, event in ipairs(fix.uiTriggeredEvents) do
@@ -61,27 +60,34 @@ for _, event in ipairs(fix.uiTriggeredEvents) do
     end
 end
 assert(releases == 1 and release.params.ship == 42, "physical ingress must emit one release for the observed ship")
+assert(opens == 1, "physical ingress must not open Gunnery Control before stopped-control")
 assert(fix.API.getSession() == nil, "no session may exist before stopped-control")
 
-control = "cockpit"
+-- Vanilla closes DockedMenu from playerGetUp. MD's event_player_stopped_control
+-- is the release boundary; stale Lua control-group readback is not a second gate.
+docked.shown = false
+fix.fireEvent("playerGetUp")
 fix.fireEvent("X4GunneryControl.OpenOnboardReleased", release.params.ship)
 session = fix.API.getSession()
 assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.reopening,
     "released physical ingress must create a standing onboard handoff")
-assert(replacements == 0, "MD release event must not replace DockedMenu directly")
 fix.fireEvent("playerGetUp")
-assert(fix.API.getSession() == session, "playerGetUp must not destroy a standing onboard handoff")
+assert(fix.API.getSession() == session, "late playerGetUp must not destroy a standing onboard handoff")
 fix.API.runSessionWatchdog()
-assert(replacements == 1 and session.lifecycle == State.lifecycle.owned,
-    "DockedMenu must be replaced once and converge to normal owned lifecycle")
+assert(opens == 2 and session.lifecycle == State.lifecycle.owned,
+    "released handoff must open once after vanilla DockedMenu cleanup")
+assert(mapCloses == 1, "physical handoff must not invoke Map teardown")
 fix.API.runSessionWatchdog()
-assert(replacements == 1, "physical replacement must remain one-shot")
+assert(opens == 2, "physical reopen must remain one-shot")
+control = "cockpit"
 
 session.phase = "console"
 fix.gcMenu.onCloseElement("close")
 assert(fix.API.getSession() == nil)
 fix.gcMenu.shown = false
 session = openViaMap()
+assert(mapCloses == 2, "Map re-entry must still use its own cleanup path")
+assert(opens == 3, "Map re-entry must remain reusable after physical handoff")
 fix.fireEvent("playerGetUp")
 assert(fix.API.getSession() == session, "Map-origin onboard session must not become seat-bound")
 fix.fireEvent("playerUndock")
