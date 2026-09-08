@@ -4,6 +4,8 @@ local State = X4GunneryState
 local control, opens, mapCloses = "cockpit", 0, 0
 local map = { name = "MapMenu", shown = false }
 local docked = { name = "DockedMenu", shown = false }
+local dockedCallback
+docked.registerCallback = function(_, callback) dockedCallback = callback end
 map.onCloseElement = function() mapCloses = mapCloses + 1; map.shown = false end
 table.insert(Menus, map); table.insert(Menus, docked)
 fix.C.GetPlayerCurrentControlGroup = function() return control end
@@ -22,6 +24,8 @@ OpenMenu = function(name)
     fix.gcMenu.shown = true
     fix.gcMenu.onShowMenu()
 end
+-- init() ran before these menu stubs existed; gameLoadingDone re-runs the hooks.
+fix.fireUIEvent("gameLoadingDone")
 Helper.closeMenuAndOpenNewMenu = function()
     error("physical release must not replace DockedMenu during the get-up transition")
 end
@@ -63,14 +67,22 @@ assert(releases == 1 and release.params.ship == 42, "physical ingress must emit 
 assert(opens == 1, "physical ingress must not open Gunnery Control before stopped-control")
 assert(fix.API.getSession() == nil, "no session may exist before stopped-control")
 
--- Vanilla closes DockedMenu from playerGetUp. MD's event_player_stopped_control
--- is the release boundary; stale Lua control-group readback is not a second gate.
-docked.shown = false
-fix.fireEvent("playerGetUp")
+-- MD's event_player_stopped_control is the release boundary; stale Lua
+-- control-group readback is not a second gate.
 fix.fireEvent("X4GunneryControl.OpenOnboardReleased", release.params.ship)
 session = fix.API.getSession()
 assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.reopening,
     "released physical ingress must create a standing onboard handoff")
+-- Vanilla closes DockedMenu from playerGetUp; until then the handoff waits
+-- rather than replacing it mid-transition.
+fix.API.runSessionWatchdog()
+assert(opens == 1 and fix.API.getSession() == session,
+    "handoff must wait while vanilla DockedMenu is still visible")
+assert(dockedCallback, "the DockedMenu display hook must be registered")
+dockedCallback()
+assert(opens == 1 and fix.API.getSession() == session,
+    "a late DockedMenu callback must only recheck the pending handoff")
+docked.shown = false
 fix.fireEvent("playerGetUp")
 assert(fix.API.getSession() == session, "late playerGetUp must not destroy a standing onboard handoff")
 fix.API.runSessionWatchdog()
@@ -92,5 +104,29 @@ fix.fireEvent("playerGetUp")
 assert(fix.API.getSession() == session, "Map-origin onboard session must not become seat-bound")
 fix.fireEvent("playerUndock")
 assert(fix.API.getSession() == nil, "playerUndock must remain an unconditional teardown")
+
+-- An unrelated menu is not the vanilla DockedMenu cleanup: cancel the one-shot.
+fix.gcMenu.shown = false
+control = "gunnercontrol"
+fix.fireEvent("X4GunneryControl.OpenOnboardReleased", 42)
+session = fix.API.getSession()
+assert(session and session.lifecycle == State.lifecycle.reopening)
+map.shown = true
+fix.API.runSessionWatchdog()
+assert(fix.API.getSession() == nil and opens == 3,
+    "a non-DockedMenu external menu must cancel the pending handoff without opening")
+map.shown = false
+
+-- The player left the ship before the handoff completed.
+fix.fireEvent("X4GunneryControl.OpenOnboardReleased", 42)
+assert(fix.API.getSession(), "handoff must be recreatable after cancellation")
+fix.C.GetContextByClass = function() return 77 end
+fix.API.runSessionWatchdog()
+assert(fix.API.getSession() == nil and opens == 3,
+    "a stale released handoff must end instead of opening Gunnery Control")
+
+-- With no onboard session standing, get-up stays the ordinary teardown.
+fix.fireEvent("playerGetUp")
+assert(fix.API.getSession() == nil)
 
 print("Issue #118 entry lifecycle regression tests passed")
