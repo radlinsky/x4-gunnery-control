@@ -985,11 +985,6 @@ local function startAutoEngage(groups)
     local member = cameraMember()
     if not member then State.returnToConsole(session); return false end
     if not enterCamera(member) then State.returnToConsole(session); return false end
-    -- Auto-engage was never parked, so a save/load or a UI reload during it
-    -- dropped the player back at the console. It overrides no turret modes and
-    -- so needs no safety record, but the camera, the checked groups and the
-    -- phase are worth just as much here as in Direct control, and the payload
-    -- already carries controlMode.
     persistSession()
     -- Finish the button callback before replacing the blurred console frame.
     -- Rebuilding a view during the click dispatch can leave the old frame
