@@ -177,11 +177,13 @@ double-clicking the launcher in Windows Explorer:
 \\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-test-lab-dev.bat
 ```
 
-The launcher reinstalls the main mod automatically before starting X4; no
-separate install step is needed. No arguments are needed for a default Steam or
-GOG installation. The `UNC paths are not supported.` notice from `cmd.exe` is
-expected and harmless. Use a Command Prompt instead when a custom installation
-folder is required:
+The launcher installs the checkout's loose files before X4. For any live result,
+follow `docs/RELOADING.md`: install the exact loose files under test before
+reload/restart and verify `[X4GC] UI initialized; build=<runtimeBuild>` matches
+the build just installed. A checkout SHA alone is not runtime proof. No
+arguments are needed for a default Steam or GOG installation. The `UNC paths are
+not supported.` notice from `cmd.exe` is expected and harmless. Use a Command
+Prompt instead when a custom installation folder is required:
 
 ```bat
 "\\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-test-lab-dev.bat" "C:\Program Files (x86)\Steam\steamapps\common\X4 Foundations"
@@ -230,11 +232,11 @@ ticker-only mode. Persistent notification settings are unchanged.
 
 **Direct-control** first opens a smaller, unblurred browser of known ships and
 stations in the current sector within the player ship's radar range. It excludes
-the occupied ship and its surfaces, not every player-owned object. Clicking a
-target immediately engages its hull — there is no intermediate hull/element
-picker screen. The browser must collapse to a compact upper-right panel at that
-point. **Every checked mutable group** must be set to armed `autoassist` —
-not just one.
+the occupied ship and its surfaces. Clicking a target engages its hull directly
+and collapses the browser to the compact panel. The selected **Direct-control
+turret mode** applies to every checked mutable group: **Attack all enemies**
+(`attackenemies`, default) or **Attack my current enemy** (`autoassist`). Changing
+the selector while engaged updates all checked groups.
 
 Verify the **upper-left element panel**: it is titled with the engaged target's
 name and lists Hull (greyed by default, because hull is what engage selects)
@@ -258,10 +260,9 @@ outside the compact panel and should change the soft target without losing
 Direct-control; arbitrary unbracketed 3D geometry is not a supported picker
 path.
 
-Note: Direct-control never re-issues the turret order on its own. If the
-engaged target is destroyed, the camera moves on but the turrets fall back to
-autoassist; Next Target or Previous Target is how the player re-engages a
-different one.
+With **Auto-next Target** enabled, target loss re-engages automatically. A lost
+surface element searches ENGAGEABLE same-root surfaces before its hull and other
+objects. With Auto-next off, choose the next target manually.
 
 Map is the first supported resumable interruption. From the console and the
 live panel, `M` followed by Map close should reacquire the owned session;
@@ -305,8 +306,8 @@ camera and clears the in-memory sweep.
 | Motion | stationary, player ship turning, NPC captain moving the ship |
 | Checkbox gate | Auto-engage and Direct-control greyed with no checked groups; activated once at least one mutable group is checked |
 | Auto-engage | Checked mutable groups temporarily use `attackenemies` + staged Armed; unchecked mutable groups use staged Mode/Armed; Direct-control policy ignored; session exit restores baseline; Next/Prev cycles/wraps; both greyed with one operational turret |
-| Direct-control | Clicking a target in the browser engages its hull immediately with no intermediate picker; every checked mutable group set to armed `autoassist`; upper-left element panel lists Hull (greyed) plus surface elements; clicking a non-active element re-points all groups; Next/Previous Target cycles in browser order and is greyed when ≤1 candidate; Cease Engagement restores all groups. Save/load restores the session as of 2026-08-08: the console reopens engaged, same groups checked, same turret POV, same target, and Cease afterwards still returns every group to its original mode. |
-| Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
+| Direct-control | Browser engages the hull directly; both Direct-control turret modes apply to every checked group and can switch while engaged; element panel retargets groups; Next/Previous Target follows browser order; Auto-next handles target loss, with same-root ENGAGEABLE surfaces before hull/object fallback; Cease restores all groups; active-session save/load resumes groups, policy, POV and target, then Cease restores baseline. |
+| Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; with Auto-next on, kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
 | Lifecycle | Cease Engagement, close console/Get Up, undock, teleport/ship change, save/load, retry, skip |
 | Menu lifecycle | From console and live panel: open/close Map and verify documented resume/fallback; try Player Information and another hotkey and verify safe teardown, not assumed resume |
 | Re-entry | Get up from every phase, sit again, and verify no blank transparent frame or stale camera remains |
@@ -369,13 +370,12 @@ Run one sequence without improvising so visible transitions can be compared:
    confirm it returns to the console. Wait two seconds.
 4. Press **Auto-engage** once more, press `M`, close Map with one `Esc`,
    then wait two seconds.
-5. Check a second mutable group. Press **Direct-control**, click a target in
-   the browser, and confirm the browser immediately collapses to the compact
-   panel — no intermediate hull picker. Confirm both groups are armed
-   `autoassist`. Confirm the upper-left element panel lists Hull (greyed) plus
-   surface elements. Confirm Next Target / Previous Target is active when more
-   than one candidate exists. Choose **Select Engagement Target** to confirm
-   the browser expands, then re-select and confirm the panel returns.
+5. Check a second mutable group. Leave **Attack all enemies** selected, press
+   **Direct-control**, click a target, and confirm the browser collapses to the
+   compact panel. Confirm both groups use `attackenemies`; switch to **Attack my
+   current enemy** and confirm both change to `autoassist`. Confirm the element
+   panel lists Hull plus surface elements and Next/Previous Target is active
+   when more than one candidate exists.
 6. With the panel showing, press `M`, close Map, then choose **Cease
    Engagement**. Confirm both groups are restored to their original mode and
    armed state.
@@ -409,7 +409,7 @@ Run these target cases manually while capturing Test Lab logs:
 | Hostile whole ship | Target is preserved |
 | Hostile engine, turret, or shield surface element | Exact surface-component ID and any returned connection are preserved |
 | Stationary hostile station surface element | Exact module-surface component ID and any returned connection are preserved |
-| Target destroyed during a manual Direct-control test | Record the expected preservation failure and cleanup result |
+| Target destroyed during a manual Direct-control test | Auto-next/manual fallback completes and cleanup remains correct |
 
 Safe Cheat Panel's Extended mode can spawn an NPC-faction ship or station for
 these manual scenarios; it cannot create arbitrary standalone modules. Live-fire
