@@ -96,10 +96,12 @@ an entry once it has a dated result; move anything durable into the research
 knowledge base. The coverage matrix further down is what to test on every
 build; this section is what is currently unanswered.
 
-For PR #16, use `PR16_LIVE_TEST_CHECKLIST.md` as the canonical procedure and do
-not repeat this queue separately: item 1 maps to M10/O7, item 2 to D5, item 3 to
-M12, and item 4 to D6. Record results in the checklist, then use them to retire
-or update these durable open questions.
+For issue/PR live tests, use the issue's acceptance criteria as the test
+contract. When the run needs a deterministic Test Lab fixture, follow
+`.agents/skills/spawn-gunnery-scenario/SKILL.md`; for installing the exact loose
+files and deciding whether to reload or restart, follow `docs/RELOADING.md`.
+The open checks below remain separate durable questions and are not a
+replacement for an issue-specific procedure.
 
 Every check assumes a filtered log:
 
