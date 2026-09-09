@@ -131,12 +131,11 @@ assert(sess23.aimTargetID ~= nil, "precondition: updateAimTarget must pick a tar
 assert(fix.getLastFrameProps() ~= nil,
     "acquiring an aim target in manual mode must rebuild the panel frame")
 
--- ── 27. engaged/direct with targetObjectID creates TWO frames ────────────────
--- The left element panel is only shown when controlMode=="direct" AND
--- session.targetObjectID is set.
+-- ── 27. engaged/direct with targetObjectID creates one overlay frame ──────
+-- The controls and left element panel share the persistent engaged overlay.
 gcMenu.onShowMenu()
 local sess27 = API.getSession()
-assert(sess27 ~= nil, "expected session for two-frame test")
+assert(sess27 ~= nil, "expected session for engaged overlay test")
 sess27.groups = { grp27 }
 sess27.checkedGroupKeys = { ["grp27"] = true }
 sess27.phase = "engaged"
@@ -148,15 +147,18 @@ sess27.targetObjectID = 500
 sess27.aimTargetID = 500
 local ok27, err27 = pcall(function() gcMenu.display() end)
 assert(ok27, "display() raised in engaged/direct+targetObjectID: " .. tostring(err27))
-assert(fix.getFrameCount() == 2,
-    "engaged/direct with targetObjectID must create TWO frames; got " .. tostring(fix.getFrameCount()))
--- frame:display() registers a view keyed by layer (helper.lua onFrameHandleView
--- Created / View.registerMenu("Helper" .. layer)). Two frames sharing the
--- default layer 4 means the second silently replaces the first on screen.
+assert(fix.getFrameCount() == 1,
+    "engaged/direct with targetObjectID must create one frame; got " .. tostring(fix.getFrameCount()))
 local fp = fix.getFrameProps()
-assert(fp[1].layer ~= fp[2].layer,
-    "the two engaged/direct frames must sit on different layers; both had "
-    .. tostring(fp[1].layer))
+assert(fp[1].layer == 0 and fp[1].viewHelperType == "X4GunneryOverlay",
+    "engaged/direct must use the layer-0 X4GunneryOverlay frame; got layer "
+    .. tostring(fp[1].layer) .. " type " .. tostring(fp[1].viewHelperType))
+local surfacePanelFound27 = false
+for _, button in ipairs(fix.getCreatedButtons()) do
+    if button.row == "surface_refresh" then surfacePanelFound27 = true end
+end
+assert(surfacePanelFound27,
+    "engaged/direct with targetObjectID must render the surface-element panel in the overlay frame")
 
 -- ── 28. engaged/auto creates ONE frame ───────────────────────────────────────
 gcMenu.onShowMenu()
@@ -301,21 +303,6 @@ sess30.controlMode = "auto"
 gcMenu.display()
 assert(povButton(75) == nil and povButton(76) == nil,
     "Auto-engage must not offer the target cycling buttons at all")
-
--- ── 33. leaving direct mode unregisters the element panel's frame ────────────
--- clearDataForRefresh() does not touch menu.frames, so a frame left over from a
--- previous display() stays registered as its own view ("Helper" .. layer) and
--- keeps rendering. Only Helper.clearFrame() unregisters it.
-sess30.controlMode = "direct"
-sess30.targetObjectID = 500
-fix.resetClearedFrames()
-gcMenu.display()
-assert(#fix.getClearedFrames() == 0, "nothing to clear while the element panel is shown")
-sess30.phase = "target_select"
-gcMenu.display()
-assert(fix.getClearedFrames()[1] == 3,
-    "leaving the element panel must clearFrame its layer; cleared "
-    .. tostring(fix.getClearedFrames()[1]))
 
 -- ── 39. Auto-next Target on: a dead target takes the turrets along ───────────
 -- The old behaviour moved only session.aimTargetID, so the camera followed the
