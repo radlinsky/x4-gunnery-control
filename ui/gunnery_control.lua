@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue117-testlab-handoff-fix"
+local runtimeBuild = "2026-09-09-issue117-view-frame-accounting-fix"
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
 -- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
@@ -488,7 +488,8 @@ end
 -- The first layer is the layer-0 primary entry.
 local function claimEngagedOverlayRegistration(layers, framehandles)
     if not View or not View.menus then return end
-    local primary, descriptors, absorbed = nil, {}, {}
+    local primary, descriptors, descriptorCount, absorbed = nil, {}, 0, {}
+    local registeredLayers, registeredFrames = {}, {}
     for _, layer in ipairs(layers) do
         local found
         for index, entry in ipairs(View.menus) do
@@ -505,6 +506,10 @@ local function claimEngagedOverlayRegistration(layers, framehandles)
         if layer == engagedOverlayLayer then primary = found end
         for descriptorLayer, descriptor in pairs(found.framedescriptors or {}) do
             descriptors[descriptorLayer] = descriptor
+            descriptorCount = descriptorCount + 1
+            registeredFrames[#registeredFrames + 1] =
+                found.frames[found.layers[descriptorLayer]]
+            registeredLayers[descriptorLayer] = #registeredFrames
         end
     end
     -- Splice the absorbed entries out directly: View.unregisterMenu() would
@@ -513,7 +518,10 @@ local function claimEngagedOverlayRegistration(layers, framehandles)
     for _, index in ipairs(absorbed) do table.remove(View.menus, index) end
     primary.id = engagedOverlayID
     primary.type = engagedOverlayType
+    primary.numframes = descriptorCount
     primary.framedescriptors = descriptors
+    primary.layers = registeredLayers
+    primary.frames = registeredFrames
     -- View traverses framedescriptors with pairs(), so descriptor order is
     -- undefined; it records the authoritative layer -> runtime frame index in
     -- the registration's own `layers` table (X4 9.00 viewhelper.lua). Read that

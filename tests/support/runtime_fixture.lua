@@ -42,7 +42,7 @@
 -- fix.registeredEvents       — handlers indexed by RegisterEvent name
 -- fix.registeredEventCalls   — ordered {name,handler} RegisterEvent captures
 -- fix.uiTriggeredEvents      — ordered {screen,control,params} UI-event captures
--- fix.View                   — minimal X4 View registry
+-- fix.View                   — X4 View registry with frame-limit accounting
 -- fix.getOnUpdateCallback()  — inspect the installed addon onUpdate callback
 -- fix.invokeOnUpdate()       — invoke that callback, if installed
 -- fix.setFullscreenMenuDisplayed(value)
@@ -223,8 +223,9 @@ function M.load()
     local nextFrameID       = 1000
 
     -- View.registerMenu creates fresh runtime ids from retained descriptors.
-    -- No compositor, child-widget, or input behavior is simulated.
-    local View = { menus = {} }
+    -- Model X4's global frame limit and per-registration accounting; no
+    -- compositor, child-widget, or input behavior is simulated.
+    local View = { currentFrames = 0, maxFrames = 5, menus = {} }
 
     local function allocateFrame()
         nextFrameID = nextFrameID + 1
@@ -236,6 +237,7 @@ function M.load()
             local entry = View.menus[index]
             if entry.id == id then
                 table.remove(View.menus, index)
+                View.currentFrames = View.currentFrames - entry.numframes
                 if releaseDescriptor ~= false then
                     for _, descriptor in pairs(entry.framedescriptors or {}) do
                         ReleaseDescriptor(descriptor)
@@ -247,13 +249,24 @@ function M.load()
 
     function View.registerMenu(id, registeredType, callback, clearCallback,
             framedescriptors, name, properties)
+        local numframes = 0
+        for _ in pairs(framedescriptors or {}) do numframes = numframes + 1 end
+        local replacedFrames = 0
+        for _, entry in ipairs(View.menus) do
+            if entry.id == id then replacedFrames = entry.numframes end
+        end
+        if numframes + View.currentFrames - replacedFrames > View.maxFrames then
+            return nil
+        end
         View.unregisterMenu(id, true)
         local entry = {
             id = id, type = registeredType, callback = callback,
+            numframes = numframes,
             clearCallback = clearCallback, framedescriptors = framedescriptors,
             name = name, properties = properties,
         }
         View.menus[#View.menus + 1] = entry
+        View.currentFrames = View.currentFrames + numframes
         -- framedescriptors is a layer-keyed map traversed with pairs(), so
         -- descriptor order is undefined; View records the layer -> runtime frame
         -- index it actually used as entry.layers[layer]. Model that with a
@@ -268,6 +281,7 @@ function M.load()
             frames[index] = allocateFrame()
             entry.layers[layer] = index
         end
+        entry.frames = frames
         if callback then callback(frames) end
         return entry
     end

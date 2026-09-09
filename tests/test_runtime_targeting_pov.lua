@@ -172,6 +172,18 @@ assert(overlay27 ~= nil and helperViews27 == 0,
     "both engaged frames must be owned by the single X4GunneryOverlay registration")
 assert(overlay27.framedescriptors[0] ~= nil and overlay27.framedescriptors[3] ~= nil,
     "the X4GunneryOverlay registration must own the layer-0 and layer-3 descriptors")
+assert(overlay27.numframes == 2 and #overlay27.frames == 2
+        and overlay27.layers[0] ~= nil and overlay27.layers[3] ~= nil,
+    "the merged View entry must account for both owned descriptors and runtime frames")
+assert(fix.View.currentFrames == 2,
+    "two engaged descriptors must consume exactly two View frames; got "
+    .. tostring(fix.View.currentFrames))
+for cycle = 1, 3 do
+    gcMenu.display()
+    assert(fix.View.currentFrames == 2,
+        "engaged redraw cycle " .. cycle .. " must return to exactly two View frames; got "
+        .. tostring(fix.View.currentFrames))
+end
 local surfacePanelFound27 = false
 for _, button in ipairs(fix.getCreatedButtons()) do
     if button.row == "surface_refresh" then surfacePanelFound27 = true end

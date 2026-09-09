@@ -466,6 +466,8 @@ assert(overlay55 ~= nil,
 assert(overlay55.framedescriptors[0] ~= nil and overlay55.framedescriptors[3] ~= nil,
     "fullscreen-takeover precondition: the overlay must own the layer-0 controls"
     .. " and layer-3 surface-browser descriptors")
+assert(overlay55.numframes == 2 and fix.View.currentFrames == 2,
+    "fullscreen-takeover precondition: the two-descriptor overlay must account for two frames")
 local elementFrame55 = gcMenu.elementFrame
 assert(elementFrame55 ~= nil,
     "fullscreen-takeover precondition: Direct engagement must build the element frame")
@@ -514,6 +516,9 @@ assert(sess55.cameraMemberID == cameraMember55
     "fullscreen takeover must preserve camera-member and POV state")
 assert(findView55("X4GunneryOverlay") == nil,
     "fullscreen takeover must unregister only the engaged Gunnery overlay")
+assert(fix.View.currentFrames == 0,
+    "fullscreen takeover must subtract both Gunnery frames; got "
+    .. tostring(fix.View.currentFrames))
 assert(gcMenu.frame == frame55 and #fix.allFrames == allFrames55,
     "fullscreen takeover must not build new Gunnery frames")
 assert(fix.getOnUpdateCallback() == updater55 and updater55 ~= nil,
@@ -590,6 +595,8 @@ assert(gcMenu.frame ~= nil and #fix.allFrames == allFrames55 + 2,
 assert(restoredOverlay55.framedescriptors[0] ~= nil
         and restoredOverlay55.framedescriptors[3] ~= nil,
     "fullscreen restoration must recreate both engaged descriptors under one registration")
+assert(restoredOverlay55.numframes == 2 and fix.View.currentFrames == 2,
+    "fullscreen restoration must return View accounting to exactly two frames")
 assert(gcMenu.elementFrame ~= nil and gcMenu.elementFrame ~= elementFrame55,
     "fullscreen restoration must rebuild the layer-3 surface-browser frame")
 assert(fix.getOnUpdateCallback() == updater55
@@ -610,6 +617,17 @@ assert(restoreBinding55.bound[3] ~= nil
         and restoreBinding55.bound[3] < restoreBinding55.bound[0],
     "the overlay callback must rebind each layer via the recorded layers[layer]"
     .. " index, not descriptor order")
+
+local externalDescriptor55 = {}
+assert(fix.View.registerMenu("Helper2", "Helper", nil, nil,
+        { [2] = externalDescriptor55 }, "ExternalOverlayAfterGunnery", {}) ~= nil,
+    "a normal one-frame external registration must still fit after Gunnery restoration")
+assert(fix.View.currentFrames == 3,
+    "Gunnery plus a normal external frame must total three, not an exhausted five; got "
+    .. tostring(fix.View.currentFrames))
+fix.View.unregisterMenu("Helper2", true)
+assert(fix.View.currentFrames == 2,
+    "closing the external frame must leave Gunnery accounting at exactly two")
 
 -- ── 56 (hookTimeoutMessage). missing kuertee UI Extensions is reported, not silent ────
 -- UI Extensions is an optional dependency (its extension id differs between the
