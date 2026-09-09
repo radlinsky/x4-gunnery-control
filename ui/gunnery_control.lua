@@ -3175,7 +3175,20 @@ function menu.onCloseElement(dueToClose)
             if not currentSession(expectedSession, expectedEpoch) or session.phase ~= "engaged" then return end
             local targetClick = dueToClose == "auto" or softtargetKey() ~= previousTarget
             if targetClick then
-                menu.display()
+                if controlMode == "direct" then
+                    local selected = C.GetSofttarget2().softtargetID
+                    if isNullID(selected) or not isEligibleEngagementTarget(selected) then
+                        restoreSofttarget(session.aimTargetID, "")
+                        menu.display()
+                    elseif sameID(selected, session.aimTargetID) then
+                        menu.display()
+                    elseif not engageTarget(selected) then
+                        restoreSofttarget(session.aimTargetID, "")
+                        menu.display()
+                    end
+                else
+                    menu.display()
+                end
             elseif session.controlMode == "direct" and dueToClose ~= "close" then
                 openTargetBrowser()
             elseif session.controlMode == "direct" then
