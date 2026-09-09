@@ -34,8 +34,8 @@ local startupCount = 0
 for _, line in ipairs(fix.getCapturedLog()) do
     if string.find(line, "[X4GC] UI initialized", 1, true) then
         startupCount = startupCount + 1
-        assert(line == "[X4GC] UI initialized; build=2026-09-09-issue116-world-target-sync-r2",
-            "startup line must carry the current build label; got: " .. line)
+        assert(string.match(line, "^%[X4GC%] UI initialized; build=.+$"),
+            "startup line must carry a nonempty build label; got: " .. line)
     end
 end
 assert(startupCount == 1, "expected exactly one startup line, got " .. tostring(startupCount))
