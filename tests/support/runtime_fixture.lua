@@ -42,6 +42,11 @@
 -- fix.registeredEvents       — handlers indexed by RegisterEvent name
 -- fix.registeredEventCalls   — ordered {name,handler} RegisterEvent captures
 -- fix.uiTriggeredEvents      — ordered {screen,control,params} UI-event captures
+-- fix.View                   — minimal X4 View registry
+-- fix.getOnUpdateCallback()  — inspect the installed addon onUpdate callback
+-- fix.invokeOnUpdate()       — invoke that callback, if installed
+-- fix.setFullscreenMenuDisplayed(value)
+--                           — control C.IsFullscreenMenuDisplayed(true, "")
 --
 -- ── RegisterEvent / fireEvent ────────────────────────────────────────────────
 -- The production code calls RegisterEvent(name, handler) during init. The old
@@ -85,6 +90,7 @@ function M.load()
     ffiStub.string = function(p) return tostring(p) end
     ffiStub.new    = function(spec, count) return {} end
 
+    local fullscreenMenuDisplayed = false
     local C = setmetatable({
         -- Explicit stubs for everything reachable from load path, init, and
         -- logSession.  The __index fallback returns a numeric-safe zero stub.
@@ -99,6 +105,10 @@ function M.load()
             return { softtargetID = 0, softtargetConnectionName = "" }
         end,
         GetUp                           = function() return true end,
+        IsFullscreenMenuDisplayed      = function(anymenu, menuname)
+            if anymenu == true and menuname == "" then return fullscreenMenuDisplayed end
+            return false
+        end,
         -- Everything else returns 0 (safe for numeric contexts).
     }, { __index = function(t, k) return function(...) return 0 end end })
 
@@ -210,6 +220,68 @@ function M.load()
     -- Teardown calls in order: "clear<layer>" / "close". Ordering is the whole
     -- point: helper.lua untracks the menu before unregistering its views.
     local teardownTrace     = {}
+    local nextFrameID       = 1000
+
+    -- View.registerMenu creates fresh runtime ids from retained descriptors.
+    -- No compositor, child-widget, or input behavior is simulated.
+    local View = { menus = {} }
+
+    local function allocateFrame()
+        nextFrameID = nextFrameID + 1
+        return nextFrameID
+    end
+
+    function View.unregisterMenu(id, releaseDescriptor)
+        for index = #View.menus, 1, -1 do
+            local entry = View.menus[index]
+            if entry.id == id then
+                table.remove(View.menus, index)
+                if releaseDescriptor ~= false then
+                    for _, descriptor in pairs(entry.framedescriptors or {}) do
+                        ReleaseDescriptor(descriptor)
+                    end
+                end
+            end
+        end
+    end
+
+    function View.registerMenu(id, registeredType, callback, clearCallback,
+            framedescriptors, name, properties)
+        View.unregisterMenu(id, true)
+        local entry = {
+            id = id, type = registeredType, callback = callback,
+            clearCallback = clearCallback, framedescriptors = framedescriptors,
+            name = name, properties = properties,
+        }
+        View.menus[#View.menus + 1] = entry
+        local frames = {}
+        for _, descriptor in ipairs(framedescriptors or {}) do
+            frames[#frames + 1] = allocateFrame()
+        end
+        if callback then callback(frames) end
+        return entry
+    end
+
+    function View.clearMenus(types)
+        for index = #View.menus, 1, -1 do
+            local entry = View.menus[index]
+            if types[entry.type] then View.unregisterMenu(entry.id, true) end
+        end
+    end
+
+    _G.View = View
+    ReleaseDescriptor = function() end
+    table.pack = table.pack or function(...) return { n = select("#", ...), ... } end
+    table.unpack = table.unpack or unpack
+    GetChildren = function() end
+
+    local addonOnUpdate
+    SetScript = function(script, callback)
+        if script == "onUpdate" then addonOnUpdate = callback end
+    end
+    RemoveScript = function(script, callback)
+        if script == "onUpdate" and addonOnUpdate == callback then addonOnUpdate = nil end
+    end
 
     -- Expose the mutable bookkeeping on the module so test code can do
     --   fix.clearedFrames = {}  (reset)  or  #fix.pendingCallbacks  (read).
@@ -296,6 +368,7 @@ function M.load()
         clearFrame              = function(m, layer)
             clearedFrames[#clearedFrames + 1] = layer
             teardownTrace[#teardownTrace + 1] = "clear" .. tostring(layer)
+            View.unregisterMenu("Helper" .. layer, true)
             if m and m.frames then m.frames[layer] = nil end
         end,
         createFrameHandle       = function(menu, props)
@@ -305,15 +378,23 @@ function M.load()
             frameProps[frameCount] = props
             local record = { props = props, background = false }
             allFrames[#allFrames + 1] = record
+            local layer = props.layer or 4
             local frame
             frame = {
-                display    = function() end,
+                content    = {},
+                display    = function(self)
+                    View.registerMenu("Helper" .. layer, props.viewHelperType or "Helper",
+                        function(frames)
+                            self.id = frames[1]
+                            menu.frames[layer] = frames[1]
+                        end, nil, { { frame = self } }, menu.name, props)
+                end,
                 update     = function() end,
                 setBackground = function(self)
                     record.background = true
                     return self
                 end,
-                properties = setmetatable({}, {
+                properties = setmetatable({ layer = layer }, {
                     __newindex = function(t, k, v) rawset(t, k, v) end,
                     __index    = function() return 0 end,
                 }),
@@ -382,7 +463,7 @@ function M.load()
             -- helper.lua keys menu.frames by layer; unregisterOwnFrames() walks it.
             menu.frames = menu.frames or {}
             -- helper.lua defaults an omitted layer to Helper.defaultFrameLayer (4).
-            menu.frames[props.layer or 4] = frame
+            menu.frames[layer] = frame
             return frame
         end,
         -- Counts Helper.closeMenu calls; the get-up path must defer that one tick.
@@ -411,6 +492,9 @@ function M.load()
                 ran = false,
             }
         end,
+        setScripts              = function() end,
+        removeAllWidgetScripts = function() end,
+        removeAllMenuScripts   = function() end,
     }
     _G.Helper = Helper
 
@@ -528,6 +612,7 @@ function M.load()
         gcMenu            = gcMenu,
         API               = API,
         C                 = C,
+        View              = View,
         ffiStub           = ffiStub,
         logContains       = logContains,
         buttonByText      = buttonByText,
@@ -539,6 +624,13 @@ function M.load()
         callbackCheckpoint = callbackCheckpoint,
         drainCallbacksSince = drainCallbacksSince,
         runCallback       = runCallback,
+        getOnUpdateCallback = function() return addonOnUpdate end,
+        invokeOnUpdate    = function()
+            if addonOnUpdate then return addonOnUpdate() end
+        end,
+        setFullscreenMenuDisplayed = function(value)
+            fullscreenMenuDisplayed = value and true or false
+        end,
         -- tables (reference — mutations visible both ways)
         pendingCallbacks  = pendingCallbacks,
         registeredEvents  = registeredEvents,
