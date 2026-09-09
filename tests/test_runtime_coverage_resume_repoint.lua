@@ -264,4 +264,30 @@ do
     assert(s.repointRetryArmed == nil, "drift must clear the armed retry")
 end
 
+-- ── 7. A parked session whose chair context went invalid is discarded ──────
+do
+    local f = freshFix()
+    f.gcMenu.onShowMenu()
+    local s = f.API.getSession()
+    s.phase, s.controlMode = "engaged", "direct"
+    s.aimTargetID = 77
+    s.cameraMemberID = 27
+    s.directSnapshots = {}
+    f.API.registerTestLab({ open = function() end })
+    f.gcMenu.display()
+    local button = f.buttonByText(ReadText(20991, 32))
+    assert(button and button.handlers.onClick, "expected Test Lab button")
+    button.handlers.onClick()
+    assert(s.lifecycle == State.lifecycle.reopening,
+        "Test Lab open must park session in reopening lifecycle")
+    s.repointTargetID = nil
+    -- The player left the gunner chair while the Test Lab was up.
+    f.C.GetPlayerCurrentControlGroup = function() return "cockpit" end
+    assert(f.API.sessionContextValid() == false,
+        "leaving the gunner chair must invalidate the parked session context")
+    f.API.runSessionWatchdog()
+    assert(f.API.getSession() == nil,
+        "a parked session with an invalid chair context must be discarded, not reopened")
+end
+
 print("runtime coverage resume repoint tests passed")
