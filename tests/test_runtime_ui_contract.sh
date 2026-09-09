@@ -223,10 +223,6 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-# #118: physical chair ingress releases first. MD's stopped-control event enters
-# a distinct standing-onboard handoff; vanilla DockedMenu cleans itself up from
-# playerGetUp, then the handoff opens Gunnery through the ordinary OpenMenu path.
-grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "chair_release"' "$main"
 grep -Fq 'X4GunneryControl.OpenOnboardReleased' "$md"
 grep -Fq 'RegisterEvent("X4GunneryControl.OpenOnboardReleased", onOpenOnboardReleased)' "$main"
 grep -Fq 'completeReleasedOnboardHandoff = function(reason)' "$main"

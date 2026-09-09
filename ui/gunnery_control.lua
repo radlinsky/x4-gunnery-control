@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-08-issue118-save-cue-fix-1"
+local runtimeBuild = "2026-09-08-issue118-vanilla-get-up-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -197,6 +197,7 @@ local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
 local redirectDockedMenu
 local completeReleasedOnboardHandoff
+local onOpenOnboardReleased
 local activeExternalMenuName
 local suggestedTestEngagement
 local cameraMismatchLogged = false
@@ -3236,15 +3237,10 @@ redirectDockedMenu = function()
     -- Deferring leaves the DockedMenu render pass before anything moves the player.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         redirectPending = false
-        -- #118: sitting at a gunner console puts the player in a control
-        -- position, and a session created from there is torn down by the normal
-        -- get-up handling. No session is created until MD has released the
-        -- control position and raised OpenOnboardReleased for this exact ship.
-        -- MD is the one-shot: a duplicate request while a release is pending, or
-        -- once the player is no longer controlling, is dropped there.
+        -- #118: leave the gunner control position through vanilla's Get Up path.
+        -- Only a successful release may enter the standing onboard lifecycle.
         if isInGunnerChair() and sameID(playerShip(), ship) and not session then
-            AddUITriggeredEvent("X4GunneryControl", "chair_release",
-                { ship = ConvertStringToLuaID(State.normID(ship)) })
+            if C.GetUp() then onOpenOnboardReleased(nil, ship) end
         end
     end, false, getElapsedTime() + 0.05)
 end
@@ -3455,10 +3451,10 @@ end
 TestAPI.onOpenOnboard = onOpenOnboard
 
 -- Physical-console ingress has a different predecessor menu than Map ingress.
--- MD raises this only after leave_control_position completed. Create the same
--- standing onboard session, but park it for the actual vanilla DockedMenu
--- replacement instead of pretending a Map exists and invoking Map teardown.
-local function onOpenOnboardReleased(_, shipComponent)
+-- Enter here only after vanilla Get Up succeeds. The MD event remains registered
+-- for an already-pending release restored from an older save. Create the same
+-- standing onboard session, but park it for the actual vanilla DockedMenu cleanup.
+onOpenOnboardReleased = function(_, shipComponent)
     if session then return end
     local ship = id(shipComponent)
     if ship == 0 then return end
