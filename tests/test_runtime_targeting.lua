@@ -421,6 +421,85 @@ assert(ok17, "deferred callback raised: " .. tostring(err17))
 assert(sess17.phase == "console",
     "engaged/auto onCloseElement('back') must reach console; got: " .. tostring(sess17.phase))
 
+-- ── 17b. engaged/direct periodic updates synchronize the retained target ─
+-- The engaged 0.25-second update seam owns world-target synchronization:
+-- hostile surfaces are adopted exactly, while non-hostile/cleared selections
+-- are put back on the retained Direct target and a same-target poll is a no-op.
+gcMenu.onShowMenu()
+local sess17b = API.getSession()
+assert(sess17b ~= nil, "expected session for periodic Direct target synchronization")
+local directGroup17b = fix.makeGroup{
+    key = "world-click-group", members = { {
+        componentID = 7, displayName = "World-click Turret",
+        operational = true, cameraSupported = true,
+    } },
+}
+sess17b.groups = { directGroup17b }
+sess17b.phase = "engaged"
+sess17b.controlMode = "direct"
+sess17b.cameraMemberID = 7
+sess17b.committedBaseline = {}
+C.SetPlayerCameraTargetView = function() end
+
+local selected17b = 0
+local softtargetWrites17b = {}
+C.GetSofttarget2 = function()
+    return { softtargetID = selected17b, softtargetConnectionName = "" }
+end
+C.SetSofttarget = function(target)
+    selected17b = target
+    softtargetWrites17b[#softtargetWrites17b + 1] = target
+    return true
+end
+RemoveSofttarget = function() selected17b = 0 end
+C.GetContextByClass = function(component)
+    if component == 202 then return 200 end -- hostile surface -> hostile ship
+    return component
+end
+GetComponentData = function(component, ...)
+    local values = {}
+    for _, key in ipairs({...}) do
+        if key == "isplayerowned" then values[#values + 1] = false
+        elseif key == "isenemy" then values[#values + 1] = component == 100 or component == 200
+        elseif key == "ishostile" then values[#values + 1] = false
+        elseif key == "maxradarrange" then values[#values + 1] = 40000
+        elseif key == "macro" then values[#values + 1] = ""
+        else values[#values + 1] = 0
+        end
+    end
+    return unpack(values)
+end
+
+local function periodicUpdate17b(selection)
+    selected17b = selection
+    softtargetWrites17b = {}
+    API.updateAimTarget()
+end
+
+sess17b.aimTargetID, sess17b.targetObjectID = 100, 100
+periodicUpdate17b(202)
+assert(sess17b.phase == "engaged" and sess17b.controlMode == "direct",
+    "hostile surface selection must keep the Direct session engaged")
+assert(sess17b.aimTargetID == 202 and sess17b.targetObjectID == 200,
+    "hostile surface selection must adopt the exact surface and retain its root object")
+
+sess17b.aimTargetID, sess17b.targetObjectID = 100, 100
+periodicUpdate17b(300)
+assert(sess17b.aimTargetID == 100 and selected17b == 100,
+    "neutral/friendly selection must retain and restore the Direct target")
+
+periodicUpdate17b(0)
+assert(sess17b.aimTargetID == 100 and selected17b == 100,
+    "cleared selection must retain and restore the Direct target")
+
+periodicUpdate17b(100)
+assert(sess17b.phase == "engaged" and sess17b.controlMode == "direct"
+        and sess17b.aimTargetID == 100 and #softtargetWrites17b == 0,
+    "selecting the current Direct target must stay engaged without retargeting; phase="
+    .. tostring(sess17b.phase) .. " mode=" .. tostring(sess17b.controlMode)
+    .. " aim=" .. tostring(sess17b.aimTargetID)
+    .. " writes=" .. tostring(#softtargetWrites17b))
+
 -- ── 18. viewCreated clears engagePending for direct but NOT for auto ──────────
 -- For auto-engage, engagePending comes from the old startWatch path which is
 -- now gone; auto never sets it. For direct, engagePending is set by engageTarget
