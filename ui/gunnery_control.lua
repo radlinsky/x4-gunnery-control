@@ -174,11 +174,12 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-08-issue118-vanilla-get-up-1"
+local runtimeBuild = "2026-09-08-issue118-player-get-up-handoff-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
+local physicalIngressPendingShip
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -3230,6 +3231,7 @@ redirectDockedMenu = function()
         completeReleasedOnboardHandoff("DockedMenu callback")
         return
     end
+    if physicalIngressPendingShip then return end
     local observedGroup = controlGroup()
     local ship = playerShip()
     if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
@@ -3238,9 +3240,9 @@ redirectDockedMenu = function()
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         redirectPending = false
         -- #118: leave the gunner control position through vanilla's Get Up path.
-        -- Only a successful release may enter the standing onboard lifecycle.
+        -- X4's playerGetUp event confirms completion and starts the handoff.
         if isInGunnerChair() and sameID(playerShip(), ship) and not session then
-            if C.GetUp() then onOpenOnboardReleased(nil, ship) end
+            if C.GetUp() then physicalIngressPendingShip = ship end
         end
     end, false, getElapsedTime() + 0.05)
 end
@@ -3486,6 +3488,12 @@ local function init()
         seatLeaving = false
     end
     local function onPlayerGetUp()
+        if physicalIngressPendingShip then
+            local ship = physicalIngressPendingShip
+            physicalIngressPendingShip = nil
+            onOpenOnboardReleased(nil, ship)
+            return
+        end
         -- Onboard sessions are deliberately not seat-bound (#118). The physical
         -- launcher can deliver playerGetUp around the same release that creates
         -- the onboard session, and a normal Map-origin onboard session is also
@@ -3506,7 +3514,10 @@ local function init()
     -- having to drive registerUIHooks through all 40 retries.
     TestAPI.hookTimeoutMessage = hookTimeoutMessage
     RegisterEvent("playerGetUp", onPlayerGetUp)
-    RegisterEvent("playerUndock", endForMovement)
+    RegisterEvent("playerUndock", function()
+        physicalIngressPendingShip = nil
+        endForMovement()
+    end)
     -- Ownership-change replacement for vanilla's cease_fire. MD fires this when
     -- the engaged target's owner changes to a faction the ship can no longer
     -- attack (capital.xml:1070 condition). The handler re-issues emitDirectFallback

@@ -73,14 +73,26 @@ fix.drainCallbacksSince(mark)
 assert(getUps == 1, "physical ingress must use vanilla Get Up exactly once")
 assertNoChairRelease("physical ingress must not depend on the unproven chair_release MD bridge")
 assert(opens == 1, "physical ingress must not open Gunnery Control before DockedMenu cleanup")
+assert(fix.API.getSession() == nil,
+    "successful Get Up must wait for playerGetUp before creating a session")
+
+-- Repeated menu signals while X4 is completing Get Up must not request it again.
+fix.fireUIEvent("gameplanchange", "cockpit")
+dockedCallback()
+fix.drainCallbacksSince(mark)
+assert(getUps == 1, "pending physical ingress must suppress duplicate Get Up requests")
+assert(fix.API.getSession() == nil,
+    "duplicate ingress before playerGetUp must not create a session")
+
+fix.fireEvent("playerGetUp")
 session = fix.API.getSession()
 assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.reopening,
-    "successful Get Up must create the standing onboard handoff")
-assert(session.physicalReleasePending == true,
-    "successful Get Up must leave exactly one physical handoff pending")
+    "playerGetUp must create the standing onboard handoff")
+assert(session.shipID == 42 and session.physicalReleasePending == true,
+    "playerGetUp must consume the exact observed ship into one physical handoff")
 
--- Vanilla closes DockedMenu from playerGetUp; until then the handoff waits
--- rather than replacing it mid-transition.
+-- The playerGetUp handler creates the handoff, but vanilla DockedMenu must still
+-- finish its own cleanup before Gunnery replaces it.
 fix.API.runSessionWatchdog()
 assert(opens == 1 and fix.API.getSession() == session,
     "handoff must wait while vanilla DockedMenu is still visible")
@@ -89,8 +101,6 @@ dockedCallback()
 assert(opens == 1 and fix.API.getSession() == session,
     "a late DockedMenu callback must only recheck the pending handoff")
 docked.shown = false
-fix.fireEvent("playerGetUp")
-assert(fix.API.getSession() == session, "late playerGetUp must not destroy a standing onboard handoff")
 fix.API.runSessionWatchdog()
 assert(opens == 2 and session.lifecycle == State.lifecycle.owned,
     "released handoff must open once after vanilla DockedMenu cleanup")
@@ -124,7 +134,28 @@ assert(getUps == 1, "a physical ingress attempt must call Get Up once even when 
 assertNoChairRelease("Get Up refusal must not fall back to chair_release")
 assert(fix.API.getSession() == nil, "Get Up refusal must not leave a ghost onboard session")
 assert(opens == 3, "Get Up refusal must not open Gunnery Control")
-getUpResult, docked.shown = true, false
+
+-- A successful retry proves refusal left no pending ingress. Undock must then
+-- clear that pending ship before playerGetUp can consume it.
+getUpResult = true
+mark = fix.callbackCheckpoint()
+fix.fireUIEvent("gameplanchange", "cockpit")
+fix.drainCallbacksSince(mark)
+assert(getUps == 2 and fix.API.getSession() == nil,
+    "Get Up refusal must leave physical ingress immediately retryable")
+fix.fireEvent("playerUndock")
+fix.fireEvent("playerGetUp")
+assert(fix.API.getSession() == nil,
+    "playerUndock must clear pending physical ingress before playerGetUp")
+
+control = "gunnercontrol"
+mark = fix.callbackCheckpoint()
+fix.fireUIEvent("gameplanchange", "cockpit")
+fix.drainCallbacksSince(mark)
+assert(getUps == 3 and fix.API.getSession() == nil,
+    "physical ingress must restart cleanly after playerUndock")
+fix.fireEvent("playerUndock")
+docked.shown = false
 
 -- Keep the old uniquely named MD completion event as a compatibility receiver:
 -- an already-pending release from a save may still arrive after this correction.
