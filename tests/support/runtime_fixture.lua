@@ -254,13 +254,20 @@ function M.load()
             name = name, properties = properties,
         }
         View.menus[#View.menus + 1] = entry
-        -- framedescriptors is keyed by frame layer; View hands the callback one
-        -- runtime frame id per descriptor, ordered by ascending layer.
+        -- framedescriptors is a layer-keyed map traversed with pairs(), so
+        -- descriptor order is undefined; View records the layer -> runtime frame
+        -- index it actually used as entry.layers[layer]. Model that with a
+        -- deliberately DESCENDING traversal so anything that assumes ascending
+        -- layer order (or frames[1]) fails here.
         local layers = {}
         for layer in pairs(framedescriptors or {}) do layers[#layers + 1] = layer end
-        table.sort(layers)
+        table.sort(layers, function(a, b) return a > b end)
         local frames = {}
-        for _ in ipairs(layers) do frames[#frames + 1] = allocateFrame() end
+        entry.layers = {}
+        for index, layer in ipairs(layers) do
+            frames[index] = allocateFrame()
+            entry.layers[layer] = index
+        end
         if callback then callback(frames) end
         return entry
     end

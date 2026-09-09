@@ -494,9 +494,9 @@ end
 
 -- Take over the Helper registrations the just-displayed engaged frames created
 -- and fold them into one custom registration. `layers` is the display order;
--- descriptor index -> layer is recorded so the View callback can rebind each
--- runtime frame id to the right frame handle without relying on frames[1] or on
--- pairs() ordering.
+-- the View callback rebinds each runtime frame id to the right frame handle via
+-- the registration's recorded layer -> index map, never frames[1] or an assumed
+-- descriptor order.
 -- `layers` always starts with engagedOverlayLayer, so the primary entry below
 -- is the layer-0 one.
 local function claimEngagedOverlayRegistration(layers, framehandles)
@@ -527,17 +527,16 @@ local function claimEngagedOverlayRegistration(layers, framehandles)
     primary.id = engagedOverlayID
     primary.type = engagedOverlayType
     primary.framedescriptors = descriptors
-    -- View hands the callback one runtime frame id per descriptor, ordered by
-    -- ascending layer. Rebuild that same layer -> index mapping rather than
-    -- assuming frames[1] or a pairs() order.
-    local descriptorLayers = {}
-    for descriptorLayer in pairs(descriptors) do
-        descriptorLayers[#descriptorLayers + 1] = descriptorLayer
-    end
-    table.sort(descriptorLayers)
+    -- View traverses framedescriptors with pairs(), so descriptor order is
+    -- undefined; it records the authoritative layer -> runtime frame index in
+    -- the registration's own `layers` table (X4 9.00 viewhelper.lua). Read that
+    -- from the CURRENT registration at callback time -- the entry is recreated
+    -- on every re-registration -- instead of sorting layers or assuming frames[1].
     primary.callback = function(frames)
-        for index, layer in ipairs(descriptorLayers) do
-            rebindEngagedOverlayFrame(framehandles[layer], frames[index])
+        local entry = findEngagedOverlayRegistration()
+        local layerIndex = entry and entry.layers or {}
+        for layer, framehandle in pairs(framehandles) do
+            rebindEngagedOverlayFrame(framehandle, frames[layerIndex[layer]])
         end
     end
     engagedOverlayLayers = layers

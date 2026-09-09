@@ -563,13 +563,18 @@ local registerMenu55 = fix.View.registerMenu
 local restoredRegistrations55 = {}
 fix.View.registerMenu = function(id, registeredType, callback, clearCallback,
         framedescriptors, name, properties)
+    local entry = registerMenu55(id, registeredType, callback, clearCallback,
+        framedescriptors, name, properties)
     if id == "X4GunneryOverlay" then
+        -- Snapshot the binding the restore callback just performed, before the
+        -- repaint replaces the frames.
         restoredRegistrations55[#restoredRegistrations55 + 1] = {
             callback = callback, framedescriptors = framedescriptors,
+            layers = entry.layers,
+            bound = { [0] = gcMenu.frames[0], [3] = gcMenu.frames[3] },
         }
     end
-    return registerMenu55(id, registeredType, callback, clearCallback,
-        framedescriptors, name, properties)
+    return entry
 end
 fix.invokeOnUpdate()
 fix.View.registerMenu = registerMenu55
@@ -607,6 +612,19 @@ assert(fix.getOnUpdateCallback() == updater55
     "fullscreen restoration must not replace the updater or tear down Gunnery")
 assert(cameraChanges55 == 0 and cameraResets55 == 0,
     "fullscreen restoration must not restore or repoint the player camera")
+
+-- Regression proof: View traverses the descriptor map with pairs(), so runtime
+-- frame ids do NOT arrive in ascending layer order -- the fixture hands layer 3
+-- the FIRST id and layer 0 the second. The callback must rebind each frame
+-- handle through the registration's recorded layers[layer] index; sorting the
+-- layers or trusting frames[1] swaps the two frames.
+local restoreBinding55 = restoredRegistrations55[1]
+assert(restoreBinding55.layers[3] == 1 and restoreBinding55.layers[0] == 2,
+    "fixture must model a non-ascending layer -> runtime frame index map")
+assert(restoreBinding55.bound[3] ~= nil
+        and restoreBinding55.bound[3] < restoreBinding55.bound[0],
+    "the overlay callback must rebind each layer via the recorded layers[layer]"
+    .. " index, not descriptor order")
 
 -- ── 56 (hookTimeoutMessage). missing kuertee UI Extensions is reported, not silent ────
 -- UI Extensions is an optional dependency (its extension id differs between the
