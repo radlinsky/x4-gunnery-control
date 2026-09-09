@@ -32,7 +32,7 @@ fix.drainCallbacksSince(mark36)
 assert(fix.getCloseMenuCalls() == 1,
     "the deferred callback must close the menu exactly once; got " .. tostring(fix.getCloseMenuCalls()))
 
--- ── 37. teardown must not unregister our views before closing the menu ───────
+-- ── 37. engaged replaces Helper4; teardown closes before unregistering ──────
 -- helper.lua's closeMenu() untracks the menu first (C.RemoveTrackedMenu) and
 -- only then lets clearMenu() unregister the views (helper.lua:1908-1947).
 -- Unregistering first hid the view while the menu was still tracked, and after
@@ -41,6 +41,14 @@ assert(fix.getCloseMenuCalls() == 1,
 gcMenu.onShowMenu()
 local sess37 = API.getSession()
 assert(sess37 ~= nil, "expected session for teardown order test")
+local function findView37(id, name)
+    for _, entry in ipairs(fix.View.menus) do
+        if entry.id == id and entry.name == name then return entry end
+    end
+end
+assert(findView37("Helper4", gcMenu.name),
+    "precondition: the console must own its normal Helper4 registration")
+fix.View.registerMenu("Helper2", "External", nil, nil, {}, "ExternalOverlay", {})
 sess37.groups = { grp27 }
 sess37.checkedGroupKeys = { ["grp27"] = true }
 sess37.phase = "engaged"
@@ -49,7 +57,12 @@ sess37.directSnapshots = {}
 sess37.cameraMemberID = 27
 sess37.targetObjectID = 500
 gcMenu.display()
-assert(fix.getFrameCount() == 2, "precondition: two frames must be registered")
+assert(findView37("X4GunneryOverlay", gcMenu.name),
+    "engaged transition must register the persistent Gunnery overlay")
+assert(not findView37("Helper4", gcMenu.name),
+    "engaged transition must unregister the prior Gunnery Helper4 frame")
+assert(findView37("Helper2", "ExternalOverlay"),
+    "engaged transition must not unregister an unrelated external menu")
 fix.resetTeardownTrace()
 local mark37 = fix.callbackCheckpoint()
 gcMenu.onCloseElement("close")

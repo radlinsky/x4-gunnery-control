@@ -2609,6 +2609,19 @@ function menu.display()
         engagedOverlayRefreshPending = true
         return
     end
+    -- Entering the persistent layer-0 view replaces, rather than refreshes, the
+    -- normal console/browser frame. Remove only that Gunnery-owned Helper view;
+    -- clearDataForRefresh() deliberately leaves its registration intact.
+    if session and session.phase == "engaged" and not findEngagedOverlayRegistration()
+            and menu.frame and menu.frame.properties and View and View.menus then
+        local previousLayer = menu.frame.properties.layer or 4
+        for _, entry in ipairs(View.menus) do
+            if entry.id == "Helper" .. previousLayer and entry.name == menu.name then
+                Helper.clearFrame(menu, previousLayer)
+                break
+            end
+        end
+    end
     -- Rebuild the current frame without untracking the menu. Helper.clearMenu()
     -- tears down menu.shown and its update/close ownership; vanilla menus use
     -- clearDataForRefresh() when replacing a live frame on the same layer.
