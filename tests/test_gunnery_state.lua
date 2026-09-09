@@ -42,7 +42,7 @@ eq(State.normID("77ll"), "77", "normID strips lowercase ll")
 assert(State.isReturnablePlayerView("firstperson"), "first-person chair view resumes")
 assert(State.isReturnablePlayerView("externalfirstperson"), "external first-person view resumes")
 assert(State.isReturnablePlayerView("cockpit"), "cockpit view resumes")
-assert(not State.isReturnablePlayerView("map"), "map is a suspended menu mode")
+assert(not State.isReturnablePlayerView("map"), "map is not a returnable player view")
 local groups = {
   { key = "g1", members = { { componentID = 1, operational = false } } },
   { key = "g2", members = { { componentID = 2, operational = true } } },

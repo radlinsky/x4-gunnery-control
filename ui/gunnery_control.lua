@@ -175,20 +175,13 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
 local runtimeBuild = "2026-09-09-issue117-testlab-handoff-fix"
--- Layer 0 is unused by the shipped menus inspected for issue #117, but is not
--- globally reserved. The unique registration ID prevents Helper-layer ID
--- collisions after the initial synchronous frame registration is retagged.
+-- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
--- The Direct surface browser keeps its own frame on its own layer (vanilla gives
--- each of Map's frames one: menu_map.lua:1052-1055), but both frames are merged
--- into the single custom registration below -- one View registration may own
--- several frame descriptors on distinct layers (X4 9.00 viewhelper.lua).
+-- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
 local elementFrameLayer = 3
 local engagedOverlayID = "X4GunneryOverlay"
 local engagedOverlayType = "X4GunneryOverlay"
--- Ordered layers of the descriptors currently owned by engagedOverlayID. The
--- index into this list is the index into the registration's descriptor list and
--- into the runtime frame ids handed back by the View callback.
+-- Owned layers for cleanup; runtime frame indices come from View entry.layers.
 local engagedOverlayLayers = { engagedOverlayLayer }
 local session, redirectPending, nextRefresh = nil, false, 0
 local physicalIngressPendingShip
@@ -430,10 +423,8 @@ local function removeEngagedUpdater()
     engagedUpdaterInstalled = false
 end
 
--- Helper frame handles provide all descriptor creation and widget binding, but
--- hard-code their registry ID to "Helper" .. layer. Retag the just-created
--- layer-0 entry synchronously so ordinary Helper clears cannot select it by
--- type and later Helper frames cannot replace it by ID.
+-- Rebind retained Helper handles after View recreates runtime frame/widget IDs.
+-- The caller selects each frame ID through View's recorded layer map.
 local function rebindEngagedOverlayFrame(framehandle, frameid)
     if not framehandle or not frameid then
         log("engaged overlay descriptor could not be restored")
@@ -492,13 +483,9 @@ local function rebindEngagedOverlayFrame(framehandle, frameid)
     if menu.viewCreated then menu.viewCreated(layer, table.unpack(children)) end
 end
 
--- Take over the Helper registrations the just-displayed engaged frames created
--- and fold them into one custom registration. `layers` is the display order;
--- the View callback rebinds each runtime frame id to the right frame handle via
--- the registration's recorded layer -> index map, never frames[1] or an assumed
--- descriptor order.
--- `layers` always starts with engagedOverlayLayer, so the primary entry below
--- is the layer-0 one.
+-- Merge per-layer Helper registrations into one custom overlay. `layers` is only
+-- ownership/cleanup order; callback frame order comes from entry.layers.
+-- The first layer is the layer-0 primary entry.
 local function claimEngagedOverlayRegistration(layers, framehandles)
     if not View or not View.menus then return end
     local primary, descriptors, absorbed = nil, {}, {}
@@ -2546,17 +2533,8 @@ local function updateAimTarget()
     end
 end
 
--- Opening the Test Lab closes this menu, and menu.cleanup() treats an unplanned
--- close as an orphaned session: it queues autoHideAt, the watchdog restores the
--- directed group, and the reopen discards the session at chair ingress. That
--- destroys an engaged session the moment the player reaches for a reload button.
--- Reuse the Map suspend/resume route instead — it is the one path already proven
--- to hand a live session across an external menu, and its `resuming` branch in
--- onShowMenu is also what re-enters the turret camera on the way back.
--- The Test Lab's operator Close and Abort paths explicitly reopen this menu;
--- player-context and load teardown suppress that handoff because this session
--- is ending independently. Keep those companion exits paired with this parked
--- ownership contract or resumePending would have no menu to consume it.
+-- Test Lab parks the live session in `reopening` while this menu is closed.
+-- Close/Abort reopen Gunnery; teardown paths suppress that handoff.
 local function openTestLab()
     if session then
         -- The reload buttons live behind this menu, and a reload wipes all Lua
@@ -2670,7 +2648,7 @@ function menu.display()
         engagedOverlayRefreshPending = true
         return
     end
-    -- Entering the persistent layer-0 view replaces, rather than refreshes, the
+    -- Entering the persistent engaged overlay replaces, rather than refreshes, the
     -- normal console/browser frame. Remove only that Gunnery-owned Helper view;
     -- clearDataForRefresh() deliberately leaves its registration intact.
     if session and session.phase == "engaged" and not findEngagedOverlayRegistration()
@@ -3636,7 +3614,7 @@ end
 -- Re-points the engine soft target at a restored target. A normal success is
 -- intentionally silent. Refusal handling depends on origin:
 --
--- A Direct engaged resume (Test Lab reopen / Map reopen) carries
+-- A Direct engaged resume (Test Lab reopen / Map-origin handoff) carries
 -- session.repointResumeRetry. The engine refuses the FIRST SetSofttarget of
 -- such a resume while it is still settling after the menu transition, and
 -- accepts the identical write on the next watchdog tick. So the first normal
@@ -3755,7 +3733,7 @@ local function onOpenOnboard(_, shipComponent)
     transitionLifecycle(State.lifecycle.reopening, "onboard ingress parked until origin menu closes")
     logSession("onboard ingress accepted; parked until Map closes")
     -- Use MapMenu's own close handler so its normal cleanup runs before the
-    -- suspended-session reopen. Defer one frame to leave the interact render pass.
+    -- parked-session reopen. Defer one frame to leave the interact render pass.
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not sameSession(expectedSession, expectedEpoch)
@@ -3963,7 +3941,7 @@ local function init()
             -- The load/reload route: the DockedMenu redirect opens the menu a
             -- tick later, and onShowMenu discards any session it did not create
             -- itself ("stale session at chair ingress"). Hand it over through
-            -- the same resume route the Map and Test Lab paths use, or the
+            -- the same parked-session route used by Map-origin and Test Lab handoffs, or the
             -- restore is undone milliseconds after it succeeds.
             transitionLifecycle(State.lifecycle.reopening, "restored session awaiting its menu")
             resumePending = true

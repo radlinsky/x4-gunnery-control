@@ -177,7 +177,7 @@ for _, button in ipairs(fix.getCreatedButtons()) do
     if button.row == "surface_refresh" then surfacePanelFound27 = true end
 end
 assert(surfacePanelFound27,
-    "engaged/direct with targetObjectID must render the surface-element panel in the overlay frame")
+    "engaged/direct with targetObjectID must render the surface-element panel in the layer-3 frame")
 
 -- ── 28. engaged/auto creates ONE frame ───────────────────────────────────────
 gcMenu.onShowMenu()

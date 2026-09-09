@@ -53,7 +53,6 @@ sess37.groups = { grp27 }
 sess37.checkedGroupKeys = { ["grp27"] = true }
 sess37.phase = "engaged"
 sess37.controlMode = "direct"
-sess37.directSnapshots = {}
 sess37.cameraMemberID = 27
 sess37.targetObjectID = 500
 gcMenu.display()
@@ -89,7 +88,7 @@ for i, record in ipairs(allFrames) do
         .. ") must call setBackground so its cell text stays readable")
 end
 
--- ── 44. leaveChair emits a notify UI event; text depends on direct snapshots ──
+-- ── 44. leaveChair notify text follows Direct control ──────────────────────
 -- X4 engine bug: SetPlayerCameraTargetView from a turret seat leaves Esc dead
 -- after the player gets up. The only observed cure is a menu that calls
 -- CreateView/DisplayView (View.createView in ego_viewhelper). The helptext
@@ -97,13 +96,11 @@ end
 -- mechanism: show_help forces that path in MD. Do NOT make this popup
 -- conditional or suppress it without re-testing Esc after a camera session.
 --
--- 44a: direct snapshots were held -> restored-settings text (text id 79).
--- 44b: no direct snapshots         -> disengaged text (text id 80).
+-- 44a Direct -> restored-settings text (79); otherwise -> disengaged text (80).
 
 C.GetSofttarget2 = function() return { softtargetID = 0, softtargetConnectionName = "" } end
 C.GetContextByClass = function(...) return 42 end
 
--- 44a: session WITH direct snapshots.
 local capturedEvents44 = {}
 gcMenu.onShowMenu()
 local sess44a = API.getSession()
@@ -126,7 +123,6 @@ assert(notifyEvA.params["text"] == ReadText(20991, 79),
     "notify text with direct controlMode must be ReadText(20991, 79) (restored-settings); got: "
     .. tostring(notifyEvA.params["text"]))
 
--- 44b: session WITHOUT direct snapshots.
 local capturedEvents44b = {}
 gcMenu.onShowMenu()
 local sess44b = API.getSession()
@@ -144,7 +140,7 @@ end
 assert(notifyEvB ~= nil,
     "leaveChair must emit AddUITriggeredEvent('X4GunneryControl','notify',...) when not in direct mode")
 assert(notifyEvB.params["text"] == ReadText(20991, 80),
-    "notify text without direct snapshots must be ReadText(20991, 80) (disengaged); got: "
+    "notify text outside Direct control must be ReadText(20991, 80) (disengaged); got: "
     .. tostring(notifyEvB.params["text"]))
 
 -- ── 45. playerGetUp route emits the notify exactly once ─────────────────────
@@ -158,7 +154,6 @@ gcMenu.onShowMenu()
 local sess45 = API.getSession()
 assert(sess45 ~= nil, "expected session for playerGetUp notify test (45)")
 sess45.phase = "console"
-sess45.directSnapshots = {}
 AddUITriggeredEvent = function(screen, control, params)
     capturedEvents45[#capturedEvents45 + 1] = { screen = screen, control = control, params = params }
 end
@@ -174,7 +169,7 @@ end
 assert(#notifyEvts45 == 1,
     "playerGetUp route must emit exactly one notify event; got " .. tostring(#notifyEvts45))
 assert(notifyEvts45[1].params["text"] == ReadText(20991, 80),
-    "playerGetUp with no direct snapshots must use disengaged text (80); got: "
+    "playerGetUp outside Direct control must use disengaged text (80); got: "
     .. tostring(notifyEvts45[1].params["text"]))
 
 -- ── 46. playerUndock route emits the notify too ──────────────────────────────
@@ -188,7 +183,6 @@ gcMenu.onShowMenu()
 local sess46 = API.getSession()
 assert(sess46 ~= nil, "expected session for playerUndock notify test (46)")
 sess46.phase = "console"
-sess46.directSnapshots = {}
 AddUITriggeredEvent = function(screen, control, params)
     capturedEvents46[#capturedEvents46 + 1] = { screen = screen, control = control, params = params }
 end
@@ -213,15 +207,7 @@ gcMenu.onShowMenu()
 local sess47 = API.getSession()
 assert(sess47 ~= nil, "expected session for stale-session no-notify test (47)")
 sess47.phase = "console"
--- Reach discardSession with seatLeaving=false by using a fresh onShowMenu,
--- which recreates the session (triggering "stale session at chair ingress" ->
--- discardSession without touching seatLeaving).
--- First set up a map-suspended session to ensure a discard path that bypasses
--- leaveChair: use X4GunneryState.lifecycle.owned with autoHideAt set so the
--- watchdog would call discardSession, but to be deterministic call via
--- onShowMenu (which discards a stale session with seatLeaving still false).
--- Simplest approach: set the session to a state that onShowMenu will discard
--- (different ship), confirming the "stale session before chair redirect" path.
+-- A different ship ID makes onShowMenu discard the stale session without leaveChair.
 AddUITriggeredEvent = function(screen, control, params)
     capturedEvents47[#capturedEvents47 + 1] = { screen = screen, control = control, params = params }
 end
@@ -249,7 +235,6 @@ gcMenu.onShowMenu()
 local sess48 = API.getSession()
 assert(sess48 ~= nil, "expected session for double-teardown test (48)")
 sess48.phase = "console"
-sess48.directSnapshots = {}
 AddUITriggeredEvent = function(screen, control, params)
     capturedEvents48[#capturedEvents48 + 1] = { screen = screen, control = control, params = params }
 end
@@ -438,7 +423,7 @@ assert(fix.getOnUpdateCallback() == updater54
 -- ── 55. fullscreen takeover suspends only the engaged overlay ─────────────
 -- A fullscreen menu must temporarily yield Gunnery's visual/input registration
 -- without converting the takeover into a disengage/re-engage cycle. Restoration
--- reuses the retained frame descriptor; the fixture intentionally does not model
+-- reuses the retained frame descriptors; the fixture intentionally does not model
 -- compositor, child-widget, or input behavior beyond the View registry.
 gcMenu.onShowMenu()
 local sess55 = API.getSession()
@@ -530,7 +515,7 @@ assert(sess55.cameraMemberID == cameraMember55
 assert(findView55("X4GunneryOverlay") == nil,
     "fullscreen takeover must unregister only the engaged Gunnery overlay")
 assert(gcMenu.frame == frame55 and #fix.allFrames == allFrames55,
-    "suspending for fullscreen takeover must not build a new Gunnery frame")
+    "fullscreen takeover must not build new Gunnery frames")
 assert(fix.getOnUpdateCallback() == updater55 and updater55 ~= nil,
     "fullscreen takeover must preserve the independent engaged updater")
 assert(fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
@@ -585,7 +570,7 @@ assert(restoredOverlay55 ~= nil,
 assert(#restoredRegistrations55 == 1
         and restoredRegistrations55[1].framedescriptors == descriptors55
         and restoredRegistrations55[1].callback == callback55,
-    "fullscreen restoration must first reuse the retained overlay descriptor and callback")
+    "fullscreen restoration must first reuse the retained overlay descriptors and callback")
 assert(API.getSession() == session55
         and sess55.phase == phase55 and sess55.lifecycle == lifecycle55
         and sess55.controlMode == controlMode55
@@ -629,7 +614,7 @@ assert(restoreBinding55.bound[3] ~= nil
 -- ── 56 (hookTimeoutMessage). missing kuertee UI Extensions is reported, not silent ────
 -- UI Extensions is an optional dependency (its extension id differs between the
 -- Nexus and Workshop releases, so a hard one disables us for half of installs).
--- Without it registerCallback is absent and the Map-reopen hook never lands; the
+-- Without it registerCallback is absent and the physical-console redirect hook never lands; the
 -- only thing standing between the player and a mod that quietly half-works is
 -- this log line.
 do
