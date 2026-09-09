@@ -76,32 +76,61 @@ assert(countLogs("GetContainedShips failed:") == 2,
 assert(countLogs("GetContainedStations failed:") == 2,
     "station-scan recovery must open exactly one new failure episode")
 
--- A Map reopen that never displays retries forever. The first failed handoff
--- gets one diagnostic; later retries and lifecycle flips are completely quiet.
-session.phase, session.controlMode = "console", nil
-session.lifecycle = State.lifecycle.suspendedMap
-gcMenu.shown = false
-local function runFailedMapReopen()
+-- A parked reopen that never displays retries forever. Enter through the real
+-- onboard pre-open handoff so the generic reopening lifecycle and pending-resume
+-- state are both established by production behavior.
+fix = dofile("tests/support/runtime_fixture.lua").load()
+gcMenu, API, C = fix.gcMenu, fix.API, fix.C
+State = X4GunneryState
+GetComponentData = function(_, key)
+    if key == "isplayerowned" then return true end
+    return nil
+end
+local groupBuffer = { [0] = { path = "p", group = "g", contextid = 5 } }
+fix.ffiStub.new = function() return groupBuffer end
+C.GetNumUpgradeGroups = function() return 1 end
+C.GetUpgradeGroups2 = function() return 1 end
+C.GetUpgradeGroupInfo2 = function()
+    return {
+        count = 1, currentcomponent = 27, currentmacro = "", slotsize = "",
+        total = 1, operational = 1,
+    }
+end
+C.IsComponentOperational = function() return true end
+
+fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
+session = API.getSession()
+assert(session and session.lifecycle == State.lifecycle.reopening,
+    "onboard pre-open handoff must create a parked reopening session")
+
+local function runFailedParkedReopen()
     local first = #fix.pendingCallbacks + 1
     API.runSessionWatchdog()
     fix.runCallback(fix.pendingCallbacks[first])
 end
-local mapBefore = #fix.getCapturedLog()
-runFailedMapReopen()
-assert(#fix.getCapturedLog() == mapBefore + 1
-    and countLogs("Map reopen did not display; retrying") == 1,
-    "first failed Map reopen must add exactly one failure line")
-runFailedMapReopen()
-assert(#fix.getCapturedLog() == mapBefore + 1,
-    "repeated failed Map reopen must remain silent in the same episode")
+local reopenBefore = #fix.getCapturedLog()
+runFailedParkedReopen()
+assert(#fix.getCapturedLog() == reopenBefore + 1
+    and countLogs("parked session reopen did not display; retrying:") == 1,
+    "first failed parked reopen must add exactly one generic failure line")
+runFailedParkedReopen()
+assert(#fix.getCapturedLog() == reopenBefore + 1,
+    "repeated failed parked reopen must remain silent in the same episode")
 
 -- A real menu display is the success boundary that resets the retry latch.
 gcMenu.onShowMenu()
 session = API.getSession()
-session.lifecycle = State.lifecycle.suspendedMap
+API.registerTestLab({ open = function() end })
+gcMenu.display()
+local testLabButton = fix.buttonByText(ReadText(20991, 32))
+assert(testLabButton and testLabButton.handlers.onClick,
+    "successful onboard reopen must expose the Test Lab handoff")
+testLabButton.handlers.onClick()
+assert(session.lifecycle == State.lifecycle.reopening,
+    "Test Lab handoff must park the displayed session for another reopen")
 gcMenu.shown = false
-runFailedMapReopen()
-assert(countLogs("Map reopen did not display; retrying") == 2,
-    "a successful Map resume must reset the next failure episode latch")
+runFailedParkedReopen()
+assert(countLogs("parked session reopen did not display; retrying:") == 2,
+    "a successful parked-session display must reset the next failure episode latch")
 
 print("runtime log-volume tests passed")

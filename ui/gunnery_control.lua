@@ -208,6 +208,7 @@ local suspendedOverlayRegistration
 local engagedOverlayRefreshPending = false
 local suggestedTestEngagement
 local cameraMismatchLogged = false
+local reopenFailureLogged = false
 local containedShipsFailureLogged, containedStationsFailureLogged = false, false
 local cutsceneNoTurretFailureLogged = false
 
@@ -879,6 +880,7 @@ local function discardSession(reason)
     if not session then return end
     removeEngagedUpdater()
     cameraMismatchLogged = false
+    reopenFailureLogged = false
     containedShipsFailureLogged, containedStationsFailureLogged = false, false
     cutsceneNoTurretFailureLogged = false
     -- Read controlMode BEFORE restoreDirect may clear it. The notify emission
@@ -2563,6 +2565,9 @@ function menu.onShowMenu()
     if not resuming then
         transitionLifecycle(State.lifecycle.owned, "fresh console shown")
     end
+    -- A displayed menu proves this reopen episode succeeded. Retry attempts do
+    -- not clear the latch, so a broken external-menu handoff stays log-silent.
+    reopenFailureLogged = false
     refresh()
     -- Seed committedBaseline and staged from the ship's live modes at sit-down.
     -- A restored session already carries its baseline from the payload; only a
@@ -3531,7 +3536,10 @@ reopenPendingSession = function(reason)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if sameSession(expectedSession, expectedEpoch) and resumePending and not menu.shown then
             resumeOpenPending = false
-            log("parked session reopen did not display; retrying: " .. tostring(reason))
+            if not reopenFailureLogged then
+                reopenFailureLogged = true
+                log("parked session reopen did not display; retrying: " .. tostring(reason))
+            end
         end
     end, false, getElapsedTime() + 0.50)
 end
