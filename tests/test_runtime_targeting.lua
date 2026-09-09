@@ -421,14 +421,13 @@ assert(ok17, "deferred callback raised: " .. tostring(err17))
 assert(sess17.phase == "console",
     "engaged/auto onCloseElement('back') must reach console; got: " .. tostring(sess17.phase))
 
--- ── 17b. engaged/direct world clicks synchronize the retained target ───────
--- Target brackets close the compact view before X4's new soft target is
--- stable. Exercise the real close callback and its delayed comparison: hostile
--- surfaces are adopted exactly, while non-hostile/cleared selections are put back
--- on the retained Direct target and a same-target click is a no-op.
+-- ── 17b. engaged/direct periodic updates synchronize the retained target ─
+-- The engaged 0.25-second update seam owns world-target synchronization:
+-- hostile surfaces are adopted exactly, while non-hostile/cleared selections
+-- are put back on the retained Direct target and a same-target poll is a no-op.
 gcMenu.onShowMenu()
 local sess17b = API.getSession()
-assert(sess17b ~= nil, "expected session for Direct world-click synchronization")
+assert(sess17b ~= nil, "expected session for periodic Direct target synchronization")
 local directGroup17b = fix.makeGroup{
     key = "world-click-group", members = { {
         componentID = 7, displayName = "World-click Turret",
@@ -471,31 +470,29 @@ GetComponentData = function(component, ...)
     return unpack(values)
 end
 
-local function worldClick17b(selection)
+local function periodicUpdate17b(selection)
     selected17b = selection
     softtargetWrites17b = {}
-    local mark = fix.callbackCheckpoint()
-    gcMenu.onCloseElement("auto")
-    fix.drainCallbacksSince(mark)
+    API.updateAimTarget()
 end
 
 sess17b.aimTargetID, sess17b.targetObjectID = 100, 100
-worldClick17b(202)
+periodicUpdate17b(202)
 assert(sess17b.phase == "engaged" and sess17b.controlMode == "direct",
     "hostile surface selection must keep the Direct session engaged")
 assert(sess17b.aimTargetID == 202 and sess17b.targetObjectID == 200,
     "hostile surface selection must adopt the exact surface and retain its root object")
 
 sess17b.aimTargetID, sess17b.targetObjectID = 100, 100
-worldClick17b(300)
+periodicUpdate17b(300)
 assert(sess17b.aimTargetID == 100 and selected17b == 100,
     "neutral/friendly selection must retain and restore the Direct target")
 
-worldClick17b(0)
+periodicUpdate17b(0)
 assert(sess17b.aimTargetID == 100 and selected17b == 100,
     "cleared selection must retain and restore the Direct target")
 
-worldClick17b(100)
+periodicUpdate17b(100)
 assert(sess17b.phase == "engaged" and sess17b.controlMode == "direct"
         and sess17b.aimTargetID == 100 and #softtargetWrites17b == 0,
     "selecting the current Direct target must stay engaged without retargeting; phase="

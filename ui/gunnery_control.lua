@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-08-issue116-world-target-sync-r1"
+local runtimeBuild = "2026-09-09-issue116-world-target-sync-r2"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
@@ -2233,12 +2233,67 @@ local function updateAimTarget()
     if hadTarget and not C.IsComponentOperational(id(prev)) and session.controlMode == "direct" then
         return onDirectTargetLost()
     end
+    if session.controlMode == "direct" then
+        local selection = C.GetSofttarget2()
+        local selected = selection.softtargetID
+        if sameID(selected, prev) then return end
+
+        local root, eligible, isenemy, ishostile
+        eligible, isenemy, ishostile = false, false, false
+        if not isNullID(selected) then
+            eligible, root = isEligibleEngagementTarget(selected)
+            isenemy, ishostile = componentData(root, "isenemy", "ishostile")
+        end
+        log("event=direct_world_sync action=observe"
+            .. " retainedAimTargetID=" .. tostring(prev)
+            .. " selectedSoftTargetID=" .. tostring(selected)
+            .. " selectedSoftTargetConnection=" .. str(selection.softtargetConnectionName)
+            .. " selectedRootID=" .. tostring(root)
+            .. " eligible=" .. tostring(eligible)
+            .. " isenemy=" .. tostring(isenemy)
+            .. " ishostile=" .. tostring(ishostile)
+            .. " directMode=" .. tostring(session.directMode)
+            .. " povAnchor=" .. tostring(session.povAnchor)
+            .. " povMode=" .. tostring(session.povMode)
+            .. " origin=" .. tostring(session.origin))
+
+        local engageAttempted = eligible and (isenemy or ishostile)
+        if engageAttempted and engageTarget(selected) then
+            local resultingSoftTarget = C.GetSofttarget2().softtargetID
+            log("event=direct_world_sync action=accept"
+                .. " selectedComponentID=" .. tostring(selected)
+                .. " selectedRootID=" .. tostring(root)
+                .. " aimTargetID=" .. tostring(session.aimTargetID)
+                .. " targetObjectID=" .. tostring(session.targetObjectID)
+                .. " softTargetID=" .. tostring(resultingSoftTarget)
+                .. " directMode=" .. tostring(session.directMode)
+                .. " povAnchor=" .. tostring(session.povAnchor)
+                .. " povMode=" .. tostring(session.povMode)
+                .. " cameraTargetID=" .. tostring(C.GetExternalTargetViewComponent()))
+            return
+        end
+
+        restoreSofttarget(prev, "")
+        local resultingSoftTarget = C.GetSofttarget2().softtargetID
+        log("event=direct_world_sync action=restore"
+            .. " selectedSoftTargetID=" .. tostring(selected)
+            .. " selectedRootID=" .. tostring(root)
+            .. " eligible=" .. tostring(eligible)
+            .. " isenemy=" .. tostring(isenemy)
+            .. " ishostile=" .. tostring(ishostile)
+            .. " engageAttempted=" .. tostring(engageAttempted)
+            .. " retainedAimTargetID=" .. tostring(prev)
+            .. " softTargetID=" .. tostring(resultingSoftTarget)
+            .. " directMode=" .. tostring(session.directMode)
+            .. " povAnchor=" .. tostring(session.povAnchor)
+            .. " povMode=" .. tostring(session.povMode))
+        return
+    end
     if not isNullID(prev) and C.IsComponentOperational(id(prev)) then
         -- Direct-control keeps the ordered target even when it drifts out of
         -- range. Auto-engage may switch to something better, but each scan is a
         -- whole-sector sweep (readTargetCandidates enumerates every ship and
         -- station), so it runs on a 5 s cadence rather than the 4 Hz refresh.
-        if session.controlMode == "direct" then return end
         if now < nextAimScan then return end
     end
     nextAimScan = now + 5
@@ -3155,6 +3210,17 @@ function menu.onCloseElement(dueToClose)
     end
     if session and not State.isOwned(session) then return end
     if session and session.phase == "engaged" then
+        local closeSoftTarget = C.GetSofttarget2()
+        log("event=direct_world_sync action=close"
+            .. " due=" .. tostring(dueToClose)
+            .. " controlMode=" .. tostring(session.controlMode)
+            .. " aimTargetID=" .. tostring(session.aimTargetID)
+            .. " softTargetID=" .. tostring(closeSoftTarget.softtargetID)
+            .. " softTargetConnection=" .. str(closeSoftTarget.softtargetConnectionName)
+            .. " directMode=" .. tostring(session.directMode)
+            .. " povAnchor=" .. tostring(session.povAnchor)
+            .. " povMode=" .. tostring(session.povMode)
+            .. " origin=" .. tostring(session.origin))
         -- Target brackets call CloseMenusUponMouseClick() as they change the
         -- soft target. Re-register the transparent/compact frame for that
         -- automatic close; an ordinary Esc follows the mode-specific path.
@@ -3170,26 +3236,10 @@ function menu.onCloseElement(dueToClose)
             return
         end
         local expectedSession, expectedEpoch = session, sessionEpoch
-        local controlMode, previousTarget = session.controlMode, session.viewSofttargetKey
+        local previousTarget = session.viewSofttargetKey
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) or session.phase ~= "engaged" then return end
             local targetClick = dueToClose == "auto" or softtargetKey() ~= previousTarget
-            if targetClick and controlMode == "direct" then
-                -- A world click may name a different object; adopt it only if it
-                -- is an eligible hostile, otherwise put the retained Direct
-                -- target back. engageTarget() redisplays on success.
-                local selected = C.GetSofttarget2().softtargetID
-                if isNullID(selected) or not sameID(selected, session.aimTargetID) then
-                    local eligible, isenemy, ishostile = false, false, false
-                    if not isNullID(selected) then
-                        local object
-                        eligible, object = isEligibleEngagementTarget(selected)
-                        isenemy, ishostile = componentData(object, "isenemy", "ishostile")
-                    end
-                    if eligible and (isenemy or ishostile) and engageTarget(selected) then return end
-                    restoreSofttarget(session.aimTargetID, "")
-                end
-            end
             if targetClick then
                 menu.display()
             elseif session.controlMode == "direct" and dueToClose ~= "close" then
