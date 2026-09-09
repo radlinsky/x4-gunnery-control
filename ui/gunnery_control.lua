@@ -174,10 +174,13 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue116-world-target-sync-r2"
--- The upper-left element panel's own frame layer; every frame registers a view
--- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
-local elementFrameLayer = 3
+local runtimeBuild = "2026-09-09-issue117-external-menus-task2"
+-- Layer 0 is unused by the shipped menus inspected for issue #117, but is not
+-- globally reserved. The unique registration ID prevents Helper-layer ID
+-- collisions after the initial synchronous frame registration is retagged.
+local engagedOverlayLayer = 0
+local engagedOverlayID = "X4GunneryOverlay"
+local engagedOverlayType = "X4GunneryOverlay"
 local session, redirectPending, nextRefresh = nil, false, 0
 local physicalIngressPendingShip
 local persistence
@@ -186,8 +189,8 @@ local testCameraFailures = {}
 -- Declared before enterCamera: a successful turret gate applies the caller's
 -- final POV only after X4 has accepted the temporary turret placement.
 local applyPov
-local dockedHookRegistered, mapHookRegistered, hookAttempts = false, false, 0
-local resumePending, endingSession = false, false
+local dockedHookRegistered, hookAttempts = false, 0
+local resumePending, resumeOpenPending, endingSession = false, false, false
 -- Defined next to leaveChair, but every teardown route needs it.
 local clearOwnShipSofttarget
 local seatLeaving = false
@@ -195,13 +198,16 @@ local sessionEpoch = 0
 local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
-local reopenSuspendedSession
 local redirectDockedMenu
 local completeReleasedOnboardHandoff
+local reopenPendingSession
 local activeExternalMenuName
+local engagedOnUpdate
+local engagedUpdaterInstalled = false
+local suspendedOverlayRegistration
+local engagedOverlayRefreshPending = false
 local suggestedTestEngagement
 local cameraMismatchLogged = false
-local mapReopenFailureLogged = false
 local containedShipsFailureLogged, containedStationsFailureLogged = false, false
 local cutsceneNoTurretFailureLogged = false
 
@@ -258,6 +264,7 @@ end
 local function newSession(ship, origin)
     engageabilityCache, engageabilityRequests = {}, {}
     engageabilityRepaintPending = nil
+    engagedOverlayRefreshPending = false
     surfacePinnedUpdatePending = false
     local session = State.newSession(ship, "gunnercontrol", origin or "chair")
     session.shipName = str(C.GetComponentName(ship))
@@ -390,6 +397,156 @@ local function transitionLifecycle(nextLifecycle, reason, quiet)
     if not quiet then
         logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
     end
+end
+
+local function findEngagedOverlayRegistration()
+    if not View or not View.menus then return nil end
+    for _, entry in ipairs(View.menus) do
+        if entry.id == engagedOverlayID then return entry end
+    end
+end
+
+local function installEngagedUpdater()
+    if engagedUpdaterInstalled or not engagedOnUpdate then return end
+    if type(SetScript) ~= "function" then return end
+    SetScript("onUpdate", engagedOnUpdate)
+    engagedUpdaterInstalled = true
+end
+
+local function removeEngagedUpdater()
+    if not engagedUpdaterInstalled then return end
+    if type(RemoveScript) ~= "function" then return end
+    RemoveScript("onUpdate", engagedOnUpdate)
+    engagedUpdaterInstalled = false
+end
+
+-- Helper frame handles provide all descriptor creation and widget binding, but
+-- hard-code their registry ID to "Helper" .. layer. Retag the just-created
+-- layer-0 entry synchronously so ordinary Helper clears cannot select it by
+-- type and later Helper frames cannot replace it by ID.
+local function rebindEngagedOverlay(framehandle, frames)
+    local frameid = frames[1]
+    if not frameid then
+        log("engaged overlay descriptor could not be restored")
+        return
+    end
+    local layer = framehandle.properties.layer
+    menu.frames = menu.frames or {}
+    menu.frames[layer] = frameid
+    local children = table.pack(GetChildren(frameid))
+    Helper.setScripts(menu, layer, frameid, children)
+    for index, widgetid in ipairs(children) do
+        local widget = framehandle.content[index]
+        local oldWidgetID = widget.id
+        widget.id = widgetid
+        if widget.type == "table" then
+            local rowData = menu.rowDataMap[oldWidgetID]
+            menu.rowDataMap[oldWidgetID] = nil
+            menu.rowDataMap[widgetid] = rowData
+            for rowidx, row in ipairs(widget.rows) do
+                for cellidx, cell in ipairs(row) do
+                    if cell.colspan ~= 0 then
+                        cell.id = GetCellContent(widgetid, rowidx, cellidx)
+                        local triggerid = cell.properties.uiTriggerID or nil
+                        if cell.type == "checkbox" then
+                            Helper.setCheckBoxScript(menu, triggerid, widgetid, rowidx, cellidx,
+                                cell.handlers.onClick)
+                        elseif cell.type == "button" then
+                            Helper.setButtonScript(menu, triggerid, widgetid, rowidx, cellidx,
+                                cell.handlers.onClick, cell.handlers.onRightClick,
+                                cell.handlers.onDoubleClick)
+                        elseif cell.type == "dropdown" then
+                            Helper.setDropDownScript(menu, triggerid, widgetid, rowidx, cellidx,
+                                cell.handlers.onDropDownActivated, cell.handlers.onDropDownConfirmed,
+                                cell.handlers.onDropDownRemoved, cell.handlers.onDropDownDeactivated)
+                        end
+                    end
+                end
+            end
+            if widget.properties.prevTable ~= 0 then
+                C.SetTablePreviousConnectedTable(widgetid, children[widget.properties.prevTable])
+            end
+            if widget.properties.nextTable ~= 0 then
+                C.SetTableNextConnectedTable(widgetid, children[widget.properties.nextTable])
+            end
+            if widget.properties.prevHorizontalTable ~= 0 then
+                C.SetTablePreviousHorizontalConnectedTable(widgetid,
+                    children[widget.properties.prevHorizontalTable])
+            end
+            if widget.properties.nextHorizontalTable ~= 0 then
+                C.SetTableNextHorizontalConnectedTable(widgetid,
+                    children[widget.properties.nextHorizontalTable])
+            end
+        end
+    end
+    if menu.viewCreated then menu.viewCreated(layer, table.unpack(children)) end
+end
+
+local function claimEngagedOverlayRegistration()
+    if not View or not View.menus then return end
+    for _, entry in ipairs(View.menus) do
+        if entry.id == "Helper" .. engagedOverlayLayer and entry.name == menu.name then
+            entry.id = engagedOverlayID
+            entry.type = engagedOverlayType
+            local framehandle = menu.frame
+            entry.callback = function(frames) rebindEngagedOverlay(framehandle, frames) end
+            suspendedOverlayRegistration = nil
+            return
+        end
+    end
+    log("engaged overlay registration was not found after frame display")
+end
+
+local function clearSuspendedOverlayDescriptor()
+    if not suspendedOverlayRegistration then return end
+    for _, descriptor in pairs(suspendedOverlayRegistration.framedescriptors or {}) do
+        ReleaseDescriptor(descriptor)
+    end
+    suspendedOverlayRegistration = nil
+end
+
+local function removeEngagedOverlay(releaseDescriptor)
+    local entry = findEngagedOverlayRegistration()
+    if entry then
+        Helper.removeAllWidgetScripts(menu, engagedOverlayLayer)
+        Helper.removeAllMenuScripts(menu, engagedOverlayLayer)
+        if releaseDescriptor == false then
+            suspendedOverlayRegistration = {
+                type = entry.type, callback = entry.callback,
+                clearCallback = entry.clearCallback,
+                framedescriptors = entry.framedescriptors,
+                name = entry.name, properties = entry.properties,
+            }
+        end
+        View.unregisterMenu(engagedOverlayID, releaseDescriptor)
+    elseif releaseDescriptor ~= false then
+        clearSuspendedOverlayDescriptor()
+    end
+    if menu.frames then menu.frames[engagedOverlayLayer] = nil end
+end
+
+local function hideEngagedOverlayForTakeover()
+    if suspendedOverlayRegistration or not findEngagedOverlayRegistration() then return end
+    removeEngagedOverlay(false)
+    logSession("engaged overlay hidden for fullscreen takeover")
+end
+
+local function restoreEngagedOverlayAfterTakeover()
+    local registration = suspendedOverlayRegistration
+    if not registration or not session or session.phase ~= "engaged" then return end
+    View.registerMenu(engagedOverlayID, registration.type, registration.callback,
+        registration.clearCallback, registration.framedescriptors,
+        registration.name, registration.properties)
+    suspendedOverlayRegistration = nil
+    logSession("engaged overlay restored after fullscreen takeover")
+    if engagedOverlayRefreshPending then
+        engagedOverlayRefreshPending = false
+        menu.display()
+    end
+end
+
+local function fullscreenTakeoverDisplayed()
+    return C.IsFullscreenMenuDisplayed(true, "") == true
 end
 
 local function memberName(componentID, ordinal)
@@ -719,8 +876,8 @@ end
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
     if not session then return end
+    removeEngagedUpdater()
     cameraMismatchLogged = false
-    mapReopenFailureLogged = false
     containedShipsFailureLogged, containedStationsFailureLogged = false, false
     cutsceneNoTurretFailureLogged = false
     -- Read controlMode BEFORE restoreDirect may clear it. The notify emission
@@ -732,7 +889,7 @@ local function discardSession(reason)
     sessionEpoch = sessionEpoch + 1
     engageabilityCache, engageabilityRequests = {}, {}
     engageabilityRepaintPending = nil
-    resumePending = false
+    resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
     clearOwnShipSofttarget()
     restoreDirect(reason)
@@ -790,10 +947,10 @@ local function endSession(reason)
     if not session and not menu.shown then return end
     endingSession = true
     discardSession(reason)
-    menu.elementFrame = nil
     -- Use the full helper even after another menu hid this frame: clearMenu()
     -- alone does not remove X4's tracked-menu record.
     Helper.closeMenu(menu, "close", false, false)
+    removeEngagedOverlay(true)
     endingSession = false
 end
 
@@ -801,15 +958,18 @@ end
 -- without consulting menu.onCloseElement(). Treat any such unplanned loss of
 -- ownership as a safety event, never as an active gunnery session.
 function menu.cleanup()
-    menu.frame = nil
     local externalMenu = activeExternalMenuName and activeExternalMenuName()
-    if session and not endingSession and externalMenu == "MapMenu" and State.isOwned(session) then
-        -- Helper's automatic onHide route bypasses onCloseElement(). Map is the
-        -- only external menu for which we have a verified cleanup callback, so
-        -- preserve the session here before Helper clears menu.shown.
-        transitionLifecycle(State.lifecycle.suspendedMap, "automatic MapMenu frame hide")
+    if session and not endingSession and session.phase == "engaged"
+            and (externalMenu or fullscreenTakeoverDisplayed()) then
+        -- A legitimate external overlay/takeover does not surrender the active
+        -- session. The independent updater owns validity checks until Gunnery
+        -- is again the ordinary active menu.
         session.autoHideAt = nil
-    elseif session and not endingSession and not State.isMapSuspended(session) then
+        if fullscreenTakeoverDisplayed() then hideEngagedOverlayForTakeover() end
+        return
+    end
+    menu.frame = nil
+    if session and not endingSession and session.lifecycle == State.lifecycle.owned then
         -- Do not destroy immediately: X4 may still be finishing a same-tick
         -- view replacement. The global watchdog confirms that ownership did
         -- not return before restoring the directed group.
@@ -873,8 +1033,8 @@ local function leaveChair(reason)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         -- Not endSession(): the session is already gone, and its
         -- "nothing to do" guard would skip the frame teardown entirely.
-        menu.elementFrame = nil
         Helper.closeMenu(menu, "close", false, false)
+        removeEngagedOverlay(true)
         seatLeaving = false
     end, false, getElapsedTime() + 0.05)
     return true
@@ -886,8 +1046,8 @@ local function leaveOnboard(reason)
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
     discardSession(reason)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        menu.elementFrame = nil
         Helper.closeMenu(menu, "close", false, false)
+        removeEngagedOverlay(true)
     end, false, getElapsedTime() + 0.05)
     return true
 end
@@ -1378,7 +1538,8 @@ local function scheduleEngageabilityRepaint(purpose)
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             surfacePinnedUpdatePending = false
             if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
-            if session.phase == "engaged" and session.controlMode == "direct" and menu.elementFrame then
+            if session.phase == "engaged" and session.controlMode == "direct"
+                    and menu.frame and not suspendedOverlayRegistration then
                 local browser = session.surfaceBrowser
                 local pinnedID = session.aimTargetID or session.targetObjectID
                 local result = browser and browser.pinnedResult
@@ -1392,7 +1553,7 @@ local function scheduleEngageabilityRepaint(purpose)
                     .. " shield_capacity=" .. tostring(shielded)
                     .. " shield_percent=" .. tostring(shieldpercent)
                     .. " hull_percent=" .. tostring(hullpercent))
-                menu.elementFrame:update()
+                menu.frame:update()
             end
         end, false, getElapsedTime() + 0.01)
         return
@@ -2347,6 +2508,8 @@ local function openTestLab()
         persistSession()
         transitionLifecycle(State.lifecycle.reopening, "Test Lab opened")
         resumePending = true
+        removeEngagedUpdater()
+        removeEngagedOverlay(true)
     end
     testLabCallbacks.open()
 end
@@ -2374,9 +2537,7 @@ function menu.onShowMenu()
     end
     local ship = playerShip()
     local resuming = resumePending and session and session.lifecycle == State.lifecycle.reopening
-    local mapSuspendResume = not resuming and session and sameID(session.shipID, ship)
-        and State.isMapSuspended(session)
-    resumePending = false
+    resumePending, resumeOpenPending = false, false
     if not session then
         session = newSession(ship)
         resuming = false
@@ -2387,34 +2548,26 @@ function menu.onShowMenu()
         -- normal ingress receives an empty state response, which is silent by
         -- design because it is the common no-save path.
         if persistence then persistence.request() end
-    elseif not sameID(session.shipID, ship) or (not resuming and not mapSuspendResume) then
+    elseif not sameID(session.shipID, ship) or not resuming then
         -- A fresh chair interaction must never inherit a hidden direct
-        -- snapshot. Only the explicit Map callback below may resume a session,
-        -- or a map-suspended session for the same ship (DockedMenu beat the
-        -- reopen path: the player never left the chair).
+        -- snapshot. Only an explicit pre-open/Test Lab handoff may resume one.
         discardSession("stale session at chair ingress")
         resuming = false
-        mapSuspendResume = false
         session = newSession(ship)
     else
-        transitionLifecycle(State.lifecycle.owned, "Map resume shown")
+        transitionLifecycle(State.lifecycle.owned, "parked session shown")
     end
-    -- A displayed menu proves this reopen episode succeeded. Only this genuine
-    -- handover (or a fresh session) clears the failure latch; retry attempts do
-    -- not, so a broken Map handoff cannot fill the log at watchdog cadence.
-    mapReopenFailureLogged = false
     -- The lifecycle transition above is intentionally before camera setup:
-    -- delayed camera work must see an owned session. A map-suspend resume
-    -- already made that transition, so only a fresh ingress needs this one.
-    if not resuming and not mapSuspendResume then
+    -- delayed camera work must see an owned session.
+    if not resuming then
         transitionLifecycle(State.lifecycle.owned, "fresh console shown")
     end
     refresh()
     -- Seed committedBaseline and staged from the ship's live modes at sit-down.
     -- A restored session already carries its baseline from the payload; only a
-    -- fresh (or discarded-and-replaced) session needs seeding. Map resumes and
-    -- Test Lab reopens carry the existing session through without re-seeding.
-    if not resuming and not mapSuspendResume
+    -- fresh (or discarded-and-replaced) session needs seeding. Explicit
+    -- handoffs carry the existing session through without re-seeding.
+    if not resuming
         and #(session.committedBaseline or {}) == 0 then
         State.seedBaseline(session, session.groups)
     end
@@ -2425,7 +2578,7 @@ function menu.onShowMenu()
             log("could not restore suspended gunnery camera; returning to console")
         end
     end
-    -- Both resume routes (Test Lab reopen and Map suspend) re-enter the engaged
+    -- Reopen flows such as Test Lab re-enter the engaged
     -- view without re-applying the engine soft target. Only the MD restore path
     -- ever set repointTargetID, so a plain close-and-reopen lost the target
     -- reticule while a Reload UI (which goes through the restore path) kept it.
@@ -2433,10 +2586,10 @@ function menu.onShowMenu()
     -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
     -- so the mode guard is required: dropping it would create a reticule Auto
     -- never otherwise shows.
-    -- A Map/Test Lab resume can transiently refuse the first SetSofttarget while
+    -- A Test Lab resume can transiently refuse the first SetSofttarget while
     -- the menu transition settles, so grant one bounded retry only on this handoff.
     -- Other re-point origins keep the normal refusal-abandons contract.
-    if (resuming or mapSuspendResume) and session.phase == "engaged"
+    if resuming and session.phase == "engaged"
         and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
         session.repointTargetID = session.aimTargetID
         session.repointResumeRetry = session.aimTargetID
@@ -2445,30 +2598,39 @@ function menu.onShowMenu()
 end
 
 function menu.display()
+    if session and session.phase == "engaged" and fullscreenTakeoverDisplayed() then
+        hideEngagedOverlayForTakeover()
+        engagedOverlayRefreshPending = true
+        return
+    end
     -- Rebuild the current frame without untracking the menu. Helper.clearMenu()
     -- tears down menu.shown and its update/close ownership; vanilla menus use
     -- clearDataForRefresh() when replacing a live frame on the same layer.
     Helper.clearDataForRefresh(menu)
-    -- The element panel is rebuilt below only in direct mode. clearDataForRefresh
-    -- leaves menu.frames alone, so a leftover panel stays registered as its own
-    -- view ("Helper" .. layer) and keeps rendering over the next phase until the
-    -- whole menu closes — unregister it explicitly.
-    if menu.elementFrame then
-        Helper.clearFrame(menu, elementFrameLayer)
-        menu.elementFrame = nil
-    end
+    -- The engaged frame uses a custom registry ID, so Helper's refresh helpers
+    -- cannot unregister it. Release that registration explicitly before a
+    -- rebuild or phase change.
+    removeEngagedOverlay(true)
     -- Every call path into display() holds a live session: callers either guard
     -- with `if session then` or return early when it is nil. Stated once here so
     -- nothing below has to repeat the check.
     if not session then return end
     if session.phase == "engaged" then
-        -- One compact upper-right panel for both controlModes (step 7).
-        -- Frame properties match the old direct panel exactly so the contract
-        -- test grep for viewFrame.properties.height still passes.
-        local width = Helper.scaleX(460)
+        engagedOverlayRefreshPending = false
+        installEngagedUpdater()
+        -- One persistent frame owns both visible panels. Helper registrations
+        -- are frame/layer keyed, so keeping the controls and surface browser in
+        -- one frame avoids a second persistent layer registration.
+        local controlsWidth = Helper.scaleX(460)
+        local elemWidth = Helper.scaleX(680)
+        local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil
+        local width = controlsWidth + (hasElementPanel and elemWidth or 0)
         session.viewSofttargetKey = softtargetKey()
         local viewFrame = Helper.createFrameHandle(menu, {
-            x = Helper.viewWidth - width - Helper.scaleX(32),
+            layer = engagedOverlayLayer,
+            viewHelperType = engagedOverlayType,
+            x = hasElementPanel and Helper.scaleX(32)
+                or (Helper.viewWidth - width - Helper.scaleX(32)),
             y = Helper.scaleY(32),
             width = width, standardButtons = { back = true, close = true },
             exclusiveInteractions = false, closeOnUnhandledClick = false,
@@ -2486,8 +2648,10 @@ function menu.display()
         menu.frame = viewFrame
         viewFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
         local controls = viewFrame:addTable(2, {
-            tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize,
-            width = width - 2 * Helper.borderSize,
+            tabOrder = 1,
+            x = (hasElementPanel and elemWidth or 0) + Helper.borderSize,
+            y = Helper.borderSize,
+            width = controlsWidth - 2 * Helper.borderSize,
         })
         -- Header row: current turret name + its group name.
         local cm, cmGroup = cameraMember()
@@ -2606,29 +2770,12 @@ function menu.display()
             testLabRow[1]:setColSpan(2):createButton({}):setText(text(32))
             testLabRow[1].handlers.onClick = openTestLab
         end
-        -- Auto-size frame height like the old direct panel (contract grep).
-        viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
-        viewFrame:display()
-        -- Element panel: top-left, only for direct mode with an engaged object.
-        if session.controlMode == "direct" and session.targetObjectID then
-            local elemWidth = Helper.scaleX(680)
-            local elemFrame = Helper.createFrameHandle(menu, {
-                -- Every frame registers its view as "Helper" .. layer, so a
-                -- second frame on the default layer 4 would replace the panel
-                -- above instead of appearing beside it (vanilla gives each of
-                -- Map's frames its own layer: menu_map.lua:1052-1055).
-                layer = elementFrameLayer,
-                x = Helper.scaleX(32), y = Helper.scaleY(32),
-                width = elemWidth,
-                exclusiveInteractions = false, closeOnUnhandledClick = false,
-                playerControls = true, startAnimation = false, blurBackground = false,
-                enableDefaultInteractions = true,
-                keepHUDVisible = true, keepCrosshairVisible = false,
-                showTickerPermanently = false,
-            })
-            menu.elementFrame = elemFrame
-            elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
-            local elemTable = elemFrame:addTable(5, {
+        local controlsHeight = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
+        local elementHeight = 0
+        -- Element panel: left side of the same frame, only for Direct mode with
+        -- an engaged object.
+        if hasElementPanel then
+            local elemTable = viewFrame:addTable(5, {
                 tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
@@ -2823,11 +2970,15 @@ function menu.display()
                 local noSurfRow = elemTable:addRow(false, {})
                 noSurfRow[1]:setColSpan(5):createText(text(61))
             end
-            elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
-            elemFrame:display()
+            elementHeight = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
         end
+        viewFrame.properties.height = math.max(controlsHeight, elementHeight)
+        viewFrame:display()
+        claimEngagedOverlayRegistration()
         return
     end
+
+    removeEngagedUpdater()
 
     local targetBrowser = session.phase == "target_select"
     local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
@@ -3113,7 +3264,7 @@ function menu.viewCreated()
     end
 end
 
-function menu.onUpdate()
+local function updateSessionRuntime()
     if not session then return end
     if not sessionContextValid() then
         endSession("left chair or ship")
@@ -3179,8 +3330,7 @@ function menu.onUpdate()
             end
         end
     end
-    if menu.frame then menu.frame:update() end
-    if menu.elementFrame then menu.elementFrame:update() end
+    if menu.frame and not suspendedOverlayRegistration then menu.frame:update() end
 end
 
 activeExternalMenuName = function()
@@ -3191,21 +3341,40 @@ activeExternalMenuName = function()
     end
 end
 
+-- Helper owns the ordinary menu updater and changes that owner as menus open.
+-- Keep console/browser work there, while a stable addon callback carries the
+-- already-engaged session whenever another menu owns Helper's slot.
+function menu.onUpdate()
+    if session and session.phase == "engaged" then
+        -- Defensive fallback for an environment without the addon script slot;
+        -- normal X4 runtime installs it before the engaged frame is displayed.
+        if not engagedUpdaterInstalled then engagedOnUpdate() end
+        return
+    end
+    updateSessionRuntime()
+end
+
+engagedOnUpdate = function()
+    if not session or session.phase ~= "engaged" or not State.isOwned(session) then
+        removeEngagedUpdater()
+        return
+    end
+    if fullscreenTakeoverDisplayed() then
+        hideEngagedOverlayForTakeover()
+    else
+        restoreEngagedOverlayAfterTakeover()
+    end
+    updateSessionRuntime()
+end
+
 function menu.onCloseElement(dueToClose)
     local externalMenu = activeExternalMenuName()
-    if session and externalMenu then
-        if externalMenu == "MapMenu" then
-            -- Map is the one external menu with a verified UI Extensions
-            -- cleanup callback. Preserve only this explicit, epoch-guarded
-            -- resume route; guessing at all other menu lifecycles caused
-            -- orphaned gunnery input frames.
-            transitionLifecycle(State.lifecycle.suspendingMap, "MapMenu opened")
-            Helper.closeMenu(menu, "close", false, false)
-            if session then transitionLifecycle(State.lifecycle.suspendedMap, "MapMenu owns the view") end
-        else
-            logSession("unsupported external menu replaces Gunnery Control: " .. externalMenu)
-            endSession("unsupported external menu " .. externalMenu)
-        end
+    if session and session.phase == "engaged" and externalMenu then
+        -- External names are deliberately not an allowlist. Floating menus sit
+        -- above the persistent overlay; fullscreen menus temporarily take only
+        -- its visual/input registration away. Neither path touches session or
+        -- camera state.
+        if fullscreenTakeoverDisplayed() then hideEngagedOverlayForTakeover() end
         return
     end
     if session and not State.isOwned(session) then return end
@@ -3312,7 +3481,7 @@ redirectDockedMenu = function()
     end, false, getElapsedTime() + 0.05)
 end
 
--- Both UI hooks exist only because kuertee UI Extensions adds registerCallback
+-- The DockedMenu hook exists only because kuertee UI Extensions adds registerCallback
 -- to the vanilla menu objects. That dependency is declared optional="true" on
 -- purpose -- UI Extensions ships under a different extension id on Nexus and on
 -- the Workshop, so a hard dependency would disable this mod for whichever half
@@ -3322,8 +3491,8 @@ end
 local function hookTimeoutMessage(docked)
     if docked and not docked.registerCallback then
         return "kuertee UI Extensions is not loaded (DockedMenu has no registerCallback)."
-            .. " The console still opens from the gameplanchange fallback, but it will not"
-            .. " reopen after closing the Map. Install UI Extensions."
+            .. " The console still opens from the gameplanchange fallback. Install UI Extensions"
+            .. " for the physical-console redirect."
     end
     return "UI hook registration timed out"
 end
@@ -3337,24 +3506,7 @@ local function registerUIHooks()
             dockedHookRegistered = true
         end
     end
-    if not mapHookRegistered then
-        local map = Helper.getMenu("MapMenu")
-        if map and map.registerCallback then
-            -- Kuertee UI Extensions exposes this Map-only lifecycle callback.
-            -- It is deliberately not generalized to arbitrary menus.
-            map.registerCallback("on_menu_cleanup", function()
-                local expectedSession, expectedEpoch = session, sessionEpoch
-                if not expectedSession or expectedSession.lifecycle ~= State.lifecycle.suspendedMap then return end
-                Helper.addDelayedOneTimeCallbackOnUpdate(function()
-                    if sameSession(expectedSession, expectedEpoch) and session.lifecycle == State.lifecycle.suspendedMap then
-                        reopenSuspendedSession("MapMenu callback")
-                    end
-                end, false, getElapsedTime() + 0.02)
-            end, menu.uixID)
-            mapHookRegistered = true
-        end
-    end
-    if not dockedHookRegistered or not mapHookRegistered then
+    if not dockedHookRegistered then
         if hookAttempts == 1 then log("UI host menus unavailable during init; retrying hook registration") end
         if hookAttempts < 40 then
             Helper.addDelayedOneTimeCallbackOnUpdate(registerUIHooks, false, getElapsedTime() + 0.25)
@@ -3364,24 +3516,21 @@ local function registerUIHooks()
     end
 end
 
-reopenSuspendedSession = function(reason)
-    if resumePending or not session or session.lifecycle ~= State.lifecycle.suspendedMap or menu.shown or activeExternalMenuName() then return end
+reopenPendingSession = function(reason)
+    if not resumePending or resumeOpenPending or not session
+            or session.lifecycle ~= State.lifecycle.reopening
+            or menu.shown or activeExternalMenuName() then return end
     if not sessionContextValid() then
-        endSession("suspended session no longer seated")
+        endSession("parked session context invalid")
         return
     end
-    resumePending = true
+    resumeOpenPending = true
     local expectedSession, expectedEpoch = session, sessionEpoch
-    transitionLifecycle(State.lifecycle.reopening, "Map cleanup: " .. reason, true)
     OpenMenu("X4GunneryMenu", { 0, 0 }, nil)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if sameSession(expectedSession, expectedEpoch) and resumePending and not menu.shown then
-            resumePending = false
-            transitionLifecycle(State.lifecycle.suspendedMap, "Map reopen did not display; retrying", true)
-            if not mapReopenFailureLogged then
-                mapReopenFailureLogged = true
-                log("Map reopen did not display; retrying")
-            end
+            resumeOpenPending = false
+            log("parked session reopen did not display; retrying: " .. tostring(reason))
         end
     end, false, getElapsedTime() + 0.50)
 end
@@ -3458,16 +3607,18 @@ local function sessionWatchdog()
         -- the soft target under the player while they are picking things on it
         -- would fight them for their own selection.
         if session.repointTargetID and session.phase == "engaged"
-            and not State.isMapSuspended(session) then
+            and not fullscreenTakeoverDisplayed() then
             attemptRepoint()
         end
-        if session.lifecycle == State.lifecycle.suspendedMap and not menu.shown and not activeExternalMenuName() then
-            reopenSuspendedSession("MapMenu cleanup")
+        if session.lifecycle == State.lifecycle.reopening and resumePending
+                and not menu.shown and not activeExternalMenuName() then
+            reopenPendingSession("external menu cleanup")
         elseif session.lifecycle == State.lifecycle.owned and not menu.shown
             and session.autoHideAt and GetCurRealTime() - session.autoHideAt > 0.05 then
             -- A Helper auto-hide bypassed onCloseElement. Do not leave an armed
             -- snapshot or a stale table that blocks a later chair redirect.
             discardSession("orphaned menu detected by watchdog")
+            removeEngagedOverlay(true)
         elseif session.lifecycle == State.lifecycle.owned and session.controlMode == "direct"
             and session.engagePending
             and session.engagePendingSince and GetCurRealTime() - session.engagePendingSince > 2 then
@@ -3485,9 +3636,8 @@ end
 TestAPI.runSessionWatchdog = sessionWatchdog
 TestAPI.sessionContextValid = function() return sessionContextValid() end
 
--- Map ingress is revalidated in Lua before a fresh onboard session is parked.
--- The existing suspended-Map lifecycle opens Gunnery Control only after the Map
--- has fully closed.
+-- Map-origin ingress is revalidated in Lua before a fresh onboard session is
+-- parked. This is pre-open handoff, not suspension of an active engagement.
 local function onOpenOnboard(_, shipComponent)
     if session then return end
     local ship = id(shipComponent)
@@ -3498,18 +3648,19 @@ local function onOpenOnboard(_, shipComponent)
     if #groups == 0 then return end
     session = newSession(ship, "onboard")
     session.groups = groups
-    -- Seed now: the suspend/resume reopen treats this as a resume and skips
+    -- Seed now: the pre-open handoff treats this as a resume and skips
     -- seeding, so committedBaseline must already be populated.
     State.seedBaseline(session, groups)
     if persistence then persistence.request() end
-    transitionLifecycle(State.lifecycle.suspendedMap, "onboard ingress parked until Map closes")
+    resumePending = true
+    transitionLifecycle(State.lifecycle.reopening, "onboard ingress parked until origin menu closes")
     logSession("onboard ingress accepted; parked until Map closes")
     -- Use MapMenu's own close handler so its normal cleanup runs before the
     -- suspended-session reopen. Defer one frame to leave the interact render pass.
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if not sameSession(expectedSession, expectedEpoch)
-                or not State.isMapSuspended(session) then return end
+                or session.lifecycle ~= State.lifecycle.reopening then return end
         local mapMenu = Helper.getMenu("MapMenu")
         if mapMenu and mapMenu.onCloseElement then mapMenu.onCloseElement("close") end
     end, false, getElapsedTime() + 0.05)
@@ -3596,13 +3747,9 @@ local function init()
         local externalMenu = activeExternalMenuName()
         if isInGunnerChair() and not menu.shown
             and (not externalMenu or externalMenu == "DockedMenu")
-            and (not session or not State.isMapSuspended(session)) then
+            and (not session or session.lifecycle ~= State.lifecycle.reopening) then
             if session then discardSession("stale session before chair redirect") end
             redirectDockedMenu()
-        elseif session and session.lifecycle == State.lifecycle.suspendedMap and State.isReturnablePlayerView(mode) then
-            Helper.addDelayedOneTimeCallbackOnUpdate(function()
-                reopenSuspendedSession("returned to " .. tostring(mode))
-            end, false, getElapsedTime() + 0.05)
         end
     end)
     -- The adapter releases only a matching target/session pair. Build a
