@@ -3177,7 +3177,13 @@ function menu.onCloseElement(dueToClose)
             if targetClick then
                 if controlMode == "direct" then
                     local selected = C.GetSofttarget2().softtargetID
-                    if isNullID(selected) or not isEligibleEngagementTarget(selected) then
+                    local eligible, isenemy, ishostile = false, false, false
+                    if not isNullID(selected) then
+                        local object
+                        eligible, object = isEligibleEngagementTarget(selected)
+                        isenemy, ishostile = componentData(object, "isenemy", "ishostile")
+                    end
+                    if isNullID(selected) or not eligible or not (isenemy or ishostile) then
                         restoreSofttarget(session.aimTargetID, "")
                         menu.display()
                     elseif sameID(selected, session.aimTargetID) then
