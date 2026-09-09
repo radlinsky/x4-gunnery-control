@@ -54,17 +54,17 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #118 Task 1: compare physical-seat and Map/right-click Gunnery Control
--- entry under the same world-click setup. This deliberately reuses the accepted
--- Issue #110 three-capital layout: two separated hostile click targets and one
--- player-owned ineligible control ahead of the Ray. The geometry already proved
--- suitable for world left-click comparison, so this fixture changes only the
--- scenario identity/labels needed to attribute the new live run.
+-- Issue #116 Task 3: verify Direct-mode target sync after a world left-click.
+-- This deliberately reuses the accepted Issue #110/#118 three-capital layout:
+-- two separated hostile click targets and one player-owned ineligible control
+-- ahead of the Ray. The geometry already proved suitable for world left-click
+-- work, so this fixture changes only the scenario identity/labels needed to
+-- attribute the new live run.
 --
 -- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-118-entry-parity-r1",
+    id      = "issue-116-world-target-sync-r1",
     enabled = false,
 
     setup = {
@@ -78,7 +78,7 @@ X4GunneryTestLabScenarioSpec = {
 
     groups = {
         {
-            label     = "ISSUE118 HOSTILE LEFT",
+            label     = "ISSUE116 HOSTILE LEFT",
             macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "xenon",
             count     = 1,
@@ -94,7 +94,7 @@ X4GunneryTestLabScenarioSpec = {
         },
 
         {
-            label     = "ISSUE118 HOSTILE RIGHT",
+            label     = "ISSUE116 HOSTILE RIGHT",
             macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "xenon",
             count     = 1,
@@ -111,7 +111,7 @@ X4GunneryTestLabScenarioSpec = {
 
         -- Player-owned: the ineligible-click control. Never designate it.
         {
-            label     = "ISSUE118 FRIENDLY CENTRE - DO NOT TARGET",
+            label     = "ISSUE116 FRIENDLY CENTRE - DO NOT TARGET",
             macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
