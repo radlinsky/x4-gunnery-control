@@ -198,7 +198,6 @@ local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
 local redirectDockedMenu
 local completeReleasedOnboardHandoff
-local onOpenOnboardReleased
 local activeExternalMenuName
 local suggestedTestEngagement
 local cameraMismatchLogged = false
@@ -3371,7 +3370,7 @@ TestAPI.attemptRepoint = attemptRepoint
 local function sessionWatchdog()
     -- UIX normally delivers DockedMenu's display callback. Poll only a released
     -- handoff here so module init stays inert while merely sitting in a chair.
-    -- Release completion itself is still MD's event_player_stopped_control.
+    -- Release completion itself is the playerGetUp event handled below.
     if session and session.physicalReleasePending then
         completeReleasedOnboardHandoff("watchdog")
     end
@@ -3453,10 +3452,9 @@ end
 TestAPI.onOpenOnboard = onOpenOnboard
 
 -- Physical-console ingress has a different predecessor menu than Map ingress.
--- Enter here only after vanilla Get Up succeeds. The MD event remains registered
--- for an already-pending release restored from an older save. Create the same
--- standing onboard session, but park it for the actual vanilla DockedMenu cleanup.
-onOpenOnboardReleased = function(_, shipComponent)
+-- Enter here only after vanilla Get Up succeeds and playerGetUp confirms the
+-- release, then park the session for the actual vanilla DockedMenu cleanup.
+local function startPhysicalIngress(shipComponent)
     if session then return end
     local ship = id(shipComponent)
     if ship == 0 then return end
@@ -3474,8 +3472,6 @@ onOpenOnboardReleased = function(_, shipComponent)
     logSession("physical release accepted; awaiting DockedMenu replacement")
 end
 
-TestAPI.onOpenOnboardReleased = onOpenOnboardReleased
-
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     if Helper then Helper.registerMenu(menu) end
@@ -3491,7 +3487,7 @@ local function init()
         if physicalIngressPendingShip then
             local ship = physicalIngressPendingShip
             physicalIngressPendingShip = nil
-            onOpenOnboardReleased(nil, ship)
+            startPhysicalIngress(ship)
             return
         end
         -- Onboard sessions are deliberately not seat-bound (#118). The physical
@@ -3524,7 +3520,6 @@ local function init()
     -- so directed turrets roll to the next hostile instead of holding fire.
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
-    RegisterEvent("X4GunneryControl.OpenOnboardReleased", onOpenOnboardReleased)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)

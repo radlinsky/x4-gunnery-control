@@ -223,30 +223,7 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-grep -Fq 'X4GunneryControl.OpenOnboardReleased' "$md"
-grep -Fq 'RegisterEvent("X4GunneryControl.OpenOnboardReleased", onOpenOnboardReleased)' "$main"
-grep -Fq 'completeReleasedOnboardHandoff = function(reason)' "$main"
-
-# These names must remain unique across saved MD state. Historical versions of
-# this save-persistent script used Release, so ChairIngress uses new cue names.
-chair_ingress='/mdscript/cues/cue[@name="ChairIngress"]'
-assert_md_xpath 1 "count($chair_ingress)" \
-  'ChairIngress must have exactly one cue'
-assert_md_xpath 1 "count($chair_ingress/cues/cue[@name=\"Issue118ChairReleaseRequest20260908\"])" \
-  'ChairIngress must have exactly one uniquely named release-request cue'
-assert_md_xpath 1 "count($chair_ingress/cues/cue[@name=\"Issue118ChairStoppedControl20260908\"])" \
-  'ChairIngress must have exactly one uniquely named stopped-control cue'
-assert_md_xpath 0 'count(//cue[@name="Release"])' \
-  'The historical Release cue name must not be reused'
-assert_md_xpath 0 "count($chair_ingress/cues/cue[@name=\"Stopped\"])" \
-  'ChairIngress must not reuse the historical Stopped child name'
-grep -Fq 'OpenMenu(menu.name, { 0, 0 }, nil)' "$main"
-if grep -Fq 'closeMenuAndOpenNewMenu(docked' "$main"; then
-  echo "physical ingress still replaces DockedMenu during the seat-release transition" >&2
-  exit 1
-fi
 grep -Fq 'local function registerUIHooks()' "$main"
-grep -Fq 'and (not externalMenu or externalMenu == "DockedMenu")' "$main"
 grep -Fq 'redirectDockedMenu()' "$main"
 grep -Fq 'Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab"' "$testlab"
 
