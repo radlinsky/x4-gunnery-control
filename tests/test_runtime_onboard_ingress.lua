@@ -67,8 +67,8 @@ do
     local s = fix.API.getSession()
     assert(s ~= nil, "onboard ingress must create a session")
     assert(s.origin == "onboard", "ingress session origin must be onboard")
-    assert(s.lifecycle == State.lifecycle.suspendedMap,
-        "onboard ingress must park the session as suspendedMap")
+    assert(s.lifecycle == State.lifecycle.reopening,
+        "onboard ingress must park the session for its pre-open handoff")
     assert(#s.groups >= 1, "onboard ingress must capture the usable turret group(s)")
     assert(next(s.committedBaseline or {}) ~= nil, "onboard ingress must seed the baseline")
 
@@ -79,6 +79,32 @@ do
     -- A second OpenOnboard while a session exists is a no-op (guard at entry).
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
     assert(fix.API.getSession() == s, "a second OpenOnboard must not replace the live session")
+
+    fix.gcMenu.onShowMenu()
+    assert(fix.API.getSession() == s,
+        "same-ship onboard handoff must retain the parked session object")
+    assert(s.lifecycle == State.lifecycle.owned,
+        "same-ship onboard handoff must become owned when the menu opens")
+end
+
+-- ── onOpenOnboard: parked handoff still enforces ship identity ─────────────
+do
+    local fix = dofile("tests/support/runtime_fixture.lua").load()
+    State = X4GunneryState
+    ownPlayerShip()
+    installOneGroup(fix)
+    fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
+    local parked = fix.API.getSession()
+    assert(parked and parked.lifecycle == State.lifecycle.reopening,
+        "precondition: real onboard handoff created a parked reopening session")
+
+    fix.C.GetContextByClass = function() return 43 end
+    fix.gcMenu.onShowMenu()
+    local replacement = fix.API.getSession()
+    assert(replacement ~= parked,
+        "onboard handoff for a ship the player left must be discarded and replaced")
+    assert(replacement.shipID == 43 and replacement.lifecycle == State.lifecycle.owned,
+        "wrong-ship handoff replacement must own the current ship console")
 end
 
 -- ── onOpenOnboard: no crash when MapMenu is unavailable ───────────────────────
@@ -91,8 +117,8 @@ do
     local mark = fix.callbackCheckpoint()
     fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
     fix.drainCallbacksSince(mark)
-    assert(fix.API.getSession() ~= nil and fix.API.getSession().lifecycle == State.lifecycle.suspendedMap,
-        "with no MapMenu the onboard session stays parked for the watchdog reopen")
+    assert(fix.API.getSession() ~= nil and fix.API.getSession().lifecycle == State.lifecycle.reopening,
+        "with no MapMenu the onboard session stays parked for the pre-open handoff")
 end
 
 -- ── Onboard exit: leaveSession -> leaveOnboard (no GetUp), origin restore ─────
