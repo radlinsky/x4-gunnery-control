@@ -2769,7 +2769,7 @@ function menu.display()
                 noSurfRow[1]:setColSpan(5):createText(text(61))
             end
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
-                elemFrame:display()
+            elemFrame:display()
         end
         return
     end
