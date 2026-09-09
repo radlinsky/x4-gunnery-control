@@ -223,9 +223,7 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"
 grep -Fq 'local function registerUIHooks()' "$main"
-grep -Fq 'if isInGunnerChair() and not menu.shown and not activeExternalMenuName()' "$main"
 grep -Fq 'redirectDockedMenu()' "$main"
 grep -Fq 'Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab"' "$testlab"
 

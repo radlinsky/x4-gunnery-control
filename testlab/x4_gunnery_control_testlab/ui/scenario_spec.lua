@@ -54,89 +54,75 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #135: live-regress the generated prospective-muzzle path for the exact
--- rank-1 Terran L Beam, turret_ter_l_beam_01_mk1_macro.
---
--- The sparse shooter has exactly one turret_ter_l_beam_01_mk1_macro in the
--- one-slot group_front_up_mid2, so every runtime muzzle record is unambiguously
--- attributable to that one exact turret.
---
--- Physical setup is a deliberate reuse of the already live-tested Issue #132 P6
--- fixture: the same Paranid L destroyer shooter, the same one-slot front-upper
--- group, and the same 2 km high-forward target (nominal hull yaw 0, pitch +30
--- degrees) of the same macro and loadout. Only the turret macro under test
--- changes. The existing FIRED/HIT observer logs every value this regression
--- needs, so the fixture adds no new instrumentation.
+-- Issue #118 Task 1: compare physical-seat and Map/right-click Gunnery Control
+-- entry under the same world-click setup. This deliberately reuses the accepted
+-- Issue #110 three-capital layout: two separated hostile click targets and one
+-- player-owned ineligible control ahead of the Ray. The geometry already proved
+-- suitable for world left-click comparison, so this fixture changes only the
+-- scenario identity/labels needed to attribute the new live run.
 --
 -- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-135-p8-ter-l-beam-live-r1",
+    id      = "issue-118-entry-parity-r1",
     enabled = false,
 
-    location = {
-        sectorMacro = "Cluster_29_Sector001_macro",
-        x = 500000,
-        y = 0,
-        z = 0,
-    },
-
     setup = {
-        remote          = true,
-        shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE135 P8 SHOOTER 1",
-        turretGroup     = "group_front_up_mid2",
-        turretLabel     = "Front Upper TER L Beam",
-        expectedTurrets = 1,
-        expectedMemberMacros = {
-            "turret_ter_l_beam_01_mk1_macro",
-        },
-        selectAll = false,
+        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
+        shipLabel       = "Ray",
+        turretGroup     = "group_front_up_left",
+        turretLabel     = "Front Upper Left",
+        expectedTurrets = 2,
+        selectAll       = false,
     },
 
     groups = {
         {
-            label     = "ISSUE135 P8 SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
-            faction   = "player",
-            count     = 1,
-            distance  = 1,
-            x         = 0,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-
-            role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_ter_l_beam",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE135 P8 TARGET HIGH FORWARD",
-            macro     = "ship_par_m_trans_container_01_a_macro",
+            label     = "ISSUE118 HOSTILE LEFT",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
             faction   = "xenon",
             count     = 1,
-            -- Nominal hull yaw 0, pitch +30 degrees, 2000 m slant range.
-            distance  = 1732.050808,
-            x         = 0,
-            y         = 1000,
+            distance  = 4500,
+            x         = -1200,
+            y         = 0,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
             holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
+        },
 
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
+        {
+            label     = "ISSUE118 HOSTILE RIGHT",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 4500,
+            x         = 1200,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+
+        -- Player-owned: the ineligible-click control. Never designate it.
+        {
+            label     = "ISSUE118 FRIENDLY CENTRE - DO NOT TARGET",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
+            faction   = "player",
+            count     = 1,
+            distance  = 4500,
+            x         = 0,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = false,
+            holdFire  = true,
+            stripDefenceUnits = true,
         },
     },
 }

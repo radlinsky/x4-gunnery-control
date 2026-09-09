@@ -174,11 +174,12 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-24-testlab-manual-designation-1"
+local runtimeBuild = "2026-09-08-issue118-player-get-up-handoff-1"
 -- The upper-left element panel's own frame layer; every frame registers a view
 -- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
 local elementFrameLayer = 3
 local session, redirectPending, nextRefresh = nil, false, 0
+local physicalIngressPendingShip
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -195,6 +196,8 @@ local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local reopenSuspendedSession
+local redirectDockedMenu
+local completeReleasedOnboardHandoff
 local activeExternalMenuName
 local suggestedTestEngagement
 local cameraMismatchLogged = false
@@ -3195,24 +3198,50 @@ function menu.onCloseElement(dueToClose)
     end
 end
 
-local function redirectDockedMenu()
+completeReleasedOnboardHandoff = function(reason)
+    if not session or not session.physicalReleasePending or menu.shown then return false end
+    if session.origin ~= "onboard" or session.lifecycle ~= State.lifecycle.reopening
+            or not resumePending then return false end
+    if not sessionContextValid() then
+        endSession("released onboard context invalid")
+        return false
+    end
+    local externalMenu = activeExternalMenuName()
+    if externalMenu then
+        -- Vanilla DockedMenu closes from playerGetUp. Wait for that normal
+        -- cleanup instead of replacing it in the middle of the seat-release
+        -- transition. Any unrelated menu cancels this one-shot handoff.
+        if externalMenu ~= "DockedMenu" then
+            endSession("released onboard blocked by " .. externalMenu)
+        end
+        return false
+    end
+    session.physicalReleasePending = nil
+    logSession("physical release opening Gunnery Control: " .. tostring(reason))
+    OpenMenu(menu.name, { 0, 0 }, nil)
+    return true
+end
+
+redirectDockedMenu = function()
+    -- A late DockedMenu callback after release only rechecks the handoff; while
+    -- DockedMenu is still visible completion waits for vanilla playerGetUp
+    -- cleanup. The watchdog opens Gunnery once no external menu remains.
+    if session and session.physicalReleasePending then
+        completeReleasedOnboardHandoff("DockedMenu callback")
+        return
+    end
+    if physicalIngressPendingShip then return end
     local observedGroup = controlGroup()
     local ship = playerShip()
     if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
     redirectPending = true
-    -- Deferring avoids opening two menus in the same DockedMenu render pass.
+    -- Deferring leaves the DockedMenu render pass before anything moves the player.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         redirectPending = false
-        if isInGunnerChair() then
-            local docked = Helper.getMenu("DockedMenu")
-            if docked then
-                -- Open the replacement before closing DockedMenu and suppress
-                -- its automatic vanilla-menu fallback. Calling closeMenu()
-                -- directly races TopLevelMenu against this custom menu.
-                Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu", { 0, 0 }, true)
-            else
-                log("could not redirect: DockedMenu is unavailable")
-            end
+        -- #118: leave the gunner control position through vanilla's Get Up path.
+        -- X4's playerGetUp event confirms completion and starts the handoff.
+        if isInGunnerChair() and sameID(playerShip(), ship) and not session then
+            if C.GetUp() then physicalIngressPendingShip = ship end
         end
     end, false, getElapsedTime() + 0.05)
 end
@@ -3339,6 +3368,12 @@ end
 TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
+    -- UIX normally delivers DockedMenu's display callback. Poll only a released
+    -- handoff here so module init stays inert while merely sitting in a chair.
+    -- Release completion itself is the playerGetUp event handled below.
+    if session and session.physicalReleasePending then
+        completeReleasedOnboardHandoff("watchdog")
+    end
     if session then
         -- The resume re-point retry grant is bound to the exact aim target and
         -- Direct control mode it was granted for (attemptRepoint). Any drift
@@ -3416,6 +3451,27 @@ end
 
 TestAPI.onOpenOnboard = onOpenOnboard
 
+-- Physical-console ingress has a different predecessor menu than Map ingress.
+-- Enter here only after vanilla Get Up succeeds and playerGetUp confirms the
+-- release, then park the session for the actual vanilla DockedMenu cleanup.
+local function startPhysicalIngress(shipComponent)
+    if session then return end
+    local ship = id(shipComponent)
+    if ship == 0 then return end
+    if not sameID(playerShip(), ship) then return end
+    if not ownedByPlayer(ship) then return end
+    local groups = readGroups(ship)
+    if #groups == 0 then return end
+    session = newSession(ship, "onboard")
+    session.groups = groups
+    State.seedBaseline(session, groups)
+    if persistence then persistence.request() end
+    session.physicalReleasePending = true
+    resumePending = true
+    transitionLifecycle(State.lifecycle.reopening, "physical control position released")
+    logSession("physical release accepted; awaiting DockedMenu replacement")
+end
+
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     if Helper then Helper.registerMenu(menu) end
@@ -3426,6 +3482,20 @@ local function init()
         seatLeaving = true
         endSession("global movement event")
         seatLeaving = false
+    end
+    local function onPlayerGetUp()
+        if physicalIngressPendingShip then
+            local ship = physicalIngressPendingShip
+            physicalIngressPendingShip = nil
+            startPhysicalIngress(ship)
+            return
+        end
+        -- Onboard sessions are deliberately not seat-bound (#118). The physical
+        -- launcher can deliver playerGetUp around the same release that creates
+        -- the onboard session, and a normal Map-origin onboard session is also
+        -- valid while standing. Only chair-origin sessions use get-up as teardown.
+        if session and session.origin == "onboard" then return end
+        endForMovement()
     end
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.
@@ -3439,8 +3509,11 @@ local function init()
     -- Exposed for unit tests only: the missing-UI-Extensions diagnosis, without
     -- having to drive registerUIHooks through all 40 retries.
     TestAPI.hookTimeoutMessage = hookTimeoutMessage
-    RegisterEvent("playerGetUp", endForMovement)
-    RegisterEvent("playerUndock", endForMovement)
+    RegisterEvent("playerGetUp", onPlayerGetUp)
+    RegisterEvent("playerUndock", function()
+        physicalIngressPendingShip = nil
+        endForMovement()
+    end)
     -- Ownership-change replacement for vanilla's cease_fire. MD fires this when
     -- the engaged target's owner changes to a faction the ship can no longer
     -- attack (capital.xml:1070 condition). The handler re-issues emitDirectFallback
@@ -3454,7 +3527,9 @@ local function init()
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
         -- object after this extension's first registration attempt.
-        if isInGunnerChair() and not menu.shown and not activeExternalMenuName()
+        local externalMenu = activeExternalMenuName()
+        if isInGunnerChair() and not menu.shown
+            and (not externalMenu or externalMenu == "DockedMenu")
             and (not session or not State.isMapSuspended(session)) then
             if session then discardSession("stale session before chair redirect") end
             redirectDockedMenu()

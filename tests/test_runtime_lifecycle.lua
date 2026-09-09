@@ -316,5 +316,4 @@ do
     assert(API.hookTimeoutMessage(nil):find("timed out", 1, true),
         "no DockedMenu at all is still a plain timeout")
 end
-
 print("runtime lifecycle tests passed")
