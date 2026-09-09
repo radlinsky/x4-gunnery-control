@@ -430,6 +430,7 @@ local function rebindEngagedOverlay(framehandle, frames)
         log("engaged overlay descriptor could not be restored")
         return
     end
+    framehandle.id = frameid
     local layer = framehandle.properties.layer
     menu.frames = menu.frames or {}
     menu.frames[layer] = frameid
