@@ -88,4 +88,63 @@ do
     assert(overlay() == nil, "the watchdog must remove the engaged overlay registration")
 end
 
+-- Defensive engaged-overlay edges: a rebind with no recreated frame, a display
+-- whose Helper registration vanished before the retag, and a retained
+-- fullscreen descriptor caught by a real teardown.
+local function engaged()
+    local fix, group, session = fresh()
+    session.phase, session.controlMode = "engaged", "auto"
+    session.selectedGroupKey, session.selectedMemberID = "g", 27
+    return fix, group, session
+end
+
+local function overlayEntry(fix)
+    for _, entry in ipairs(fix.View.menus) do
+        if entry.id == "X4GunneryOverlay" then return entry end
+    end
+end
+
+do
+    local fix = engaged()
+    fix.gcMenu.display()
+    overlayEntry(fix).callback({})
+    assert(fix.logContains("engaged overlay descriptor could not be restored"),
+        "a rebind without a recreated frame id must be reported, not crash")
+end
+
+do
+    local fix = engaged()
+    local registerMenu = fix.View.registerMenu
+    fix.View.registerMenu = function(id, ...)
+        if id ~= "Helper0" then return registerMenu(id, ...) end
+    end
+    fix.gcMenu.display()
+    fix.View.registerMenu = registerMenu
+    assert(fix.logContains("engaged overlay registration was not found after frame display"),
+        "a missing Helper registration must be reported, not crash the retag")
+end
+
+do
+    local fix, _, session = engaged()
+    local now = 0
+    GetCurRealTime = function() return now end
+    fix.gcMenu.display()
+    fix.setFullscreenMenuDisplayed(true)
+    fix.invokeOnUpdate()
+    assert(overlayEntry(fix) == nil and fix.gcMenu.frame,
+        "fullscreen takeover must unregister the overlay while retaining its descriptor")
+    local released = 0
+    ReleaseDescriptor = function() released = released + 1 end
+    -- Teardown wins the race: the takeover ends without anyone restoring first.
+    fix.setFullscreenMenuDisplayed(false)
+    fix.gcMenu.shown = false
+    fix.gcMenu.cleanup()
+    now = now + 1
+    fix.API.runSessionWatchdog()
+    assert(released > 0, "a real teardown must release the retained overlay descriptor")
+    fix.invokeOnUpdate()
+    assert(overlayEntry(fix) == nil,
+        "a released overlay descriptor must not be restored after the takeover ends")
+end
+
 print("runtime coverage tests passed")
