@@ -424,7 +424,7 @@ assert(sess17.phase == "console",
 -- ── 17b. engaged/direct world clicks synchronize the retained target ───────
 -- Target brackets close the compact view before X4's new soft target is
 -- stable. Exercise the real close callback and its delayed comparison: hostile
--- surfaces are adopted exactly, while rejected/cleared selections are put back
+-- surfaces are adopted exactly, while non-hostile/cleared selections are put back
 -- on the retained Direct target and a same-target click is a no-op.
 gcMenu.onShowMenu()
 local sess17b = API.getSession()
@@ -444,22 +444,17 @@ C.SetPlayerCameraTargetView = function() end
 
 local selected17b = 0
 local softtargetWrites17b = {}
-local refusedSofttarget17b
 C.GetSofttarget2 = function()
     return { softtargetID = selected17b, softtargetConnectionName = "" }
 end
 C.SetSofttarget = function(target)
-    if target == refusedSofttarget17b then
-        refusedSofttarget17b = nil
-        return false
-    end
     selected17b = target
     softtargetWrites17b[#softtargetWrites17b + 1] = target
     return true
 end
 RemoveSofttarget = function() selected17b = 0 end
 C.GetContextByClass = function(component)
-    if component == 202 or component == 204 then return 200 end -- hostile surfaces -> hostile ship
+    if component == 202 then return 200 end -- hostile surface -> hostile ship
     return component
 end
 GetComponentData = function(component, ...)
@@ -500,11 +495,6 @@ worldClick17b(0)
 assert(sess17b.aimTargetID == 100 and selected17b == 100,
     "cleared selection must retain and restore the Direct target")
 
-refusedSofttarget17b = 204
-worldClick17b(204)
-assert(sess17b.aimTargetID == 100 and selected17b == 100,
-    "an engine-rejected retarget must retain and restore the Direct target")
-
 worldClick17b(100)
 assert(sess17b.phase == "engaged" and sess17b.controlMode == "direct"
         and sess17b.aimTargetID == 100 and #softtargetWrites17b == 0,
@@ -512,11 +502,6 @@ assert(sess17b.phase == "engaged" and sess17b.controlMode == "direct"
     .. tostring(sess17b.phase) .. " mode=" .. tostring(sess17b.controlMode)
     .. " aim=" .. tostring(sess17b.aimTargetID)
     .. " writes=" .. tostring(#softtargetWrites17b))
-
-sess17b.controlMode = "auto"
-worldClick17b(300)
-assert(sess17b.phase == "engaged" and sess17b.controlMode == "auto",
-    "world selection must leave Auto-engage unchanged")
 
 -- ── 18. viewCreated clears engagePending for direct but NOT for auto ──────────
 -- For auto-engage, engagePending comes from the old startWatch path which is

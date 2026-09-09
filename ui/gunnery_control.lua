@@ -3174,27 +3174,24 @@ function menu.onCloseElement(dueToClose)
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) or session.phase ~= "engaged" then return end
             local targetClick = dueToClose == "auto" or softtargetKey() ~= previousTarget
-            if targetClick then
-                if controlMode == "direct" then
-                    local selected = C.GetSofttarget2().softtargetID
+            if targetClick and controlMode == "direct" then
+                -- A world click may name a different object; adopt it only if it
+                -- is an eligible hostile, otherwise put the retained Direct
+                -- target back. engageTarget() redisplays on success.
+                local selected = C.GetSofttarget2().softtargetID
+                if isNullID(selected) or not sameID(selected, session.aimTargetID) then
                     local eligible, isenemy, ishostile = false, false, false
                     if not isNullID(selected) then
                         local object
                         eligible, object = isEligibleEngagementTarget(selected)
                         isenemy, ishostile = componentData(object, "isenemy", "ishostile")
                     end
-                    if isNullID(selected) or not eligible or not (isenemy or ishostile) then
-                        restoreSofttarget(session.aimTargetID, "")
-                        menu.display()
-                    elseif sameID(selected, session.aimTargetID) then
-                        menu.display()
-                    elseif not engageTarget(selected) then
-                        restoreSofttarget(session.aimTargetID, "")
-                        menu.display()
-                    end
-                else
-                    menu.display()
+                    if eligible and (isenemy or ishostile) and engageTarget(selected) then return end
+                    restoreSofttarget(session.aimTargetID, "")
                 end
+            end
+            if targetClick then
+                menu.display()
             elseif session.controlMode == "direct" and dueToClose ~= "close" then
                 openTargetBrowser()
             elseif session.controlMode == "direct" then
