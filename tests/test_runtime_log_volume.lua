@@ -128,6 +128,9 @@ assert(testLabButton and testLabButton.handlers.onClick,
 testLabButton.handlers.onClick()
 assert(session.lifecycle == State.lifecycle.reopening,
     "Test Lab handoff must park the displayed session for another reopen")
+-- This case covers the generic parked-reopen retry latch, not the Test Lab
+-- handoff gap: drop the handoff marker so the watchdog owns the reopen again.
+session.testLabHandoffPending = nil
 gcMenu.shown = false
 runFailedParkedReopen()
 assert(countLogs("parked session reopen did not display; retrying:") == 2,

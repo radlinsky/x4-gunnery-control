@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue117-external-menus-task2"
+local runtimeBuild = "2026-09-09-issue117-testlab-handoff-fix"
 -- Layer 0 is unused by the shipped menus inspected for issue #117, but is not
 -- globally reserved. The unique registration ID prevents Helper-layer ID
 -- collisions after the initial synchronous frame registration is retagged.
@@ -2511,6 +2511,12 @@ local function openTestLab()
         persistSession()
         transitionLifecycle(State.lifecycle.reopening, "Test Lab opened")
         resumePending = true
+        -- Test Lab's Helper.closeMenuAndOpenNewMenu leaves a real interval with
+        -- this menu hidden and its menu not shown yet. Without this marker the
+        -- generic watchdog reads that gap as a finished external-menu cleanup
+        -- and reopens Gunnery on top of the Test Lab. Runtime-only: set after
+        -- persistSession() so it never reaches the saved envelope.
+        session.testLabHandoffPending = true
         removeEngagedUpdater()
         removeEngagedOverlay(true)
     end
@@ -2558,6 +2564,7 @@ function menu.onShowMenu()
         resuming = false
         session = newSession(ship)
     else
+        session.testLabHandoffPending = nil
         transitionLifecycle(State.lifecycle.owned, "parked session shown")
     end
     -- The lifecycle transition above is intentionally before camera setup:
@@ -3633,7 +3640,8 @@ local function sessionWatchdog()
             attemptRepoint()
         end
         if session.lifecycle == State.lifecycle.reopening and resumePending
-                and not menu.shown and not activeExternalMenuName() then
+                and not menu.shown and not activeExternalMenuName()
+                and not session.testLabHandoffPending then
             reopenPendingSession("external menu cleanup")
         elseif session.lifecycle == State.lifecycle.owned and not menu.shown
             and session.autoHideAt and GetCurRealTime() - session.autoHideAt > 0.05 then

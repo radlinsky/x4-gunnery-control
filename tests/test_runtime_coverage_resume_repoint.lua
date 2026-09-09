@@ -162,6 +162,9 @@ local function directTestLabResume(f, aimTarget)
     button.handlers.onClick()
     assert(s.lifecycle == State.lifecycle.reopening,
         "Test Lab open must park session in reopening lifecycle")
+    -- Generic parked session from here on; the Test Lab handoff gap has its own
+    -- coverage and deliberately suspends watchdog reopening while it is set.
+    s.testLabHandoffPending = nil
     s.repointTargetID = nil
     f.gcMenu.onShowMenu()
     assert(f.API.getSession() == s, "resume must keep the same session object")
@@ -280,6 +283,9 @@ do
     button.handlers.onClick()
     assert(s.lifecycle == State.lifecycle.reopening,
         "Test Lab open must park session in reopening lifecycle")
+    -- Generic parked session from here on; the Test Lab handoff gap has its own
+    -- coverage and deliberately suspends watchdog reopening while it is set.
+    s.testLabHandoffPending = nil
     s.repointTargetID = nil
     -- The player left the gunner chair while the Test Lab was up.
     f.C.GetPlayerCurrentControlGroup = function() return "cockpit" end
