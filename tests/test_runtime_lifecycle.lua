@@ -478,6 +478,12 @@ end
 local overlay55 = findView55("X4GunneryOverlay")
 assert(overlay55 ~= nil,
     "fullscreen-takeover precondition: engaged Gunnery overlay must be registered")
+assert(overlay55.framedescriptors[0] ~= nil and overlay55.framedescriptors[3] ~= nil,
+    "fullscreen-takeover precondition: the overlay must own the layer-0 controls"
+    .. " and layer-3 surface-browser descriptors")
+local elementFrame55 = gcMenu.elementFrame
+assert(elementFrame55 ~= nil,
+    "fullscreen-takeover precondition: Direct engagement must build the element frame")
 local session55 = sess55
 local groups55, checked55 = sess55.groups, sess55.checkedGroupKeys
 local groupMode55, groupArmed55 = grp55.mode, grp55.armed
@@ -588,8 +594,14 @@ assert(sess55.targetObjectID == targetObject55 and sess55.aimTargetID == aimTarg
         and sess55.cameraMemberID == cameraMember55
         and sess55.povAnchor == povAnchor55 and sess55.povMode == povMode55,
     "fullscreen restoration must preserve targets, camera member, and POV")
-assert(gcMenu.frame ~= nil and #fix.allFrames == allFrames55 + 1,
-    "the display requested during takeover must repaint once only after restoration")
+assert(gcMenu.frame ~= nil and #fix.allFrames == allFrames55 + 2,
+    "the display requested during takeover must repaint both engaged frames once"
+    .. " only after restoration")
+assert(restoredOverlay55.framedescriptors[0] ~= nil
+        and restoredOverlay55.framedescriptors[3] ~= nil,
+    "fullscreen restoration must recreate both engaged descriptors under one registration")
+assert(gcMenu.elementFrame ~= nil and gcMenu.elementFrame ~= elementFrame55,
+    "fullscreen restoration must rebuild the layer-3 surface-browser frame")
 assert(fix.getOnUpdateCallback() == updater55
         and fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
     "fullscreen restoration must not replace the updater or tear down Gunnery")

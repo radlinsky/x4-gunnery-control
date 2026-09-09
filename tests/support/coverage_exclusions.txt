@@ -7,36 +7,36 @@
 # X4 engine has recreated real child widget IDs for a retained frame and are
 # driven by engine-created widget identities, engine cell content handles and
 # C table-connection APIs that the stock-Lua fixture does not model.
-ui/gunnery_control.lua:441 # indexes frame content against engine-created child widget list
-ui/gunnery_control.lua:442 # reads the pre-rebind engine widget ID for remapping
-ui/gunnery_control.lua:443 # reassigns the engine-created child widget ID onto the retained widget
-ui/gunnery_control.lua:444 # branches on engine-restored widget type metadata
-ui/gunnery_control.lua:445 # looks up row data keyed by the engine's old widget ID
-ui/gunnery_control.lua:446 # clears row data under the engine's old widget ID
-ui/gunnery_control.lua:447 # rekeys row data to the engine's new widget ID
-ui/gunnery_control.lua:448 # walks rows of an engine-rebound table widget
-ui/gunnery_control.lua:449 # walks cells of an engine-rebound table row
-ui/gunnery_control.lua:450 # branches on engine-restored cell colspan metadata
-ui/gunnery_control.lua:451 # calls GetCellContent for an engine-created cell handle
-ui/gunnery_control.lua:452 # reads the engine-assigned uiTriggerID for the rebound cell
-ui/gunnery_control.lua:453 # branches on engine-restored cell type metadata
-ui/gunnery_control.lua:454 # rebinds a checkbox script to engine-created widget/cell IDs
-ui/gunnery_control.lua:455 # continuation of the engine-ID checkbox script rebind
-ui/gunnery_control.lua:456 # branches on engine-restored cell type metadata
-ui/gunnery_control.lua:457 # rebinds a button script to engine-created widget/cell IDs
-ui/gunnery_control.lua:458 # continuation of the engine-ID button script rebind
-ui/gunnery_control.lua:459 # continuation of the engine-ID button script rebind
-ui/gunnery_control.lua:460 # branches on engine-restored cell type metadata
-ui/gunnery_control.lua:461 # rebinds a dropdown script to engine-created widget/cell IDs
-ui/gunnery_control.lua:462 # continuation of the engine-ID dropdown script rebind
-ui/gunnery_control.lua:463 # continuation of the engine-ID dropdown script rebind
-ui/gunnery_control.lua:468 # reads engine-restored prevTable connection metadata
-ui/gunnery_control.lua:469 # calls C.SetTablePreviousConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:471 # reads engine-restored nextTable connection metadata
-ui/gunnery_control.lua:472 # calls C.SetTableNextConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:474 # reads engine-restored prevHorizontalTable connection metadata
-ui/gunnery_control.lua:475 # calls C.SetTablePreviousHorizontalConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:476 # continuation of the engine-only horizontal table-connection call
-ui/gunnery_control.lua:478 # reads engine-restored nextHorizontalTable connection metadata
-ui/gunnery_control.lua:479 # calls C.SetTableNextHorizontalConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:480 # continuation of the engine-only horizontal table-connection call
+ui/gunnery_control.lua:449 # indexes frame content against engine-created child widget list
+ui/gunnery_control.lua:450 # reads the pre-rebind engine widget ID for remapping
+ui/gunnery_control.lua:451 # reassigns the engine-created child widget ID onto the retained widget
+ui/gunnery_control.lua:452 # branches on engine-restored widget type metadata
+ui/gunnery_control.lua:453 # looks up row data keyed by the engine's old widget ID
+ui/gunnery_control.lua:454 # clears row data under the engine's old widget ID
+ui/gunnery_control.lua:455 # rekeys row data to the engine's new widget ID
+ui/gunnery_control.lua:456 # walks rows of an engine-rebound table widget
+ui/gunnery_control.lua:457 # walks cells of an engine-rebound table row
+ui/gunnery_control.lua:458 # branches on engine-restored cell colspan metadata
+ui/gunnery_control.lua:459 # calls GetCellContent for an engine-created cell handle
+ui/gunnery_control.lua:460 # reads the engine-assigned uiTriggerID for the rebound cell
+ui/gunnery_control.lua:461 # branches on engine-restored cell type metadata
+ui/gunnery_control.lua:462 # rebinds a checkbox script to engine-created widget/cell IDs
+ui/gunnery_control.lua:463 # continuation of the engine-ID checkbox script rebind
+ui/gunnery_control.lua:464 # branches on engine-restored cell type metadata
+ui/gunnery_control.lua:465 # rebinds a button script to engine-created widget/cell IDs
+ui/gunnery_control.lua:466 # continuation of the engine-ID button script rebind
+ui/gunnery_control.lua:467 # continuation of the engine-ID button script rebind
+ui/gunnery_control.lua:468 # branches on engine-restored cell type metadata
+ui/gunnery_control.lua:469 # rebinds a dropdown script to engine-created widget/cell IDs
+ui/gunnery_control.lua:470 # continuation of the engine-ID dropdown script rebind
+ui/gunnery_control.lua:471 # continuation of the engine-ID dropdown script rebind
+ui/gunnery_control.lua:476 # reads engine-restored prevTable connection metadata
+ui/gunnery_control.lua:477 # calls C.SetTablePreviousConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:479 # reads engine-restored nextTable connection metadata
+ui/gunnery_control.lua:480 # calls C.SetTableNextConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:482 # reads engine-restored prevHorizontalTable connection metadata
+ui/gunnery_control.lua:483 # calls C.SetTablePreviousHorizontalConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:484 # continuation of the engine-only horizontal table-connection call
+ui/gunnery_control.lua:486 # reads engine-restored nextHorizontalTable connection metadata
+ui/gunnery_control.lua:487 # calls C.SetTableNextHorizontalConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:488 # continuation of the engine-only horizontal table-connection call

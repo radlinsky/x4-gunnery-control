@@ -254,10 +254,13 @@ function M.load()
             name = name, properties = properties,
         }
         View.menus[#View.menus + 1] = entry
+        -- framedescriptors is keyed by frame layer; View hands the callback one
+        -- runtime frame id per descriptor, ordered by ascending layer.
+        local layers = {}
+        for layer in pairs(framedescriptors or {}) do layers[#layers + 1] = layer end
+        table.sort(layers)
         local frames = {}
-        for _, descriptor in ipairs(framedescriptors or {}) do
-            frames[#frames + 1] = allocateFrame()
-        end
+        for _ in ipairs(layers) do frames[#frames + 1] = allocateFrame() end
         if callback then callback(frames) end
         return entry
     end
@@ -387,7 +390,7 @@ function M.load()
                         function(frames)
                             self.id = frames[1]
                             menu.frames[layer] = frames[1]
-                        end, nil, { { frame = self } }, menu.name, props)
+                        end, nil, { [layer] = { frame = self } }, menu.name, props)
                 end,
                 update     = function() end,
                 setBackground = function(self)

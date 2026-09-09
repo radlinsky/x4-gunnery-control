@@ -131,8 +131,10 @@ assert(sess23.aimTargetID ~= nil, "precondition: updateAimTarget must pick a tar
 assert(fix.getLastFrameProps() ~= nil,
     "acquiring an aim target in manual mode must rebuild the panel frame")
 
--- ── 27. engaged/direct with targetObjectID creates one overlay frame ──────
--- The controls and left element panel share the persistent engaged overlay.
+-- ── 27. engaged/direct builds two frames under one overlay registration ───
+-- Compact controls stay upper right on layer 0; the surface-element browser
+-- stays upper left on layer 3. Both descriptors belong to the single custom
+-- X4GunneryOverlay registration.
 gcMenu.onShowMenu()
 local sess27 = API.getSession()
 assert(sess27 ~= nil, "expected session for engaged overlay test")
@@ -147,12 +149,29 @@ sess27.targetObjectID = 500
 sess27.aimTargetID = 500
 local ok27, err27 = pcall(function() gcMenu.display() end)
 assert(ok27, "display() raised in engaged/direct+targetObjectID: " .. tostring(err27))
-assert(fix.getFrameCount() == 1,
-    "engaged/direct with targetObjectID must create one frame; got " .. tostring(fix.getFrameCount()))
+assert(fix.getFrameCount() == 2,
+    "engaged/direct with targetObjectID must create two frames; got " .. tostring(fix.getFrameCount()))
 local fp = fix.getFrameProps()
 assert(fp[1].layer == 0 and fp[1].viewHelperType == "X4GunneryOverlay",
-    "engaged/direct must use the layer-0 X4GunneryOverlay frame; got layer "
+    "engaged/direct controls must use the layer-0 X4GunneryOverlay frame; got layer "
     .. tostring(fp[1].layer) .. " type " .. tostring(fp[1].viewHelperType))
+assert(fp[1].x == Helper.viewWidth - fp[1].width - 32 and fp[1].y == 32,
+    "engaged controls must sit in the upper-right corner; got x " .. tostring(fp[1].x))
+assert(fp[2].layer == 3,
+    "the Direct surface browser must keep its own layer-3 frame; got layer " .. tostring(fp[2].layer))
+assert(fp[2].x == 32 and fp[2].y == 32,
+    "the Direct surface browser must sit in the upper-left corner; got x " .. tostring(fp[2].x))
+local overlay27, helperViews27 = nil, 0
+for _, entry in ipairs(fix.View.menus) do
+    if entry.id == "X4GunneryOverlay" then overlay27 = entry end
+    if entry.name == gcMenu.name and entry.id ~= "X4GunneryOverlay" then
+        helperViews27 = helperViews27 + 1
+    end
+end
+assert(overlay27 ~= nil and helperViews27 == 0,
+    "both engaged frames must be owned by the single X4GunneryOverlay registration")
+assert(overlay27.framedescriptors[0] ~= nil and overlay27.framedescriptors[3] ~= nil,
+    "the X4GunneryOverlay registration must own the layer-0 and layer-3 descriptors")
 local surfacePanelFound27 = false
 for _, button in ipairs(fix.getCreatedButtons()) do
     if button.row == "surface_refresh" then surfacePanelFound27 = true end

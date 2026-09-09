@@ -179,8 +179,17 @@ local runtimeBuild = "2026-09-09-issue117-testlab-handoff-fix"
 -- globally reserved. The unique registration ID prevents Helper-layer ID
 -- collisions after the initial synchronous frame registration is retagged.
 local engagedOverlayLayer = 0
+-- The Direct surface browser keeps its own frame on its own layer (vanilla gives
+-- each of Map's frames one: menu_map.lua:1052-1055), but both frames are merged
+-- into the single custom registration below -- one View registration may own
+-- several frame descriptors on distinct layers (X4 9.00 viewhelper.lua).
+local elementFrameLayer = 3
 local engagedOverlayID = "X4GunneryOverlay"
 local engagedOverlayType = "X4GunneryOverlay"
+-- Ordered layers of the descriptors currently owned by engagedOverlayID. The
+-- index into this list is the index into the registration's descriptor list and
+-- into the runtime frame ids handed back by the View callback.
+local engagedOverlayLayers = { engagedOverlayLayer }
 local session, redirectPending, nextRefresh = nil, false, 0
 local physicalIngressPendingShip
 local persistence
@@ -425,9 +434,8 @@ end
 -- hard-code their registry ID to "Helper" .. layer. Retag the just-created
 -- layer-0 entry synchronously so ordinary Helper clears cannot select it by
 -- type and later Helper frames cannot replace it by ID.
-local function rebindEngagedOverlay(framehandle, frames)
-    local frameid = frames[1]
-    if not frameid then
+local function rebindEngagedOverlayFrame(framehandle, frameid)
+    if not framehandle or not frameid then
         log("engaged overlay descriptor could not be restored")
         return
     end
@@ -484,19 +492,56 @@ local function rebindEngagedOverlay(framehandle, frames)
     if menu.viewCreated then menu.viewCreated(layer, table.unpack(children)) end
 end
 
-local function claimEngagedOverlayRegistration()
+-- Take over the Helper registrations the just-displayed engaged frames created
+-- and fold them into one custom registration. `layers` is the display order;
+-- descriptor index -> layer is recorded so the View callback can rebind each
+-- runtime frame id to the right frame handle without relying on frames[1] or on
+-- pairs() ordering.
+-- `layers` always starts with engagedOverlayLayer, so the primary entry below
+-- is the layer-0 one.
+local function claimEngagedOverlayRegistration(layers, framehandles)
     if not View or not View.menus then return end
-    for _, entry in ipairs(View.menus) do
-        if entry.id == "Helper" .. engagedOverlayLayer and entry.name == menu.name then
-            entry.id = engagedOverlayID
-            entry.type = engagedOverlayType
-            local framehandle = menu.frame
-            entry.callback = function(frames) rebindEngagedOverlay(framehandle, frames) end
-            suspendedOverlayRegistration = nil
+    local primary, descriptors, absorbed = nil, {}, {}
+    for _, layer in ipairs(layers) do
+        local found
+        for index, entry in ipairs(View.menus) do
+            if entry.id == "Helper" .. layer and entry.name == menu.name then
+                found = entry
+                if layer ~= engagedOverlayLayer then absorbed[#absorbed + 1] = index end
+                break
+            end
+        end
+        if not found then
+            log("engaged overlay registration was not found after frame display")
             return
         end
+        if layer == engagedOverlayLayer then primary = found end
+        for descriptorLayer, descriptor in pairs(found.framedescriptors or {}) do
+            descriptors[descriptorLayer] = descriptor
+        end
     end
-    log("engaged overlay registration was not found after frame display")
+    -- Splice the absorbed entries out directly: View.unregisterMenu() would
+    -- destroy their live frames and release descriptors this registration keeps.
+    table.sort(absorbed, function(a, b) return a > b end)
+    for _, index in ipairs(absorbed) do table.remove(View.menus, index) end
+    primary.id = engagedOverlayID
+    primary.type = engagedOverlayType
+    primary.framedescriptors = descriptors
+    -- View hands the callback one runtime frame id per descriptor, ordered by
+    -- ascending layer. Rebuild that same layer -> index mapping rather than
+    -- assuming frames[1] or a pairs() order.
+    local descriptorLayers = {}
+    for descriptorLayer in pairs(descriptors) do
+        descriptorLayers[#descriptorLayers + 1] = descriptorLayer
+    end
+    table.sort(descriptorLayers)
+    primary.callback = function(frames)
+        for index, layer in ipairs(descriptorLayers) do
+            rebindEngagedOverlayFrame(framehandles[layer], frames[index])
+        end
+    end
+    engagedOverlayLayers = layers
+    suspendedOverlayRegistration = nil
 end
 
 local function clearSuspendedOverlayDescriptor()
@@ -510,8 +555,10 @@ end
 local function removeEngagedOverlay(releaseDescriptor)
     local entry = findEngagedOverlayRegistration()
     if entry then
-        Helper.removeAllWidgetScripts(menu, engagedOverlayLayer)
-        Helper.removeAllMenuScripts(menu, engagedOverlayLayer)
+        for _, layer in ipairs(engagedOverlayLayers) do
+            Helper.removeAllWidgetScripts(menu, layer)
+            Helper.removeAllMenuScripts(menu, layer)
+        end
         if releaseDescriptor == false then
             suspendedOverlayRegistration = {
                 type = entry.type, callback = entry.callback,
@@ -524,7 +571,13 @@ local function removeEngagedOverlay(releaseDescriptor)
     elseif releaseDescriptor ~= false then
         clearSuspendedOverlayDescriptor()
     end
-    if menu.frames then menu.frames[engagedOverlayLayer] = nil end
+    if menu.frames then
+        for _, layer in ipairs(engagedOverlayLayers) do menu.frames[layer] = nil end
+    end
+    if releaseDescriptor ~= false then
+        engagedOverlayLayers = { engagedOverlayLayer }
+        menu.elementFrame = nil
+    end
 end
 
 local function hideEngagedOverlayForTakeover()
@@ -972,6 +1025,7 @@ function menu.cleanup()
         return
     end
     menu.frame = nil
+    menu.elementFrame = nil
     if session and not endingSession and session.lifecycle == State.lifecycle.owned then
         -- Do not destroy immediately: X4 may still be finishing a same-tick
         -- view replacement. The global watchdog confirms that ownership did
@@ -1557,6 +1611,7 @@ local function scheduleEngageabilityRepaint(purpose)
                     .. " shield_percent=" .. tostring(shieldpercent)
                     .. " hull_percent=" .. tostring(hullpercent))
                 menu.frame:update()
+                if menu.elementFrame then menu.elementFrame:update() end
             end
         end, false, getElapsedTime() + 0.01)
         return
@@ -2644,19 +2699,18 @@ function menu.display()
     if session.phase == "engaged" then
         engagedOverlayRefreshPending = false
         installEngagedUpdater()
-        -- One persistent frame owns both visible panels. Helper registrations
-        -- are frame/layer keyed, so keeping the controls and surface browser in
-        -- one frame avoids a second persistent layer registration.
+        -- Two frames on two layers, merged into one View registration by
+        -- claimEngagedOverlayRegistration(): compact controls upper right,
+        -- surface browser upper left.
         local controlsWidth = Helper.scaleX(460)
         local elemWidth = Helper.scaleX(680)
         local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil
-        local width = controlsWidth + (hasElementPanel and elemWidth or 0)
+        local width = controlsWidth
         session.viewSofttargetKey = softtargetKey()
         local viewFrame = Helper.createFrameHandle(menu, {
             layer = engagedOverlayLayer,
             viewHelperType = engagedOverlayType,
-            x = hasElementPanel and Helper.scaleX(32)
-                or (Helper.viewWidth - width - Helper.scaleX(32)),
+            x = Helper.viewWidth - width - Helper.scaleX(32),
             y = Helper.scaleY(32),
             width = width, standardButtons = { back = true, close = true },
             exclusiveInteractions = false, closeOnUnhandledClick = false,
@@ -2674,9 +2728,7 @@ function menu.display()
         menu.frame = viewFrame
         viewFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
         local controls = viewFrame:addTable(2, {
-            tabOrder = 1,
-            x = (hasElementPanel and elemWidth or 0) + Helper.borderSize,
-            y = Helper.borderSize,
+            tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize,
             width = controlsWidth - 2 * Helper.borderSize,
         })
         -- Header row: current turret name + its group name.
@@ -2797,11 +2849,27 @@ function menu.display()
             testLabRow[1].handlers.onClick = openTestLab
         end
         local controlsHeight = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
-        local elementHeight = 0
-        -- Element panel: left side of the same frame, only for Direct mode with
-        -- an engaged object.
+        viewFrame.properties.height = controlsHeight
+        viewFrame:display()
+        local overlayLayers, overlayFrames = { engagedOverlayLayer }, { [engagedOverlayLayer] = viewFrame }
+        -- Element panel: its own upper-left frame on its own layer, only for
+        -- Direct mode with an engaged object.
         if hasElementPanel then
-            local elemTable = viewFrame:addTable(5, {
+            local elemFrame = Helper.createFrameHandle(menu, {
+                layer = elementFrameLayer,
+                x = Helper.scaleX(32), y = Helper.scaleY(32), width = elemWidth,
+                exclusiveInteractions = false, closeOnUnhandledClick = false,
+                playerControls = true, startAnimation = false, blurBackground = false,
+                enableDefaultInteractions = true,
+                -- Must agree with the controls frame; see keepHUDVisible above.
+                keepHUDVisible = true, keepCrosshairVisible = false,
+                showTickerPermanently = false,
+            })
+            menu.elementFrame = elemFrame
+            elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
+            overlayLayers[#overlayLayers + 1] = elementFrameLayer
+            overlayFrames[elementFrameLayer] = elemFrame
+            local elemTable = elemFrame:addTable(5, {
                 tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
@@ -2996,11 +3064,10 @@ function menu.display()
                 local noSurfRow = elemTable:addRow(false, {})
                 noSurfRow[1]:setColSpan(5):createText(text(61))
             end
-            elementHeight = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
+            elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
+            elemFrame:display()
         end
-        viewFrame.properties.height = math.max(controlsHeight, elementHeight)
-        viewFrame:display()
-        claimEngagedOverlayRegistration()
+        claimEngagedOverlayRegistration(overlayLayers, overlayFrames)
         return
     end
 
@@ -3356,7 +3423,10 @@ local function updateSessionRuntime()
             end
         end
     end
-    if menu.frame and not suspendedOverlayRegistration then menu.frame:update() end
+    if menu.frame and not suspendedOverlayRegistration then
+        menu.frame:update()
+        if menu.elementFrame then menu.elementFrame:update() end
+    end
 end
 
 activeExternalMenuName = function()

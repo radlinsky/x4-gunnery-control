@@ -224,12 +224,20 @@ grep -Fq 'standardButtons = { back = true, close = true }' "$main"
 # index and ignores setColSpan, so this grep is the only guard.
 grep -Fq 'row[2]:setColSpan(3):createText(label' "$main"
 grep -Fq 'memberRow[2]:setColSpan(3):createText("  " .. member.displayName)' "$main"
-# Direct target details now share the engaged overlay frame with the controls.
+# Direct target details keep their own upper-left frame on their own layer; the
+# controls keep the upper-right layer-0 frame. Both descriptors are merged into
+# the single custom X4GunneryOverlay registration.
 grep -Fq 'local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil' "$main"
-grep -Fq 'local elemTable = viewFrame:addTable(5, {' "$main"
-grep -Fq 'viewFrame.properties.height = math.max(controlsHeight, elementHeight)' "$main"
-if grep -Fq 'menu.elementFrame' "$main" || grep -Fq 'elementFrameLayer' "$main"; then
-  echo "separate target element frame was reintroduced; engaged controls and target details must share one overlay frame" >&2
+grep -Fq 'local elementFrameLayer = 3' "$main"
+grep -Fq 'local elemTable = elemFrame:addTable(5, {' "$main"
+grep -Fq 'viewFrame.properties.height = controlsHeight' "$main"
+grep -Fq 'elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize' "$main"
+grep -Fq 'claimEngagedOverlayRegistration(overlayLayers, overlayFrames)' "$main"
+# The element frame must never become a second persistent View registration:
+# the only direct View.registerMenu call is the fullscreen overlay restore.
+if [ "$(grep -Fc 'View.registerMenu(' "$main")" != "1" ] \
+    || ! grep -Fq 'View.registerMenu(engagedOverlayID' "$main"; then
+  echo "the element frame must not get its own persistent View registration" >&2
   exit 1
 fi
 grep -Fq 'endSession("global movement event")' "$main"
