@@ -306,7 +306,7 @@ do
     C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
     C.GetPlayerOccupiedShipID = function() return sess59.shipID end
     clock = clock + 10
-    gcMenu.onUpdate()
+    fix.invokeOnUpdate()
     assert(#targetEvents59 == 21,
         "59: automatic refresh must recalculate pinned plus current 20-row page only; got "
             .. tostring(#targetEvents59) .. " phase=" .. tostring(sess59.phase)
@@ -335,7 +335,7 @@ do
     targetEvents59 = {}
     C.IsGamePaused = function() return true end
     clock = clock + 20
-    gcMenu.onUpdate()
+    fix.invokeOnUpdate()
     assert(#targetEvents59 == 0,
         "59: paused UI updates must issue no pinned or automatic surface requests; got "
             .. tostring(#targetEvents59))
