@@ -633,7 +633,7 @@
                 <do_if value="player.hasbody">
                   <start_actor_sequence actor="player.entity" type="'idle'" behavior="'generic'" transition="false" immediate="true" blend="false"/>
                 </do_if>
-                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=player_context_changed|rollback=skipped" chance="100"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=player_context_changed|rollback=skipped'" chance="100"/>
               </do_if>
               <do_elseif value="player.hasbody != SeatedPlayerProbe.$lastbody">
                 <set_value name="SeatedPlayerProbe.$lastbody" exact="player.hasbody"/>
@@ -680,19 +680,17 @@
                   <position value="SeatedPlayerProbe.$standingposition"/>
                   <rotation value="SeatedPlayerProbe.$standingrotation"/>
                 </set_player_entity_position>
-                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=' + $reason + '|rollback=standing_transform" chance="100"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=' + $reason + '|rollback=standing_transform'" chance="100"/>
               </do_if>
               <do_else>
-                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=' + $reason + '|rollback=skipped" chance="100"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=' + $reason + '|rollback=skipped'" chance="100"/>
               </do_else>
             </do_if>
           </actions>
         </cue>
 
         <cue name="SeatedProbeTimeout">
-          <conditions>
-            <delay exact="120s"/>
-          </conditions>
+          <delay exact="120s"/>
           <actions>
             <do_if value="SeatedPlayerProbe.$active">
               <set_value name="SeatedPlayerProbe.$active" exact="false"/>
@@ -704,10 +702,10 @@
                   <position value="SeatedPlayerProbe.$standingposition"/>
                   <rotation value="SeatedPlayerProbe.$standingrotation"/>
                 </set_player_entity_position>
-                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + SeatedPlayerProbe.$nonce + '|reason=md_timeout|rollback=standing_transform" chance="100"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + SeatedPlayerProbe.$nonce + '|reason=md_timeout|rollback=standing_transform'" chance="100"/>
               </do_if>
               <do_else>
-                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + SeatedPlayerProbe.$nonce + '|reason=md_timeout|rollback=skipped" chance="100"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + SeatedPlayerProbe.$nonce + '|reason=md_timeout|rollback=skipped'" chance="100"/>
               </do_else>
             </do_if>
           </actions>
