@@ -10,7 +10,7 @@ before relying on any claim.
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
 | External-menu lifecycle and persistent Gunnery overlay | [external-menu-lifecycle.md](external-menu-lifecycle.md) | X4 9.00 source-supported custom-view overlay, fullscreen takeover boundary, and live-only compositor/input ordering questions |
-| Seated player presentation after control release | [seated-player-control-separation.md](seated-player-control-separation.md) | X4 9.00 source-backed body/control separation; live-tested body restoration does not rebind ordinary first-person view, and no supported Lua/MD viewpoint attachment or refresh surface exists |
+| Seated player presentation after control release | [seated-player-control-separation.md](seated-player-control-separation.md) | X4 9.00 source-backed body/control separation; `set_player_entity_position` alone is live-disproved for rebinding ordinary first-person view, while the shipped player-relocation action `add_actor_to_room` after control release remains an untested live hypothesis |
 | MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
