@@ -174,10 +174,10 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue146-seated-player-feasibility"
+local runtimeBuild = "2026-09-09-issue146-room-reconnect"
 -- Temporary Task 2 feasibility switch. Keep false in committed/default builds;
 -- Task 3 enables this exact switch in its controlled installation only.
-local seatedPlayerProbeEnabled = false
+local seatedPlayerProbeEnabled = true
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
 -- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
