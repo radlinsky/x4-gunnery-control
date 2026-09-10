@@ -599,6 +599,16 @@
               <set_value name="SeatedPlayerProbe.$hasstanding" exact="true"/>
               <set_value name="SeatedPlayerProbe.$active" exact="true"/>
               <set_value name="SeatedPlayerProbe.$lastbody" exact="player.hasbody"/>
+              <do_if value="not player.controlled">
+                <add_actor_to_room actor="player.entity" object="SeatedPlayerProbe.$room" result="$roomresult">
+                  <position value="SeatedPlayerProbe.$chairposition"/>
+                  <rotation value="SeatedPlayerProbe.$chairrotation"/>
+                </add_actor_to_room>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=room_connect|nonce=' + $nonce + '|trigger=apply|result=' + @$roomresult + '|room=' + SeatedPlayerProbe.$room + '|controlled=' + @player.controlled + '|body=' + player.hasbody" chance="100"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=room_connect|nonce=' + $nonce + '|trigger=apply|result=skipped_player_controlled|room=' + SeatedPlayerProbe.$room + '|controlled=' + @player.controlled + '|body=' + player.hasbody" chance="100"/>
+              </do_else>
               <set_player_entity_position>
                 <position value="SeatedPlayerProbe.$chairposition"/>
                 <rotation value="SeatedPlayerProbe.$chairrotation"/>
@@ -639,6 +649,16 @@
                 <set_value name="SeatedPlayerProbe.$lastbody" exact="player.hasbody"/>
                 <debug_text text="'[X4GC] SEATED_PROBE|event=body_transition|nonce=' + $nonce + '|available=' + player.hasbody" chance="100"/>
                 <do_if value="player.hasbody">
+                  <do_if value="not player.controlled">
+                    <add_actor_to_room actor="player.entity" object="SeatedPlayerProbe.$room" result="$roomresult">
+                      <position value="SeatedPlayerProbe.$chairposition"/>
+                      <rotation value="SeatedPlayerProbe.$chairrotation"/>
+                    </add_actor_to_room>
+                    <debug_text text="'[X4GC] SEATED_PROBE|event=room_connect|nonce=' + $nonce + '|trigger=body_recreated|result=' + @$roomresult + '|room=' + SeatedPlayerProbe.$room + '|controlled=' + @player.controlled + '|body=' + player.hasbody" chance="100"/>
+                  </do_if>
+                  <do_else>
+                    <debug_text text="'[X4GC] SEATED_PROBE|event=room_connect|nonce=' + $nonce + '|trigger=body_recreated|result=skipped_player_controlled|room=' + SeatedPlayerProbe.$room + '|controlled=' + @player.controlled + '|body=' + player.hasbody" chance="100"/>
+                  </do_else>
                   <set_player_entity_position>
                     <position value="SeatedPlayerProbe.$chairposition"/>
                     <rotation value="SeatedPlayerProbe.$chairrotation"/>
