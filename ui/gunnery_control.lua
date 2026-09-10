@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue117-view-frame-accounting-fix"
+local runtimeBuild = "2026-09-09-issue117-view-registration-atomicity-fix"
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
 -- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
@@ -487,9 +487,10 @@ end
 -- ownership/cleanup order; callback frame order comes from entry.layers.
 -- The first layer is the layer-0 primary entry.
 local function claimEngagedOverlayRegistration(layers, framehandles)
-    if not View or not View.menus then return end
+    if not View or not View.menus then return false end
     local primary, descriptors, descriptorCount, absorbed = nil, {}, 0, {}
     local registeredLayers, registeredFrames = {}, {}
+    local registeredIDs = {}
     for _, layer in ipairs(layers) do
         local found
         for index, entry in ipairs(View.menus) do
@@ -501,8 +502,12 @@ local function claimEngagedOverlayRegistration(layers, framehandles)
         end
         if not found then
             log("engaged overlay registration was not found after frame display")
-            return
+            for _, registeredID in ipairs(registeredIDs) do
+                View.unregisterMenu(registeredID, true)
+            end
+            return false
         end
+        registeredIDs[#registeredIDs + 1] = found.id
         if layer == engagedOverlayLayer then primary = found end
         for descriptorLayer, descriptor in pairs(found.framedescriptors or {}) do
             descriptors[descriptorLayer] = descriptor
@@ -536,6 +541,7 @@ local function claimEngagedOverlayRegistration(layers, framehandles)
     end
     engagedOverlayLayers = layers
     suspendedOverlayRegistration = nil
+    return true
 end
 
 local function clearSuspendedOverlayDescriptor()
@@ -586,6 +592,10 @@ local function restoreEngagedOverlayAfterTakeover()
     View.registerMenu(engagedOverlayID, registration.type, registration.callback,
         registration.clearCallback, registration.framedescriptors,
         registration.name, registration.properties)
+    if not findEngagedOverlayRegistration() then
+        log("engaged overlay registration could not be restored after fullscreen takeover")
+        return
+    end
     suspendedOverlayRegistration = nil
     logSession("engaged overlay restored after fullscreen takeover")
     if engagedOverlayRefreshPending then
@@ -3052,7 +3062,11 @@ function menu.display()
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
             elemFrame:display()
         end
-        claimEngagedOverlayRegistration(overlayLayers, overlayFrames)
+        if not claimEngagedOverlayRegistration(overlayLayers, overlayFrames) then
+            removeEngagedUpdater()
+            returnToConsole("engaged overlay registration incomplete")
+            menu.display()
+        end
         return
     end
 

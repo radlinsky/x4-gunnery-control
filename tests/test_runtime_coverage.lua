@@ -126,6 +126,40 @@ end
 
 do
     local fix, _, session = engaged()
+    session.controlMode = "direct"
+    session.targetObjectID, session.aimTargetID = 500, 500
+    fix.View.maxFrames = 1
+    fix.gcMenu.display()
+    local ownedViews = {}
+    for _, entry in ipairs(fix.View.menus) do
+        if entry.name == fix.gcMenu.name then ownedViews[#ownedViews + 1] = entry.id end
+    end
+    assert(session.phase == "console" and fix.getOnUpdateCallback() == nil,
+        "a partial initial overlay registration must leave engaged mode and its updater")
+    assert(#ownedViews == 1 and ownedViews[1] == "Helper4" and fix.View.currentFrames == 1,
+        "a partial initial overlay registration must roll back before showing the safe console")
+end
+
+do
+    local fix = engaged()
+    fix.gcMenu.display()
+    fix.setFullscreenMenuDisplayed(true)
+    fix.invokeOnUpdate()
+    fix.View.maxFrames = 0
+    fix.setFullscreenMenuDisplayed(false)
+    fix.invokeOnUpdate()
+    assert(overlayEntry(fix) == nil
+            and not fix.logContains("engaged overlay restored after fullscreen takeover"),
+        "a refused fullscreen restoration must not report success")
+    fix.View.maxFrames = 5
+    fix.invokeOnUpdate()
+    assert(overlayEntry(fix) ~= nil
+            and fix.logContains("engaged overlay restored after fullscreen takeover"),
+        "a refused fullscreen restoration must retain its descriptor and retry")
+end
+
+do
+    local fix, _, session = engaged()
     local now = 0
     GetCurRealTime = function() return now end
     fix.gcMenu.display()
