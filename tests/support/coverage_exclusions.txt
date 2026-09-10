@@ -7,36 +7,112 @@
 # X4 engine has recreated real child widget IDs for a retained frame and are
 # driven by engine-created widget identities, engine cell content handles and
 # C table-connection APIs that the stock-Lua fixture does not model.
-ui/gunnery_control.lua:440 # indexes frame content against engine-created child widget list
-ui/gunnery_control.lua:441 # reads the pre-rebind engine widget ID for remapping
-ui/gunnery_control.lua:442 # reassigns the engine-created child widget ID onto the retained widget
-ui/gunnery_control.lua:443 # branches on engine-restored widget type metadata
-ui/gunnery_control.lua:444 # looks up row data keyed by the engine's old widget ID
-ui/gunnery_control.lua:445 # clears row data under the engine's old widget ID
-ui/gunnery_control.lua:446 # rekeys row data to the engine's new widget ID
-ui/gunnery_control.lua:447 # walks rows of an engine-rebound table widget
-ui/gunnery_control.lua:448 # walks cells of an engine-rebound table row
-ui/gunnery_control.lua:449 # branches on engine-restored cell colspan metadata
-ui/gunnery_control.lua:450 # calls GetCellContent for an engine-created cell handle
-ui/gunnery_control.lua:451 # reads the engine-assigned uiTriggerID for the rebound cell
-ui/gunnery_control.lua:452 # branches on engine-restored cell type metadata
-ui/gunnery_control.lua:453 # rebinds a checkbox script to engine-created widget/cell IDs
-ui/gunnery_control.lua:454 # continuation of the engine-ID checkbox script rebind
-ui/gunnery_control.lua:455 # branches on engine-restored cell type metadata
-ui/gunnery_control.lua:456 # rebinds a button script to engine-created widget/cell IDs
-ui/gunnery_control.lua:457 # continuation of the engine-ID button script rebind
-ui/gunnery_control.lua:458 # continuation of the engine-ID button script rebind
-ui/gunnery_control.lua:459 # branches on engine-restored cell type metadata
-ui/gunnery_control.lua:460 # rebinds a dropdown script to engine-created widget/cell IDs
-ui/gunnery_control.lua:461 # continuation of the engine-ID dropdown script rebind
-ui/gunnery_control.lua:462 # continuation of the engine-ID dropdown script rebind
-ui/gunnery_control.lua:467 # reads engine-restored prevTable connection metadata
-ui/gunnery_control.lua:468 # calls C.SetTablePreviousConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:470 # reads engine-restored nextTable connection metadata
-ui/gunnery_control.lua:471 # calls C.SetTableNextConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:473 # reads engine-restored prevHorizontalTable connection metadata
-ui/gunnery_control.lua:474 # calls C.SetTablePreviousHorizontalConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:475 # continuation of the engine-only horizontal table-connection call
-ui/gunnery_control.lua:477 # reads engine-restored nextHorizontalTable connection metadata
-ui/gunnery_control.lua:478 # calls C.SetTableNextHorizontalConnectedTable, an engine-only table-connection API
-ui/gunnery_control.lua:479 # continuation of the engine-only horizontal table-connection call
+ui/gunnery_control.lua:448 # indexes frame content against engine-created child widget list
+ui/gunnery_control.lua:449 # reads the pre-rebind engine widget ID for remapping
+ui/gunnery_control.lua:450 # reassigns the engine-created child widget ID onto the retained widget
+ui/gunnery_control.lua:451 # branches on engine-restored widget type metadata
+ui/gunnery_control.lua:452 # looks up row data keyed by the engine's old widget ID
+ui/gunnery_control.lua:453 # clears row data under the engine's old widget ID
+ui/gunnery_control.lua:454 # rekeys row data to the engine's new widget ID
+ui/gunnery_control.lua:455 # walks rows of an engine-rebound table widget
+ui/gunnery_control.lua:456 # walks cells of an engine-rebound table row
+ui/gunnery_control.lua:457 # branches on engine-restored cell colspan metadata
+ui/gunnery_control.lua:458 # calls GetCellContent for an engine-created cell handle
+ui/gunnery_control.lua:459 # reads the engine-assigned uiTriggerID for the rebound cell
+ui/gunnery_control.lua:460 # branches on engine-restored cell type metadata
+ui/gunnery_control.lua:461 # rebinds a checkbox script to engine-created widget/cell IDs
+ui/gunnery_control.lua:462 # continuation of the engine-ID checkbox script rebind
+ui/gunnery_control.lua:463 # branches on engine-restored cell type metadata
+ui/gunnery_control.lua:464 # rebinds a button script to engine-created widget/cell IDs
+ui/gunnery_control.lua:465 # continuation of the engine-ID button script rebind
+ui/gunnery_control.lua:466 # continuation of the engine-ID button script rebind
+ui/gunnery_control.lua:467 # branches on engine-restored cell type metadata
+ui/gunnery_control.lua:468 # rebinds a dropdown script to engine-created widget/cell IDs
+ui/gunnery_control.lua:469 # continuation of the engine-ID dropdown script rebind
+ui/gunnery_control.lua:470 # continuation of the engine-ID dropdown script rebind
+ui/gunnery_control.lua:475 # reads engine-restored prevTable connection metadata
+ui/gunnery_control.lua:476 # calls C.SetTablePreviousConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:478 # reads engine-restored nextTable connection metadata
+ui/gunnery_control.lua:479 # calls C.SetTableNextConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:481 # reads engine-restored prevHorizontalTable connection metadata
+ui/gunnery_control.lua:482 # calls C.SetTablePreviousHorizontalConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:483 # continuation of the engine-only horizontal table-connection call
+ui/gunnery_control.lua:485 # reads engine-restored nextHorizontalTable connection metadata
+ui/gunnery_control.lua:486 # calls C.SetTableNextHorizontalConnectedTable, an engine-only table-connection API
+ui/gunnery_control.lua:487 # continuation of the engine-only horizontal table-connection call
+
+# #146's temporary probe is deliberately unreachable while its committed opt-in
+# switch is false. These lines require the live UI-to-MD acknowledgements, native
+# playerGetUp delivery, control-group transition, and real-player room/body state
+# that the stock-Lua fixture cannot model. The probe is bounded live-test code,
+# not a permanent behavior contract worth duplicating in a synthetic unit test.
+ui/gunnery_control.lua:235 # formats diagnostics for the disabled live seated probe
+ui/gunnery_control.lua:236 # completes the disabled live-probe diagnostic record
+ui/gunnery_control.lua:945 # reads the live probe state during engine-driven cleanup
+ui/gunnery_control.lua:946 # exits cleanup when no live probe is active
+ui/gunnery_control.lua:947 # reads the engine-owned post-release control group
+ui/gunnery_control.lua:948 # verifies the player remains aboard the captured live ship
+ui/gunnery_control.lua:949 # emits the MD stop request for the live player
+ui/gunnery_control.lua:951 # completes the engine-only stop payload
+ui/gunnery_control.lua:952 # records the engine-only stop/rollback decision
+ui/gunnery_control.lua:953 # clears the temporary live probe state
+ui/gunnery_control.lua:3582 # reads the temporary live probe at the release handoff
+ui/gunnery_control.lua:3583 # observes the engine-owned released control group
+ui/gunnery_control.lua:3584 # logs the live control-group observation
+ui/gunnery_control.lua:3585 # completes the live control diagnostic
+ui/gunnery_control.lua:3586 # checks the UI-to-MD probe acknowledgement identity
+ui/gunnery_control.lua:3587 # checks the captured live ship identity
+ui/gunnery_control.lua:3588 # stops a mismatched live probe
+ui/gunnery_control.lua:3589 # rejects a nonempty post-release control group
+ui/gunnery_control.lua:3590 # distinguishes unreleased gunnercontrol in diagnostics
+ui/gunnery_control.lua:3591 # stops on the observed live control-group prerequisite
+ui/gunnery_control.lua:3593 # advances the acknowledged live probe to pose application
+ui/gunnery_control.lua:3594 # timestamps the live pose request
+ui/gunnery_control.lua:3595 # emits the engine-only MD player-pose request
+ui/gunnery_control.lua:3596 # completes the live pose request payload
+ui/gunnery_control.lua:3598 # records the live pose request
+ui/gunnery_control.lua:3627 # enters the explicitly enabled live-only branch
+ui/gunnery_control.lua:3628 # allocates a nonce for a live capture transaction
+ui/gunnery_control.lua:3629 # creates the live capture transaction
+ui/gunnery_control.lua:3630 # stores its captured ship identity
+ui/gunnery_control.lua:3631 # completes the live capture transaction state
+ui/gunnery_control.lua:3632 # emits the MD chair-transform capture request
+ui/gunnery_control.lua:3633 # supplies the live capture identity and build
+ui/gunnery_control.lua:3635 # records the engine-only capture request
+ui/gunnery_control.lua:3636 # completes the capture diagnostic
+ui/gunnery_control.lua:3750 # enters timeout/observation handling for a live probe
+ui/gunnery_control.lua:3751 # computes age of the engine-only transaction
+ui/gunnery_control.lua:3752 # identifies a missing MD capture acknowledgement
+ui/gunnery_control.lua:3753 # stops the timed-out live capture
+ui/gunnery_control.lua:3754 # identifies missing native playerGetUp delivery
+ui/gunnery_control.lua:3755 # stops the timed-out native release
+ui/gunnery_control.lua:3756 # clears the pending native release identity
+ui/gunnery_control.lua:3757 # checks the bounded live pose lifetime
+ui/gunnery_control.lua:3758 # computes the live pose duration
+ui/gunnery_control.lua:3759 # stops the bounded feasibility probe
+ui/gunnery_control.lua:3760 # selects active live body observation
+ui/gunnery_control.lua:3761 # emits the MD body/context observation request
+ui/gunnery_control.lua:3864 # binds a native physical handoff to the captured probe
+ui/gunnery_control.lua:3865 # preserves the live probe nonce on the onboard session
+ui/gunnery_control.lua:3892 # advances state after native playerGetUp delivery
+ui/gunnery_control.lua:3893 # logs the native playerGetUp boundary
+ui/gunnery_control.lua:3894 # supplies the captured live ship to the diagnostic
+ui/gunnery_control.lua:3895 # records the engine-owned released control group
+ui/gunnery_control.lua:3921 # parses the MD capture acknowledgement
+ui/gunnery_control.lua:3922 # rejects stale live capture acknowledgements
+ui/gunnery_control.lua:3923 # completes the live capture acknowledgement guard
+ui/gunnery_control.lua:3924 # records the capture acknowledgement result
+ui/gunnery_control.lua:3925 # validates the capture and current engine chair context
+ui/gunnery_control.lua:3926 # validates same-ship identity before native GetUp
+ui/gunnery_control.lua:3927 # requests safe fallback for a failed live capture
+ui/gunnery_control.lua:3928 # classifies the live capture failure
+ui/gunnery_control.lua:3929 # exits after capture failure cleanup
+ui/gunnery_control.lua:3931 # advances an acknowledged capture to native GetUp
+ui/gunnery_control.lua:3932 # invokes native GetUp only after the MD acknowledgement
+ui/gunnery_control.lua:3933 # records the ship awaiting native playerGetUp
+ui/gunnery_control.lua:3935 # stops when native GetUp refuses the live request
+ui/gunnery_control.lua:3939 # parses the MD pose-application acknowledgement
+ui/gunnery_control.lua:3940 # rejects a stale live pose acknowledgement
+ui/gunnery_control.lua:3941 # records the MD pose result
+ui/gunnery_control.lua:3942 # marks a successful live pose active
+ui/gunnery_control.lua:3943 # safely stops a failed live pose request

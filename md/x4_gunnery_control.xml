@@ -546,6 +546,175 @@
       </actions>
     </cue>
 
+    <!-- #146 Task 2 temporary feasibility service. Lua's committed switch is
+         false, so this is inert in normal play. It captures the real player's
+         chair transform before native Get Up, acknowledges that capture before
+         Lua may continue, and applies only to the released same-ship/session. -->
+    <cue name="SeatedPlayerProbe">
+      <cues>
+        <cue name="SeatedProbeCapture" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'seated_probe_capture'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <set_value name="$build" exact="@event.param3.$build"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <do_if value="$nonce and typeof $ship == datatype.component and player.container == $ship and player.room and player.entity">
+              <set_value name="SeatedPlayerProbe.$nonce" exact="$nonce"/>
+              <set_value name="SeatedPlayerProbe.$ship" exact="$ship"/>
+              <set_value name="SeatedPlayerProbe.$room" exact="player.room"/>
+              <set_value name="SeatedPlayerProbe.$chairposition" exact="player.entity.position"/>
+              <set_value name="SeatedPlayerProbe.$chairrotation" exact="player.entity.rotation"/>
+              <set_value name="SeatedPlayerProbe.$active" exact="false"/>
+              <remove_value name="SeatedPlayerProbe.$hasstanding"/>
+              <remove_value name="SeatedPlayerProbe.$standingposition"/>
+              <remove_value name="SeatedPlayerProbe.$standingrotation"/>
+              <debug_text text="'[X4GC] SEATED_PROBE|build=' + $build + '|event=capture|nonce=' + $nonce + '|result=ok|ship=' + $ship + '|room=' + SeatedPlayerProbe.$room + '|position=' + SeatedPlayerProbe.$chairposition + '|rotation=' + SeatedPlayerProbe.$chairrotation" chance="100"/>
+              <raise_lua_event name="'X4GunneryControl.SeatedProbeCapture'" param="'x4gcp1:capture:' + $nonce + ':ok'"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC] SEATED_PROBE|build=' + $build + '|event=capture|nonce=' + @$nonce + '|result=failed|ship=' + @$ship + '|room=' + @player.room" chance="100"/>
+              <raise_lua_event name="'X4GunneryControl.SeatedProbeCapture'" param="'x4gcp1:capture:' + @$nonce + ':failed'"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <cue name="SeatedProbeApply" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'seated_probe_apply'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <do_if value="$nonce == SeatedPlayerProbe.$nonce and $ship == SeatedPlayerProbe.$ship and player.container == $ship and player.room == SeatedPlayerProbe.$room and player.entity">
+              <set_value name="SeatedPlayerProbe.$standingposition" exact="player.entity.position"/>
+              <set_value name="SeatedPlayerProbe.$standingrotation" exact="player.entity.rotation"/>
+              <set_value name="SeatedPlayerProbe.$hasstanding" exact="true"/>
+              <set_value name="SeatedPlayerProbe.$active" exact="true"/>
+              <set_value name="SeatedPlayerProbe.$lastbody" exact="player.hasbody"/>
+              <set_player_entity_position>
+                <position value="SeatedPlayerProbe.$chairposition"/>
+                <rotation value="SeatedPlayerProbe.$chairrotation"/>
+              </set_player_entity_position>
+              <debug_text text="'[X4GC] SEATED_PROBE|event=chair_transform|nonce=' + $nonce + '|result=applied|body=' + player.hasbody" chance="100"/>
+              <do_if value="player.hasbody">
+                <start_actor_sequence actor="player.entity" type="'idle'" behavior="'sit'" transition="false" immediate="true" blend="false" result="$sequenceresult"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=seated_sequence|nonce=' + $nonce + '|type=idle|behavior=sit|transition=false|immediate=true|blend=false|result=' + @$sequenceresult" chance="100"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=body|nonce=' + $nonce + '|available=false|action=wait'" chance="100"/>
+              </do_else>
+              <reset_cue cue="SeatedProbeTimeout"/>
+              <raise_lua_event name="'X4GunneryControl.SeatedProbeApplied'" param="'x4gcp1:apply:' + $nonce + ':ok'"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC] SEATED_PROBE|event=apply|nonce=' + @$nonce + '|result=context_mismatch'" chance="100"/>
+              <raise_lua_event name="'X4GunneryControl.SeatedProbeApplied'" param="'x4gcp1:apply:' + @$nonce + ':context_mismatch'"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <cue name="SeatedProbeObserve" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'seated_probe_observe'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <do_if value="SeatedPlayerProbe.$active and $nonce == SeatedPlayerProbe.$nonce">
+              <do_if value="player.container != SeatedPlayerProbe.$ship or player.room != SeatedPlayerProbe.$room">
+                <set_value name="SeatedPlayerProbe.$active" exact="false"/>
+                <do_if value="player.hasbody">
+                  <start_actor_sequence actor="player.entity" type="'idle'" behavior="'generic'" transition="false" immediate="true" blend="false"/>
+                </do_if>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=player_context_changed|rollback=skipped" chance="100"/>
+              </do_if>
+              <do_elseif value="player.hasbody != SeatedPlayerProbe.$lastbody">
+                <set_value name="SeatedPlayerProbe.$lastbody" exact="player.hasbody"/>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=body_transition|nonce=' + $nonce + '|available=' + player.hasbody" chance="100"/>
+                <do_if value="player.hasbody">
+                  <set_player_entity_position>
+                    <position value="SeatedPlayerProbe.$chairposition"/>
+                    <rotation value="SeatedPlayerProbe.$chairrotation"/>
+                  </set_player_entity_position>
+                  <start_actor_sequence actor="player.entity" type="'idle'" behavior="'sit'" transition="false" immediate="true" blend="false" result="$sequenceresult"/>
+                  <debug_text text="'[X4GC] SEATED_PROBE|event=seated_sequence|nonce=' + $nonce + '|trigger=body_recreated|result=' + @$sequenceresult" chance="100"/>
+                </do_if>
+              </do_elseif>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="SeatedProbeAnimationFinished" instantiate="true">
+          <conditions>
+            <event_character_animation_finished object="player.entity"/>
+          </conditions>
+          <actions>
+            <do_if value="SeatedPlayerProbe.$active">
+              <debug_text text="'[X4GC] SEATED_PROBE|event=animation_finished|nonce=' + SeatedPlayerProbe.$nonce + '|animation=' + @event.param + '|blend_remaining=' + @event.param2" chance="100"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="SeatedProbeStop" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'seated_probe_stop'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$restore" exact="@event.param3.$restore"/>
+            <set_value name="$reason" exact="@event.param3.$reason"/>
+            <do_if value="$nonce == SeatedPlayerProbe.$nonce">
+              <set_value name="SeatedPlayerProbe.$active" exact="false"/>
+              <do_if value="player.hasbody">
+                <start_actor_sequence actor="player.entity" type="'idle'" behavior="'generic'" transition="false" immediate="true" blend="false"/>
+              </do_if>
+              <do_if value="$restore and SeatedPlayerProbe.$hasstanding and player.container == SeatedPlayerProbe.$ship and player.room == SeatedPlayerProbe.$room">
+                <set_player_entity_position>
+                  <position value="SeatedPlayerProbe.$standingposition"/>
+                  <rotation value="SeatedPlayerProbe.$standingrotation"/>
+                </set_player_entity_position>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=' + $reason + '|rollback=standing_transform" chance="100"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + $nonce + '|reason=' + $reason + '|rollback=skipped" chance="100"/>
+              </do_else>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="SeatedProbeTimeout">
+          <conditions>
+            <delay exact="120s"/>
+          </conditions>
+          <actions>
+            <do_if value="SeatedPlayerProbe.$active">
+              <set_value name="SeatedPlayerProbe.$active" exact="false"/>
+              <do_if value="player.hasbody">
+                <start_actor_sequence actor="player.entity" type="'idle'" behavior="'generic'" transition="false" immediate="true" blend="false"/>
+              </do_if>
+              <do_if value="SeatedPlayerProbe.$hasstanding and player.container == SeatedPlayerProbe.$ship and player.room == SeatedPlayerProbe.$room">
+                <set_player_entity_position>
+                  <position value="SeatedPlayerProbe.$standingposition"/>
+                  <rotation value="SeatedPlayerProbe.$standingrotation"/>
+                </set_player_entity_position>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + SeatedPlayerProbe.$nonce + '|reason=md_timeout|rollback=standing_transform" chance="100"/>
+              </do_if>
+              <do_else>
+                <debug_text text="'[X4GC] SEATED_PROBE|event=stop|nonce=' + SeatedPlayerProbe.$nonce + '|reason=md_timeout|rollback=skipped" chance="100"/>
+              </do_else>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
     <!-- Legacy name: this cue once also hosted the "Prefer My Target" / "Release
          Other Turrets" override (removed in #38 as unreachable with the X4 API).
          It now hosts only Direct-control (DirectFallback + DirectWatch). The name

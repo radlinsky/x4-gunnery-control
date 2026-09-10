@@ -174,7 +174,10 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue117-view-registration-atomicity-fix"
+local runtimeBuild = "2026-09-09-issue146-seated-player-feasibility"
+-- Temporary Task 2 feasibility switch. Keep false in committed/default builds;
+-- Task 3 enables this exact switch in its controlled installation only.
+local seatedPlayerProbeEnabled = false
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
 -- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
@@ -185,6 +188,7 @@ local engagedOverlayType = "X4GunneryOverlay"
 local engagedOverlayLayers = { engagedOverlayLayer }
 local session, redirectPending, nextRefresh = nil, false, 0
 local physicalIngressPendingShip
+local seatedProbeSerial, seatedProbe = 0, nil
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
@@ -227,6 +231,10 @@ local function id(value) return ConvertStringTo64Bit(tostring(value)) end
 local function componentData(component, ...) return GetComponentData(id(component), ...) end
 local function controlGroup() return str(C.GetPlayerCurrentControlGroup()) end
 local function log(message) DebugError("[X4GC] " .. message) end
+local function probeLog(event, fields)
+    log("SEATED_PROBE|build=" .. runtimeBuild .. "|event=" .. event
+        .. (fields and fields ~= "" and ("|" .. fields) or ""))
+end
 -- Raw FFI ids stringify with a ULL suffix and id()-converted ones do not, so a
 -- bare tostring comparison judges the same component to be two different ones.
 local function sameID(a, b) return State.normID(a) == State.normID(b) end
@@ -931,6 +939,20 @@ local function restoreStandingCamera()
     C.SetPlayerCameraCockpitView(true)
 end
 
+local function stopSeatedProbe(reason)
+    local probe = seatedProbe
+    if not probe then return end
+    local safe = controlGroup() ~= "gunnercontrol"
+        and sameID(playerShip(), probe.shipID)
+    AddUITriggeredEvent("X4GunneryControl", "seated_probe_stop", {
+        nonce = probe.nonce, ship = probe.shipID, reason = tostring(reason),
+        restore = safe,
+    })
+    probeLog("stop_requested", "nonce=" .. probe.nonce .. "|reason=" .. tostring(reason)
+        .. "|restore=" .. tostring(safe))
+    seatedProbe = nil
+end
+
 local function returnToConsole(reason)
     if not session then return end
     if session.origin == "onboard" then restoreStandingCamera() else C.SetPlayerCameraCockpitView(true) end
@@ -943,6 +965,7 @@ end
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
     if not session then return end
+    if session.seatedProbeNonce then stopSeatedProbe(reason) end
     removeEngagedUpdater()
     cameraMismatchLogged = false
     reopenFailureLogged = false
@@ -3555,6 +3578,26 @@ completeReleasedOnboardHandoff = function(reason)
         end
         return false
     end
+    if session.seatedProbeNonce then
+        local probe = seatedProbe
+        local observedGroup = controlGroup()
+        probeLog("control_observed", "nonce=" .. tostring(session.seatedProbeNonce)
+            .. "|control=" .. (observedGroup ~= "" and observedGroup or "empty"))
+        if not probe or probe.nonce ~= session.seatedProbeNonce
+                or not sameID(probe.shipID, session.shipID) then
+            stopSeatedProbe("handoff_probe_identity_mismatch")
+        elseif observedGroup ~= "" then
+            stopSeatedProbe(observedGroup == "gunnercontrol"
+                and "gunnercontrol_not_released" or "standing_control_group_not_empty")
+        else
+            probe.phase = "pose_pending"
+            probe.poseRequestedAt = GetCurRealTime()
+            AddUITriggeredEvent("X4GunneryControl", "seated_probe_apply", {
+                nonce = probe.nonce, ship = session.shipID,
+            })
+            probeLog("pose_requested", "nonce=" .. probe.nonce .. "|ship=" .. tostring(session.shipID))
+        end
+    end
     session.physicalReleasePending = nil
     logSession("physical release opening Gunnery Control: " .. tostring(reason))
     OpenMenu(menu.name, { 0, 0 }, nil)
@@ -3580,7 +3623,20 @@ redirectDockedMenu = function()
         -- #118: leave the gunner control position through vanilla's Get Up path.
         -- X4's playerGetUp event confirms completion and starts the handoff.
         if isInGunnerChair() and sameID(playerShip(), ship) and not session then
-            if C.GetUp() then physicalIngressPendingShip = ship end
+            if seatedPlayerProbeEnabled then
+                seatedProbeSerial = seatedProbeSerial + 1
+                seatedProbe = {
+                    nonce = tostring(seatedProbeSerial), shipID = ship,
+                    phase = "capture_pending", captureRequestedAt = GetCurRealTime(),
+                }
+                AddUITriggeredEvent("X4GunneryControl", "seated_probe_capture", {
+                    nonce = seatedProbe.nonce, ship = ship, build = runtimeBuild,
+                })
+                probeLog("capture_requested", "nonce=" .. seatedProbe.nonce
+                    .. "|ship=" .. tostring(ship))
+            elseif C.GetUp() then
+                physicalIngressPendingShip = ship
+            end
         end
     end, false, getElapsedTime() + 0.05)
 end
@@ -3690,6 +3746,22 @@ end
 TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
+    if seatedProbe then
+        local age = GetCurRealTime() - (seatedProbe.captureRequestedAt or 0)
+        if seatedProbe.phase == "capture_pending" and age > 2 then
+            stopSeatedProbe("capture_timeout")
+        elseif seatedProbe.phase == "getup_pending" and age > 8 then
+            stopSeatedProbe("player_getup_timeout")
+            physicalIngressPendingShip = nil
+        elseif (seatedProbe.phase == "pose_pending" or seatedProbe.phase == "active")
+                and GetCurRealTime() - (seatedProbe.poseRequestedAt or 0) > 120 then
+            stopSeatedProbe("probe_timeout")
+        elseif seatedProbe.phase == "pose_pending" or seatedProbe.phase == "active" then
+            AddUITriggeredEvent("X4GunneryControl", "seated_probe_observe", {
+                nonce = seatedProbe.nonce, ship = seatedProbe.shipID,
+            })
+        end
+    end
     -- UIX normally delivers DockedMenu's display callback. Poll only a released
     -- handoff here so module init stays inert while merely sitting in a chair.
     -- Release completion itself is the playerGetUp event handled below.
@@ -3788,6 +3860,10 @@ local function startPhysicalIngress(shipComponent)
     local groups = readGroups(ship)
     if #groups == 0 then return end
     session = newSession(ship, "onboard")
+    if seatedProbe and seatedProbe.phase == "getup_complete"
+            and sameID(seatedProbe.shipID, ship) then
+        session.seatedProbeNonce = seatedProbe.nonce
+    end
     session.groups = groups
     State.seedBaseline(session, groups)
     if persistence then persistence.request() end
@@ -3812,7 +3888,14 @@ local function init()
         if physicalIngressPendingShip then
             local ship = physicalIngressPendingShip
             physicalIngressPendingShip = nil
+            if seatedProbe and sameID(seatedProbe.shipID, ship) then
+                seatedProbe.phase = "getup_complete"
+                probeLog("player_getup_complete", "nonce=" .. seatedProbe.nonce
+                    .. "|ship=" .. tostring(ship) .. "|control="
+                    .. (controlGroup() ~= "" and controlGroup() or "empty"))
+            end
             startPhysicalIngress(ship)
+            if seatedProbe and not session then stopSeatedProbe("physical_handoff_failed") end
             return
         end
         -- Onboard sessions are deliberately not seat-bound (#118). The physical
@@ -3834,8 +3917,36 @@ local function init()
     -- Exposed for unit tests only: the missing-UI-Extensions diagnosis, without
     -- having to drive registerUIHooks through all 40 retries.
     TestAPI.hookTimeoutMessage = hookTimeoutMessage
+    local function onSeatedProbeCapture(_, payload)
+        local nonce, result = tostring(payload or ""):match("^x4gcp1:capture:([^:]+):([^:]+)$")
+        if not seatedProbe or seatedProbe.phase ~= "capture_pending"
+                or nonce ~= seatedProbe.nonce then return end
+        probeLog("capture_ack", "nonce=" .. nonce .. "|result=" .. tostring(result))
+        if result ~= "ok" or not isInGunnerChair()
+                or not sameID(playerShip(), seatedProbe.shipID) or session then
+            stopSeatedProbe(result ~= "ok" and ("capture_" .. tostring(result))
+                or "capture_context_changed")
+            return
+        end
+        seatedProbe.phase = "getup_pending"
+        if C.GetUp() then
+            physicalIngressPendingShip = seatedProbe.shipID
+        else
+            stopSeatedProbe("getup_refused")
+        end
+    end
+    local function onSeatedProbeApplied(_, payload)
+        local nonce, result = tostring(payload or ""):match("^x4gcp1:apply:([^:]+):([^:]+)$")
+        if not seatedProbe or nonce ~= seatedProbe.nonce then return end
+        probeLog("apply_ack", "nonce=" .. nonce .. "|result=" .. tostring(result))
+        if result == "ok" then seatedProbe.phase = "active"
+        else stopSeatedProbe("apply_" .. tostring(result)) end
+    end
     RegisterEvent("playerGetUp", onPlayerGetUp)
+    RegisterEvent("X4GunneryControl.SeatedProbeCapture", onSeatedProbeCapture)
+    RegisterEvent("X4GunneryControl.SeatedProbeApplied", onSeatedProbeApplied)
     RegisterEvent("playerUndock", function()
+        stopSeatedProbe("player_undock")
         physicalIngressPendingShip = nil
         endForMovement()
     end)
