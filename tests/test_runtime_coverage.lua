@@ -125,10 +125,37 @@ do
 end
 
 do
-    local fix, _, session = engaged()
-    session.controlMode = "direct"
-    session.targetObjectID, session.aimTargetID = 500, 500
+    local fix, group, session = fresh()
+    group.members = { { componentID = 27, displayName = "T", operational = true,
+        cameraSupported = true, componentKey = "27" } }
+    session.phase = "target_select"
+    session.staged = { g = { mode = "defend", armed = true } }
+    session.committedBaseline = { { kind = "group", contextID = group.contextID,
+        path = group.path, group = group.group, shipID = session.shipID,
+        mode = group.mode, armed = group.armed } }
+    fix.C.SetSofttarget = function() return true end
+    fix.C.SetPlayerCameraTargetView = function() return true end
+    fix.C.GetContextByClass = function(component, class, force)
+        if class == "container" and force == true then return 500 end
+        return 42
+    end
+    local modeWrites, armedWrites = {}, {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, _, mode)
+        modeWrites[#modeWrites + 1] = tostring(mode)
+    end
+    fix.C.SetTurretGroupArmed = function(_, _, _, _, armed)
+        armedWrites[#armedWrites + 1] = armed
+    end
+    assert(fix.API.engageTarget(501),
+        "partial-registration precondition: real Direct engagement must succeed")
+    assert(session.engagePending and group.mode ~= "attack" and group.armed == true,
+        "partial-registration precondition: Direct temporary state must be live")
     fix.View.maxFrames = 1
+    local displayCalls, display = 0, fix.gcMenu.display
+    fix.gcMenu.display = function(...)
+        displayCalls = displayCalls + 1
+        return display(...)
+    end
     fix.gcMenu.display()
     local ownedViews = {}
     for _, entry in ipairs(fix.View.menus) do
@@ -136,22 +163,46 @@ do
     end
     assert(session.phase == "console" and fix.getOnUpdateCallback() == nil,
         "a partial initial overlay registration must leave engaged mode and its updater")
+    assert(session.controlMode == nil and not session.engagePending and not session.engagePendingSince,
+        "a partial initial overlay registration must clear Direct and its pending transition")
+    assert(modeWrites[#modeWrites] == "attack" and armedWrites[#armedWrites] == false,
+        "a partial initial overlay registration must restore the real pre-Direct turret state")
+    assert(displayCalls == 2,
+        "registration failure must redraw once through returnToConsole, not display twice")
     assert(#ownedViews == 1 and ownedViews[1] == "Helper4" and fix.View.currentFrames == 1,
         "a partial initial overlay registration must roll back before showing the safe console")
 end
 
 do
     local fix = engaged()
+    local now = 0
+    GetCurRealTime = function() return now end
     fix.gcMenu.display()
     fix.setFullscreenMenuDisplayed(true)
     fix.invokeOnUpdate()
     fix.View.maxFrames = 0
+    local restoreCalls = 0
+    local registerMenu = fix.View.registerMenu
+    fix.View.registerMenu = function(id, ...)
+        if id == "X4GunneryOverlay" then restoreCalls = restoreCalls + 1 end
+        return registerMenu(id, ...)
+    end
     fix.setFullscreenMenuDisplayed(false)
     fix.invokeOnUpdate()
+    fix.invokeOnUpdate()
+    fix.invokeOnUpdate()
+    local restoreFailureLogs = 0
+    for _, line in ipairs(fix.getCapturedLog()) do
+        if string.find(line, "engaged overlay registration could not be restored", 1, true) then
+            restoreFailureLogs = restoreFailureLogs + 1
+        end
+    end
     assert(overlayEntry(fix) == nil
-            and not fix.logContains("engaged overlay restored after fullscreen takeover"),
-        "a refused fullscreen restoration must not report success")
+            and not fix.logContains("engaged overlay restored after fullscreen takeover")
+            and restoreCalls == 1 and restoreFailureLogs == 1,
+        "a sustained capacity shortage must throttle fullscreen restoration retries")
     fix.View.maxFrames = 5
+    now = now + 0.5
     fix.invokeOnUpdate()
     assert(overlayEntry(fix) ~= nil
             and fix.logContains("engaged overlay restored after fullscreen takeover"),

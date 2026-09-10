@@ -483,6 +483,8 @@ local function rebindEngagedOverlayFrame(framehandle, frameid)
     if menu.viewCreated then menu.viewCreated(layer, table.unpack(children)) end
 end
 
+local engagedOverlayRestoreRetryAt
+
 -- Merge per-layer Helper registrations into one custom overlay. `layers` is only
 -- ownership/cleanup order; callback frame order comes from entry.layers.
 -- The first layer is the layer-0 primary entry.
@@ -550,6 +552,7 @@ local function clearSuspendedOverlayDescriptor()
         ReleaseDescriptor(descriptor)
     end
     suspendedOverlayRegistration = nil
+    engagedOverlayRestoreRetryAt = nil
 end
 
 local function removeEngagedOverlay(releaseDescriptor)
@@ -566,6 +569,7 @@ local function removeEngagedOverlay(releaseDescriptor)
                 framedescriptors = entry.framedescriptors,
                 name = entry.name, properties = entry.properties,
             }
+            engagedOverlayRestoreRetryAt = nil
         end
         View.unregisterMenu(engagedOverlayID, releaseDescriptor)
     elseif releaseDescriptor ~= false then
@@ -589,14 +593,18 @@ end
 local function restoreEngagedOverlayAfterTakeover()
     local registration = suspendedOverlayRegistration
     if not registration or not session or session.phase ~= "engaged" then return end
+    local now = GetCurRealTime()
+    if engagedOverlayRestoreRetryAt and now < engagedOverlayRestoreRetryAt then return end
     View.registerMenu(engagedOverlayID, registration.type, registration.callback,
         registration.clearCallback, registration.framedescriptors,
         registration.name, registration.properties)
     if not findEngagedOverlayRegistration() then
         log("engaged overlay registration could not be restored after fullscreen takeover")
+        engagedOverlayRestoreRetryAt = now + 0.5
         return
     end
     suspendedOverlayRegistration = nil
+    engagedOverlayRestoreRetryAt = nil
     logSession("engaged overlay restored after fullscreen takeover")
     if engagedOverlayRefreshPending then
         engagedOverlayRefreshPending = false
@@ -3064,8 +3072,9 @@ function menu.display()
         end
         if not claimEngagedOverlayRegistration(overlayLayers, overlayFrames) then
             removeEngagedUpdater()
+            restoreDirect("engaged overlay registration incomplete")
+            session.engagePending, session.engagePendingSince = nil, nil
             returnToConsole("engaged overlay registration incomplete")
-            menu.display()
         end
         return
     end
