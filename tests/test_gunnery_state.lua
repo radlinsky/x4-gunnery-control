@@ -42,7 +42,7 @@ eq(State.normID("77ll"), "77", "normID strips lowercase ll")
 assert(State.isReturnablePlayerView("firstperson"), "first-person chair view resumes")
 assert(State.isReturnablePlayerView("externalfirstperson"), "external first-person view resumes")
 assert(State.isReturnablePlayerView("cockpit"), "cockpit view resumes")
-assert(not State.isReturnablePlayerView("map"), "map is a suspended menu mode")
+assert(not State.isReturnablePlayerView("map"), "map is not a returnable player view")
 local groups = {
   { key = "g1", members = { { componentID = 1, operational = false } } },
   { key = "g2", members = { { componentID = 2, operational = true } } },
@@ -50,14 +50,10 @@ local groups = {
 local session = State.newSession(99, "gunnercontrol")
 eq(session.lifecycle, State.lifecycle.owned, "new session owns its view")
 assert(State.isOwned(session), "new session is owned")
-State.setLifecycle(session, State.lifecycle.suspendingMap)
-assert(State.isMapSuspended(session), "map suspension is recognized")
-assert(not State.isOwned(session), "suspended map session no longer owns a view")
-State.setLifecycle(session, State.lifecycle.suspendedMap)
-assert(State.isMapSuspended(session), "fully suspended map session is recognized")
 State.setLifecycle(session, State.lifecycle.reopening)
-assert(State.isMapSuspended(session), "map reopen remains an explicit suspension path")
+assert(not State.isOwned(session), "reopening session does not own a view")
 State.setLifecycle(session, State.lifecycle.owned)
+assert(State.isOwned(session), "reopened session returns to owned")
 State.retainSelection(session, groups); eq(session.selectedGroupKey, "g2", "first usable group"); eq(session.selectedMemberID, 2, "first usable member")
 session.selectedGroupKey, session.selectedMemberID = "g2", 2
 State.retainSelection(session, groups); eq(session.selectedGroupKey, "g2", "selection is retained")

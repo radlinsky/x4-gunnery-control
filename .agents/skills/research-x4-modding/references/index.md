@@ -9,6 +9,7 @@ before relying on any claim.
 | Source hierarchy and classification | [source-policy.md](source-policy.md) | Rules and claim record shape |
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
+| External-menu lifecycle and persistent Gunnery overlay | [external-menu-lifecycle.md](external-menu-lifecycle.md) | X4 9.00 source-supported custom-view overlay, fullscreen takeover boundary, and live-only compositor/input ordering questions |
 | MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |

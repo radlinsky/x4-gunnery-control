@@ -101,12 +101,10 @@ function State.isReturnablePlayerView(mode)
 end
 
 -- Lifecycle is deliberately independent from the visible Gunnery Control
--- phase. X4 can remove a Helper frame when another menu opens; retaining a
--- phase alone must never be interpreted as retaining input/view ownership.
+-- phase. `reopening` is reserved for explicit pre-open/restore/Test Lab
+-- handoffs; an already-engaged overlay remains owned across external menus.
 State.lifecycle = {
     owned = "owned",
-    suspendingMap = "suspending_map",
-    suspendedMap = "suspended_map",
     reopening = "reopening",
 }
 
@@ -116,12 +114,6 @@ end
 
 function State.isOwned(session)
     return session ~= nil and session.lifecycle == State.lifecycle.owned
-end
-
-function State.isMapSuspended(session)
-    return session ~= nil and (session.lifecycle == State.lifecycle.suspendingMap
-        or session.lifecycle == State.lifecycle.suspendedMap
-        or session.lifecycle == State.lifecycle.reopening)
 end
 
 function State.newSession(shipID, controlGroup, origin)

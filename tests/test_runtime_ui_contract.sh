@@ -42,18 +42,16 @@ if grep -Fq 'controlGroup() == "gunnertrigger"' "$main"; then
 fi
 grep -Fq 'C.GetContextByClass(C.GetPlayerID(), "container", false)' "$main"
 grep -Fq 'C.IsComponentClass(ship, "ship")' "$main"
-# A frame that hides the HUD never gets it back: only the fullscreen console
-# (no playerControls) may do so, and it does that by being the non-targetBrowser
-# case of keepHUDVisible = targetBrowser.
+# Every Gunnery frame builder must keep the HUD visible. X4 does not reliably
+# restore it when successive frames from the same menu disagree.
 if grep -Fq 'keepHUDVisible = false' "$main"; then
   echo "no frame may set keepHUDVisible = false; the HUD is not restored afterwards" >&2
   exit 1
 fi
-# Every frame must agree on it; a browser(true) -> console(false) sequence
-# leaves the standing player with no HUD.
+frame_builders=$(grep -c 'Helper.createFrameHandle(menu, {' "$main")
 hud_true=$(grep -c 'keepHUDVisible = true' "$main")
-if [ "$hud_true" -ne 3 ]; then
-  echo "all 3 frames must set keepHUDVisible = true; found $hud_true" >&2
+if [ "$hud_true" -ne "$frame_builders" ]; then
+  echo "every Gunnery frame builder must set keepHUDVisible = true; found $hud_true for $frame_builders frame builders" >&2
   exit 1
 fi
 grep -Fq 'showTickerPermanently = false' "$main"
@@ -116,16 +114,36 @@ grep -Fq 'requestEngageabilities(pageIDs, "surface_page")' "$main"
 grep -Fq 'local parentHullRow = elemTable:addRow("surface_parent_hull", {})' "$main"
 grep -Fq 'local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})' "$main"
 grep -Fq 'browser.nextAutoRefreshAt = browser.autoRefresh and (getElapsedTime() + 10) or nil' "$main"
-grep -Fq 'menu.elementFrame:update()' "$main"
 grep -Fq 'returnToConsole("Watch closed")' "$main"
 grep -Fq 'openTargetBrowser()' "$main"
 grep -Fq 'softtargetKey() ~= previousTarget' "$main"
 grep -Fq 'isEligibleEngagementTarget(current.softtargetID)' "$main"
 grep -Fq 'State.turretGroupLabel(entry.group)' "$main"
 grep -Fq 'State.isEngagementTargetAllowed(session and session.shipID, object)' "$main"
+# External-menu preservation is generic: ordinary overlays keep the persistent
+# custom view; fullscreen takeovers hide only that view and restore it later.
+grep -Fq 'local engagedOverlayID = "X4GunneryOverlay"' "$main"
+grep -Fq 'local engagedOverlayType = "X4GunneryOverlay"' "$main"
+grep -Fq 'viewHelperType = engagedOverlayType' "$main"
 grep -Fq 'local activeExternalMenuName' "$main"
 grep -Fq 'activeExternalMenuName = function()' "$main"
-grep -Fq 'State.lifecycle.suspendingMap' "$main"
+grep -Fq 'local function fullscreenTakeoverDisplayed()' "$main"
+grep -Fq 'C.IsFullscreenMenuDisplayed(true, "") == true' "$main"
+grep -Fq 'local function hideEngagedOverlayForTakeover()' "$main"
+grep -Fq 'local function restoreEngagedOverlayAfterTakeover()' "$main"
+# The old Map-named suspension lifecycle must not return; menu names are not an
+# allowlist for active-session preservation.
+for obsolete_menu_lifecycle in \
+  'State.lifecycle.suspendingMap' \
+  'State.lifecycle.suspendedMap' \
+  'reopenSuspendedSession' \
+  'map.registerCallback("on_menu_cleanup"' \
+  'externalMenu == "MapMenu" and State.isOwned(session)'; do
+  if grep -Fq "$obsolete_menu_lifecycle" "$main"; then
+    echo "obsolete Map-specific external-menu lifecycle remains: $obsolete_menu_lifecycle" >&2
+    exit 1
+  fi
+done
 grep -Fq 'sameSession(expectedSession, expectedEpoch)' "$main"
 grep -Fq 'currentSession(expectedSession, expectedEpoch)' "$main"
 grep -Fq 'sessionEpoch = sessionEpoch + 1' "$main"
@@ -134,10 +152,6 @@ if grep -Eq '^[[:space:]]*Helper\.clearMenu\(menu\)' "$main"; then
   exit 1
 fi
 grep -Fq 'local function sessionWatchdog()' "$main"
-grep -Fq 'reopenSuspendedSession("returned to " .. tostring(mode))' "$main"
-grep -Fq 'State.lifecycle.suspendedMap' "$main"
-grep -Fq 'map.registerCallback("on_menu_cleanup"' "$main"
-grep -Fq 'externalMenu == "MapMenu" and State.isOwned(session)' "$main"
 grep -Fq 'C.SetTrackedMenuFullscreen(menu.name, false)' "$main"
 grep -Fq 'bool IsGamePaused(void)' "$main"
 # Phase rename: "watch"/"direct" are gone; "engaged" + controlMode replace them.
@@ -210,7 +224,22 @@ grep -Fq 'standardButtons = { back = true, close = true }' "$main"
 # index and ignores setColSpan, so this grep is the only guard.
 grep -Fq 'row[2]:setColSpan(3):createText(label' "$main"
 grep -Fq 'memberRow[2]:setColSpan(3):createText("  " .. member.displayName)' "$main"
-grep -Fq 'viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize' "$main"
+# Direct target details keep their own upper-left frame on their own layer; the
+# controls keep the upper-right layer-0 frame. Both descriptors are merged into
+# the single custom X4GunneryOverlay registration.
+grep -Fq 'local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil' "$main"
+grep -Fq 'local elementFrameLayer = 3' "$main"
+grep -Fq 'local elemTable = elemFrame:addTable(5, {' "$main"
+grep -Fq 'viewFrame.properties.height = controlsHeight' "$main"
+grep -Fq 'elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize' "$main"
+grep -Fq 'claimEngagedOverlayRegistration(overlayLayers, overlayFrames)' "$main"
+# The element frame must never become a second persistent View registration:
+# the only direct View.registerMenu call is the fullscreen overlay restore.
+if [ "$(grep -Fc 'View.registerMenu(' "$main")" != "1" ] \
+    || ! grep -Fq 'View.registerMenu(engagedOverlayID' "$main"; then
+  echo "the element frame must not get its own persistent View registration" >&2
+  exit 1
+fi
 grep -Fq 'endSession("global movement event")' "$main"
 grep -Fq 'endSession("left chair or ship")' "$main"
 grep -Fq 'C.SetPlayerCameraCockpitView(true)' "$main"
@@ -399,16 +428,14 @@ fi
 # Task 2: cycleEntry and cycleTarget
 grep -Fq 'State.cycleEntry' "$main"
 grep -Eq '(local function cycleTarget|local [a-zA-Z_, ]*cycleTarget|cycleTarget = function)' "$main"
-# Task 4: element frame for target display, unregistered when it goes away
-grep -Fq 'menu.elementFrame' "$main"
-grep -Fq 'Helper.clearFrame(menu, elementFrameLayer)' "$main"
 # Select-all checkbox over the group column.
 grep -Fq 'State.toggleAllGroups(session)' "$main"
 grep -Fq 'State.allGroupsChecked(session)' "$main"
-# Every frame gets a semi-transparent background so cell text stays legible.
+# Every current frame builder gets a semi-transparent background so cell text
+# stays legible over the live view.
 bg_calls=$(grep -c 'setBackground("solid"' "$main")
-if [ "$bg_calls" -ne 3 ]; then
-  echo "all 3 frames must set a semi-transparent background; found $bg_calls" >&2
+if [ "$bg_calls" -ne "$frame_builders" ]; then
+  echo "every Gunnery frame builder must set a semi-transparent background; found $bg_calls for $frame_builders frame builders" >&2
   exit 1
 fi
 # Teardown order: Helper.closeMenu() untracks the menu before its views are
