@@ -174,9 +174,8 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue146-room-reconnect"
--- Temporary Task 2 feasibility switch. Keep false in committed/default builds;
--- Task 3 enables this exact switch in its controlled installation only.
+local runtimeBuild = "2026-09-09-issue146-menu-boundary-diagnostic"
+-- Temporary Issue #146 diagnostic switch; enabled only for the controlled probe build.
 local seatedPlayerProbeEnabled = true
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
@@ -234,6 +233,12 @@ local function log(message) DebugError("[X4GC] " .. message) end
 local function probeLog(event, fields)
     log("SEATED_PROBE|build=" .. runtimeBuild .. "|event=" .. event
         .. (fields and fields ~= "" and ("|" .. fields) or ""))
+end
+local function requestSeatedProbeSnapshot(stage)
+    if not seatedProbe then return end
+    AddUITriggeredEvent("X4GunneryControl", "seated_probe_snapshot", {
+        nonce = seatedProbe.nonce, stage = tostring(stage),
+    })
 end
 -- Raw FFI ids stringify with a ULL suffix and id()-converted ones do not, so a
 -- bare tostring comparison judges the same component to be two different ones.
@@ -2613,10 +2618,23 @@ function TestAPI.requestEngageabilities(targets) return requestEngageabilities(t
 function TestAPI.engageabilityText(result) return engageabilityText(result) end
 
 function menu.onShowMenu()
+    local initialSeatedProbeOpening = session and session.seatedProbeNonce
+        and seatedProbe and seatedProbe.nonce == session.seatedProbeNonce
+        and seatedProbe.phase == "menu_open_requested"
+    if initialSeatedProbeOpening then
+        probeLog("menu_onshow_enter", "nonce=" .. seatedProbe.nonce)
+        requestSeatedProbeSnapshot("menu_onshow_enter")
+        logSession("seated probe menu_onshow_enter")
+    end
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
     -- mark themselves non-fullscreen so they do not behave like a full map
     -- menu. This is a runtime behavior gate and must remain live-tested.
     C.SetTrackedMenuFullscreen(menu.name, false)
+    if initialSeatedProbeOpening then
+        probeLog("menu_tracking_applied", "nonce=" .. seatedProbe.nonce)
+        requestSeatedProbeSnapshot("menu_tracking_applied")
+        logSession("seated probe menu_tracking_applied")
+    end
     -- A fresh chair sit-down still requires the seat. An onboard session in
     -- flight (parked by onOpenOnboard, reopened when the Map closes) is allowed
     -- through even though the player is standing; sessionContextValid() re-checks
@@ -2688,7 +2706,18 @@ function menu.onShowMenu()
         session.repointTargetID = session.aimTargetID
         session.repointResumeRetry = session.aimTargetID
     end
+    if initialSeatedProbeOpening then
+        session.seatedProbeInitialDisplay = true
+        probeLog("menu_display_begin", "nonce=" .. seatedProbe.nonce)
+        requestSeatedProbeSnapshot("menu_display_begin")
+        logSession("seated probe menu_display_begin")
+    end
     menu.display()
+    if initialSeatedProbeOpening and seatedProbe then
+        probeLog("menu_display_end", "nonce=" .. seatedProbe.nonce)
+        requestSeatedProbeSnapshot("menu_display_end")
+        logSession("seated probe menu_display_end")
+    end
 end
 
 function menu.display()
@@ -3382,6 +3411,14 @@ function menu.viewCreated()
     if session and State.isOwned(session) then
         session.autoHideAt = nil
     end
+    if session and session.seatedProbeInitialDisplay then
+        session.seatedProbeInitialDisplay = nil
+        if seatedProbe and seatedProbe.nonce == session.seatedProbeNonce then
+            probeLog("menu_view_created", "nonce=" .. seatedProbe.nonce)
+            requestSeatedProbeSnapshot("menu_view_created")
+            logSession("seated probe menu_view_created")
+        end
+    end
     if session and State.isOwned(session) and session.phase == "engaged" and session.controlMode == "direct" and session.engagePending then
         session.engagePending, session.engagePendingSince = nil, nil
         logSession("engagement transition confirmed by frame creation")
@@ -3590,8 +3627,9 @@ completeReleasedOnboardHandoff = function(reason)
             stopSeatedProbe(observedGroup == "gunnercontrol"
                 and "gunnercontrol_not_released" or "standing_control_group_not_empty")
         else
-            probe.phase = "pose_pending"
-            probe.poseRequestedAt = GetCurRealTime()
+            probe.phase = "apply_pending"
+            probe.applyRequestedAt = GetCurRealTime()
+            probe.poseRequestedAt = probe.applyRequestedAt
             AddUITriggeredEvent("X4GunneryControl", "seated_probe_apply", {
                 nonce = probe.nonce, ship = session.shipID,
             })
@@ -3599,6 +3637,12 @@ completeReleasedOnboardHandoff = function(reason)
         end
     end
     session.physicalReleasePending = nil
+    if session.seatedProbeNonce and seatedProbe
+            and seatedProbe.nonce == session.seatedProbeNonce
+            and seatedProbe.phase == "apply_pending" then
+        logSession("physical release parked for seated probe apply acknowledgement")
+        return true
+    end
     logSession("physical release opening Gunnery Control: " .. tostring(reason))
     OpenMenu(menu.name, { 0, 0 }, nil)
     return true
@@ -3680,16 +3724,30 @@ reopenPendingSession = function(reason)
     if not resumePending or resumeOpenPending or not session
             or session.lifecycle ~= State.lifecycle.reopening
             or menu.shown or activeExternalMenuName() then return end
+    if session.seatedProbeNonce and seatedProbe
+            and seatedProbe.nonce == session.seatedProbeNonce
+            and seatedProbe.phase ~= "menu_ready" then return end
     if not sessionContextValid() then
         endSession("parked session context invalid")
         return
     end
     resumeOpenPending = true
+    if session.seatedProbeNonce and seatedProbe
+            and seatedProbe.nonce == session.seatedProbeNonce then
+        seatedProbe.phase = "menu_open_requested"
+        probeLog("menu_open_request", "nonce=" .. seatedProbe.nonce)
+        requestSeatedProbeSnapshot("menu_open_request")
+        logSession("seated probe menu_open_request")
+    end
     local expectedSession, expectedEpoch = session, sessionEpoch
     OpenMenu("X4GunneryMenu", { 0, 0 }, nil)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if sameSession(expectedSession, expectedEpoch) and resumePending and not menu.shown then
             resumeOpenPending = false
+            if seatedProbe and seatedProbe.nonce == session.seatedProbeNonce
+                    and seatedProbe.phase == "menu_open_requested" then
+                seatedProbe.phase = "menu_ready"
+            end
             if not reopenFailureLogged then
                 reopenFailureLogged = true
                 log("parked session reopen did not display; retrying: " .. tostring(reason))
@@ -3753,13 +3811,29 @@ local function sessionWatchdog()
         elseif seatedProbe.phase == "getup_pending" and age > 8 then
             stopSeatedProbe("player_getup_timeout")
             physicalIngressPendingShip = nil
-        elseif (seatedProbe.phase == "pose_pending" or seatedProbe.phase == "active")
+        elseif seatedProbe.phase == "apply_pending"
+                and GetCurRealTime() - (seatedProbe.applyRequestedAt or 0) > 2 then
+            probeLog("apply_ack_timeout", "nonce=" .. seatedProbe.nonce)
+            stopSeatedProbe("apply_ack_timeout")
+        elseif (seatedProbe.phase == "menu_delay" or seatedProbe.phase == "menu_ready"
+                or seatedProbe.phase == "menu_open_requested" or seatedProbe.phase == "active")
                 and GetCurRealTime() - (seatedProbe.poseRequestedAt or 0) > 120 then
             stopSeatedProbe("probe_timeout")
-        elseif seatedProbe.phase == "pose_pending" or seatedProbe.phase == "active" then
+        elseif seatedProbe.phase == "apply_pending" or seatedProbe.phase == "menu_delay"
+                or seatedProbe.phase == "menu_ready" or seatedProbe.phase == "menu_open_requested"
+                or seatedProbe.phase == "active" then
             AddUITriggeredEvent("X4GunneryControl", "seated_probe_observe", {
                 nonce = seatedProbe.nonce, ship = seatedProbe.shipID,
             })
+            local now = GetCurRealTime()
+            if not seatedProbe.nextSnapshotAt or now >= seatedProbe.nextSnapshotAt then
+                seatedProbe.nextSnapshotAt = now + 0.5
+                requestSeatedProbeSnapshot(menu.shown and "periodic_menu_shown" or "periodic_menu_hidden")
+            end
+            if seatedProbe.phase == "menu_delay"
+                    and now - (seatedProbe.menuDelayStartedAt or now) >= 12 then
+                seatedProbe.phase = "menu_ready"
+            end
         end
     end
     -- UIX normally delivers DockedMenu's display callback. Poll only a released
@@ -3939,8 +4013,16 @@ local function init()
         local nonce, result = tostring(payload or ""):match("^x4gcp1:apply:([^:]+):([^:]+)$")
         if not seatedProbe or nonce ~= seatedProbe.nonce then return end
         probeLog("apply_ack", "nonce=" .. nonce .. "|result=" .. tostring(result))
-        if result == "ok" then seatedProbe.phase = "active"
-        else stopSeatedProbe("apply_" .. tostring(result)) end
+        if result == "ok" then
+            seatedProbe.phase = "menu_delay"
+            seatedProbe.menuDelayStartedAt = GetCurRealTime()
+            seatedProbe.nextSnapshotAt = seatedProbe.menuDelayStartedAt
+            probeLog("menu_delay_started", "nonce=" .. nonce .. "|delay=12s")
+            requestSeatedProbeSnapshot("menu_delay_started")
+            logSession("seated probe placement acknowledged; 12-second menu delay started")
+        else
+            stopSeatedProbe("apply_" .. tostring(result))
+        end
     end
     RegisterEvent("playerGetUp", onPlayerGetUp)
     RegisterEvent("X4GunneryControl.SeatedProbeCapture", onSeatedProbeCapture)

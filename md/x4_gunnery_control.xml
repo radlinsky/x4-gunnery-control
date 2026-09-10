@@ -599,6 +599,7 @@
               <set_value name="SeatedPlayerProbe.$hasstanding" exact="true"/>
               <set_value name="SeatedPlayerProbe.$active" exact="true"/>
               <set_value name="SeatedPlayerProbe.$lastbody" exact="player.hasbody"/>
+              <debug_text text="'[X4GC] SEATED_PROBE|event=post_getup_state|nonce=' + $nonce + '|player.entity.position=' + player.entity.position + '|player.entity.rotation=' + player.entity.rotation + '|standing_position=' + SeatedPlayerProbe.$standingposition + '|standing_rotation=' + SeatedPlayerProbe.$standingrotation + '|player.room=' + @player.room + '|player.controlled=' + @player.controlled + '|player.hasbody=' + player.hasbody" chance="100"/>
               <do_if value="not player.controlled">
                 <add_actor_to_room actor="player.entity" object="SeatedPlayerProbe.$room" result="$roomresult">
                   <position value="SeatedPlayerProbe.$chairposition"/>
@@ -613,7 +614,7 @@
                 <position value="SeatedPlayerProbe.$chairposition"/>
                 <rotation value="SeatedPlayerProbe.$chairrotation"/>
               </set_player_entity_position>
-              <debug_text text="'[X4GC] SEATED_PROBE|event=chair_transform|nonce=' + $nonce + '|result=applied|body=' + player.hasbody" chance="100"/>
+              <debug_text text="'[X4GC] SEATED_PROBE|event=chair_transform|nonce=' + $nonce + '|trigger=apply|player.entity.position=' + player.entity.position + '|player.entity.rotation=' + player.entity.rotation + '|player.room=' + @player.room + '|player.controlled=' + @player.controlled + '|player.hasbody=' + player.hasbody + '|chair_position=' + SeatedPlayerProbe.$chairposition + '|chair_rotation=' + SeatedPlayerProbe.$chairrotation + '|standing_position=' + SeatedPlayerProbe.$standingposition + '|standing_rotation=' + SeatedPlayerProbe.$standingrotation" chance="100"/>
               <do_if value="player.hasbody">
                 <start_actor_sequence actor="player.entity" type="'idle'" behavior="'sit'" transition="false" immediate="true" blend="false" result="$sequenceresult"/>
                 <debug_text text="'[X4GC] SEATED_PROBE|event=seated_sequence|nonce=' + $nonce + '|type=idle|behavior=sit|transition=false|immediate=true|blend=false|result=' + @$sequenceresult" chance="100"/>
@@ -628,6 +629,19 @@
               <debug_text text="'[X4GC] SEATED_PROBE|event=apply|nonce=' + @$nonce + '|result=context_mismatch'" chance="100"/>
               <raise_lua_event name="'X4GunneryControl.SeatedProbeApplied'" param="'x4gcp1:apply:' + @$nonce + ':context_mismatch'"/>
             </do_else>
+          </actions>
+        </cue>
+
+        <cue name="SeatedProbeSnapshot" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'seated_probe_snapshot'"/>
+          </conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$stage" exact="@event.param3.$stage"/>
+            <do_if value="SeatedPlayerProbe.$active and $nonce == SeatedPlayerProbe.$nonce and player.entity">
+              <debug_text text="'[X4GC] SEATED_PROBE|event=snapshot|nonce=' + $nonce + '|stage=' + $stage + '|player.container=' + @player.container + '|player.room=' + @player.room + '|player.entity.position=' + player.entity.position + '|player.entity.rotation=' + player.entity.rotation + '|player.controlled=' + @player.controlled + '|player.hasbody=' + player.hasbody + '|chair_position=' + SeatedPlayerProbe.$chairposition + '|chair_rotation=' + SeatedPlayerProbe.$chairrotation + '|standing_position=' + @SeatedPlayerProbe.$standingposition + '|standing_rotation=' + @SeatedPlayerProbe.$standingrotation" chance="100"/>
+            </do_if>
           </actions>
         </cue>
 
@@ -663,6 +677,7 @@
                     <position value="SeatedPlayerProbe.$chairposition"/>
                     <rotation value="SeatedPlayerProbe.$chairrotation"/>
                   </set_player_entity_position>
+                  <debug_text text="'[X4GC] SEATED_PROBE|event=chair_transform|nonce=' + $nonce + '|trigger=body_recreated|player.entity.position=' + player.entity.position + '|player.entity.rotation=' + player.entity.rotation + '|player.room=' + @player.room + '|player.controlled=' + @player.controlled + '|player.hasbody=' + player.hasbody + '|chair_position=' + SeatedPlayerProbe.$chairposition + '|chair_rotation=' + SeatedPlayerProbe.$chairrotation + '|standing_position=' + @SeatedPlayerProbe.$standingposition + '|standing_rotation=' + @SeatedPlayerProbe.$standingrotation" chance="100"/>
                   <start_actor_sequence actor="player.entity" type="'idle'" behavior="'sit'" transition="false" immediate="true" blend="false" result="$sequenceresult"/>
                   <debug_text text="'[X4GC] SEATED_PROBE|event=seated_sequence|nonce=' + $nonce + '|trigger=body_recreated|result=' + @$sequenceresult" chance="100"/>
                 </do_if>
