@@ -64,7 +64,10 @@ assert(findView37("Helper2", "ExternalOverlay"),
     "engaged transition must not unregister an unrelated external menu")
 fix.resetTeardownTrace()
 local mark37 = fix.callbackCheckpoint()
-gcMenu.onCloseElement("close")
+local getUp37 = fix.buttonByLabel("getUp")
+assert(getUp37 and getUp37.handlers and getUp37.handlers.onClick,
+    "engaged Direct panel must provide an explicit Get Up action")
+getUp37.handlers.onClick()
 fix.drainCallbacksSince(mark37)
 local trace37 = fix.getTeardownTrace()
 assert(trace37[1] == "close",

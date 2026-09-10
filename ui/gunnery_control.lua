@@ -174,7 +174,7 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-09-issue117-view-registration-atomicity-fix"
+local runtimeBuild = "2026-09-10-issue110-close-back-fix"
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
 -- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
@@ -3515,10 +3515,8 @@ function menu.onCloseElement(dueToClose)
             local targetClick = dueToClose == "auto" or softtargetKey() ~= previousTarget
             if targetClick then
                 menu.display()
-            elseif session.controlMode == "direct" and dueToClose ~= "close" then
-                openTargetBrowser()
             elseif session.controlMode == "direct" then
-                endSession("Engage compact panel closed")
+                openTargetBrowser()
             else
                 returnToConsole("Watch closed")
             end

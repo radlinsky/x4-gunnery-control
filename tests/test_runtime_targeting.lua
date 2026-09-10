@@ -24,39 +24,11 @@ assert(ok_init, "onShowMenu() raised: " .. tostring(err_init))
 local sess = API.getSession()
 assert(sess ~= nil, "expected a live session after onShowMenu()")
 
--- ── 10. assertion 5: Esc from target_select always lands on console ──────────
--- Regression: when session.phase=="target_select" and session.directSnapshot is
--- set, the old onCloseElement branch restored phase="direct" and called
--- menu.display(), creating an infinite Esc cycle. The correct behaviour is:
---   direct --Esc--> target_select --Esc--> console
--- Two closes from direct must always terminate at console.
-
--- NOTE on test setup approach: the harness cannot yet drive the full ingress
--- through startDirect/engageTarget/openTargetBrowser, because those module-local
--- paths require engine state beyond the frame stub. Set up that precise state
--- through TestAPI.getSession(), then exercise the real public close callback or
--- rendered Back-button callback for the behavior under test.
-
--- ── 10a: target_select + direct controlMode -> onCloseElement("close") ──────
--- This is the exact bug state: player pressed Esc from the target picker while
--- an engagement was in progress (controlMode is "direct").
-sess.phase = "target_select"
-sess.controlMode = "direct"
-
-gcMenu.onCloseElement("close")
-local phaseAfterPickerClose = sess.phase
-assert(phaseAfterPickerClose == "console",
-    "BUG: closing target_select with controlMode=direct landed on phase='"
-    .. tostring(phaseAfterPickerClose)
-    .. "' instead of 'console'. The Esc cycle is still present.")
-assert(sess.controlMode == nil,
-    "closing target_select must clear controlMode (returnToConsole was not called)")
-
--- ── 10b: visible target-browser Back restores Direct settings ───────────────
--- Unlike onCloseElement above, the visible Back button owns its own callback.
+-- ── 10. visible target-browser Back returns to the console ──────────────────
+-- The visible Back button owns its own callback.
 -- A browser reopened from a Direct engagement still holds snapshots while its
--- live turret groups are in autoassist, so that callback must restore before
--- returning to the console. Drive the rendered button rather than a test API.
+-- live turret groups are in autoassist, so that callback must return without
+-- restoring them. Drive the rendered button rather than a test API.
 gcMenu.onShowMenu()
 sess = API.getSession()
 local browserGroup = fix.makeGroup{
@@ -124,39 +96,6 @@ assert(#modeWrites10b == 0 and #armedWrites10b == 0,
 
 C.SetTurretGroupMode2 = savedSetMode10b
 C.SetTurretGroupArmed = savedSetArmed10b
-
--- ── 10c: bounded cycle check ────────────────────────────────────────────────
--- Directly simulate the full Esc sequence: engaged/direct -> target_select -> console.
--- This encodes the actual defect: every step from engaged must terminate at
--- console within a bounded number of close events with no revisit of engaged.
-gcMenu.onShowMenu()
-sess = API.getSession()
-sess.phase = "engaged"
-sess.controlMode = "direct"
-sess.committedBaseline = { { shipID = sess.shipID, kind = "group",
-    componentID = 0, contextID = 0, path = "", group = "", mode = "attack", armed = true } }
--- Simulate the picker opening (openTargetBrowser sets phase but keeps committedBaseline).
-sess.phase = "target_select"
-
-local stepsToConsole = 0
-local visitedEngaged = false
-for i = 1, 10 do
-    if sess.phase == "console" then break end
-    if sess.phase == "engaged" then visitedEngaged = true end
-    if sess.phase == "target_select" then
-        gcMenu.onCloseElement("close")
-        stepsToConsole = stepsToConsole + 1
-    else
-        break
-    end
-end
-assert(sess.phase == "console",
-    "Esc cycle did not terminate at console within 10 close events; final phase: "
-    .. tostring(sess.phase))
-assert(not visitedEngaged,
-    "Esc cycle re-entered engaged phase during target_select -> console transition")
-assert(stepsToConsole <= 2,
-    "Esc cycle took " .. stepsToConsole .. " closes to reach console (expected <= 2)")
 
 -- ── 12. Watch and direct frames must provide a visible back button ────────────
 -- Proven live on 2026-08-04: Esc (dueToClose == "back") is never delivered to
@@ -420,6 +359,51 @@ local ok17, err17 = pcall(fix.drainCallbacksSince, mark17)
 assert(ok17, "deferred callback raised: " .. tostring(err17))
 assert(sess17.phase == "console",
     "engaged/auto onCloseElement('back') must reach console; got: " .. tostring(sess17.phase))
+
+-- ── 17a. Direct X closes navigate back exactly one menu state ───────────────
+gcMenu.onShowMenu()
+local sess17a = API.getSession()
+assert(sess17a ~= nil, "expected session for Direct compact-panel close test")
+sess17a.phase = "engaged"
+sess17a.controlMode = "direct"
+local group17a = fix.makeGroup{
+    key = "group17a", contextID = 17, path = "path17a", group = "group17a",
+    mode = "autoassist", armed = true, members = {},
+}
+sess17a.groups = { group17a }
+local baseline17a = { { shipID = sess17a.shipID, kind = "group",
+    contextID = 17, path = "path17a", group = "group17a",
+    mode = "attack", armed = false } }
+sess17a.committedBaseline = baseline17a
+sess17a.viewSofttargetKey = "0\031"
+local modeWrites17a, armedWrites17a = 0, 0
+local savedSetMode17a = C.SetTurretGroupMode2
+local savedSetArmed17a = C.SetTurretGroupArmed
+C.SetTurretGroupMode2 = function() modeWrites17a = modeWrites17a + 1 end
+C.SetTurretGroupArmed = function() armedWrites17a = armedWrites17a + 1 end
+fix.resetTeardownTrace()
+local mark17a = fix.callbackCheckpoint()
+gcMenu.onCloseElement("close")
+local ok17a, err17a = pcall(fix.drainCallbacksSince, mark17a)
+assert(ok17a, "Direct compact-panel close callback raised: " .. tostring(err17a))
+assert(API.getSession() == sess17a,
+    "engaged/direct onCloseElement('close') must keep the same session alive")
+assert(sess17a.phase == "target_select",
+    "first Direct X must return to target selection; got: " .. tostring(sess17a.phase))
+assert(sess17a.controlMode == "direct" and sess17a.committedBaseline == baseline17a,
+    "first Direct X must preserve Direct engagement state for target reselection")
+assert(#fix.getTeardownTrace() == 0 and modeWrites17a == 0 and armedWrites17a == 0,
+    "first Direct X must not tear down the session or restore directed settings")
+
+gcMenu.onCloseElement("close")
+assert(API.getSession() == sess17a,
+    "target-selection X must keep the same Gunnery session alive")
+assert(sess17a.phase == "console" and sess17a.controlMode == nil,
+    "second Direct X must return from target selection to the console")
+assert(#fix.getTeardownTrace() == 0 and modeWrites17a == 0 and armedWrites17a == 0,
+    "target-selection X must not tear down the session or restore directed settings")
+C.SetTurretGroupMode2 = savedSetMode17a
+C.SetTurretGroupArmed = savedSetArmed17a
 
 -- ── 17b. engaged/direct periodic updates synchronize the retained target ─
 -- The engaged 0.25-second update seam owns world-target synchronization:
