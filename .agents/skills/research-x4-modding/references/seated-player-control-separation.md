@@ -134,3 +134,78 @@ schema are the primary evidence.
 Binary reverse engineering may explain these outcomes, but none of these claims
 is promoted by internal fields or call chains. No FFI hook, native patch,
 unpublished call, or guessed engine API belongs in the candidate.
+
+## Ordinary first-person viewpoint boundary after control release
+
+### The supported Lua camera surface cannot bind ordinary first-person view to the player body
+- X4: 9.00
+- Status: shipped-source
+- Source: complete base `08.cat` UI Lua census (77 files), especially
+  `ui/addons/ego_detailmonitor/menu_map.lua:2020,2133-2134`,
+  `ui/addons/ego_interactmenu/menu_interactmenu.lua:1171,1276,1313`, and
+  `ui/addons/ego_detailmonitor/menu_followcamera.lua`; indexed with
+  `scripts/index-lua-ffi.sh` on 2026-09-09
+- Live test: no — source-surface result
+- Finding: the shipped declarations expose mode or anchor operations for
+  cockpit, external-target, cinematic, scene, and follow cameras. None accepts
+  `player.entity`, a room-relative player transform, a body instance, or a
+  request to attach, refresh, recalculate, or rebind the ordinary first-person
+  viewpoint. `GetCameraRotation` and the MD `player.camera` properties are
+  read-only observations. A turret target-view operation addresses a different
+  external camera and does not establish control of ordinary first-person view.
+
+### The supported MD surface moves the body but does not move or refresh its viewpoint
+- X4: 9.00
+- Status: shipped-source
+- Source: `libraries/common.xsd:36508-36521`;
+  `libraries/medium_library.xml:548-557,600-629`;
+  `libraries/parameters.xml:408-442,488-545`;
+  `libraries/scriptproperties.xsd:42-46`; complete base `md/*.xml` and
+  `libraries/*.{xml,xsd}` census (391 files) on 2026-09-09
+- Live test: no — source-surface result
+- Finding: `set_player_entity_position` sets only the player's position and
+  rotation in the current room. `leave_control_position` activates first-person
+  controls, while `set_player_firstperson_override` selects movement/body
+  parameters such as body dimensions, eye offset, movement speed, pitch,
+  bobbing, and acceleration. The schema exposes no ordinary-viewpoint action,
+  no camera/body binding action, and no refresh after player placement. The
+  complete shipped MD corpus contains no hidden composition of such operations.
+
+### Restoring the real body transform does not implicitly rebind ordinary first-person view
+- X4: 9.00
+- Status: live-tested
+- Source: Issue #146 diagnostic run recorded 2026-09-09, build marker
+  `2026-09-09-issue146-seated-player-feasibility`, candidate
+  `3010595f54531a983f960266a6450a2d8028e56d`
+- Live test: yes — native Get Up reached an empty control group; the chair
+  transform was applied again after `player.hasbody` returned; real-player
+  `idle` / `sit` succeeded; the owner-visible first-person viewpoint still
+  returned to the standing location when normal Gunnery Control reopened
+- Finding: the exact supported body-placement and animation composition did
+  not make the ordinary player viewpoint follow the restored seated body. This
+  disproves an implicit viewpoint refresh from `set_player_entity_position`,
+  body recreation, or `idle` / `sit` under the tested released-control/menu
+  state. The run does not establish how the engine internally selects its
+  first-person viewpoint anchor.
+
+### No supported mechanism exists for the required released-control seated viewpoint
+- X4: 9.00
+- Status: inference
+- Source: composition of the shipped-source and live-tested records above;
+  X4 9.00 `X4.exe` named export census; official Lua function overview checked
+  2026-09-09; targeted installed-extension and Egosoft-forum searches
+- Live test: yes — the only supported body/transform candidate failed the
+  viewpoint relationship in the recorded diagnostic run
+- Finding: **FAIL.** X4 9.00 exposes no supported public Lua/MD operation or
+  sequence that attaches or recalculates the ordinary first-person viewpoint
+  from a moved real player body, refreshes that relationship after
+  `set_player_entity_position`, or preserves it with no active
+  `gunnercontrol` group while normal Gunnery Control UI remains open. The
+  executable exports ordinary camera-mode setters but no named body/viewpoint
+  bind or refresh operation; export names do not prove signatures or public
+  support in any case. Reverse-engineered player animation, body-lifetime,
+  transform, control-group, and camera-selection paths may explain the split,
+  but those internals remain engine-owned and cannot become a candidate API.
+  There is therefore no supported next implementation operation. Retain the
+  accepted standing/onboard route; a replacement or cosmetic camera and native
+  hooks are outside this finding.
