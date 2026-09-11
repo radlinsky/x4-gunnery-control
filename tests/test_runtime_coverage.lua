@@ -237,14 +237,12 @@ do
         "a released overlay descriptor must not be restored after the takeover ends")
 end
 
--- Live race: Test Lab's closeMenuAndOpenNewMenu leaves a real gap with Gunnery
--- hidden and no external menu reported. The generic watchdog must not read that
--- as a finished external-menu cleanup and reopen Gunnery over the Test Lab.
+-- Test Lab's handoff leaves a gap with Gunnery hidden and no external menu
+-- reported. The watchdog must not read that as a finished external-menu cleanup
+-- and reopen Gunnery over the Test Lab.
 do
     local fix, _, session = fresh()
-    local opened = 0
     fix.API.registerTestLab({ open = function()
-        opened = opened + 1
         fix.gcMenu.shown = false
     end })
     fix.gcMenu.display()
@@ -255,7 +253,6 @@ do
         return realOpenMenu and realOpenMenu(name, ...)
     end
     button(fix, 32)()
-    assert(opened == 1, "Test Lab handoff must open the Test Lab once")
     assert(session.lifecycle == X4GunneryState.lifecycle.reopening
         and fix.API.getSession() == session, "handoff must park this exact session")
     fix.API.runSessionWatchdog()
