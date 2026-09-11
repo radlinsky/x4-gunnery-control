@@ -40,7 +40,6 @@
 -- fix.clock                  — shared time value; assign to advance getElapsedTime
 -- fix.fireEvent(name,payload) — fire a RegisterEvent handler recorded during load
 -- fix.registeredEvents       — handlers indexed by RegisterEvent name
--- fix.registeredEventCalls   — ordered {name,handler} RegisterEvent captures
 -- fix.uiTriggeredEvents      — ordered {screen,control,params} UI-event captures
 -- fix.View                   — X4 View registry with frame-limit accounting
 -- fix.getOnUpdateCallback()  — inspect the installed addon onUpdate callback
@@ -359,12 +358,10 @@ function M.load()
     -- registered handler away.  This stub records them so tests can fire events
     -- through fix.fireEvent(name, payload).
     local registeredEvents = {}   -- { [name] = { handler, ... } }
-    local registeredEventCalls = {}
     local registeredUIEvents = {}
     RegisterEvent = function(name, handler)
         if not registeredEvents[name] then registeredEvents[name] = {} end
         registeredEvents[name][#registeredEvents[name] + 1] = handler
-        registeredEventCalls[#registeredEventCalls + 1] = { name = name, handler = handler }
     end
 
     local function fireEvent(name, payload)
@@ -658,7 +655,6 @@ function M.load()
         -- tables (reference — mutations visible both ways)
         pendingCallbacks  = pendingCallbacks,
         registeredEvents  = registeredEvents,
-        registeredEventCalls = registeredEventCalls,
         registeredUIEvents = registeredUIEvents,
         uiTriggeredEvents = uiTriggeredEvents,
         allFrames         = allFrames,
