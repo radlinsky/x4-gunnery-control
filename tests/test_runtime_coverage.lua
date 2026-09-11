@@ -105,23 +105,47 @@ local function overlayEntry(fix)
 end
 
 do
-    local fix = engaged()
+    local fix, _, session = engaged()
     fix.gcMenu.display()
-    overlayEntry(fix).callback({})
-    assert(fix.logContains("engaged overlay descriptor could not be restored"),
-        "a rebind without a recreated frame id must be reported, not crash")
+    local entry = overlayEntry(fix)
+    assert(pcall(entry.callback, {}),
+        "a rebind without recreated frame ids must return safely")
+    assert(fix.API.getSession() == session and session.phase == "engaged"
+            and session.controlMode == "auto" and overlayEntry(fix) == entry
+            and fix.getOnUpdateCallback() ~= nil,
+        "a failed rebind must leave the engaged session and overlay usable")
 end
 
 do
-    local fix = engaged()
+    local fix, group, session = engaged()
+    session.controlMode = "direct"
+    session.engagePending, session.engagePendingSince = true, 1
+    session.committedBaseline = { { kind = "group", contextID = group.contextID,
+        path = group.path, group = group.group, shipID = session.shipID,
+        mode = "attack", armed = false } }
+    group.mode, group.armed = "attackenemies", true
+    local modeWrites, armedWrites = {}, {}
+    fix.C.SetTurretGroupMode2 = function(_, _, _, _, mode)
+        modeWrites[#modeWrites + 1] = tostring(mode)
+    end
+    fix.C.SetTurretGroupArmed = function(_, _, _, _, armed)
+        armedWrites[#armedWrites + 1] = armed
+    end
     local registerMenu = fix.View.registerMenu
     fix.View.registerMenu = function(id, ...)
         if id ~= "Helper0" then return registerMenu(id, ...) end
     end
     fix.gcMenu.display()
     fix.View.registerMenu = registerMenu
-    assert(fix.logContains("engaged overlay registration was not found after frame display"),
-        "a missing Helper registration must be reported, not crash the retag")
+    assert(fix.API.getSession() == session and session.phase == "console"
+            and fix.getOnUpdateCallback() == nil,
+        "a missing Helper registration must safely abandon engaged mode and its updater")
+    assert(session.controlMode == nil and not session.engagePending and not session.engagePendingSince,
+        "a missing Helper registration must clear Direct and its pending transition")
+    assert(modeWrites[#modeWrites] == "attack" and armedWrites[#armedWrites] == false,
+        "a missing Helper registration must restore the pre-Direct turret state")
+    assert(overlayEntry(fix) == nil,
+        "a missing Helper registration must not leak the custom Gunnery overlay")
 end
 
 do
