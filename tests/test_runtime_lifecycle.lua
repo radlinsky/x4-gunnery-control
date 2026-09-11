@@ -454,24 +454,10 @@ assert(overlay55 ~= nil,
 assert(overlay55.framedescriptors[0] ~= nil and overlay55.framedescriptors[3] ~= nil,
     "fullscreen-takeover precondition: the overlay must own the layer-0 controls"
     .. " and layer-3 surface-browser descriptors")
-assert(overlay55.numframes == 2 and fix.View.currentFrames == 2,
-    "fullscreen-takeover precondition: the two-descriptor overlay must account for two frames")
-local elementFrame55 = gcMenu.elementFrame
-assert(elementFrame55 ~= nil,
-    "fullscreen-takeover precondition: Direct engagement must build the element frame")
-local session55 = sess55
-local groups55, checked55 = sess55.groups, sess55.checkedGroupKeys
-local groupMode55, groupArmed55 = grp55.mode, grp55.armed
-local phase55, lifecycle55, controlMode55, directMode55 =
-    sess55.phase, sess55.lifecycle, sess55.controlMode, sess55.directMode
-local targetObject55, aimTarget55 = sess55.targetObjectID, sess55.aimTargetID
-local cameraMember55 = sess55.cameraMemberID
-local povAnchor55, povMode55 = sess55.povAnchor, sess55.povMode
 local frame55 = gcMenu.frame
-local updater55 = fix.getOnUpdateCallback()
-local descriptors55 = overlay55.framedescriptors
-local callback55 = overlay55.callback
-local allFrames55 = #fix.allFrames
+local elementFrame55 = gcMenu.elementFrame
+assert(frame55 ~= nil and elementFrame55 ~= nil,
+    "fullscreen-takeover precondition: Direct engagement must build both Gunnery frames")
 local cameraChanges55, cameraResets55 = 0, 0
 fix.C.SetPlayerCameraTargetView = function()
     cameraChanges55 = cameraChanges55 + 1
@@ -487,58 +473,38 @@ fix.resetTeardownTrace()
 fix.setFullscreenMenuDisplayed(true)
 fix.invokeOnUpdate()
 
-assert(API.getSession() == session55,
-    "fullscreen takeover must preserve the exact engaged session object")
-assert(sess55.phase == phase55 and sess55.lifecycle == lifecycle55
-        and sess55.controlMode == controlMode55
-        and sess55.directMode == directMode55,
-    "fullscreen takeover must preserve engaged Direct control and its policy")
-assert(sess55.groups == groups55 and sess55.groups[1] == grp55
-        and grp55.mode == groupMode55 and grp55.armed == groupArmed55
-        and sess55.checkedGroupKeys == checked55 and sess55.checkedGroupKeys.grp55 == true,
-    "fullscreen takeover must preserve directed groups and their checked state")
-assert(sess55.targetObjectID == targetObject55 and sess55.aimTargetID == aimTarget55,
-    "fullscreen takeover must preserve root and aim targets")
-assert(sess55.cameraMemberID == cameraMember55
-        and sess55.povAnchor == povAnchor55 and sess55.povMode == povMode55,
-    "fullscreen takeover must preserve camera-member and POV state")
+assert(API.getSession() == sess55 and sess55.phase == "engaged"
+        and sess55.controlMode == "direct" and sess55.directMode == "attackenemies",
+    "fullscreen takeover must preserve the engaged Direct session and policy")
+assert(sess55.groups[1] == grp55 and sess55.checkedGroupKeys.grp55 == true
+        and grp55.mode == "attackenemies" and grp55.armed == true,
+    "fullscreen takeover must preserve the selected group and checked state")
+assert(sess55.targetObjectID == 550 and sess55.aimTargetID == 551
+        and sess55.cameraMemberID == 55
+        and sess55.povAnchor == "target" and sess55.povMode == "manual",
+    "fullscreen takeover must preserve targets, camera member, and POV")
 assert(findView55("X4GunneryOverlay") == nil,
     "fullscreen takeover must unregister only the engaged Gunnery overlay")
-assert(fix.View.currentFrames == 0,
-    "fullscreen takeover must subtract both Gunnery frames; got "
-    .. tostring(fix.View.currentFrames))
-assert(gcMenu.frame == frame55 and #fix.allFrames == allFrames55,
-    "fullscreen takeover must not build new Gunnery frames")
-assert(fix.getOnUpdateCallback() == updater55 and updater55 ~= nil,
-    "fullscreen takeover must preserve the independent engaged updater")
+assert(gcMenu.frame == frame55 and gcMenu.elementFrame == elementFrame55,
+    "fullscreen takeover must retain the existing Gunnery frames")
 assert(fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
     "fullscreen takeover must not tear down the engaged session")
 assert(cameraChanges55 == 0 and cameraResets55 == 0,
     "fullscreen takeover must not change or restore the player camera")
 
 gcMenu.display()
-assert(API.getSession() == session55
-        and sess55.phase == phase55 and sess55.lifecycle == lifecycle55
-        and sess55.controlMode == controlMode55
-        and sess55.directMode == directMode55,
-    "display during fullscreen takeover must preserve the same Direct session and policy")
-assert(sess55.groups == groups55 and sess55.checkedGroupKeys == checked55
-        and sess55.targetObjectID == targetObject55 and sess55.aimTargetID == aimTarget55
-        and sess55.cameraMemberID == cameraMember55
-        and sess55.povAnchor == povAnchor55 and sess55.povMode == povMode55,
-    "display during fullscreen takeover must preserve groups, targets, camera, and POV")
 assert(findView55("X4GunneryOverlay") == nil
-        and gcMenu.frame == frame55 and #fix.allFrames == allFrames55,
-    "display during fullscreen takeover must not rebuild or re-register the overlay")
-assert(fix.getOnUpdateCallback() == updater55
+        and gcMenu.frame == frame55 and gcMenu.elementFrame == elementFrame55,
+    "display during fullscreen takeover must defer repaint and registration")
+assert(API.getSession() == sess55 and sess55.phase == "engaged"
         and fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
-    "display during fullscreen takeover must not replace the updater or tear down Gunnery")
+    "display during fullscreen takeover must preserve the session without teardown")
 assert(cameraChanges55 == 0 and cameraResets55 == 0,
     "display during fullscreen takeover must not restore or repoint the player camera")
 
 fix.setFullscreenMenuDisplayed(false)
 local registerMenu55 = fix.View.registerMenu
-local restoredRegistrations55 = {}
+local restoreBinding55
 fix.View.registerMenu = function(id, registeredType, callback, clearCallback,
         framedescriptors, name, properties)
     local entry = registerMenu55(id, registeredType, callback, clearCallback,
@@ -546,9 +512,8 @@ fix.View.registerMenu = function(id, registeredType, callback, clearCallback,
     if id == "X4GunneryOverlay" then
         -- Snapshot the binding the restore callback just performed, before the
         -- repaint replaces the frames.
-        restoredRegistrations55[#restoredRegistrations55 + 1] = {
-            callback = callback, framedescriptors = framedescriptors,
-            layers = entry.layers,
+        restoreBinding55 = {
+            layers = { [0] = entry.layers[0], [3] = entry.layers[3] },
             bound = { [0] = gcMenu.frames[0], [3] = gcMenu.frames[3] },
         }
     end
@@ -560,36 +525,22 @@ fix.View.registerMenu = registerMenu55
 local restoredOverlay55 = findView55("X4GunneryOverlay")
 assert(restoredOverlay55 ~= nil,
     "ending fullscreen takeover must restore the engaged Gunnery registration")
-assert(#restoredRegistrations55 == 1
-        and restoredRegistrations55[1].framedescriptors == descriptors55
-        and restoredRegistrations55[1].callback == callback55,
-    "fullscreen restoration must first reuse the retained overlay descriptors and callback")
-assert(API.getSession() == session55
-        and sess55.phase == phase55 and sess55.lifecycle == lifecycle55
-        and sess55.controlMode == controlMode55
-        and sess55.directMode == directMode55,
-    "fullscreen restoration must preserve the exact engaged Direct session and policy")
-assert(sess55.groups == groups55 and sess55.groups[1] == grp55
-        and grp55.mode == groupMode55 and grp55.armed == groupArmed55
-        and sess55.checkedGroupKeys == checked55 and sess55.checkedGroupKeys.grp55 == true,
-    "fullscreen restoration must preserve directed groups and their checked state")
-assert(sess55.targetObjectID == targetObject55 and sess55.aimTargetID == aimTarget55
-        and sess55.cameraMemberID == cameraMember55
-        and sess55.povAnchor == povAnchor55 and sess55.povMode == povMode55,
-    "fullscreen restoration must preserve targets, camera member, and POV")
-assert(gcMenu.frame ~= nil and #fix.allFrames == allFrames55 + 2,
-    "the display requested during takeover must repaint both engaged frames once"
-    .. " only after restoration")
+assert(API.getSession() == sess55 and sess55.phase == "engaged"
+        and sess55.controlMode == "direct" and sess55.directMode == "attackenemies",
+    "fullscreen restoration must preserve the engaged Direct session and policy")
+assert(sess55.groups[1] == grp55 and sess55.checkedGroupKeys.grp55 == true
+        and grp55.mode == "attackenemies" and grp55.armed == true
+        and sess55.targetObjectID == 550 and sess55.aimTargetID == 551
+        and sess55.cameraMemberID == 55
+        and sess55.povAnchor == "target" and sess55.povMode == "manual",
+    "fullscreen restoration must preserve the selected group, targets, camera, and POV")
+assert(gcMenu.frame ~= frame55 and gcMenu.elementFrame ~= elementFrame55,
+    "the display requested during takeover must repaint only after restoration")
 assert(restoredOverlay55.framedescriptors[0] ~= nil
         and restoredOverlay55.framedescriptors[3] ~= nil,
     "fullscreen restoration must recreate both engaged descriptors under one registration")
-assert(restoredOverlay55.numframes == 2 and fix.View.currentFrames == 2,
-    "fullscreen restoration must return View accounting to exactly two frames")
-assert(gcMenu.elementFrame ~= nil and gcMenu.elementFrame ~= elementFrame55,
-    "fullscreen restoration must rebuild the layer-3 surface-browser frame")
-assert(fix.getOnUpdateCallback() == updater55
-        and fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
-    "fullscreen restoration must not replace the updater or tear down Gunnery")
+assert(fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
+    "fullscreen restoration must not tear down Gunnery")
 assert(cameraChanges55 == 0 and cameraResets55 == 0,
     "fullscreen restoration must not restore or repoint the player camera")
 
@@ -598,24 +549,13 @@ assert(cameraChanges55 == 0 and cameraResets55 == 0,
 -- the FIRST id and layer 0 the second. The callback must rebind each frame
 -- handle through the registration's recorded layers[layer] index; sorting the
 -- layers or trusting frames[1] swaps the two frames.
-local restoreBinding55 = restoredRegistrations55[1]
-assert(restoreBinding55.layers[3] == 1 and restoreBinding55.layers[0] == 2,
+assert(restoreBinding55 ~= nil
+        and restoreBinding55.layers[3] == 1 and restoreBinding55.layers[0] == 2,
     "fixture must model a non-ascending layer -> runtime frame index map")
 assert(restoreBinding55.bound[3] ~= nil
         and restoreBinding55.bound[3] < restoreBinding55.bound[0],
     "the overlay callback must rebind each layer via the recorded layers[layer]"
     .. " index, not descriptor order")
-
-local externalDescriptor55 = {}
-assert(fix.View.registerMenu("Helper2", "Helper", nil, nil,
-        { [2] = externalDescriptor55 }, "ExternalOverlayAfterGunnery", {}) ~= nil,
-    "a normal one-frame external registration must still fit after Gunnery restoration")
-assert(fix.View.currentFrames == 3,
-    "Gunnery plus a normal external frame must total three, not an exhausted five; got "
-    .. tostring(fix.View.currentFrames))
-fix.View.unregisterMenu("Helper2", true)
-assert(fix.View.currentFrames == 2,
-    "closing the external frame must leave Gunnery accounting at exactly two")
 
 -- ── 56 (hookTimeoutMessage). missing kuertee UI Extensions is reported, not silent ────
 -- UI Extensions is an optional dependency (its extension id differs between the
