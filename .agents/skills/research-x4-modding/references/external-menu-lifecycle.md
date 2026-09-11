@@ -2,8 +2,8 @@
 
 - X4 version: 9.00
 - Research date: 2026-09-09
-- Project starting SHA: `921cdad21ecbdd25c9766fffc40f3e609469f5ef`
-- Scope: issue #117 research boundary only; no production behavior is proven by this record.
+- Scope: how a persistent custom-type overlay coexists with ordinary external
+  menus and with fullscreen menu takeovers.
 
 ### Helper clears by registered type, not by view name
 
@@ -74,9 +74,9 @@ remain untouched while the custom-type overlay survives underneath.
 - Source: `ui/addons/ego_interactmenu/menu_interactmenu.lua:342-344,3414-3435,7725-7750`;
   `ui/addons/ego_viewhelper/viewhelper.lua:58-70,191-227`;
   `ui/addons/ego_detailmonitorhelper/helper.lua:3120-3141,4115`
-- Live test: required. Shipped Lua does not define engine-side compositor or
-  hit-test ordering. Verify that InteractMenu is visibly/input-wise above the
-  Gunnery overlay and that clicks do not leak to Gunnery controls underneath.
+- Live test: yes — 2026-09-09; see the live-tested record below. Shipped Lua does
+  not define engine-side compositor or hit-test ordering, so ordering beyond the
+  tested vanilla InteractMenu case remains unproven.
 - Finding: ordinary InteractMenu uses Helper layer 2 and the default registered
   type `"Helper"`. A surviving custom-type Gunnery frame on a different layer
   remains in the shared View registry while InteractMenu is added. Closing
@@ -113,7 +113,10 @@ remain untouched while the custom-type overlay survives underneath.
   `ui/addons/ego_detailmonitor/menu_platformundock.lua:83`;
   `ui/addons/ego_detailmonitor/menu_map.lua:6383,6509,6595-6617`;
   `ui/addons/ego_helptext/helptext.lua:532`
-- Live test: required — confirm the behavior during real overlay/fullscreen menu transitions.
+- Live test: partial — 2026-09-09 live runs confirmed the discriminator
+  classified normal `InteractMenu` as an overlay and normal Map as a takeover.
+  The general name-independent API semantic is still an inference: the tested
+  cases do not establish behavior for arbitrary menus.
 - Finding: bounded by shipped call patterns and FFI signatures,
   `IsFullscreenMenuDisplayed(true, "")` is the intended name-independent query
   for whether any displayed tracked menu is classified fullscreen;
@@ -133,11 +136,10 @@ remain untouched while the custom-type overlay survives underneath.
 - Source: `ui/addons/ego_detailmonitorhelper/helper.lua:1423-1436,1907`;
   `ui/addons/ego_detailmonitor/menu_map.lua:1051-1055,6595-6617`;
   `ui/addons/ego_viewhelper/viewhelper.lua:58-70,101-168`
-- Live test: required. Polling cannot run between `TrackMenu` and synchronous Map
-  frame creation. Verify that takeover hiding/restoration has no visible one-frame
-  overlap or input leak, and verify the first safe render tick after takeover
-  closure. Also verify camera continuity; the view-registry path itself contains
-  no Gunnery camera operation, but engine composition is runtime behavior.
+- Live test: yes — 2026-09-09 for normal Map takeover and restore, including
+  camera and session continuity. Polling cannot run between `TrackMenu` and
+  synchronous Map frame creation; no visible overlap or input leak was observed
+  in the tested Map case. Other fullscreen menus are untested.
 - Finding: fullscreen tracking is established before a menu's `onShowMenu` builds
   its frames, and removal occurs during Helper close. No shipped Lua callback was
   found that announces a fullscreen-classification transition; shipped code
@@ -147,13 +149,31 @@ remain untouched while the custom-type overlay survives underneath.
   entry by ID without invoking Gunnery's clear callback. The Lua frame handle and
   session can therefore become stale relative to the View registry.
 
-### Project lifecycle boundary for issue #117
+### Live-tested external-menu coexistence
 
-This section is a project design consequence of the evidence above, not an X4
-engine fact by itself.
+- X4: 9.00
+- Status: live-tested
+- Source: owner-captured X4 9.00 live runs, repository SHAs
+  `aa5e54a9b26b5d08919e8e6dfd3856f7cd081f8e` and
+  `1bbd33e9d8e531b99a0223cb88c2849a7f6774a4`
+- Live test: yes — 2026-09-09 for the `aa5e54a9` run; the later integrated run
+  reproduced the same `InteractMenu`, Map takeover/restore, and camera/session
+  results, and the prior View frame-limit failure did not recur.
+- Finding: with a Gunnery session engaged behind a persistent custom-type
+  overlay, opening ordinary world `InteractMenu` left the session, target,
+  selected groups, engagement mode, POV, and camera intact; the overlay was not
+  hidden, rebuilt, or torn down, and closing `InteractMenu` required no Gunnery
+  reopen. Normal fullscreen Map suspended only the Gunnery overlay's visibility
+  and restored the same session and view afterwards. Observed for both
+  physical-console entry and Map entry, and for both Turret POV and Target POV.
+- Limit: this proves the vanilla `InteractMenu` and normal Map cases. It is not a
+  universal guarantee of compositor or input behavior for arbitrary third-party
+  menus, which are handled conservatively by fullscreen classification.
 
-- An already-engaged Gunnery session should own a persistent custom-type overlay
-  separately from ordinary Helper-menu ownership.
+### Implementation consequences and invariants
+
+- An engaged Gunnery session owns a persistent custom-type overlay separately
+  from ordinary Helper-menu ownership.
 - Opening an ordinary external overlay must not end the session, hide/rebuild the
   Gunnery overlay, or restore the player camera merely because the menu name is
   unknown.
@@ -161,25 +181,19 @@ engine fact by itself.
   only the Gunnery overlay while preserving the session, target, selected groups,
   engagement mode, POV, and camera, then restore visibility when no fullscreen
   takeover remains.
-- Current Map-named lifecycle states/branches can be generalized to takeover
-  visibility. Map `on_menu_cleanup` and reopen-by-name are not the generic
-  lifecycle boundary once fullscreen polling is live-proven.
-- `cleanup()` should remain an unexpected-loss/orphan-safety path, not the normal
+- Takeover lifecycle is driven by fullscreen classification, not by menu name;
+  Map-named states and reopen-by-name are not the lifecycle boundary.
+- `cleanup()` remains an unexpected-loss/orphan-safety path, not the normal
   detector for legitimate external menus.
-- Physical-console pre-open handoff safety remains separate: issue #118's
-  incomplete handoff can still be cancelled if another menu intervenes before
-  Gunnery is fully engaged.
-- Issue #116 world left-click target synchronization and
-  `CloseMenusUponMouseClick()` behavior remain preserved requirements.
+- Physical-console pre-open handoff safety is separate: an incomplete handoff can
+  still be cancelled if another menu intervenes before Gunnery is fully engaged.
+- World left-click target synchronization and `CloseMenusUponMouseClick()`
+  behavior remain preserved requirements.
 
-### Remaining live acceptance questions
+### Remaining limits
 
-1. With Gunnery engaged in a custom-type persistent overlay, normal world
-   InteractMenu must render and receive input above Gunnery without changing the
-   Gunnery camera, hiding panels, ending the session, or rebuilding on close.
-2. A fullscreen takeover such as normal Map must cause only overlay visibility to
-   suspend and restore, with no visible transition artifact, input leak, session
-   recreation, target/group/mode/POV change, or camera restoration.
-
-Until those are observed in X4, classify the architecture as source-supported,
-not live-tested.
+- No live guarantee exists for arbitrary third-party menus; a menu that leaves
+  Helper's default fullscreen classification is conservatively treated as a
+  takeover.
+- The general `IsFullscreenMenuDisplayed(true, "")` semantic remains an
+  inference, proven only for the tested `InteractMenu` and normal Map cases.
