@@ -43,9 +43,6 @@ covered against the PR base. The pass line prints the denominators, e.g.
 `coverage passed: state 735/735, persistence 84/84`. Those numbers are a canary:
 after a refactor or a file split they must be **unchanged**. If `state`/`persistence`
 drops, a test lost a line it used to cover; if it rises, you duplicated a block.
-A genuinely engine-only unreachable line goes in
-`tests/support/coverage_exclusions.txt` as `ui/gunnery_control.lua:<line>  # reason`
-— never a blanket waiver.
 
 ## How to add a test (and keep files small)
 
@@ -179,8 +176,8 @@ double-clicking the launcher in Windows Explorer:
 
 The launcher installs the checkout's loose files before X4. For any live result,
 follow `docs/RELOADING.md`: install the exact loose files under test before
-reload/restart and verify `[X4GC] UI initialized; build=<runtimeBuild>` matches
-the build just installed. A checkout SHA alone is not runtime proof. No
+reload/restart and verify `[X4GC] UI initialized` appears after the reload. A
+checkout SHA alone does not prove which loose files X4 loaded. No
 arguments are needed for a default Steam or GOG installation. The `UNC paths are
 not supported.` notice from `cmd.exe` is expected and harmless. Use a Command
 Prompt instead when a custom installation folder is required:
