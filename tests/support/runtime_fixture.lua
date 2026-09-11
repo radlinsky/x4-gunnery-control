@@ -655,7 +655,6 @@ function M.load()
         -- tables (reference — mutations visible both ways)
         pendingCallbacks  = pendingCallbacks,
         registeredEvents  = registeredEvents,
-        registeredUIEvents = registeredUIEvents,
         uiTriggeredEvents = uiTriggeredEvents,
         allFrames         = allFrames,
         -- scalars that tests only READ (not write) can be proxied via __index
