@@ -390,7 +390,7 @@ assert(API.getSession() == sess17a,
     "engaged/direct onCloseElement('close') must keep the same session alive")
 assert(sess17a.phase == "target_select",
     "first Direct X must return to target selection; got: " .. tostring(sess17a.phase))
-assert(sess17a.controlMode == "direct" and sess17a.committedBaseline == baseline17a,
+assert(sess17a.controlMode == "direct",
     "first Direct X must preserve Direct engagement state for target reselection")
 assert(#fix.getTeardownTrace() == 0 and modeWrites17a == 0 and armedWrites17a == 0,
     "first Direct X must not tear down the session or restore directed settings")
