@@ -190,39 +190,28 @@ do
 end
 
 do
-    local fix = engaged()
+    local fix, _, session = engaged()
     local now = 0
     GetCurRealTime = function() return now end
     fix.gcMenu.display()
     fix.setFullscreenMenuDisplayed(true)
     fix.invokeOnUpdate()
     fix.View.maxFrames = 0
-    local restoreCalls = 0
-    local registerMenu = fix.View.registerMenu
-    fix.View.registerMenu = function(id, ...)
-        if id == "X4GunneryOverlay" then restoreCalls = restoreCalls + 1 end
-        return registerMenu(id, ...)
-    end
     fix.setFullscreenMenuDisplayed(false)
     fix.invokeOnUpdate()
     fix.invokeOnUpdate()
     fix.invokeOnUpdate()
-    local restoreFailureLogs = 0
-    for _, line in ipairs(fix.getCapturedLog()) do
-        if string.find(line, "engaged overlay registration could not be restored", 1, true) then
-            restoreFailureLogs = restoreFailureLogs + 1
-        end
-    end
     assert(overlayEntry(fix) == nil
-            and not fix.logContains("engaged overlay restored after fullscreen takeover")
-            and restoreCalls == 1 and restoreFailureLogs == 1,
-        "a sustained capacity shortage must throttle fullscreen restoration retries")
+            and fix.API.getSession() == session and session.phase == "engaged"
+            and session.controlMode == "auto" and fix.getOnUpdateCallback() ~= nil,
+        "immediate retries must keep the engaged session usable without restoring early")
     fix.View.maxFrames = 5
     now = now + 0.5
     fix.invokeOnUpdate()
     assert(overlayEntry(fix) ~= nil
-            and fix.logContains("engaged overlay restored after fullscreen takeover"),
-        "a refused fullscreen restoration must retain its descriptor and retry")
+            and fix.API.getSession() == session and session.phase == "engaged"
+            and session.controlMode == "auto",
+        "a refused fullscreen restoration must retry for the same engaged session")
 end
 
 do
