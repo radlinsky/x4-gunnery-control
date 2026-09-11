@@ -196,10 +196,7 @@ if grep -Fq 'session.phase == "direct"' "$main"; then
   echo 'residual session.phase == "direct" found in main file' >&2
   exit 1
 fi
-# Shape, not value: a dated build id must exist so a debug log identifies the
-# build. Pinning the literal only forced a test edit on every bump.
-grep -Eq 'local runtimeBuild = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[^"]+"' "$main"
-grep -Fq 'UI initialized; build=" .. runtimeBuild' "$main"
+grep -Fq 'log("UI initialized")' "$main"
 
 for removed_log in \
   'watchdog state changed' \

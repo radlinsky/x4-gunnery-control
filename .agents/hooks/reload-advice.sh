@@ -72,7 +72,7 @@ render_advice() {
     restart)
       echo "RELOAD: **full restart**. Exit X4 and run scripts/launch-x4-dev.bat (it installs on its own). A reload cannot safely apply all changed X4 files: ${paths}." ;;
     ui)
-      echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> use the Test Lab button for the phase under test -> **Reload UI**, and confirm the log shows the runtimeBuild id you installed. THREE Test Lab buttons exist: console action row / target browser action row / engaged panel. A UI reload wipes Lua state. Changed: ${paths}." ;;
+      echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> use the Test Lab button for the phase under test -> **Reload UI**, and confirm the log shows UI initialized. THREE Test Lab buttons exist: console action row / target browser action row / engaged panel. A UI reload wipes Lua state. Changed: ${paths}." ;;
     md)
       echo "RELOAD: run scripts/install-dev.sh \"<game path>\" yourself, then tell the owner: sit at a gunnery console -> use the Test Lab button for the phase under test -> **Reload MD**, then trigger the changed cue again. THREE Test Lab buttons exist: console action row / target browser action row / engaged panel. refreshmd keeps cue variables and does not re-run completed cues. Changed: ${paths}." ;;
     ai)

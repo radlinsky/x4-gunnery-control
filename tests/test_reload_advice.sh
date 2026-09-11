@@ -47,7 +47,7 @@ expect_contains "aiscripts/example.xml" "Reload AI"
 # owner asked for these steps by name after being told just the button.
 expect_contains "ui/gunnery_control.lua" "sit at a gunnery console"
 expect_contains "ui/gunnery_control.lua" "Test Lab"
-expect_contains "ui/gunnery_control.lua" "runtimeBuild"
+expect_contains "ui/gunnery_control.lua" "UI initialized"
 expect_contains "md/x4_gunnery_control.xml" "sit at a gunnery console"
 
 # And "the Test Lab button" is still ambiguous: there are three, on the console

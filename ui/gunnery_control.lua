@@ -174,7 +174,6 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-09-10-issue110-close-back-fix"
 -- Layer 0 is practical, not reserved; View layers remain globally shared.
 local engagedOverlayLayer = 0
 -- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
@@ -2475,49 +2474,12 @@ local function updateAimTarget()
             eligible, root = isEligibleEngagementTarget(selected)
             isenemy, ishostile = componentData(root, "isenemy", "ishostile")
         end
-        log("event=direct_world_sync action=observe"
-            .. " retainedAimTargetID=" .. tostring(prev)
-            .. " selectedSoftTargetID=" .. tostring(selected)
-            .. " selectedSoftTargetConnection=" .. str(selection.softtargetConnectionName)
-            .. " selectedRootID=" .. tostring(root)
-            .. " eligible=" .. tostring(eligible)
-            .. " isenemy=" .. tostring(isenemy)
-            .. " ishostile=" .. tostring(ishostile)
-            .. " directMode=" .. tostring(session.directMode)
-            .. " povAnchor=" .. tostring(session.povAnchor)
-            .. " povMode=" .. tostring(session.povMode)
-            .. " origin=" .. tostring(session.origin))
-
         local engageAttempted = eligible and (isenemy or ishostile)
         if engageAttempted and engageTarget(selected) then
-            local resultingSoftTarget = C.GetSofttarget2().softtargetID
-            log("event=direct_world_sync action=accept"
-                .. " selectedComponentID=" .. tostring(selected)
-                .. " selectedRootID=" .. tostring(root)
-                .. " aimTargetID=" .. tostring(session.aimTargetID)
-                .. " targetObjectID=" .. tostring(session.targetObjectID)
-                .. " softTargetID=" .. tostring(resultingSoftTarget)
-                .. " directMode=" .. tostring(session.directMode)
-                .. " povAnchor=" .. tostring(session.povAnchor)
-                .. " povMode=" .. tostring(session.povMode)
-                .. " cameraTargetID=" .. tostring(C.GetExternalTargetViewComponent()))
             return
         end
 
         restoreSofttarget(prev, "")
-        local resultingSoftTarget = C.GetSofttarget2().softtargetID
-        log("event=direct_world_sync action=restore"
-            .. " selectedSoftTargetID=" .. tostring(selected)
-            .. " selectedRootID=" .. tostring(root)
-            .. " eligible=" .. tostring(eligible)
-            .. " isenemy=" .. tostring(isenemy)
-            .. " ishostile=" .. tostring(ishostile)
-            .. " engageAttempted=" .. tostring(engageAttempted)
-            .. " retainedAimTargetID=" .. tostring(prev)
-            .. " softTargetID=" .. tostring(resultingSoftTarget)
-            .. " directMode=" .. tostring(session.directMode)
-            .. " povAnchor=" .. tostring(session.povAnchor)
-            .. " povMode=" .. tostring(session.povMode))
         return
     end
     if not isNullID(prev) and C.IsComponentOperational(id(prev)) then
@@ -3483,17 +3445,6 @@ function menu.onCloseElement(dueToClose)
     end
     if session and not State.isOwned(session) then return end
     if session and session.phase == "engaged" then
-        local closeSoftTarget = C.GetSofttarget2()
-        log("event=direct_world_sync action=close"
-            .. " due=" .. tostring(dueToClose)
-            .. " controlMode=" .. tostring(session.controlMode)
-            .. " aimTargetID=" .. tostring(session.aimTargetID)
-            .. " softTargetID=" .. tostring(closeSoftTarget.softtargetID)
-            .. " softTargetConnection=" .. str(closeSoftTarget.softtargetConnectionName)
-            .. " directMode=" .. tostring(session.directMode)
-            .. " povAnchor=" .. tostring(session.povAnchor)
-            .. " povMode=" .. tostring(session.povMode)
-            .. " origin=" .. tostring(session.origin))
         -- Target brackets call CloseMenusUponMouseClick() as they change the
         -- soft target. Re-register the transparent/compact frame for that
         -- automatic close; an ordinary Esc follows the mode-specific path.
@@ -3575,7 +3526,7 @@ redirectDockedMenu = function()
     -- Deferring leaves the DockedMenu render pass before anything moves the player.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         redirectPending = false
-        -- #118: leave the gunner control position through vanilla's Get Up path.
+        -- Leave the gunner control position through vanilla's Get Up path.
         -- X4's playerGetUp event confirms completion and starts the handoff.
         if isInGunnerChair() and sameID(playerShip(), ship) and not session then
             if C.GetUp() then physicalIngressPendingShip = ship end
@@ -3813,7 +3764,7 @@ local function init()
             startPhysicalIngress(ship)
             return
         end
-        -- Onboard sessions are deliberately not seat-bound (#118). The physical
+        -- Onboard sessions are deliberately not seat-bound. The physical
         -- launcher can deliver playerGetUp around the same release that creates
         -- the onboard session, and a normal Map-origin onboard session is also
         -- valid while standing. Only chair-origin sessions use get-up as teardown.
@@ -3992,6 +3943,6 @@ local function init()
         persistence.request(true)
     end)
     sessionWatchdog()
-    log("UI initialized; build=" .. runtimeBuild)
+    log("UI initialized")
 end
 init()
