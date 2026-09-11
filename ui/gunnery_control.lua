@@ -1253,6 +1253,20 @@ local function startTargetSelection(groups)
     -- keep the browser open instead of bouncing back to the console.
     local cameraOptions = { onFailure = function() log("target selection continues without a camera") end }
     if not enterCamera(member, cameraOptions) then State.returnToConsole(session); return false end
+    -- The restore above left unchecked groups committed in a Direct engine mode
+    -- attacking with no target chosen. Hold them in their staged mode until
+    -- engageTarget applies staged; committedBaseline still restores them, and
+    -- persisting keeps that baseline in any save taken meanwhile.
+    local held = false
+    for _, snapshot in ipairs(session.committedBaseline or {}) do
+        local g = State.isDirectedMode(snapshot.mode) and sameID(snapshot.shipID, session.shipID)
+            and findSnapshotGroup(snapshot)
+        local s = g and session.staged and session.staged[g.key]
+        if s and State.canMutate(g) and not session.checkedGroupKeys[g.key] then
+            setMode(g, s.mode); held = true
+        end
+    end
+    if held then persistSession() end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch) and session.phase == "target_select" then menu.display() end
