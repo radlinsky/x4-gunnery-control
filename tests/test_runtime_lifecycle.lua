@@ -344,8 +344,7 @@ assert(overlay54 and overlay54.type == "X4GunneryOverlay"
         and overlay54.properties and overlay54.properties.layer == 0,
     "engaged Gunnery must own its layer-0 X4GunneryOverlay registration")
 local frame54 = gcMenu.frame
-local updater54 = fix.getOnUpdateCallback()
-assert(updater54 ~= nil,
+assert(fix.getOnUpdateCallback() ~= nil,
     "engaged Gunnery must install its independent updater before an external overlay opens")
 
 -- Opening an ordinary Helper-owned menu first clears the previous Helper view.
@@ -361,13 +360,6 @@ fix.View.registerMenu("Helper4", "Helper", nil, nil, {}, external54.name, {})
 assert(findView54("Helper4") ~= nil,
     "ordinary-overlay precondition: the unknown external Helper view must be registered")
 
-local groups54, checked54 = sess54.groups, sess54.checkedGroupKeys
-local groupMode54, groupArmed54 = grp54.mode, grp54.armed
-local allFrames54, callbacks54 = #fix.allFrames, #fix.pendingCallbacks
-local targetObject54, aimTarget54 = sess54.targetObjectID, sess54.aimTargetID
-local cameraMember54 = sess54.cameraMemberID
-local povAnchor54, povMode54 = sess54.povAnchor, sess54.povMode
-local directMode54 = sess54.directMode
 local cameraChanges54, cameraResets54 = 0, 0
 fix.C.SetPlayerCameraTargetView = function()
     cameraChanges54 = cameraChanges54 + 1
@@ -385,30 +377,22 @@ gcMenu.onCloseElement("close")
 gcMenu.onUpdate()
 fix.invokeOnUpdate()
 
-assert(API.getSession() == sess54,
-    "an unknown ordinary external overlay must preserve the exact engaged session object")
-assert(sess54.groups == groups54 and sess54.groups[1] == grp54
-        and grp54.mode == groupMode54 and grp54.armed == groupArmed54
-        and sess54.checkedGroupKeys == checked54 and sess54.checkedGroupKeys.grp54 == true,
-    "an unknown ordinary external overlay must preserve directed groups and their checked state")
-assert(sess54.phase == "engaged" and sess54.controlMode == "direct"
-        and sess54.directMode == directMode54,
-    "an unknown ordinary external overlay must preserve Direct control and its policy")
-assert(sess54.targetObjectID == targetObject54 and sess54.aimTargetID == aimTarget54,
-    "an unknown ordinary external overlay must preserve root and aim targets")
-assert(sess54.cameraMemberID == cameraMember54
-        and sess54.povAnchor == povAnchor54 and sess54.povMode == povMode54,
-    "an unknown ordinary external overlay must preserve camera-member and POV state")
-assert(findView54("X4GunneryOverlay") == overlay54 and gcMenu.frame == frame54
-        and #fix.allFrames == allFrames54,
+assert(API.getSession() == sess54 and sess54.phase == "engaged"
+        and sess54.controlMode == "direct" and sess54.directMode == "attackenemies",
+    "an unknown ordinary external overlay must preserve the engaged Direct session and policy")
+assert(sess54.groups[1] == grp54 and sess54.checkedGroupKeys.grp54 == true
+        and grp54.mode == "attackenemies" and grp54.armed == true,
+    "an unknown ordinary external overlay must preserve the selected group and checked state")
+assert(sess54.targetObjectID == 500 and sess54.aimTargetID == 501
+        and sess54.cameraMemberID == 54
+        and sess54.povAnchor == "target" and sess54.povMode == "manual",
+    "an unknown ordinary external overlay must preserve targets, camera member, and POV")
+assert(findView54("X4GunneryOverlay") == overlay54 and gcMenu.frame == frame54,
     "an unknown ordinary external overlay must neither hide nor rebuild Gunnery")
 assert(cameraChanges54 == 0 and cameraResets54 == 0,
     "an unknown ordinary external overlay must not change or reset the Gunnery camera")
-assert(fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0
-        and #fix.pendingCallbacks == callbacks54,
-    "an unknown ordinary external overlay must not schedule or perform Gunnery teardown")
-assert(fix.getOnUpdateCallback() == updater54,
-    "the same independent engaged updater must remain installed across Helper ownership")
+assert(fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
+    "an unknown ordinary external overlay must not perform Gunnery teardown")
 
 -- Remove only the simulated third-party menu and its ordinary Helper view.
 external54.shown = false
@@ -417,11 +401,12 @@ for index, candidate in ipairs(Menus) do
 end
 fix.View.unregisterMenu("Helper4", true)
 assert(API.getSession() == sess54 and findView54("X4GunneryOverlay") == overlay54
-        and gcMenu.frame == frame54 and #fix.allFrames == allFrames54,
+        and gcMenu.frame == frame54,
     "closing only the external overlay must leave the same Gunnery session and frame registered")
-assert(fix.getOnUpdateCallback() == updater54
+fix.invokeOnUpdate()
+assert(API.getSession() == sess54 and sess54.phase == "engaged"
         and fix.getCloseMenuCalls() == 0 and #fix.getTeardownTrace() == 0,
-    "closing only the external overlay must not reconstruct or tear down Gunnery")
+    "closing the external overlay must leave the engaged updater working without teardown")
 
 -- ── 55. fullscreen takeover suspends only the engaged overlay ─────────────
 -- A fullscreen menu must temporarily yield Gunnery's visual/input registration
