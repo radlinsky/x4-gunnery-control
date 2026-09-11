@@ -43,9 +43,6 @@ covered against the PR base. The pass line prints the denominators, e.g.
 `coverage passed: state 735/735, persistence 84/84`. Those numbers are a canary:
 after a refactor or a file split they must be **unchanged**. If `state`/`persistence`
 drops, a test lost a line it used to cover; if it rises, you duplicated a block.
-A genuinely engine-only unreachable line goes in
-`tests/support/coverage_exclusions.txt` as `ui/gunnery_control.lua:<line>  # reason`
-— never a blanket waiver.
 
 ## How to add a test (and keep files small)
 

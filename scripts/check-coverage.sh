@@ -68,7 +68,6 @@ if [[ -n "$coverage_base" ]]; then
   control_added=$coverage_dir/control-added
   control_required=$coverage_dir/control-required
   control_actual=$coverage_dir/control-actual
-  control_excluded=$coverage_dir/control-excluded
   control_missing=$coverage_dir/control-missing
   executable_lines ui/gunnery_control.lua >"$control_expected"
   git diff --unified=0 "$coverage_base" -- ui/gunnery_control.lua \
@@ -76,36 +75,17 @@ if [[ -n "$coverage_base" ]]; then
     | awk '{ count = ($2 == "" ? 1 : $2); for (line = $1; line < $1 + count; line++) print line }' \
     | sort -u >"$control_added"
   comm -12 "$control_expected" "$control_added" >"$control_required"
-  # An exclusion is deliberately line-specific. It must name a required line
-  # and give a reason, so a refactor cannot leave an unreviewed broad waiver.
-  awk '
-    /^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-    /^ui\/gunnery_control\.lua:[0-9]+[[:space:]]+#[[:space:]]+.+$/ {
-      split($1, key, ":"); print key[2]; next
-    }
-    { print "invalid coverage exclusion: " $0 > "/dev/stderr"; exit 1 }
-  ' tests/support/coverage_exclusions.txt | sort -u >"$control_excluded"
-  if comm -23 "$control_excluded" "$control_required" | grep -q .; then
-    echo "coverage exclusion is stale or not an added executable control line" >&2
-    exit 1
-  fi
-  comm -23 "$control_required" "$control_excluded" >"$control_required.remaining"
   covered_lines ui/gunnery_control.lua >"$control_actual"
-  comm -23 "$control_required.remaining" "$control_actual" >"$control_missing"
+  comm -23 "$control_required" "$control_actual" >"$control_missing"
   if [[ -s "$control_missing" ]]; then
     echo "coverage missing changed executable control lines: $(paste -sd, "$control_missing")" >&2
     exit 1
   fi
-  control_count=$(wc -l <"$control_required.remaining")
-  control_exclusion_count=$(wc -l <"$control_excluded")
+  control_count=$(wc -l <"$control_required")
 else
   control_count=0
-  control_exclusion_count=0
 fi
 
 state_count=$(executable_lines ui/gunnery_state.lua | wc -l)
 persistence_count=$(executable_lines ui/gunnery_persistence.lua | wc -l)
 echo "coverage passed: state ${state_count}/${state_count}, persistence ${persistence_count}/${persistence_count}, changed control ${control_count}/${control_count} executable lines"
-if [[ "$control_exclusion_count" -gt 0 ]]; then
-  echo "coverage note: ${control_exclusion_count} documented engine-only changed-control exclusion(s)" >&2
-fi

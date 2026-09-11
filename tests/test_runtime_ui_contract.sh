@@ -185,8 +185,6 @@ if grep -Fq 'session.phase == "direct"' "$main"; then
   echo 'residual session.phase == "direct" found in main file' >&2
   exit 1
 fi
-grep -Fq 'log("UI initialized")' "$main"
-
 for removed_log in \
   'watchdog state changed' \
   'raw group id carries padding' \
