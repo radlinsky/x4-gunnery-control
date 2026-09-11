@@ -459,8 +459,8 @@ Test Lab.
 
 Install the exact loose files under test before reload/restart, then follow
 **[docs/RELOADING.md](docs/RELOADING.md)** as the single source of truth.
-Verify the resulting `[X4GC] UI initialized; build=<runtimeBuild>` line matches
-the build just installed; a checkout SHA alone is not runtime proof.
+Verify the resulting `[X4GC] UI initialized` line appears after the reload; a
+checkout SHA alone does not prove which loose files X4 loaded.
 
 On Windows, the launcher (`launch-x4-dev.bat`) runs `install-dev.sh`
 automatically before starting X4, so you do not need to run it by hand first
@@ -825,7 +825,7 @@ the in-game camera, lifecycle, target-preservation, or live-fire checks.
 |---|---|
 | `validate.sh` says a check was skipped | Install the named Lua or ShellCheck dependency and run it again. |
 | `install-dev.sh` rejects the game path | Point it at the directory containing `X4.exe`/`X4` and `extensions`, not at the extension folder. |
-| Changes do not appear in X4 | Confirm the exact loose files were installed, follow `docs/RELOADING.md`, and verify `[X4GC] UI initialized; build=<runtimeBuild>` matches the installed build. |
+| Changes do not appear in X4 | Confirm the exact loose files were installed, follow `docs/RELOADING.md`, and verify `[X4GC] UI initialized` appears after the reload. |
 | `launch-x4-dev.bat` cannot find X4 | Pass the installation folder or full `X4.exe` path, or set `X4GC_GAME_ROOT` for a custom Steam library. |
 | No development log can be found | Use the directory printed by `launch-x4-dev.bat`; `debug.log` lands in X4's userdata folder under `Documents\Egosoft\X4\<numeric-id>\`. Confirm `-logfile debug.log` is present and unquoted: X4 writes nothing at all when it is missing or quoted. A stale `INVALID.FILENAME` beside it means an absolute path was passed instead of a bare filename. Remember that each launch truncates the previous log. |
 | Gunnery Control does not open | Confirm UI Extensions 9.00+, follow its current Protected UI Mode guidance, fully restart X4, and inspect `[X4GC]`/Lua errors. |

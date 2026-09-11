@@ -179,8 +179,8 @@ double-clicking the launcher in Windows Explorer:
 
 The launcher installs the checkout's loose files before X4. For any live result,
 follow `docs/RELOADING.md`: install the exact loose files under test before
-reload/restart and verify `[X4GC] UI initialized; build=<runtimeBuild>` matches
-the build just installed. A checkout SHA alone is not runtime proof. No
+reload/restart and verify `[X4GC] UI initialized` appears after the reload. A
+checkout SHA alone does not prove which loose files X4 loaded. No
 arguments are needed for a default Steam or GOG installation. The `UNC paths are
 not supported.` notice from `cmd.exe` is expected and harmless. Use a Command
 Prompt instead when a custom installation folder is required:
