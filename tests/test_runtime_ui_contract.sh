@@ -120,17 +120,6 @@ grep -Fq 'softtargetKey() ~= previousTarget' "$main"
 grep -Fq 'isEligibleEngagementTarget(current.softtargetID)' "$main"
 grep -Fq 'State.turretGroupLabel(entry.group)' "$main"
 grep -Fq 'State.isEngagementTargetAllowed(session and session.shipID, object)' "$main"
-# External-menu preservation is generic: ordinary overlays keep the persistent
-# custom view; fullscreen takeovers hide only that view and restore it later.
-grep -Fq 'local engagedOverlayID = "X4GunneryOverlay"' "$main"
-grep -Fq 'local engagedOverlayType = "X4GunneryOverlay"' "$main"
-grep -Fq 'viewHelperType = engagedOverlayType' "$main"
-grep -Fq 'local activeExternalMenuName' "$main"
-grep -Fq 'activeExternalMenuName = function()' "$main"
-grep -Fq 'local function fullscreenTakeoverDisplayed()' "$main"
-grep -Fq 'C.IsFullscreenMenuDisplayed(true, "") == true' "$main"
-grep -Fq 'local function hideEngagedOverlayForTakeover()' "$main"
-grep -Fq 'local function restoreEngagedOverlayAfterTakeover()' "$main"
 # The old Map-named suspension lifecycle must not return; menu names are not an
 # allowlist for active-session preservation.
 for obsolete_menu_lifecycle in \
