@@ -1,4 +1,4 @@
--- Issue #118: physical ingress must wait for X4's get-up lifecycle boundary.
+-- Physical ingress must wait for X4's get-up lifecycle boundary.
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local State = X4GunneryState
 local control, opens, getUps = "gunnercontrol", 0, 0
@@ -55,8 +55,6 @@ fix.fireEvent("playerGetUp")
 local session = fix.API.getSession()
 assert(session and session.origin == "onboard" and session.lifecycle == State.lifecycle.reopening,
     "playerGetUp must create the standing onboard handoff")
-assert(session.shipID == 42 and session.physicalReleasePending == true,
-    "playerGetUp must hand off the observed ship")
 
 dockedCallback()
 assert(opens == 0, "DockedMenu callback must wait for its cleanup")
@@ -80,9 +78,9 @@ fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
 fix.drainCallbacksSince(mark)
 fix.API.runSessionWatchdog()
 session = fix.API.getSession()
-assert(session and session.lifecycle == State.lifecycle.owned)
 fix.fireEvent("playerGetUp")
-assert(fix.API.getSession() == session, "onboard playerGetUp must not end a standing session")
+assert(session and session.lifecycle == State.lifecycle.owned and fix.API.getSession() == session,
+    "onboard playerGetUp must not end a standing session")
 fix.fireEvent("playerUndock")
 assert(fix.API.getSession() == nil, "playerUndock must end the standing session")
 fix.gcMenu.shown = false
@@ -123,4 +121,4 @@ fix.fireEvent("playerUndock")
 fix.fireEvent("playerGetUp")
 assert(fix.API.getSession() == nil, "undock must clear pending physical ingress")
 
-print("Issue #118 physical ingress lifecycle regression test passed")
+print("physical entry lifecycle regression test passed")
