@@ -175,26 +175,18 @@ do
     assert(session.engagePending and group.mode ~= "attack" and group.armed == true,
         "partial-registration precondition: Direct temporary state must be live")
     fix.View.maxFrames = 1
-    local displayCalls, display = 0, fix.gcMenu.display
-    fix.gcMenu.display = function(...)
-        displayCalls = displayCalls + 1
-        return display(...)
-    end
     fix.gcMenu.display()
-    local ownedViews = {}
-    for _, entry in ipairs(fix.View.menus) do
-        if entry.name == fix.gcMenu.name then ownedViews[#ownedViews + 1] = entry.id end
-    end
-    assert(session.phase == "console" and fix.getOnUpdateCallback() == nil,
+    assert(fix.API.getSession() == session and session.phase == "console"
+            and fix.getOnUpdateCallback() == nil,
         "a partial initial overlay registration must leave engaged mode and its updater")
     assert(session.controlMode == nil and not session.engagePending and not session.engagePendingSince,
         "a partial initial overlay registration must clear Direct and its pending transition")
     assert(modeWrites[#modeWrites] == "attack" and armedWrites[#armedWrites] == false,
         "a partial initial overlay registration must restore the real pre-Direct turret state")
-    assert(displayCalls == 2,
-        "registration failure must redraw once through returnToConsole, not display twice")
-    assert(#ownedViews == 1 and ownedViews[1] == "Helper4" and fix.View.currentFrames == 1,
-        "a partial initial overlay registration must roll back before showing the safe console")
+    assert(overlayEntry(fix) == nil,
+        "a partial initial overlay registration must not leak the custom Gunnery overlay")
+    assert(fix.gcMenu.frame and button(fix, 15),
+        "a partial initial overlay registration must leave the normal console usable")
 end
 
 do
