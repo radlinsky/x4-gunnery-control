@@ -29,8 +29,8 @@ Read specialized guidance only when needed:
 - [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for reload/restart
   decisions.
 
-Use `research-x4-modding` rather than guessing for X4 API, MD, AI, schema, macro,
-or shipped-behavior claims.
+For X4 API, MD, AI, schema, macro, or shipped-behavior claims, use
+`research-x4-modding` rather than guessing.
 
 ## 1. Define the proof first
 
