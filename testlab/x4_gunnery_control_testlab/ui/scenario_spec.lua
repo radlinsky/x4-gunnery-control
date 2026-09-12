@@ -1,11 +1,7 @@
 -- Test Lab scenario spec: the fixture the next live test needs.
 --
 -- THIS FILE IS AGENT-AUTHORED INPUT. Keep it plain: literal fields only, no
--- logic and no requires. Ordinary live fixtures should change this file only.
--- Commit and push each PR-specific fixture with the work that used it so the
--- commit preserves the exact live-test setup.
--- Keep the repository copy disabled; scripts/launch-x4-test-lab-dev.bat enables
--- the installed copy when launching the development Test Lab.
+-- logic and no requires.
 --
 -- Fields
 --   id        string   Change when fixture meaning changes.
@@ -57,8 +53,6 @@
 -- Issue #151 C4: live-test the five newly supported rank-2 turret macros on
 -- two sparse remote shooters. Shooter A is selected automatically by its
 -- exact single-turret macro; FIRED records attribute shots to weapon macros.
---
--- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
     id      = "issue-151-endpoint-count-rank2-gorgon-live-r2",
