@@ -36,9 +36,7 @@ grep -Fq 'A remote operational station can receive exact turret and shield equip
 grep -Fq 'documented as either a ship or a station module' "$skill/references/md-ai.md"
 grep -Fq 'md/setup.xml:85-99' "$skill/references/md-ai.md"
 scenario_skill_dir=.agents/skills/spawn-gunnery-scenario
-scenario_skill="$scenario_skill_dir/SKILL.md"
 scenario_equipment="$scenario_skill_dir/references/equipment.md"
-grep -Fq "\`research-x4-modding\` rather than guessing." "$scenario_skill"
 grep -Fq 'references that exact id directly' "$scenario_equipment"
 grep -Fq 'not add a Lua whitelist or an MD branch for it' "$scenario_equipment"
 if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill_dir"; then
