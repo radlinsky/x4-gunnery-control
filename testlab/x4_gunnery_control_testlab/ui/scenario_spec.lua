@@ -55,7 +55,7 @@
 -- exact macro; FIRED records attribute shots to weapon macros.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-155-endpoint-count-rank1-carrier-live-r1",
+    id      = "issue-155-endpoint-count-rank1-carrier-live-r2",
     enabled = false,
 
     location = {

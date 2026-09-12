@@ -33,12 +33,14 @@
       <shield macro="shield_arg_xl_standard_01_mk1_macro" path="../con_shield_xl_03"/>
       <shield macro="shield_arg_xl_standard_01_mk1_macro" path="../con_shield_xl_02"/>
       <shield macro="shield_arg_xl_standard_01_mk1_macro" path="../con_shield_xl_01"/>
-      <turret macro="turret_spl_m_beam_02_mk1_macro" path="../con_turret_m_06"/>
-      <turret macro="turret_spl_m_laser_02_mk1_macro" path="../con_turret_m_08"/>
-      <turret macro="turret_spl_m_plasma_02_mk1_macro" path="../con_turret_m_07"/>
-      <turret macro="turret_ter_m_beam_02_mk1_macro" path="../con_turret_m_01"/>
-      <turret macro="turret_ter_m_laser_02_mk1_macro" path="../con_turret_m_02"/>
     </macros>
+    <groups>
+      <turrets macro="turret_spl_m_beam_02_mk1_macro" group="group_front_left_up" exact="1"/>
+      <turrets macro="turret_spl_m_laser_02_mk1_macro" group="group_front_right_up" exact="1"/>
+      <turrets macro="turret_spl_m_plasma_02_mk1_macro" group="group_front_left_down" exact="1"/>
+      <turrets macro="turret_ter_m_beam_02_mk1_macro" group="group_front_right_down" exact="1"/>
+      <turrets macro="turret_ter_m_laser_02_mk1_macro" group="group_rear_left_up" exact="1"/>
+    </groups>
     <software>
       <software ware="software_dockmk2"/>
       <software ware="software_flightassistmk1"/>
