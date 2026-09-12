@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 
 launcher=scripts/launch-x4-dev.bat
 test -f "$launcher"
+testlab_launcher=scripts/launch-x4-test-lab-dev.bat
+test -f "$testlab_launcher"
 
 grep -Fq 'if not exist "%X4GC_EXE%" goto missing' "$launcher"
 grep -Fq 'if defined X4GC_EXE goto environmentexe' "$launcher"
@@ -78,5 +80,7 @@ if grep -v '^ *rem ' "$launcher" | grep -i 'WSLENV' | grep -i 'X4GC_TAIL_LOG'; t
   echo "FAIL: X4GC_TAIL_LOG appears in WSLENV inside launch-x4-dev.bat" >&2
   exit 1
 fi
+
+grep -Fq 'set "WSLENV=X4GC_INSTALL_TESTLAB:X4GC_EXTRACTED_ROOT:%WSLENV%"' "$testlab_launcher"
 
 echo "Windows development launcher checks passed"

@@ -95,24 +95,28 @@ def query_compatibility(
         return _unresolved(turret_macro, ship_macro, "empty_compatibility_tags")
 
     compatible = []
+    ship_connections = []
     for connection in ship_component["connection_records"]:
-        if not required_tags.issubset(connection["tag_tokens"]):
-            continue
         name = str(connection["name"]).strip()
         if not name:
             return _unresolved(turret_macro, ship_macro, "malformed_ship_connection")
         raw_group = connection["authored_attributes"].get("group")
         group = str(raw_group).strip() if raw_group is not None else None
-        compatible.append({"connection": name, "group": group or None})
+        entry = {"connection": name, "group": group or None}
+        ship_connections.append(entry)
+        if required_tags.issubset(connection["tag_tokens"]):
+            compatible.append(entry)
 
-    connection_names = [entry["connection"] for entry in compatible]
+    connection_names = [entry["connection"] for entry in ship_connections]
     if len(set(connection_names)) != len(connection_names):
         return _unresolved(turret_macro, ship_macro, "duplicate_ship_connection")
+    ship_connections.sort(key=lambda entry: (str(entry["connection"]), str(entry["group"] or "")))
     compatible.sort(key=lambda entry: (str(entry["connection"]), str(entry["group"] or "")))
     return {
         "status": "compatible" if compatible else "incompatible",
         "turret_macro": turret_macro,
         "ship_macro": ship_macro,
+        "ship_connections": ship_connections,
         "compatible_connections": compatible,
         "compatible_mount_count": len(compatible),
     }

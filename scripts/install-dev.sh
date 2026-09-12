@@ -8,6 +8,17 @@ if [[ ! -d "$game/extensions" || ( ! -f "$game/X4.exe" && ! -f "$game/X4" ) ]]; 
   echo "Not an X4 installation: $game" >&2
   exit 2
 fi
+
+if [[ -n "${X4GC_INSTALL_TESTLAB:-}" ]]; then
+  roots=$(.agents/skills/research-x4-modding/scripts/discover-x4-roots.sh)
+  extracted_root=$(sed -n 's/^extracted_root=//p' <<<"$roots")
+  if [[ -z "$extracted_root" || ! -d "$extracted_root" ]]; then
+    echo "Test Lab preflight requires unpacked official X4 XML source; set X4GC_EXTRACTED_ROOT to its source-set root." >&2
+    exit 3
+  fi
+  python3 scripts/preflight_testlab_loadouts.py --source-root "$extracted_root"
+fi
+
 target="$game/extensions/x4_gunnery_control"
 # target is an explicitly constructed subdirectory under a validated X4 installation;
 # the extension root ($game/extensions) must never be removed — only $target is wiped.

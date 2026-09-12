@@ -53,6 +53,9 @@ exactly.
 ## 3. Validate and load
 
 Run relevant focused validation, `./scripts/validate.sh`, and `git diff --check`.
+Install or launch Test Lab only through `scripts/install-dev.sh` with
+`X4GC_INSTALL_TESTLAB=1` (the Test Lab launcher sets it); this runs the required
+source-backed loadout preflight before installation.
 Follow [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for the required
 reset.
 
