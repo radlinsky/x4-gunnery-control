@@ -5,175 +5,126 @@ description: Prepare, install, and hand off deterministic X4 Gunnery Control liv
 
 # Prepare a controlled gunnery scenario
 
-Use Test Lab to turn a live-test requirement into a deterministic fixture and a
-small owner checklist. The owner operates X4; the agent owns fixture setup,
+Use Test Lab to turn a live-test requirement into the smallest deterministic
+fixture and owner procedure. The owner operates X4; the agent owns fixture setup,
 validation, installation, and log review.
 
-## Default path
+Prefer changing only
+`testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua`. Extend reusable Test
+Lab behavior only when the experiment cannot be expressed there; do not add
+helpers, APIs, logging, or tests for one scenario's convenience.
 
-Start with the existing Test Lab capability. Prefer changing only
-`testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua`.
+Work from the exact branch/SHA under test. Keep the repository
+`scenario_spec.lua` disabled; the development installer enables only its
+installed copy.
 
-Extend reusable Test Lab behavior only when the experiment cannot be expressed
-with the existing scenario spec. Do not add helpers, fixture APIs, logging, or
-tests merely to make one scenario more convenient.
+Read specialized guidance only when needed:
 
-Work from the exact branch/SHA under test. Commit and push the PR-specific live
-fixture with the work that used it so that checking out the commit restores the
-exact scenario. Keep the repository `scenario_spec.lua` disabled; the Test Lab
-development installer enables only the installed copy.
+- [references/equipment.md](references/equipment.md) for sparse or unusual
+  ship/turret loadouts.
+- [references/remote-fixtures.md](references/remote-fixtures.md) for spawned
+  player ships, teleport handoff, placement, remote evidence, and Create/Despawn
+  safety.
+- [../../../docs/TURRET_ASSET_KINEMATICS.md](../../../docs/TURRET_ASSET_KINEMATICS.md)
+  for turret asset/mount/runtime terminology.
+- [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for reload/restart
+  decisions.
 
-Read specialized guidance only when the requested fixture needs it:
+Use `research-x4-modding` for X4 API, MD, AI, schema, macro, or shipped-behavior
+claims rather than guessing.
 
-- [references/remote-fixtures.md](references/remote-fixtures.md) — spawned player
-  ships, teleport handoff, and remote Create/Despawn safety.
-- [references/equipment.md](references/equipment.md) — deterministic sparse or
-  unusual ship/turret loadouts and exact asset identity.
+## 1. Define the proof first
 
-For turret asset/mount/runtime terminology, use
-[../../../docs/TURRET_ASSET_KINEMATICS.md](../../../docs/TURRET_ASSET_KINEMATICS.md).
-For X4 API, MD, AI, schema, macro, or shipped-behavior claims, use
-`research-x4-modding` rather than guessing.
+Specify only the identities, counts, placement, behavior, safety state, and
+PASS/FAIL evidence the experiment needs. Give each meaningful control or treatment
+one named role. Use deterministic placement; do not depend on the owner manually
+positioning objects.
 
-## 1. Define the proof before editing
+Verify unfamiliar X4 identities and loadout assumptions from current shipped
+source. Do not infer ids, slot counts, equipment identity, or other internal facts
+from display names.
 
-Write down only what the experiment needs to control or prove:
+Before authoring a custom turret loadout, prove that each exact turret macro can
+mount on the exact ship and that enough compatible mounts exist. Use the repository
+compatibility query when available; until then use `research-x4-modding` against
+current shipped source. Incompatible or unresolved compatibility stops before
+fixture edits or X4 launch.
 
-- exact player ship and turret-group identity needed by the test;
-- one uniquely named fixture role per meaningful control or treatment;
-- exact object identity/count and deterministic placement for each role;
-- the minimal behavior/safety state needed to keep the fixture stable;
-- the visible result and log evidence that will count as PASS or FAIL.
+Never infer turret-to-ship compatibility from size, race, display name, similar
+variants, valid-looking group ids, or an official loadout using another turret
+macro. Do not create a local compatibility inventory.
 
-Use deterministic positions: normally `spread = 0` and `behaviour = "wait"` for
-controlled targets. Add roles only when each distinguishes a specific predicate.
-Never depend on the owner flying or nudging a target into place.
-
-Verify unfamiliar X4 macros and loadout assumptions from current X4 sources.
-Do not infer internal ids, slot counts, labels, or equipment identity from a
-display name.
-
-Before authoring any custom turret loadout, prove that each exact turret macro
-can mount on the exact ship and that the ship has at least as many compatible
-mounts as the fixture requires. Use the repository compatibility query when it
-exists; until then, use `research-x4-modding` against current shipped source.
-Treat incompatible or unresolved compatibility as a hard stop before editing the
-fixture or launching X4.
-
-Do not infer turret-to-ship compatibility from size, race, display name, similar
-variants, valid-looking group ids, or an official loadout that uses a different
-turret macro. Record only the source proof needed for the fixture; do not create
-a local compatibility list.
-
-For hostile fixtures, use existing Test Lab safety controls where applicable.
-READY must depend on the relevant live safety/attackability census, not merely on
-a red label or successful spawn.
-
-Qualify only predicates relevant to the experiment. Do not infer CANNOT BEAR,
-LINE OF FIRE BLOCKED, targeting, or other engine state from an uncorrelated
-no-fire interval.
+For hostile fixtures, READY must depend on the relevant live
+safety/attackability census, not merely a red label or successful spawn. Do not
+infer CANNOT BEAR, LINE OF FIRE BLOCKED, targeting, or similar engine state from
+an uncorrelated no-fire interval.
 
 ## 2. Author the smallest fixture
 
-Edit `scenario_spec.lua` first. Its field comments are the source of truth for
-the supported fixture schema; do not duplicate that schema here.
+Treat `scenario_spec.lua` field comments as the fixture-schema authority. Do not
+duplicate that schema here.
 
-For each fixture:
+Use exact setup identity, fixed placement, and only the roles, behavior, and
+readiness fields required by the proof. Give the scenario a new id when its
+meaning changes. The Create path must fail closed on setup identity or census
+mismatch and must not require the owner to identify, clear, position, or select
+objects manually when the fixture can do so exactly.
 
-- give it a new scenario id when its meaning changes;
-- keep the repository copy `enabled = false`;
-- use exact setup identity for the required ship and turret group;
-- use role names that tell the owner what each spawned object is for;
-- use fixed placement and only the behavior needed by the test;
-- specify exact readiness census fields only when the test depends on them.
-
-The Create path must fail closed on a setup identity/census mismatch and must not
-leave the owner guessing whether the fixture succeeded. Do not ask the owner to
-identify unnamed objects, manually clear old fixtures, position ships, or
-manually select a group that the spec can select exactly.
-
-For a remote fixture, read `references/remote-fixtures.md`. Create and Despawn
-are destructive replacement/cleanup actions: Test Lab must reject them while an
-occupied spawned player fixture could be destroyed. This is a code-level safety
-requirement, not just operator wording.
+For sparse or unusual equipment, follow `references/equipment.md`. For remote
+fixtures, follow `references/remote-fixtures.md` instead of duplicating its
+operator or safety rules here.
 
 ## 3. Validate and load the exact state
 
-Run the relevant repository validation for the files changed, including
-`./scripts/validate.sh` and `git diff --check` before accepting repository
-changes. Do not weaken valid tests to accommodate a fixture.
+Run relevant focused validation, `./scripts/validate.sh`, and `git diff --check`.
+Do not weaken valid tests. Scenario data needs no dedicated unit test; add the
+smallest regression test only when reusable Test Lab behavior changes.
 
-Scenario-specific fixture data does not need a dedicated unit test. When the
-work changes reusable Test Lab validation, transport, safety, selection,
-observation, or lifecycle behavior, add the smallest appropriate regression
-test for that behavior instead of testing the live fixture's exact data.
+Follow `docs/RELOADING.md` for the exact state not yet loaded in X4. For repeat
+runs, base reset/reload decisions on changes since the exact head already loaded,
+not the full PR diff. When a restart is required, launch
+`scripts/launch-x4-test-lab-dev.bat` from the exact worktree under test.
 
-Follow [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for installation,
-reload, and restart decisions. Apply it to the exact state not yet loaded in X4.
-For repeat runs, compute the reset from the files changed since the exact head
-already loaded in the current X4 process, not from the full PR diff.
-When a restart is required, have the owner use
-`scripts/launch-x4-test-lab-dev.bat` from the exact worktree under test; that
-launcher installs Test Lab and enables the installed scenario copy.
+## 4. Give one exact live-test procedure
 
-## 4. Give the owner one exact live-test procedure
+The user launches and operates X4. Never ask them to inspect the raw log.
 
-Before any live run, read the current version of this skill and give a complete
-procedure. The user launches and operates X4; do not ask them to inspect the raw
-log.
+State:
 
-Always state:
+1. exact tested SHA and required setup/reset;
+2. required save, ship, seat, console, and other setup state;
+3. exact **Gunnery Control → Test Lab** path and scenario id;
+4. exact Create/setup action and fixture-prepared ship, group, and role names;
+5. whether gameplay uses **Attack my current enemy** or default
+   **Attack any enemy** (selector: **Attack all enemies**);
+6. exact owner actions and expected visible result;
+7. exactly when to stop and upload the debug log, and what ChatGPT will inspect;
+8. explicit PASS and FAIL conditions.
 
-1. the exact tested SHA and required setup/reset;
-2. the required save, ship, seat, console, and other setup state;
-3. the exact **Gunnery Control → Test Lab** path and displayed scenario id;
-4. exactly one **Create test scenario** action for setup;
-5. the exact turret group and spawned object names/roles the fixture should
-   prepare automatically;
-6. whether gameplay uses **Attack my current enemy** or default **Attack any enemy**
-   (selector: **Attack all enemies**);
-7. the owner's exact clicks/actions in order and expected visible result;
-8. exactly when to stop and upload the debug log;
-9. what ChatGPT will inspect in that log;
-10. explicit PASS and FAIL conditions.
+For remote fixtures, include the operator flow required by
+`references/remote-fixtures.md`. Name any controls the owner must not touch when
+they could invalidate or destroy the fixture.
 
-For a remote fixture, add the exact teleport and single post-teleport Test Lab
-open from `references/remote-fixtures.md`; state clearly that Create must not be
-pressed again after teleport.
+## 5. Review the evidence
 
-Name controls the owner must not touch when they could invalidate or destroy the
-fixture. Do not write vague instructions such as “choose a group,” “pick a
-target,” “spawn the ships,” or “repeat as needed.”
+Offline validation proves only OFFLINE behavior; actual X4 runtime behavior needs
+LIVE evidence. A workflow using both is MIXED.
 
-## 5. Review evidence yourself
+Inspect the uploaded log yourself. Correlate every automated prerequisite with
+the same scenario/request identity, including spawn acknowledgement, readiness,
+and exact group/loadout state. Treat stale or mismatched acknowledgements as no
+proof.
 
-Offline validation proves only OFFLINE behavior. Actual X4 runtime behavior
-requires LIVE evidence; a workflow that combines both is MIXED.
-
-For every automated prerequisite, identify the correlated log record or field
-that proves it. At minimum, correlate scenario/request identity, acknowledged
-spawned count, setup/readiness result, and the exact group/loadout state the
-experiment depends on. A stale or mismatched acknowledgement is not proof.
-
-After the owner uploads the log, inspect it yourself. Do not ask the owner to
-interpret raw log lines. Treat manual visual observations as owner observations
-unless they have matching machine evidence.
-
-For firing/targeting experiments, prefer correlated shot/projectile/hit evidence
-when available. A geometry-qualified state proves a geometry solution only; it
-does not by itself prove actual turret targeting.
+For firing or targeting tests, prefer correlated shot/projectile/hit evidence.
+A geometry-qualified state proves geometry only, not actual turret targeting.
 
 If the evidence cannot distinguish code failure from setup, stale fixture state,
-readiness, logging gaps, or unrelated X4 behavior, improve the evidence before
-changing behavior unless other evidence already proves the bug.
+readiness, logging gaps, weapon readiness, stale projectiles, or unrelated X4
+behavior, improve the evidence before changing behavior unless other evidence
+already proves the bug.
 
-## 6. Clean up
+## 6. Preserve the tested state
 
-After the live run:
-
-- keep the repository `scenario_spec.lua` disabled;
-- keep the exact PR-specific fixture in the commit and push it with the branch;
-- run relevant validation again before committing the fixture, reusable Test
-  Lab changes, and documentation intended to remain;
-- use **Despawn test scenario** only as explicit post-test cleanup, not as a
-  routine prerequisite for creating the next fixture.
+Commit and push the PR-specific fixture with the work it tested so checking out
+the commit restores the scenario. Keep the repository `scenario_spec.lua`
+disabled. Use **Despawn test scenario** only for explicit post-test cleanup.
