@@ -7,7 +7,7 @@ connection-tag decision, not a race/name/size heuristic or a pair inventory.
 
 - X4: current public X4 modding documentation, checked 2026-09-12
 - Status: documented-public
-- Source: X Community Wiki, `Tags and flags`, sections `component` and `Tag compatibility modes`
+- Source: [X Community Wiki — Tags and flags](https://wiki.egosoft.com/X4%20Foundations%20Wiki/Modding%20Support/Assets%20Modding/Guides/Tags%20and%20flags/), sections `component` and `Tag compatibility modes`
 - Live test: no — static asset compatibility rule
 - Finding: the child asset's single connection tagged `component` is its mating connection; the other tags on that connection define compatibility. Ship upgrades use `OTHERALL` from the slot side, equivalently `ALL` from the upgrade side: every compatibility tag required by the upgrade must exist on the ship slot, while the ship slot may have additional tags.
 
