@@ -102,7 +102,7 @@ X4GunneryTestLabScenarioSpec = {
 
             role      = "shooter",
             loadout   = "x4gc_testlab_par_m_frigate_01_rank2_gatling_c4",
-            expectedWeapons        = 0,
+            expectedWeapons        = 3,
             expectedTurrets        = 3,
             expectedMissileTurrets = 0,
         },
@@ -124,7 +124,7 @@ X4GunneryTestLabScenarioSpec = {
 
             role      = "shooter",
             loadout   = "x4gc_testlab_par_m_frigate_01_rank2_shotgun_c4",
-            expectedWeapons        = 0,
+            expectedWeapons        = 2,
             expectedTurrets        = 2,
             expectedMissileTurrets = 0,
         },
