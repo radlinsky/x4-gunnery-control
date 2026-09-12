@@ -1,7 +1,7 @@
 -- Test Lab scenario spec: the fixture the next live test needs.
 --
 -- THIS FILE IS AGENT-AUTHORED INPUT. Keep it plain: literal fields only, no
--- logic and no requires. Ordinary live fixtures should change this file only.
+-- logic and no requires.
 --
 -- Fields
 --   id        string   Change when fixture meaning changes.
