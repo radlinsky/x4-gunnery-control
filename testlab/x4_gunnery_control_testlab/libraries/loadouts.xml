@@ -110,4 +110,43 @@
       <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
+  <loadout id="x4gc_testlab_par_m_frigate_01_rank2_gatling_c4" macro="ship_par_m_frigate_01_a_macro">
+    <macros>
+      <engine macro="engine_par_m_combat_01_mk1_macro" path="../con_engine_03"/>
+      <engine macro="engine_par_m_combat_01_mk1_macro" path="../con_engine_02"/>
+      <engine macro="engine_par_m_combat_01_mk1_macro" path="../con_engine_01"/>
+      <turret macro="turret_par_m_gatling_01_mk1_macro" path="../con_turret_front_L"/>
+      <turret macro="turret_tel_m_gatling_01_mk1_macro" path="../con_turret_front_R"/>
+      <turret macro="turret_ter_m_gatling_01_mk1_macro" path="../con_turret_back_L"/>
+    </macros>
+    <software>
+      <software ware="software_dockmk2"/>
+      <software ware="software_flightassistmk1"/>
+      <software ware="software_scannerlongrangemk2"/>
+      <software ware="software_scannerobjectmk2"/>
+      <software ware="software_targetmk1"/>
+    </software>
+    <virtualmacros>
+      <thruster macro="thruster_gen_m_combat_01_mk3_macro"/>
+    </virtualmacros>
+  </loadout>
+  <loadout id="x4gc_testlab_par_m_frigate_01_rank2_shotgun_c4" macro="ship_par_m_frigate_01_a_macro">
+    <macros>
+      <engine macro="engine_par_m_combat_01_mk1_macro" path="../con_engine_03"/>
+      <engine macro="engine_par_m_combat_01_mk1_macro" path="../con_engine_02"/>
+      <engine macro="engine_par_m_combat_01_mk1_macro" path="../con_engine_01"/>
+      <turret macro="turret_par_m_shotgun_01_mk1_macro" path="../con_turret_front_L"/>
+      <turret macro="turret_tel_m_shotgun_01_mk1_macro" path="../con_turret_front_R"/>
+    </macros>
+    <software>
+      <software ware="software_dockmk2"/>
+      <software ware="software_flightassistmk1"/>
+      <software ware="software_scannerlongrangemk2"/>
+      <software ware="software_scannerobjectmk2"/>
+      <software ware="software_targetmk1"/>
+    </software>
+    <virtualmacros>
+      <thruster macro="thruster_gen_m_combat_01_mk3_macro"/>
+    </virtualmacros>
+  </loadout>
 </loadouts>

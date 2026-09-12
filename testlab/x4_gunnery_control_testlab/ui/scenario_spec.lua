@@ -50,69 +50,102 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Direct world-target synchronization fixture: two separated hostile click
--- targets and one player-owned ineligible control.
+-- Issue #151 C4: live-test the five newly supported rank-2 turret macros on
+-- two sparse remote shooters. Shooter A is selected automatically by its
+-- exact single-turret macro; FIRED records attribute shots to weapon macros.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "direct-world-target-sync-r1",
+    id      = "issue-151-endpoint-count-rank2-gorgon-live-r2",
     enabled = false,
 
+    location = {
+        sectorMacro = "Cluster_29_Sector001_macro",
+        x = 500000,
+        y = 0,
+        z = 0,
+    },
+
     setup = {
-        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
-        shipLabel       = "Ray",
-        turretGroup     = "group_front_up_left",
-        turretLabel     = "Front Upper Left",
-        expectedTurrets = 2,
-        selectAll       = false,
+        remote          = true,
+        shipMacro       = "ship_par_m_frigate_01_a_macro",
+        shipLabel       = "ISSUE151 C4 SHOOTER A 1",
+        singleTurretMacro = "turret_par_m_gatling_01_mk1_macro",
+        turretLabel     = "PAR M Gatling Single",
+        expectedTurrets = 1,
+        expectedMemberMacros = {
+            "turret_par_m_gatling_01_mk1_macro",
+        },
+        selectAll = false,
     },
 
     groups = {
         {
-            label     = "HOSTILE CLICK TARGET LEFT",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 4500,
-            x         = -1200,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-        },
-
-        {
-            label     = "HOSTILE CLICK TARGET RIGHT",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 4500,
-            x         = 1200,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-        },
-
-        -- Player-owned: the ineligible-click control. Never designate it.
-        {
-            label     = "FRIENDLY INELIGIBLE CONTROL - DO NOT TARGET",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
+            label     = "ISSUE151 C4 SHOOTER A",
+            macro     = "ship_par_m_frigate_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 4500,
-            x         = 0,
+            distance  = 0,
+            x         = -200,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
-            hostile   = false,
+            yaw       = 0,
+            pitch     = 0,
+            roll      = 0,
+            preserveOrientation = true,
+
+            role      = "shooter",
+            loadout   = "x4gc_testlab_par_m_frigate_01_rank2_gatling_c4",
+            expectedWeapons        = 3,
+            expectedTurrets        = 3,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE151 C4 SHOOTER B",
+            macro     = "ship_par_m_frigate_01_a_macro",
+            faction   = "player",
+            count     = 1,
+            distance  = 0,
+            x         = 200,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+            yaw       = 0,
+            pitch     = 0,
+            roll      = 0,
+            preserveOrientation = true,
+
+            role      = "shooter",
+            loadout   = "x4gc_testlab_par_m_frigate_01_rank2_shotgun_c4",
+            expectedWeapons        = 2,
+            expectedTurrets        = 2,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE151 C4 TARGET",
+            macro     = "ship_par_m_trans_container_01_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 500,
+            x         = 0,
+            y         = 1000,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
             holdFire  = true,
             stripDefenceUnits = true,
+            repairGuard       = true,
+            yaw   = 0,
+            pitch = 0,
+            roll  = 0,
+            preserveOrientation = true,
+
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
+            expectedMissileTurrets = 0,
         },
     },
 }

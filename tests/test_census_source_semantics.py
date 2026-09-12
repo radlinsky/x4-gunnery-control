@@ -2,6 +2,7 @@
 """Focused regression tests for accepted Issue #83 source-semantic recognition."""
 from __future__ import annotations
 
+import itertools
 import struct
 import sys
 import unittest
@@ -737,8 +738,10 @@ class SourceSemanticTests(unittest.TestCase):
             self.assertEqual(result["classification"], "UNSUPPORTED")
 
     def test_rank2_signature_applies_rotation_and_optional_channel0_residue(self) -> None:
-        for with_residue in (False, True):
-            with self.subTest(with_residue=with_residue):
+        for with_residue, endpoint_count in itertools.product(
+            (False, True), (1, 2, 5, 3)
+        ):
+            with self.subTest(with_residue=with_residue, endpoint_count=endpoint_count):
                 edge2_counts = (
                     (2, 2, 0, 0, 0) if with_residue else (0, 2, 0, 0, 0)
                 )
@@ -768,8 +771,12 @@ class SourceSemanticTests(unittest.TestCase):
                 result = _resolve_supported_endpoint_source_semantics(
                     _endpoint(covered, depth=5, selected=selected),
                     _geometry(5, rank2_restrictions=True),
-                    component_endpoint_count=2,
+                    component_endpoint_count=endpoint_count,
                 )
+
+                if endpoint_count == 3:
+                    self.assertEqual(result["classification"], "UNSUPPORTED")
+                    continue
 
                 self.assertEqual(result["classification"], "SOURCE_RESOLVED")
                 self.assertEqual(
