@@ -76,6 +76,7 @@ X4GunneryTestLabScenarioSpec = {
         shipMacro       = "ship_par_m_frigate_01_a_macro",
         shipLabel       = "ISSUE151 C4 SHOOTER A 1",
         singleTurretMacro = "turret_par_m_gatling_01_mk1_macro",
+        turretLabel     = "PAR M Gatling Single",
         expectedTurrets = 1,
         expectedMemberMacros = {
             "turret_par_m_gatling_01_mk1_macro",
