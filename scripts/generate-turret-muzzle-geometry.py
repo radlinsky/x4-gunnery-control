@@ -94,6 +94,18 @@ MACROS = {
     # turret_xen_m_laser_02_mk1, so they must share one contract.
     "turret_xen_m_beam_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
     "turret_xen_m_laser_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
+    "turret_spl_m_beam_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_spl_m_laser_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_spl_m_plasma_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_ter_m_beam_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_ter_m_laser_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+}
+
+# This story-only alias shares the accepted Terran laser component but is not
+# part of the Issue #137 production boundary. Its presence may not prevent the
+# explicitly accepted macro from being generated, and it is not emitted itself.
+ALLOWED_UNGENERATED_ALIASES = {
+    "turret_ter_m_laser_02_mk1_macro": {"turret_ter_m_laser_story_mk1_macro"},
 }
 
 
@@ -185,7 +197,14 @@ def _record(report: _Report, macro: str) -> list[str]:
     aliases = component["macros"]
     if len(set(aliases)) != len(aliases):
         raise SystemExit(f"duplicate macro alias on the census component for {macro}")
-    if any(MACROS.get(alias) != MACROS[macro] for alias in aliases):
+    generated_aliases = [alias for alias in aliases if alias in MACROS]
+    ungenerated_aliases = set(aliases) - set(generated_aliases)
+    if (
+        any(MACROS[alias] != MACROS[macro] for alias in generated_aliases)
+        or not ungenerated_aliases.issubset(
+            ALLOWED_UNGENERATED_ALIASES.get(macro, set())
+        )
+    ):
         raise SystemExit(f"unsupported shared component for {macro}")
     resolutions = component["source_semantic_resolutions"]
     accepted_resolution_counts = (

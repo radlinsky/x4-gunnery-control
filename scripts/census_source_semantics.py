@@ -1,4 +1,4 @@
-"""Recognize and apply the two accepted Issue #83 source-semantic cases."""
+"""Recognize and apply accepted source-semantic cases."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -155,7 +155,7 @@ def _resolve_supported_endpoint_source_semantics(
     *,
     component_endpoint_count: int,
 ) -> dict[str, object]:
-    """Apply only the two accepted name-free semantic signatures; otherwise fail closed."""
+    """Apply only accepted name-free semantic signatures; otherwise fail closed."""
 
     covered = _covered_by_edge(endpoint)
     depth = len(endpoint.get("source_part_path", []))
@@ -484,13 +484,14 @@ def _resolve_supported_endpoint_source_semantics(
             ),
         }
 
-    # Accepted one-key barrel case (Issue #79 / #125 A2, Issue #128 P2): the
-    # depth-4 rotator/barrel composition where the barrel stores a single
+    # Accepted one-key barrel cases (Issue #79 / #125 A2, Issue #128 P2,
+    # Issue #137): the rotator/barrel compositions where the barrel stores a
+    # single
     # settled turret_active channel-0 key instead of the doubled form. The
     # barrel rule is structural/name-free; each accepted variant stays bounded
     # to its own live-backed rotator value and companion-channel evidence.
     #
-    # (rotator channel-0 bits, edge-3 counts, {edge-3 channel: bits}). The
+    # (rotator channel-0 bits, barrel counts, {barrel channel: bits}). The
     # beam_02 companions are a full-turn additive rotation and a unit scale,
     # both proved to add no material settled transform, so the applied math is
     # the channel-0 translations either way.
@@ -509,22 +510,49 @@ def _resolve_supported_endpoint_source_semantics(
             },
         ),
     )
+    one_key_layout = None
+    if depth == 4 and set(keyed) == {1, 3}:
+        one_key_layout = {
+            "rotator_edge": 1,
+            "barrel_edge": 3,
+            "yaw_edge": 1,
+            "pitch_edge": 2,
+            "semantic_case": "depth4_one_key_barrel_translation",
+            "selector_frame": None,
+        }
+    elif (
+        depth == 3
+        and covered is not None
+        and set(covered) == {0, 1, 2}
+        and set(keyed) == {0, 2}
+    ):
+        one_key_layout = {
+            "rotator_edge": 0,
+            "barrel_edge": 2,
+            "yaw_edge": 0,
+            "pitch_edge": 1,
+            "semantic_case": "depth3_one_key_barrel_translation",
+            "selector_frame": 50,
+        }
+
     one_key_barrel_match = False
     one_key_rotator_pos: list[float] = []
     one_key_barrel_pos: list[float] = []
     if (
         component_endpoint_count == 2
-        and depth == 4
-        and set(keyed) == {1, 3}
-        and _counts(keyed[1]) == (2, 0, 0, 0, 0)
+        and one_key_layout is not None
+        and _counts(keyed[one_key_layout["rotator_edge"]])
+        == (2, 0, 0, 0, 0)
     ):
+        rotator_edge = one_key_layout["rotator_edge"]
+        barrel_edge = one_key_layout["barrel_edge"]
         # Repeated rotator storage alone does not justify arbitrary
         # translations; only the accepted signatures pass.
         rotator_match = any(
-            _first_three_bits(keyed[1], 0) == rotator_bits
-            and _counts(keyed[3]) == barrel_counts
+            _first_three_bits(keyed[rotator_edge], 0) == rotator_bits
+            and _counts(keyed[barrel_edge]) == barrel_counts
             and all(
-                _first_three_bits(keyed[3], channel) == bits
+                _first_three_bits(keyed[barrel_edge], channel) == bits
                 for channel, bits in companions.items()
             )
             for rotator_bits, barrel_counts, companions in (
@@ -534,7 +562,7 @@ def _resolve_supported_endpoint_source_semantics(
 
         # Rule 4: barrel active key must use STEP interpolation:
         # raw_bits indexes 3, 4, 5 are all "0x00000001".
-        barrel_records = _channel_records(keyed[3], 0)
+        barrel_records = _channel_records(keyed[barrel_edge], 0)
         barrel_step = (
             len(barrel_records) == 1
             and len(barrel_records[0]["raw_bits"]) >= 6
@@ -562,7 +590,12 @@ def _resolve_supported_endpoint_source_semantics(
             end_raw = span.get("end", "")
             if start_raw and end_raw:
                 try:
-                    one_frame = int(start_raw) == int(end_raw)
+                    start = int(start_raw)
+                    end = int(end_raw)
+                    one_frame = start == end and (
+                        one_key_layout["selector_frame"] is None
+                        or start == one_key_layout["selector_frame"]
+                    )
                 except (ValueError, TypeError):
                     one_frame = False
 
@@ -575,20 +608,20 @@ def _resolve_supported_endpoint_source_semantics(
         # barrel_step also guarantees barrel_records[0] exists; a declared
         # channel-0 count with no usable raw record must fail closed here.
         if barrel_step and all_memberships is not None:
-            edge3_memberships = [
+            barrel_memberships = [
                 m
                 for m in all_memberships
-                if int(m.get("endpoint_path_edge_index", -1)) == 3
+                if int(m.get("endpoint_path_edge_index", -1)) == barrel_edge
             ]
             activating_descs = [
                 m
-                for m in edge3_memberships
+                for m in barrel_memberships
                 if m.get("subname") == "turret_activating"
                 and _channel_records(m, 0)
             ]
             deactivating_descs = [
                 m
-                for m in edge3_memberships
+                for m in barrel_memberships
                 if m.get("subname") == "turret_deactivating"
                 and _channel_records(m, 0)
             ]
@@ -610,14 +643,16 @@ def _resolve_supported_endpoint_source_semantics(
 
         # Rule 7: authored yaw/pitch layout.
         one_key_layers = authored_geometry.get("source_geometry_layers", [])
+        yaw_edge = one_key_layout["yaw_edge"]
+        pitch_edge = one_key_layout["pitch_edge"]
         rot_y_restrictions = (
-            one_key_layers[1]["authored_restrictions"]
-            if len(one_key_layers) > 1
+            one_key_layers[yaw_edge]["authored_restrictions"]
+            if len(one_key_layers) > yaw_edge
             else []
         )
         rot_x_restrictions = (
-            one_key_layers[2]["authored_restrictions"]
-            if len(one_key_layers) > 2
+            one_key_layers[pitch_edge]["authored_restrictions"]
+            if len(one_key_layers) > pitch_edge
             else []
         )
         geo_match = (
@@ -642,19 +677,19 @@ def _resolve_supported_endpoint_source_semantics(
             # Read the accepted translations from the verified source records
             # after the evidence-bounded guards have matched.
             one_key_rotator_pos = list(
-                _channel_records(keyed[1], 0)[0]["raw_values"][:3]
+                _channel_records(keyed[rotator_edge], 0)[0]["raw_values"][:3]
             )
             one_key_barrel_pos = list(barrel_records[0]["raw_values"][:3])
 
     if one_key_barrel_match:
         return {
             "classification": "SOURCE_RESOLVED",
-            "semantic_case": "depth4_one_key_barrel_translation",
+            "semantic_case": one_key_layout["semantic_case"],
             "applied_authored_geometry": _apply(
                 authored_geometry,
                 positions={
-                    1: one_key_rotator_pos,
-                    3: one_key_barrel_pos,
+                    one_key_layout["rotator_edge"]: one_key_rotator_pos,
+                    one_key_layout["barrel_edge"]: one_key_barrel_pos,
                 },
             ),
         }

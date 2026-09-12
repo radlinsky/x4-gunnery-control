@@ -168,8 +168,9 @@ def _geometry(
             _restriction("rotation_x", -10.0, 89.0)
         ]
     if one_key_barrel_restrictions and depth >= 3:
-        layers[1]["authored_restrictions"] = [_restriction("rotation_y")]
-        layers[2]["authored_restrictions"] = [
+        yaw_edge = 0 if depth == 3 else 1
+        layers[yaw_edge]["authored_restrictions"] = [_restriction("rotation_y")]
+        layers[yaw_edge + 1]["authored_restrictions"] = [
             _restriction("rotation_x", -10.0, one_key_barrel_pitch_max)
         ]
     if p8_restrictions and depth >= 3:
@@ -488,6 +489,108 @@ class SourceSemanticTests(unittest.TestCase):
             ani_descriptor_memberships=boundary_memberships,
             authored_animation_selector_occurrences=selector_occurrences,
         )
+
+    def _depth3_one_key_barrel_endpoint(
+        self,
+        barrel: tuple[float, float, float],
+        *,
+        rotator: tuple[float, float, float] | None = None,
+        barrel_companions: dict[int, tuple[float, float, float]] | None = None,
+        frame: int = 50,
+    ) -> dict[str, object]:
+        covered = self._one_key_barrel_covered(
+            barrel,
+            rotator=rotator,
+            barrel_companions=barrel_companions,
+        )
+        for descriptor, edge_index in zip(
+            (covered[1], covered[2], covered[3]), (0, 1, 2)
+        ):
+            descriptor["endpoint_path_edge_index"] = edge_index
+        boundaries = self._one_key_barrel_boundary_memberships(barrel)
+        for descriptor in boundaries:
+            descriptor["endpoint_path_edge_index"] = 2
+        return _endpoint(
+            covered[1:],
+            depth=3,
+            ani_descriptor_memberships=boundaries,
+            authored_animation_selector_occurrences=[
+                _one_frame_selector("turret_active", frame)
+            ],
+        )
+
+    def test_depth3_one_key_barrel_translation_is_bounded_and_recognized(
+        self,
+    ) -> None:
+        for label, barrel, rotator, companions in (
+            ("ordinary", self._LASER_02_BARREL, self._LASER_02_ROTATOR, None),
+            (
+                "beam",
+                self._BEAM_02_BARREL,
+                self._BEAM_02_ROTATOR,
+                self._BEAM_02_COMPANIONS,
+            ),
+        ):
+            with self.subTest(label=label):
+                result = _resolve_supported_endpoint_source_semantics(
+                    self._depth3_one_key_barrel_endpoint(
+                        barrel, rotator=rotator, barrel_companions=companions
+                    ),
+                    _geometry(3, one_key_barrel_restrictions=True),
+                    component_endpoint_count=2,
+                )
+                self.assertEqual(result["classification"], "SOURCE_RESOLVED")
+                self.assertEqual(
+                    result["semantic_case"],
+                    "depth3_one_key_barrel_translation",
+                )
+                layers = result["applied_authored_geometry"]["source_geometry_layers"]
+                self.assertEqual(
+                    layers[0]["settled_local_position_delta"],
+                    [-rotator[0], rotator[1], rotator[2]],
+                )
+                self.assertEqual(
+                    layers[2]["settled_local_position_delta"],
+                    [-barrel[0], barrel[1], barrel[2]],
+                )
+
+    def test_depth3_one_key_barrel_translation_fails_closed(self) -> None:
+        endpoint = self._depth3_one_key_barrel_endpoint(self._LASER_02_BARREL)
+        cases = []
+        cases.append(
+            (
+                "wrong_frame",
+                self._depth3_one_key_barrel_endpoint(
+                    self._LASER_02_BARREL, frame=49
+                ),
+                2,
+                _geometry(3, one_key_barrel_restrictions=True),
+            )
+        )
+        missing_edge = self._depth3_one_key_barrel_endpoint(self._LASER_02_BARREL)
+        missing_edge["_ancestry_covered_turret_active_descriptor_memberships"].pop(1)
+        cases.append(
+            (
+                "incomplete_coverage",
+                missing_edge,
+                2,
+                _geometry(3, one_key_barrel_restrictions=True),
+            )
+        )
+        cases.append(
+            (
+                "wrong_endpoint_count",
+                endpoint,
+                1,
+                _geometry(3, one_key_barrel_restrictions=True),
+            )
+        )
+        for label, candidate, endpoint_count, geometry in cases:
+            with self.subTest(label=label):
+                result = _resolve_supported_endpoint_source_semantics(
+                    candidate, geometry, component_endpoint_count=endpoint_count
+                )
+                self.assertEqual(result["classification"], "UNSUPPORTED")
 
     def test_depth4_one_key_barrel_translation_is_recognized(self) -> None:
         """plasma_02 values still resolve and apply exactly as before."""
