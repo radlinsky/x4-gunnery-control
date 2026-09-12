@@ -128,9 +128,40 @@ def _check_shared_component():
         raise AssertionError(f"{label} must fail closed")
 
 
+def _check_resolution_cardinality():
+    connections = tuple(f"con_{index}" for index in range(5))
+    cases = (
+        ("turret_par_m_laser_01_mk1_macro", (1, 2, 5)),
+        ("turret_par_l_beam_01_mk1_macro", (2,)),
+    )
+    for macro, accepted in cases:
+        semantic_case, layer_count = _gen.MACROS[macro]
+        layers = _layers(layer_count)
+        for count in (1, 2, 3, 5):
+            report = {
+                "x4_version": X4_VERSION,
+                "component_to_macros": [
+                    {
+                        "macros": [macro],
+                        "source_semantic_resolutions": [
+                            _endpoint_geometry(layers, connection, semantic_case)
+                            for connection in connections[:count]
+                        ],
+                    }
+                ],
+            }
+            try:
+                _gen._record(report, macro)
+            except SystemExit:
+                assert count not in accepted, f"{macro} must accept {count}"
+            else:
+                assert count in accepted, f"{macro} must reject {count}"
+
+
 def main():
     _check_settled_rotation_x()
     _check_shared_component()
+    _check_resolution_cardinality()
     order = ("con_laser_01", "con_laser_02")
 
     first = _gen._render(_report(order), X4_VERSION)

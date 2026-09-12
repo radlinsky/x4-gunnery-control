@@ -690,7 +690,7 @@ def _resolve_supported_endpoint_source_semantics(
         rank2_layers[4]["authored_restrictions"] if len(rank2_layers) == 5 else []
     )
     rank2_matches = (
-        component_endpoint_count == 2
+        component_endpoint_count in (1, 2, 5)
         and depth == 5
         and len(selected) == 4
         and all(

@@ -72,6 +72,11 @@ MACROS = {
     "turret_tel_m_laser_01_mk1_macro": ("depth5_additive_x_rotation", 5),
     "turret_tel_m_plasma_01_mk1_macro": ("depth5_additive_x_rotation", 5),
     "turret_ter_m_laser_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_par_m_gatling_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_tel_m_gatling_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_ter_m_gatling_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_par_m_shotgun_01_mk1_macro": ("depth5_additive_x_rotation", 5),
+    "turret_tel_m_shotgun_01_mk1_macro": ("depth5_additive_x_rotation", 5),
     "turret_spl_l_beam_01_mk1_macro": ("depth4_zero_translation", 4),
     "turret_spl_l_laser_01_mk1_macro": ("depth4_zero_translation", 4),
     "turret_spl_l_plasma_01_mk1_macro": ("depth4_zero_translation", 4),
@@ -183,7 +188,10 @@ def _record(report: _Report, macro: str) -> list[str]:
     if any(MACROS.get(alias) != MACROS[macro] for alias in aliases):
         raise SystemExit(f"unsupported shared component for {macro}")
     resolutions = component["source_semantic_resolutions"]
-    if len(resolutions) != 2 or any(
+    accepted_resolution_counts = (
+        (1, 2, 5) if semantic_case == "depth5_additive_x_rotation" else (2,)
+    )
+    if len(resolutions) not in accepted_resolution_counts or any(
         item.get("classification") != "SOURCE_RESOLVED"
         or item.get("semantic_case") != semantic_case
         for item in resolutions
