@@ -73,8 +73,8 @@ Do not weaken valid tests. Scenario data needs no dedicated unit test; add the
 smallest regression test only when reusable Test Lab behavior changes.
 
 Follow the reload/restart guide above for the exact state not yet loaded in X4.
-For repeat runs, base reset decisions on changes since the exact head already
-loaded, not the full PR diff. When a restart is required, launch
+For repeat runs, compute the reset from the files changed since the exact head
+already loaded, not the full PR diff. When a restart is required, launch
 `scripts/launch-x4-test-lab-dev.bat` from the exact worktree under test.
 
 ## 4. Give one exact live-test procedure
