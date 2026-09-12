@@ -55,13 +55,13 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 --
 -- Issue #151 C4: live-test the five newly supported rank-2 turret macros on
--- one sparse remote shooter. The five loaded groups are selected together;
--- existing FIRED records attribute every shot to its exact weapon macro.
+-- two sparse remote shooters. Shooter A is selected automatically by its
+-- exact single-turret macro; FIRED records attribute shots to weapon macros.
 --
 -- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-151-endpoint-count-rank2-live-r1",
+    id      = "issue-151-endpoint-count-rank2-gorgon-live-r2",
     enabled = false,
 
     location = {
@@ -73,48 +73,69 @@ X4GunneryTestLabScenarioSpec = {
 
     setup = {
         remote          = true,
-        shipMacro       = "ship_ter_xl_carrier_01_a_macro",
-        shipLabel       = "ISSUE151 C4 SHOOTER 1",
-        turretGroup     = "group_front_mid_top",
-        turretLabel     = "Five Rank-2 Turret Groups",
-        expectedTurrets = 5,
+        shipMacro       = "ship_par_m_frigate_01_a_macro",
+        shipLabel       = "ISSUE151 C4 SHOOTER A 1",
+        singleTurretMacro = "turret_par_m_gatling_01_mk1_macro",
+        expectedTurrets = 1,
         expectedMemberMacros = {
             "turret_par_m_gatling_01_mk1_macro",
-            "turret_par_m_shotgun_01_mk1_macro",
-            "turret_tel_m_gatling_01_mk1_macro",
-            "turret_tel_m_shotgun_01_mk1_macro",
-            "turret_ter_m_gatling_01_mk1_macro",
         },
-        selectAll = true,
+        selectAll = false,
     },
 
     groups = {
         {
-            label     = "ISSUE151 C4 SHOOTER",
-            macro     = "ship_ter_xl_carrier_01_a_macro",
+            label     = "ISSUE151 C4 SHOOTER A",
+            macro     = "ship_par_m_frigate_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 1,
-            x         = 0,
+            distance  = 0,
+            x         = -200,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
+            yaw       = 0,
+            pitch     = 0,
+            roll      = 0,
+            preserveOrientation = true,
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_ter_xl_carrier_01_rank2_c4",
+            loadout   = "x4gc_testlab_par_m_frigate_01_rank2_gatling_c4",
             expectedWeapons        = 0,
-            expectedTurrets        = 5,
+            expectedTurrets        = 3,
             expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE151 C4 TARGET PORT HIGH",
+            label     = "ISSUE151 C4 SHOOTER B",
+            macro     = "ship_par_m_frigate_01_a_macro",
+            faction   = "player",
+            count     = 1,
+            distance  = 0,
+            x         = 200,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+            yaw       = 0,
+            pitch     = 0,
+            roll      = 0,
+            preserveOrientation = true,
+
+            role      = "shooter",
+            loadout   = "x4gc_testlab_par_m_frigate_01_rank2_shotgun_c4",
+            expectedWeapons        = 0,
+            expectedTurrets        = 2,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE151 C4 TARGET",
             macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = 0,
-            x         = -1414.213562,
-            y         = 1414.213562,
+            distance  = 500,
+            x         = 0,
+            y         = 1000,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
