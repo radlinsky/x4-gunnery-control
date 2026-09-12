@@ -139,6 +139,8 @@ def _build_ani_resource_inventory(
 
 def _collect_xml_identities(
     roots: Mapping[str, Path],
+    *,
+    macro_names: frozenset[str] | None = None,
 ) -> tuple[
     dict[str, list[dict[str, object]]],
     list[dict[str, str]],
@@ -275,10 +277,13 @@ def _collect_xml_identities(
 
             for macro in xml_root.iter("macro"):
                 macro_class = macro.get("class", "")
-                if macro_class not in _INCLUDED_CLASSES:
+                name = macro.get("name", "").strip()
+                if macro_names is None:
+                    if macro_class not in _INCLUDED_CLASSES:
+                        continue
+                elif name not in macro_names:
                     continue
 
-                name = macro.get("name", "").strip()
                 if not name:
                     anomalies.append(
                         _anomaly(

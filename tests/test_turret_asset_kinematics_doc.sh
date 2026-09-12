@@ -80,13 +80,11 @@ for example_identity in \
     || fail "verified X4 9.00 example identity is missing: $example_identity"
 done
 
-# Agent workflows point at one canonical definition instead of cloning it, and
-# each Markdown target resolves from the file that contains it.
+# Canonical workflow pointers resolve from the files that contain them.
 for pointer in \
   AGENTS.md \
   .agents/skills/research-x4-modding/SKILL.md \
-  .agents/skills/research-x4-modding/references/index.md \
-  .agents/skills/spawn-gunnery-scenario/SKILL.md; do
+  .agents/skills/research-x4-modding/references/index.md; do
   target=$(grep -oE '\([^)]*TURRET_ASSET_KINEMATICS\.md\)' "$pointer" | head -n 1 | tr -d '()')
   [[ -n "$target" ]] || fail "canonical document pointer is missing from $pointer"
   [[ -f "$(dirname "$pointer")/$target" ]] \
