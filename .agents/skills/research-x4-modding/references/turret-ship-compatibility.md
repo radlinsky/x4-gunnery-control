@@ -33,12 +33,11 @@ its whitespace-normalized group key.
 
 - X4: 9.00
 - Status: inference
-- Source: the documented ship-upgrade tag rule above plus the X4 9.00 source identity chain above; independently checked against the accepted Tokyo/Gorgon fixture investigation
+- Source: documented ship-upgrade tag matching plus the X4 9.00 source identity chain above
 - Live test: no — the rule selects source-compatible mounts; actual installation/runtime behavior is a separate live question
 - Finding: resolve the exact turret macro and its unique component, then its unique `component`-tagged mating connection. Required tags are every tag on that connection except the structural `component` tag. Resolve the exact ship macro and ship component. A ship connection is compatible exactly when it contains every required tag; additional ship-connection tags are allowed. Compatible mount count is the number of distinct matching ship connections. Return unresolved rather than guessing when macro/component identity, the unique mating connection, source definitions, or tag data are missing, duplicated, conflicting, or otherwise ambiguous.
 
-This rule explains the known failure class without an exception: an embedded
-medium turret whose mating connection requires `advanced` and `unhittable` is
-not compatible with a capital-ship slot authored as `standard` and `hittable`,
-even when that slot has a valid turret group id. A compatible variant is not
-evidence for a different exact turret macro.
+This also explains the failure class without an exception: an embedded medium
+turret requiring `advanced` and `unhittable` does not fit a capital-ship slot
+authored as `standard` and `hittable`, even when that slot has a valid turret
+group id. A compatible variant is not evidence for a different exact macro.
