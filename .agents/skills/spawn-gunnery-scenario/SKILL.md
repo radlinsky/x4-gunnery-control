@@ -27,11 +27,11 @@ Control only the identities, counts, placement, behavior, safety state, and
 PASS/FAIL evidence the experiment needs. Give each meaningful control or treatment
 one named role and use deterministic placement.
 
-Before authoring a custom turret loadout, prove that each exact turret macro can
-mount on the exact ship and that enough compatible mounts exist. Use the repository
-compatibility query when available; until then use `research-x4-modding` against
-current shipped source. Stop before fixture edits or X4 launch if compatibility is
-incompatible or unresolved.
+Before authoring a custom turret loadout, run
+[`scripts/turret_ship_compatibility.py`](../../../scripts/turret_ship_compatibility.py)
+for each exact turret macro and exact ship macro. Require `compatible` and enough
+compatible mounts for the requested count; otherwise stop before fixture edits or
+X4 launch.
 
 Never infer turret-to-ship compatibility from size, race, display name, similar
 variants, valid-looking group ids, or an official loadout using another turret
