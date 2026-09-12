@@ -54,71 +54,82 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Direct world-target synchronization fixture: two separated hostile click
--- targets and one player-owned ineligible control.
+-- Issue #151 C4: live-test the five newly supported rank-2 turret macros on
+-- one sparse remote shooter. The five loaded groups are selected together;
+-- existing FIRED records attribute every shot to its exact weapon macro.
 --
 -- Keep this repository copy disabled.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "direct-world-target-sync-r1",
+    id      = "issue-151-endpoint-count-rank2-live-r1",
     enabled = false,
 
+    location = {
+        sectorMacro = "Cluster_29_Sector001_macro",
+        x = 500000,
+        y = 0,
+        z = 0,
+    },
+
     setup = {
-        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
-        shipLabel       = "Ray",
-        turretGroup     = "group_front_up_left",
-        turretLabel     = "Front Upper Left",
-        expectedTurrets = 2,
-        selectAll       = false,
+        remote          = true,
+        shipMacro       = "ship_ter_xl_carrier_01_a_macro",
+        shipLabel       = "ISSUE151 C4 SHOOTER 1",
+        turretGroup     = "group_front_mid_top",
+        turretLabel     = "Five Rank-2 Turret Groups",
+        expectedTurrets = 5,
+        expectedMemberMacros = {
+            "turret_par_m_gatling_01_mk1_macro",
+            "turret_par_m_shotgun_01_mk1_macro",
+            "turret_tel_m_gatling_01_mk1_macro",
+            "turret_tel_m_shotgun_01_mk1_macro",
+            "turret_ter_m_gatling_01_mk1_macro",
+        },
+        selectAll = true,
     },
 
     groups = {
         {
-            label     = "HOSTILE CLICK TARGET LEFT",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 4500,
-            x         = -1200,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-        },
-
-        {
-            label     = "HOSTILE CLICK TARGET RIGHT",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 4500,
-            x         = 1200,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-        },
-
-        -- Player-owned: the ineligible-click control. Never designate it.
-        {
-            label     = "FRIENDLY INELIGIBLE CONTROL - DO NOT TARGET",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
+            label     = "ISSUE151 C4 SHOOTER",
+            macro     = "ship_ter_xl_carrier_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 4500,
+            distance  = 1,
             x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
-            hostile   = false,
+
+            role      = "shooter",
+            loadout   = "x4gc_testlab_ter_xl_carrier_01_rank2_c4",
+            expectedWeapons        = 0,
+            expectedTurrets        = 5,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE151 C4 TARGET PORT HIGH",
+            macro     = "ship_par_m_trans_container_01_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 0,
+            x         = -1414.213562,
+            y         = 1414.213562,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
             holdFire  = true,
             stripDefenceUnits = true,
+            repairGuard       = true,
+            yaw   = 0,
+            pitch = 0,
+            roll  = 0,
+            preserveOrientation = true,
+
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
+            expectedMissileTurrets = 0,
         },
     },
 }
