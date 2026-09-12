@@ -53,6 +53,18 @@ Verify unfamiliar X4 macros and loadout assumptions from current X4 sources.
 Do not infer internal ids, slot counts, labels, or equipment identity from a
 display name.
 
+Before authoring any custom turret loadout, prove that each exact turret macro
+can mount on the exact ship and that the ship has at least as many compatible
+mounts as the fixture requires. Use the repository compatibility query when it
+exists; until then, use `research-x4-modding` against current shipped source.
+Treat incompatible or unresolved compatibility as a hard stop before editing the
+fixture or launching X4.
+
+Do not infer turret-to-ship compatibility from size, race, display name, similar
+variants, valid-looking group ids, or an official loadout that uses a different
+turret macro. Record only the source proof needed for the fixture; do not create
+a local compatibility list.
+
 For hostile fixtures, use existing Test Lab safety controls where applicable.
 READY must depend on the relevant live safety/attackability census, not merely on
 a red label or successful spawn.
