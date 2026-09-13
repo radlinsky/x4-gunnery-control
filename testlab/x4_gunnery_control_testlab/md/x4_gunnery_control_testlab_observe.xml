@@ -117,16 +117,9 @@
              (suffix s, scriptproperties.xml:2396) and comparing a time against
              a plain number is a type error, not a false. -->
         <set_value name="$LastSample" exact="player.age - 1s"/>
-        <!-- Issue #155 automatic geometry burst state.  Disposable: delete with
-             the ObserveAutoGeometry cue once that LIVE gate is scored.
-             $LastFired is the per-turret trigger-pull clock the quiet-period
-             test reads; $Complete counts that turret's completed three-sample
-             windows; $Done is the per-turret claim, written only by the fifth
-             completed window and never released. -->
-        <set_value name="$LastFired" exact="table[]"/>
-        <set_value name="$Complete" exact="table[]"/>
-        <set_value name="$Done" exact="table[]"/>
-        <set_value name="$BurstCount" exact="0"/>
+        <set_value name="$GeometryCaptureActive" exact="false"/>
+        <set_value name="$GeometryTick" exact="0"/>
+        <set_value name="$LastGeometrySample" exact="player.age - 1s"/>
       </actions>
       <cues>
 
@@ -144,13 +137,11 @@
             <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
             <!-- A loaded save can already contain ObserveRoot and therefore
                  skip newly added conditionless root actions after refreshmd.
-                 Initialize this disposable session state on the user-driven
-                 enable path before ObserveArm can accept a firing event. -->
+                 Reset the bounded capture on every user-driven enable. -->
             <do_if value="ObserveRoot.$Enabled">
-              <set_value name="ObserveRoot.$LastFired" exact="table[]"/>
-              <set_value name="ObserveRoot.$Complete" exact="table[]"/>
-              <set_value name="ObserveRoot.$Done" exact="table[]"/>
-              <set_value name="ObserveRoot.$BurstCount" exact="0"/>
+              <set_value name="ObserveRoot.$GeometryCaptureActive" exact="false"/>
+              <set_value name="ObserveRoot.$GeometryTick" exact="0"/>
+              <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age - 1s"/>
             </do_if>
             <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
             <reset_cue cue="ObserveArm"/>
@@ -391,10 +382,15 @@
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
                 <set_value name="$Barrel" exact="event.object.barrelposition"/>
-                <!-- The quiet-period clock for ObserveAutoGeometry.  Written
-                     here because this cue has no delay, so it stamps the real
-                     instant of fire. -->
-                <set_value name="ObserveRoot.$LastFired.{event.object}" exact="player.age"/>
+                <do_if value="not ObserveRoot.$GeometryCaptureActive
+                              and ObserveRoot.$GeometryTick == 0
+                              and (event.object.macro == macro.turret_spl_m_beam_02_mk1_macro
+                                or event.object.macro == macro.turret_spl_m_laser_02_mk1_macro
+                                or event.object.macro == macro.turret_spl_m_plasma_02_mk1_macro
+                                or event.object.macro == macro.turret_ter_m_beam_02_mk1_macro
+                                or event.object.macro == macro.turret_ter_m_laser_02_mk1_macro)">
+                  <set_value name="ObserveRoot.$GeometryCaptureActive" exact="true"/>
+                </do_if>
                 <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
                 <set_value name="$TargetMountBearing" exact="if $Aimed then $Aimed.relativeposition.{event.object} else null"/>
                 <debug_text text="'[X4GC TEST FIRED] t=' + player.age
@@ -551,53 +547,17 @@
               </actions>
             </cue>
 
-            <!-- ObserveAutoGeometry  (issue #155, disposable)
-                 Delete with the ObserveRoot $LastFired/$Complete/$Done/$BurstCount state
-                 once that LIVE gate is scored.
-
-                 The owner cannot reach the manual "Mark moment" button while
-                 seated in a remote shooter, so the geometry #155 predeclared
-                 has to be captured without a click.  Same fields the Mark
-                 snapshot logs, restricted to the five scoped macros and to the
-                 predeclared measurement window.
-
-                 Attribution first, geometry second: a FIRED event is what
-                 establishes which exact turret is engaging which target, so the
-                 burst hangs off it rather than sweeping every turret.  The
-                 parent-completion event plus the first child's 600 ms delay
-                 put the window at +600/+700/+800 ms, which makes the preceding
-                 500 ms of every sample quiet-testable against $LastFired.  Any
-                 trigger-pull inside the preceding 500 ms or inside the 200 ms
-                 window pushes $LastFired forward and fails at least one sample,
-                 which drops the burst silently rather than logging a spoiled
-                 window or a diagnostic line per trigger-pull.
-
-                 Every shot before permanent completion starts its own candidate
-                 burst, so the shot that spoils an in-flight burst is also the
-                 shot that seeds the next one: retries need no rearming and no
-                 shot can be swallowed.  Five complete windows are kept per
-                 turret rather than one, because the <= 0.005 m barrel stability
-                 rule is scored later by ChatGPT and not by MD: a first window
-                 that happens to move more than 5 mm must not retire the turret
-                 before a settled window can be captured.  Only a window that
-                 reaches sample 3 counts, so aborted candidates cost nothing.
-                 $Done is claimed by the fifth completed window and never
-                 released; every sample re-checks it, so once it is set the
-                 losers cancel and the turret goes quiet for good.  Nothing here feeds
-                 production; FIRED/HIT keep their setup and attribution role
-                 only. -->
-            <cue name="ObserveAutoGeometry" instantiate="true">
+            <!-- The first scoped FIRED event starts one raw 50 ms capture.
+                 Firing cadence does not influence its clock or its samples. -->
+            <cue name="ObserveGeometrySampler" instantiate="true" checkinterval="50ms">
               <conditions>
-                <event_weapon_fired group="$FiringWeapons"/>
-                <check_value value="event.object.macro == macro.turret_spl_m_beam_02_mk1_macro
-                                 or event.object.macro == macro.turret_spl_m_laser_02_mk1_macro
-                                 or event.object.macro == macro.turret_spl_m_plasma_02_mk1_macro
-                                 or event.object.macro == macro.turret_ter_m_beam_02_mk1_macro
-                                 or event.object.macro == macro.turret_ter_m_laser_02_mk1_macro"/>
-                <check_value value="not @ObserveRoot.$Done.{event.object}"/>
+                <check_value value="ObserveRoot.$GeometryCaptureActive
+                                 and ObserveRoot.$GeometryTick lt 1200
+                                 and player.age gt ObserveRoot.$LastGeometrySample"/>
               </conditions>
               <actions>
-                <set_value name="$Weapon" exact="event.object"/>
+                <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age"/>
+                <set_value name="ObserveRoot.$GeometryTick" exact="ObserveRoot.$GeometryTick + 1"/>
                 <set_value name="$Target" exact="null"/>
                 <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
                   <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
@@ -608,179 +568,51 @@
                 <do_elseif value="player.target?">
                   <set_value name="$Target" exact="player.target"/>
                 </do_elseif>
-                <set_value name="ObserveRoot.$BurstCount" exact="ObserveRoot.$BurstCount + 1"/>
-                <set_value name="$Burst" exact="ObserveRoot.$BurstCount"/>
+                <do_for_each name="$Weapon" in="$Ship.weapons.operational.list">
+                  <do_if value="$Weapon.macro == macro.turret_spl_m_beam_02_mk1_macro
+                                or $Weapon.macro == macro.turret_spl_m_laser_02_mk1_macro
+                                or $Weapon.macro == macro.turret_spl_m_plasma_02_mk1_macro
+                                or $Weapon.macro == macro.turret_ter_m_beam_02_mk1_macro
+                                or $Weapon.macro == macro.turret_ter_m_laser_02_mk1_macro">
+                    <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                    <do_if value="$Target">
+                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
+                        <position object="$Weapon" space="$Weapon"/>
+                      </create_orientation>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' tick=' + ObserveRoot.$GeometryTick
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' tgt=' + $Target
+                        + ' tgtname=' + $Target.knownname
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' aim_yaw=' + $AimLocal.yaw
+                        + ' aim_pitch=' + $AimLocal.pitch
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                    </do_if>
+                    <do_else>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' tick=' + ObserveRoot.$GeometryTick
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' tgt=none'
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' aim_yaw=none'
+                        + ' aim_pitch=none'
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                    </do_else>
+                  </do_if>
+                </do_for_each>
+                <do_if value="ObserveRoot.$GeometryTick ge 1200">
+                  <set_value name="ObserveRoot.$GeometryCaptureActive" exact="false"/>
+                </do_if>
               </actions>
-              <cues>
-                <cue name="ObserveAutoGeometrySample1">
-                  <conditions>
-                    <event_cue_completed cue="parent"/>
-                  </conditions>
-                  <delay exact="600ms"/>
-                  <actions>
-                    <set_value name="$Weapon" exact="parent.$Weapon"/>
-                    <!-- No recorded trigger-pull reads as zero quiet time and
-                         aborts, rather than as an infinitely quiet turret. -->
-                    <set_value name="$Quiet" exact="if @ObserveRoot.$LastFired.{$Weapon} then player.age - ObserveRoot.$LastFired.{$Weapon} else 0s"/>
-                    <!-- Same target precedence as the Mark snapshot and the
-                         FIRED line, re-resolved per sample so a target change
-                         inside the window is visible rather than assumed. -->
-                    <set_value name="$Target" exact="null"/>
-                    <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
-                      <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
-                    </do_if>
-                    <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
-                      <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
-                    </do_elseif>
-                    <do_elseif value="player.target?">
-                      <set_value name="$Target" exact="player.target"/>
-                    </do_elseif>
-                    <!-- This turret already has its five complete windows, so
-                         this candidate is redundant no matter how good it
-                         looks. -->
-                    <do_if value="@ObserveRoot.$Done.{$Weapon}">
-                      <cancel_cue cue="parent"/>
-                    </do_if>
-                    <!-- Everything #155 predeclares about the window except the
-                         barrel stability, which ChatGPT reads off the three
-                         logged positions.  The target is pinned by sample 1 so
-                         a later sample cannot silently switch targets, and the
-                         mode is read per sample rather than inferred from the
-                         FIRED line or the 10 s census. -->
-                    <do_elseif value="not $Weapon.exists
-                                   or $Weapon.mode != weaponmode.autoassist
-                                   or $Quiet lt 500ms
-                                   or not parent.$Target
-                                   or not $Target
-                                   or $Target != parent.$Target">
-                      <cancel_cue cue="parent"/>
-                    </do_elseif>
-                    <do_else>
-                      <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
-                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
-                        <position object="$Weapon" space="$Weapon"/>
-                      </create_orientation>
-                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
-                        + ' burst=' + parent.$Burst
-                        + ' sample=1'
-                        + ' weapon=' + $Weapon
-                        + ' macro=' + $Weapon.macro
-                        + ' tgt=' + $Target
-                        + ' mode=' + $Weapon.mode
-                        + ' quiet=' + $Quiet
-                        + ' aim_yaw=' + $AimLocal.yaw
-                        + ' aim_pitch=' + $AimLocal.pitch
-                        + ' barrel_x=' + $Barrel.x
-                        + ' barrel_y=' + $Barrel.y
-                        + ' barrel_z=' + $Barrel.z"/>
-                    </do_else>
-                  </actions>
-                </cue>
-                <cue name="ObserveAutoGeometrySample2">
-                  <conditions>
-                    <event_cue_completed cue="ObserveAutoGeometrySample1"/>
-                  </conditions>
-                  <delay exact="100ms"/>
-                  <actions>
-                    <set_value name="$Weapon" exact="parent.$Weapon"/>
-                    <set_value name="$Quiet" exact="if @ObserveRoot.$LastFired.{$Weapon} then player.age - ObserveRoot.$LastFired.{$Weapon} else 0s"/>
-                    <set_value name="$Target" exact="null"/>
-                    <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
-                      <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
-                    </do_if>
-                    <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
-                      <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
-                    </do_elseif>
-                    <do_elseif value="player.target?">
-                      <set_value name="$Target" exact="player.target"/>
-                    </do_elseif>
-                    <do_if value="@ObserveRoot.$Done.{$Weapon}">
-                      <cancel_cue cue="parent"/>
-                    </do_if>
-                    <do_elseif value="not $Weapon.exists
-                                   or $Weapon.mode != weaponmode.autoassist
-                                   or $Quiet lt 500ms
-                                   or not parent.$Target
-                                   or not $Target
-                                   or $Target != parent.$Target">
-                      <cancel_cue cue="parent"/>
-                    </do_elseif>
-                    <do_else>
-                      <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
-                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
-                        <position object="$Weapon" space="$Weapon"/>
-                      </create_orientation>
-                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
-                        + ' burst=' + parent.$Burst
-                        + ' sample=2'
-                        + ' weapon=' + $Weapon
-                        + ' macro=' + $Weapon.macro
-                        + ' tgt=' + $Target
-                        + ' mode=' + $Weapon.mode
-                        + ' quiet=' + $Quiet
-                        + ' aim_yaw=' + $AimLocal.yaw
-                        + ' aim_pitch=' + $AimLocal.pitch
-                        + ' barrel_x=' + $Barrel.x
-                        + ' barrel_y=' + $Barrel.y
-                        + ' barrel_z=' + $Barrel.z"/>
-                    </do_else>
-                  </actions>
-                </cue>
-                <cue name="ObserveAutoGeometrySample3">
-                  <conditions>
-                    <event_cue_completed cue="ObserveAutoGeometrySample2"/>
-                  </conditions>
-                  <delay exact="100ms"/>
-                  <actions>
-                    <set_value name="$Weapon" exact="parent.$Weapon"/>
-                    <set_value name="$Quiet" exact="if @ObserveRoot.$LastFired.{$Weapon} then player.age - ObserveRoot.$LastFired.{$Weapon} else 0s"/>
-                    <set_value name="$Target" exact="null"/>
-                    <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
-                      <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
-                    </do_if>
-                    <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
-                      <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
-                    </do_elseif>
-                    <do_elseif value="player.target?">
-                      <set_value name="$Target" exact="player.target"/>
-                    </do_elseif>
-                    <do_if value="@ObserveRoot.$Done.{$Weapon}">
-                      <cancel_cue cue="parent"/>
-                    </do_if>
-                    <do_elseif value="not $Weapon.exists
-                                   or $Weapon.mode != weaponmode.autoassist
-                                   or $Quiet lt 500ms
-                                   or not parent.$Target
-                                   or not $Target
-                                   or $Target != parent.$Target">
-                      <cancel_cue cue="parent"/>
-                    </do_elseif>
-                    <do_else>
-                      <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
-                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
-                        <position object="$Weapon" space="$Weapon"/>
-                      </create_orientation>
-                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
-                        + ' burst=' + parent.$Burst
-                        + ' sample=3'
-                        + ' weapon=' + $Weapon
-                        + ' macro=' + $Weapon.macro
-                        + ' tgt=' + $Target
-                        + ' mode=' + $Weapon.mode
-                        + ' quiet=' + $Quiet
-                        + ' aim_yaw=' + $AimLocal.yaw
-                        + ' aim_pitch=' + $AimLocal.pitch
-                        + ' barrel_x=' + $Barrel.x
-                        + ' barrel_y=' + $Barrel.y
-                        + ' barrel_z=' + $Barrel.z"/>
-                      <set_value name="ObserveRoot.$Complete.{$Weapon}" exact="(if @ObserveRoot.$Complete.{$Weapon} then ObserveRoot.$Complete.{$Weapon} else 0) + 1"/>
-                      <do_if value="ObserveRoot.$Complete.{$Weapon} ge 5">
-                        <set_value name="ObserveRoot.$Done.{$Weapon}" exact="true"/>
-                      </do_if>
-                    </do_else>
-                  </actions>
-                </cue>
-              </cues>
             </cue>
 
           </cues>

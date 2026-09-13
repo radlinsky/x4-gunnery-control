@@ -83,12 +83,12 @@ grep -Fq "event.param == \$Aimed or @event.param3.{1} == \$Aimed" "$md" \
 # regular weapons/turrets and the separate missile-turret property list.
 weapons=$(grep -Fc 'in="player.ship.weapons.operational.list"' "$md")
 missiles=$(grep -Fc 'in="player.ship.missileturrets.operational.list"' "$md")
-ship_weapons=$(grep -Fc "in=\"\$Ship.weapons.operational.list\"" "$md")
-ship_missiles=$(grep -Fc "in=\"\$Ship.missileturrets.operational.list\"" "$md")
 [[ "$weapons" -eq 1 ]] || fail "expected one player weapons snapshot loop, found $weapons"
 [[ "$missiles" -eq 1 ]] || fail "expected one player missile-turret snapshot loop, found $missiles"
-[[ "$ship_weapons" -eq 1 ]] || fail "expected one census weapons loop, found $ship_weapons"
-[[ "$ship_missiles" -eq 1 ]] || fail "expected one census missile-turret loop, found $ship_missiles"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.weapons.operational.list'])" "$md") == "1" ]] \
+  || fail "expected one census weapons loop"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.missileturrets.operational.list'])" "$md") == "1" ]] \
+  || fail "expected one census missile-turret loop"
 
 # Issue #54 Task 2: inrange must mirror shipped combat-AI reachability —
 # bounding-box distance under maxfirerange, no size term — in both snapshot
@@ -197,46 +197,38 @@ grep -Fq '<cue name="ObserveFired" instantiate="true">' "$md" \
 grep -Fq '<cue name="ObserveHit" instantiate="true">' "$md" \
   || fail "ObserveHit observer cue is missing"
 
-# The disposable automatic-geometry session must be safe on refreshmd into an
-# existing save: enabling observation recreates all four state values before
-# ObserveArm is reset.  Candidate identity is then captured by immediate parent
-# actions.  Three completion-event stages then sample at +600/+700/+800 ms.
-for state in LastFired Complete Done; do
-  [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='table[]'])" "$md") == "1" ]] \
+# The disposable geometry capture is one bounded, rate-agnostic raw sampler.
+for obsolete in LastFired Complete Done BurstCount ObserveAutoGeometry ObserveAutoGeometrySample1 ObserveAutoGeometrySample2 ObserveAutoGeometrySample3; do
+  ! grep -Fq "$obsolete" "$md" || fail "obsolete shot-timed AUTOGEO state/cue remains: $obsolete"
+done
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler' and @instantiate='true' and @checkinterval='50ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sampler does not use instantiate=true checkinterval=50ms"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler']//reset_cue | //cue[@name='ObserveGeometrySampler']/cues | //cue[@name='ObserveGeometrySampler']//event_cue_completed | //cue[@name='ObserveGeometrySampler']//delay)" "$md") == "0" ]] \
+  || fail "AUTOGEO sampler contains self-reset, nested, completion-event, or delay pacing"
+for reset in \
+  "GeometryCaptureActive:false" \
+  "GeometryTick:0" \
+  "LastGeometrySample:player.age - 1s"; do
+  state=${reset%%:*}
+  value=${reset#*:}
+  [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='$value'])" "$md") == "1" ]] \
     || fail "observation enable does not reset AUTOGEO \$$state"
 done
-[[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$BurstCount' and @exact='0'])" "$md") == "1" ]] \
-  || fail "observation enable does not reset AUTOGEO \$BurstCount"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/delay)" "$md") == "0" ]] \
-  || fail "AUTOGEO event cue must initialize its candidate without delay"
-for state in Weapon Target Burst; do
-  [[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/actions/set_value[@name='\$$state'])" "$md") == "1" ]] \
-    || fail "AUTOGEO event cue does not initialize candidate \$$state"
+fired_start=$(xmllint --xpath "//cue[@name='ObserveFired']/actions/do_if[contains(@value, 'not ObserveRoot.\$GeometryCaptureActive')]" "$md")
+printf '%s\n' "$fired_start" | grep -Fq "ObserveRoot.\$GeometryTick == 0" \
+  || fail "AUTOGEO capture start is not limited to the first scoped FIRED event"
+[[ $(printf '%s\n' "$fired_start" | grep -Fc "ObserveRoot.\$GeometryCaptureActive\" exact=\"true") == 1 ]] \
+  || fail "first scoped FIRED event does not latch AUTOGEO capture active"
+! printf '%s\n' "$fired_start" | grep -Fq 'GeometryTick" exact="0' \
+  || fail "subsequent FIRED events can restart the AUTOGEO tick clock"
+sampler=$(xmllint --xpath "//cue[@name='ObserveGeometrySampler']" "$md")
+printf '%s\n' "$sampler" | grep -Fq "ObserveRoot.\$GeometryTick lt 1200" \
+  || fail "AUTOGEO sampler is not bounded to 1200 ticks"
+printf '%s\n' "$sampler" | grep -Fq "player.age gt ObserveRoot.\$LastGeometrySample" \
+  || fail "AUTOGEO sampler lacks duplicate-player.age protection"
+for field in "t=" "tick=" "weapon=" "macro=" "tgt=" "mode=" "ready=" "aim_yaw=" "aim_pitch=" "barrel_x=" "barrel_y=" "barrel_z="; do
+  printf '%s\n' "$sampler" | grep -Fq "$field" || fail "AUTOGEO raw log lost field: $field"
 done
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/actions/set_value[@name='\$Sample'] | //cue[@name='ObserveAutoGeometry']//delay[contains(@exact, 'parent.\$Sample')])" "$md") == "0" ]] \
-  || fail "AUTOGEO sequencing must not depend on parent.\$Sample"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample1']/conditions/event_cue_completed[@cue='parent'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 1 must wait for candidate parent completion"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample1']/delay[@exact='600ms'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 1 must wait 600 ms"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample2']/conditions/event_cue_completed[@cue='ObserveAutoGeometrySample1'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 2 must wait for sample 1 completion"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample2']/delay[@exact='100ms'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 2 must wait 100 ms"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/conditions/event_cue_completed[@cue='ObserveAutoGeometrySample2'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 3 must wait for sample 2 completion"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/delay[@exact='100ms'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 3 must wait 100 ms"
-for sample in 1 2 3; do
-  [[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample$sample']/actions//cancel_cue[@cue='parent'])" "$md") == "2" ]] \
-    || fail "AUTOGEO sample $sample must cancel the candidate parent on invalid input"
-done
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample1' or @name='ObserveAutoGeometrySample2']/actions//set_value[contains(@name, 'Complete') or contains(@name, 'Done')])" "$md") == "0" ]] \
-  || fail "AUTOGEO completion state must not be written before sample 3"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/actions//set_value[@name='ObserveRoot.\$Complete.{\$Weapon}'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 3 must count a completed window"
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/actions//set_value[@name='ObserveRoot.\$Done.{\$Weapon}'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sample 3 must retire a turret after five windows"
 
 # Lua: a newly accepted aim target (different from lastObservedAimTarget) emits
 # the same observe_mark event the Mark button emits and logs auto_mark_initial.
