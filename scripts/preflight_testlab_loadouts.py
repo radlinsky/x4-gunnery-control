@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from census_common import REQUIRED_SOURCE_SETS
-from turret_ship_compatibility import query_compatibility
+from turret_ship_compatibility import build_compatibility_index
 
 
 class PreflightError(Exception):
@@ -28,6 +28,17 @@ def validate_loadouts(source_sets: Mapping[str, Path], loadouts_path: Path) -> N
         raise PreflightError(f"cannot read loadouts XML: {exc}") from exc
     if root.tag != "loadouts":
         raise PreflightError("unsupported loadout document root")
+
+    pairs = {
+        (assignment.get("macro", "").strip(), loadout.get("macro", "").strip())
+        for loadout in root
+        for assignment in list(loadout.findall("./macros/turret"))
+        + list(loadout.findall("./groups/turrets"))
+    }
+    macro_names = frozenset(name for pair in pairs for name in pair)
+    compatibility_index = (
+        build_compatibility_index(source_sets, macro_names) if pairs else None
+    )
 
     cache: dict[tuple[str, str], dict[str, object]] = {}
     for loadout in root:
@@ -48,7 +59,8 @@ def validate_loadouts(source_sets: Mapping[str, Path], loadouts_path: Path) -> N
             turret_macro = assignment.get("macro", "").strip()
             pair = (turret_macro, ship_macro)
             if pair not in cache:
-                cache[pair] = query_compatibility(source_sets, turret_macro, ship_macro)
+                assert compatibility_index is not None
+                cache[pair] = compatibility_index.query(turret_macro, ship_macro)
             result = cache[pair]
             assignment_context = f"{context}, turret {turret_macro!r}"
             if result["status"] == "unresolved":
