@@ -1,0 +1,1664 @@
+{
+  "summary": {
+    "macros": 92,
+    "components": 91,
+    "endpoint_count": {
+      "2": 52,
+      "4": 2,
+      "5": 11,
+      "1": 25,
+      "3": 1,
+      "8": 1
+    },
+    "selected_lexical_index": {
+      "2": 46,
+      "1": 35,
+      "4": 11
+    },
+    "strict_graph_fingerprints": 83,
+    "semantic_cases": {
+      "null": 55,
+      "depth4_one_key_barrel_translation": 11,
+      "depth4_dual_translation": 3,
+      "depth5_additive_x_rotation": 12,
+      "depth4_p6_translation": 2,
+      "depth4_zero_translation": 3,
+      "depth3_one_key_barrel_translation": 5,
+      "depth4_p8_translation": 1
+    },
+    "verified_files": 274,
+    "verification_failures": 0
+  },
+  "fingerprints": {
+    "fd6779a4154d8684c0c5d0d2cee85be8e4c3b98fb0b9bfb7eef507bc50385bb5": [
+      "turret_arg_l_beam_01_mk1_macro"
+    ],
+    "cc77fc8f9e97bfb4472bdce9338dfebf2412d82fbaa9924a9eb917bd2dc6797f": [
+      "turret_arg_l_laser_01_mk1_macro"
+    ],
+    "3b391e74e44c64a58658c3a3cbef88e487c7ce668877be6e99bffa40ea9cb657": [
+      "turret_arg_l_plasma_01_mk1_macro"
+    ],
+    "4d57250316edd543010db2a92b4dd03f6353dc0a0bc950dde42216afbda31d6b": [
+      "turret_arg_m_beam_01_mk1_macro"
+    ],
+    "bbb03998013a15435731f353ba070e986daa984746e8c46fc4a9d3035be3cb8f": [
+      "turret_arg_m_beam_02_mk1_macro",
+      "turret_par_m_beam_02_mk1_macro",
+      "turret_tel_m_beam_02_mk1_macro"
+    ],
+    "379657b726092d4fe4fbac8c79b5c91dc186b8909222b182377236e0664a660e": [
+      "turret_arg_m_flak_01_mk1_macro"
+    ],
+    "c31c231e34cfcfc8e89ca718825932c4ab5ee7b9952d43c8ba6ef9ffa82e1728": [
+      "turret_arg_m_flak_02_mk1_macro"
+    ],
+    "ed0b9dcfbae93501fbba9ac02f09fce432a346b2c35e85ba14a5761928658df3": [
+      "turret_arg_m_gatling_01_mk1_macro"
+    ],
+    "9b1bab2a2f72a53ea522d55900bbe9299a823f097e44afaab7e70a81dbef70be": [
+      "turret_arg_m_gatling_02_mk1_macro",
+      "turret_par_m_gatling_02_mk1_macro",
+      "turret_pir_m_battleship_01_gatling_02_mk1_macro",
+      "turret_tel_m_gatling_02_mk1_macro"
+    ],
+    "f89524a42eff0ec42dce121aa7404e526ec44d5b49fc587167a1e352478c4434": [
+      "turret_arg_m_laser_01_mk1_macro"
+    ],
+    "a79d400d57ec0aaa6d9cfe3ba7741a62c7a898e9430ee90f6f80b61eb7486410": [
+      "turret_arg_m_laser_02_mk1_macro"
+    ],
+    "6b8e85a002955e458d142d57a9dfc74880b262acb91032c261073a7e2d0573b2": [
+      "turret_arg_m_plasma_01_mk1_macro"
+    ],
+    "602e5fa58016ea5ced8d580390913c8da710dea69dea12d8d7f520ba9680a560": [
+      "turret_arg_m_plasma_02_mk1_macro"
+    ],
+    "bbdbe370166fd83b70497c99d0f0912177fecf1afdc13663c55c99d2104be94c": [
+      "turret_arg_m_shotgun_01_mk1_macro"
+    ],
+    "59ca2be46530e3b004111b6cd6946efbe17bd376276a19e524d41e3f645a4ec4": [
+      "turret_arg_m_shotgun_02_mk1_macro"
+    ],
+    "c435309f9c8f2596105de995e437cbd95939d99e2048abd8828a479d85e7a84b": [
+      "turret_bor_l_disruptor_01_mk1_macro"
+    ],
+    "77fc24b0f19842e9e962df67fa36679053e6350f884afc4da4f4bc6bc0ccd2ce": [
+      "turret_bor_l_flak_01_mk1_macro"
+    ],
+    "f0972bb9f04bb6ceda9d15d6fbc28135926f1bdc836bf6b31b45f6d5e9ec4476": [
+      "turret_bor_l_laser_01_mk1_macro"
+    ],
+    "8b8884fd94171b00218986af1f131656b61eb488b7e24d6f60069a60960eb0c1": [
+      "turret_bor_m_arc_01_mk1_macro"
+    ],
+    "5f2693592988bf5b13eaf89243aa60b9a6cc3af3432bf6eb3d76d48140928c41": [
+      "turret_bor_m_arc_02_mk1_macro"
+    ],
+    "8ff346053974355573ee3463397a4e09a951ff7373591affc350b34b20bb864f": [
+      "turret_bor_m_laser_01_mk1_macro"
+    ],
+    "b44b1578543dac1d2a6708c828c260cda852e0afba57250953ef7823c6b5d87f": [
+      "turret_bor_m_laser_02_mk1_macro"
+    ],
+    "4b5f5249d234e5d7cce25e9fbbc27158784b12bbb8f734f6d5da0cecc44a0216": [
+      "turret_bor_m_railgun_01_mk1_macro"
+    ],
+    "02876c71d810028259a03f9b5e3aaf8e379c37daee3f28ef1ca2348dc50a7d7b": [
+      "turret_bor_m_railgun_02_mk1_macro"
+    ],
+    "3fda7d8464890ea5558fdcce8ef23187df0692b486bec0a5b52a665c6a3c4871": [
+      "turret_gen_m_disabler_01_mk1_macro"
+    ],
+    "5277c4af0b6859c75ceceb0be377510ab9289da7317f923d3e0cb1b284ca1f58": [
+      "turret_gen_m_gatling_01_mk1_macro"
+    ],
+    "461ae9ec811b4b30d5be8d350e3dc66974ee0d5be2f81383231978fb660f8699": [
+      "turret_gen_m_shieldpierce_01_mk1_macro"
+    ],
+    "b85bd4deeb86ed05164c0bff303cff27cc888532bd417b50b7e519348d308b36": [
+      "turret_gen_m_yacht_01_mk1_macro"
+    ],
+    "04804f2671d02e5471ed64b75add5658ebd89cf5b447da21dde5ea2b833016c7": [
+      "turret_kha_l_beam_01_mk1_macro"
+    ],
+    "473270318eff85a134d136d6dce0aad7f4dea948373e93b7bb564df0549942b0": [
+      "turret_kha_m_beam_01_mk1_macro"
+    ],
+    "4a986e895a3d3a7da99ddedc7ff12bfd9842385311321e3343c0c28213970ce1": [
+      "turret_par_l_beam_01_mk1_macro"
+    ],
+    "ec68447d6b1554fcda592602a7c12e90a3eb7692495914690e23ecd255daffea": [
+      "turret_par_l_laser_01_mk1_macro"
+    ],
+    "ff1670c22480149dc33d4b5bc629a3905beae2596bb0f4037e947e5ab8a6dce6": [
+      "turret_par_l_plasma_01_mk1_macro"
+    ],
+    "c8d5fac4d5d36117847c8d1d79f21f6c9b58bc8a80566bb815f63121ce952dc5": [
+      "turret_par_m_beam_01_mk1_macro"
+    ],
+    "5ed953153bb5e73a11a82884726461c0d2dfaf388e58507a423ae0598f6ddfd1": [
+      "turret_par_m_gatling_01_mk1_macro"
+    ],
+    "14f3e0a73956b5c63254ec2baf63339832f4288c5f7ec153000400dd3cc2468b": [
+      "turret_par_m_laser_01_mk1_macro"
+    ],
+    "433f0e30c3cc174b2f5a6c1c7c7e0b2050a2bb90c45a742a165003369cf87d67": [
+      "turret_par_m_laser_02_mk1_macro"
+    ],
+    "3a6c3213e961390b6fb8b3418babcc24c885f188db0dad5a62f0f8cf2e1928a0": [
+      "turret_par_m_plasma_01_mk1_macro"
+    ],
+    "ba04d64be36e7f08b667c9ddffe859789838b06695a9f598b351d101a547316b": [
+      "turret_par_m_plasma_02_mk1_macro",
+      "turret_tel_m_plasma_02_mk1_macro"
+    ],
+    "c1126c45dd99c1a0a76c8cf149898026a58ed2088c9932ce82d91bb155ba3b36": [
+      "turret_par_m_shotgun_01_mk1_macro"
+    ],
+    "3dcd442d9d8bc06609244176c7b1698bc6660d1f233849b280172e2a2228d2ed": [
+      "turret_par_m_shotgun_02_mk1_macro"
+    ],
+    "257624e5429519cb1d086dacdac53af99a2d3f4db40dfab03b71a3b28b3632ea": [
+      "turret_pir_l_battleship_01_laser_01_mk1_macro",
+      "turret_tel_l_laser_01_mk1_macro"
+    ],
+    "a0e351ecc38d2010aaaeb07deff52dc927fc7adbb4d2599415b93f1fd5e47c71": [
+      "turret_spl_l_beam_01_mk1_macro"
+    ],
+    "ce5d3122b457cca00a0c89973005c1449090cff302ba84b01ab3efa893c5b351": [
+      "turret_spl_l_laser_01_mk1_macro"
+    ],
+    "90fc16410f0186a3987af8e5bf760f6b6cd4dc01366a7b7aac9f87fb6b31b8fe": [
+      "turret_spl_l_plasma_01_mk1_macro"
+    ],
+    "af90482750e8e0f962a3d450eafd8d2426dde294eabc06f4151d8b76abfdc5b5": [
+      "turret_spl_m_beam_01_mk1_macro"
+    ],
+    "c9cb1fae3df610ba379be2f94c202cc0407b330bb6d3412234eb1c8f7991cce8": [
+      "turret_spl_m_beam_02_mk1_macro"
+    ],
+    "e14599121dddefc8dfab78f48dd342ece72fbb3148280289db96664495109b25": [
+      "turret_spl_m_flak_01_mk1_macro"
+    ],
+    "36651fb261fe7f1d34deae2dc9d3f8eba1fab12323b65a5057d5dff8c2a1c3b8": [
+      "turret_spl_m_flak_02_mk1_macro"
+    ],
+    "bd045c53266b2b23e98a4b2d8b16833ebb0347298455d37eb8b0d725e72192c0": [
+      "turret_spl_m_gatling_01_mk1_macro"
+    ],
+    "df11201790ea0e6aba58ffc0d13570c2f5a74f82788e3752721fdb76bfe3da43": [
+      "turret_spl_m_gatling_02_mk1_macro",
+      "turret_ter_m_gatling_02_mk1_macro"
+    ],
+    "6dacce8036792a68b3dbec7a4da817a99172b43fcc95f30adf1eb23406be6fe0": [
+      "turret_spl_m_laser_01_mk1_macro"
+    ],
+    "058ffaed6ce963346f1dfb84e63d986275b77759d51b1fa6d27605daa3a21cca": [
+      "turret_spl_m_laser_02_mk1_macro"
+    ],
+    "f039b2f19a95fef9831f39ee4539fd26f97cbc90224394935e8058a2c80f1f37": [
+      "turret_spl_m_plasma_01_mk1_macro"
+    ],
+    "875fd5ea431de7eb7ff704919b0b213243edeeb7c2685f8e548fa9b638e0acab": [
+      "turret_spl_m_plasma_02_mk1_macro"
+    ],
+    "f0177c6f38be103c84d5fd4efccf74f4415c8e69283ceb83f52eb07098390da1": [
+      "turret_spl_m_shotgun_01_mk1_macro"
+    ],
+    "74761714a38a6c0661af3b3062d9f904b1c6b5937000621a40f3c0cc2fae25a3": [
+      "turret_spl_m_shotgun_02_mk1_macro"
+    ],
+    "57644fbf27f7b7f99437d6eed7b4584f4b7cff4dc517645bdd38c30526bc49b7": [
+      "turret_tel_l_beam_01_mk1_macro"
+    ],
+    "6e714da0eca2aafd61e57db680c08db727cd40fec692bd7eb71ab44e44eb8c80": [
+      "turret_tel_l_plasma_01_mk1_macro"
+    ],
+    "7d8bb21f3f38dd45cc423bbe2fdf4e0ae9f2cdc38eaaa77f9b0bf5cc87f3cc50": [
+      "turret_tel_m_beam_01_mk1_macro"
+    ],
+    "fe22eefcee98eb526b4e84201370b233ec70325a65924fb8f74b5a3eb54e142f": [
+      "turret_tel_m_gatling_01_mk1_macro"
+    ],
+    "733ebc336db522e5bc0f8cb86093755d21adf479d24f44c2003b605a7de20e3a": [
+      "turret_tel_m_laser_01_mk1_macro"
+    ],
+    "58b7feb240619d50e6507a9cd299bad86155dda1f46c204cc765c4f33d279d75": [
+      "turret_tel_m_laser_02_mk1_macro"
+    ],
+    "20021fbbdd761f090b11f6190cf5bb5e829b6d99b00dd551e78fc7a3e0c0f821": [
+      "turret_tel_m_plasma_01_mk1_macro"
+    ],
+    "4e5f71da411ef4b164b5a2477610934b3f7487f86743dbcf40bb40f45e6693a9": [
+      "turret_tel_m_shotgun_01_mk1_macro"
+    ],
+    "2e39320df8d2458ddab377dee8a6a83e9425852360bd323fb2de30f518afe7b6": [
+      "turret_tel_m_shotgun_02_mk1_macro"
+    ],
+    "79c8064a206f07a9b385254c4ccc3ca50d942abf1b61258a849bdf0ce1adbfac": [
+      "turret_ter_l_beam_01_mk1_macro"
+    ],
+    "f28f1591a4abb1f576895e155e9e9ccf314be760d6b935e508e9d634a8b6be40": [
+      "turret_ter_l_gatling_01_mk1_macro"
+    ],
+    "5198cc4afd42b5619c8751cf56be1a93e9d5cc1c71f6631d8d9952c5a2837e92": [
+      "turret_ter_l_laser_01_mk1_macro"
+    ],
+    "b43e36b0ead87c476fe0a92641aadef0c882b5bd417b8503c33280aa037ba46f": [
+      "turret_ter_m_beam_01_mk1_macro"
+    ],
+    "e8933f8516be14144ae13042e0a93b2f0d57c3f396914c8e25b7c7d8e2f3e2a6": [
+      "turret_ter_m_beam_02_mk1_macro"
+    ],
+    "37d859643ce5545ca76027dbceb8d2c69769a5b31fead629adda57de4c8f71f5": [
+      "turret_ter_m_gatling_01_mk1_macro"
+    ],
+    "65f3a8da2290302ac73ff4e7786c807ca1dd44dc0a077df363481c7fa870d248": [
+      "turret_ter_m_laser_01_mk1_macro"
+    ],
+    "4fe1a681e12c3a1c56d0135da35a3340fc696972f4f109d13a5a37d9114d4a18": [
+      "turret_ter_m_laser_02_mk1_macro"
+    ],
+    "594dbb8aa7fee34ce1c44218dc4d510f6f032268cac7c098160f67349f68d2e1": [
+      "turret_ter_m_laser_03_mk1_macro"
+    ],
+    "a02fe05d64161769445cdeccb573d8d28ef447f5f5c79afc4912e31283ccb663": [
+      "turret_ter_m_laser_04_mk1_macro"
+    ],
+    "c3ac96892f0a3cdc49dad1a15f8de630ffb72c438eb722db7ac3748c32aabbf1": [
+      "turret_xen_l_laser_01_mk1_macro"
+    ],
+    "c3991701479dcfb67c6b6d026f61b825b755a8aaefe4563169771e75b9ea48e5": [
+      "turret_xen_l_plasma_01_mk1_macro"
+    ],
+    "3247074b679d160bf8f72afb01c47589f7c4985df2fdf3d973b760bfd0a8957c": [
+      "turret_xen_m_beam_02_mk1_macro",
+      "turret_xen_m_laser_02_mk1_macro"
+    ],
+    "bc8c88cfe3f49fb6c00701004bf23bbfa49b17553eb17732ea9f4bbdb05a9553": [
+      "turret_xen_m_gatling_01_mk1_macro"
+    ],
+    "1546727f65e993ca03d90752e7bd28818a94c8d015c2b71c33efe8ddc7bc3199": [
+      "turret_xen_m_gatling_02_mk1_macro"
+    ],
+    "ede7cfa5791a4663d95bb6063f2d0fda1fdf1148e379b0e0d9dcd629e11a9af4": [
+      "turret_xen_m_laser_01_mk1_macro"
+    ],
+    "0bf4ad7394e873c2026c641af6e51a29cc6c36b3bc94b483acda88a4e7b87787": [
+      "turret_xen_xl_battleship_01_mk1_macro"
+    ]
+  },
+  "verified_files": [
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_arg_l_beam_01_mk1_macro.xml",
+      "sha256": "8cb8224c30feb083855cd6577d5b007155b99120b6def42f82abe4f83c4319f8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_arg_l_beam_01_mk1.xml",
+      "sha256": "1592dfe0e6a815f97b01c94056f196e35685298a582330fa55b098b5448df9a2"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_ARG_L_BEAM_01_MK1_DATA.ANI",
+      "sha256": "f3aef952feaa4a0972e2c8a0e5ab199a5a03e18b4e148c8706483442be9bbe99"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_arg_l_laser_01_mk1_macro.xml",
+      "sha256": "692f4b95fbb43ecf32f852da0ecb24f29da30d5b286e0af9e0abd56fe8581c3f"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_arg_l_laser_01_mk1.xml",
+      "sha256": "983565bbfa7933e390b8be35c61ac83c65520f3d7419eb1e5ce7601e761712f6"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_ARG_L_LASER_01_MK1_DATA.ANI",
+      "sha256": "4b8960ce49a4b12cad2ab5ad58fb062923c563a52cf721c4b9c8a07709a30e8d"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_l_plasma_01_mk1_macro.xml",
+      "sha256": "deda0770d55565e48146a795fc2067c61ba1f94d8cb0d0ce2533c19f3bc6dc38"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_l_plasma_01_mk1.xml",
+      "sha256": "6e22698d142004dd16414789be81e1f8594356f934aa99c5e1925312dbe56681"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_L_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "b416a91ab55f6c538283b68f4cc05f11c0e07c333e5d1ba4428506560c4cefe0"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_arg_m_beam_01_mk1_macro.xml",
+      "sha256": "7c898d0ab327edbf2bb1a483973472119291e78cc71dfe30112fbeab46999355"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_arg_m_beam_01_mk1.xml",
+      "sha256": "52aaec84cb01fe957acffcd41c965321a5fca6dc50393a6fd988e4b7ecd36b9c"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_ARG_M_BEAM_01_MK1_DATA.ANI",
+      "sha256": "3c4a0e783806be35a4a512eb66f8e5819d16c0258bff3c15413c523d366b9c74"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_arg_m_beam_02_mk1_macro.xml",
+      "sha256": "816ce5b813c76ee2a111aee2ace77beaf49f06c45e816d3461fe08575913ec1b"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_arg_m_beam_02_mk1.xml",
+      "sha256": "b31bb7f5becc2326b20705479d8f70b36f64985835f6907a30dd9a5709af5023"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_ARG_M_BEAM_02_MK1_DATA.ANI",
+      "sha256": "98a8b6e7751d9ef5c7ed452d81d20d9a566aeaa47787249c04de518719507ec7"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_m_flak_01_mk1_macro.xml",
+      "sha256": "cbc35d80bdd4f6b7cb94a45998d521b9279515422f13509be68d5ba817d9017c"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_m_flak_01_mk1.xml",
+      "sha256": "ddda73951734585bea38e17d2b3ded496d9835b191f41e7ed94265b71a2559e9"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_M_FLAK_01_MK1_DATA.ANI",
+      "sha256": "c84a7f6cebc1f706c558477b797206a42867db91140f4a35d7792a73285b037c"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_m_flak_02_mk1_macro.xml",
+      "sha256": "703ff22a2258f175142ec66d931b4e80586bfeeec2381aa73e3445fcba9d9ca5"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_m_flak_02_mk1.xml",
+      "sha256": "cfa90a5cc8891491925da1a78f0a81b03f326db25e7ae22da69a745a5467538d"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_M_FLAK_02_MK1_DATA.ANI",
+      "sha256": "043ed7bd09df0291576c360a1f82d101b9eb6231d74d0cd349dd4f761b6d5332"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_m_gatling_01_mk1_macro.xml",
+      "sha256": "e8516b92d3621063ff096ccc9224437d9280cf244af4aded7e365f339366aae4"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_m_gatling_01_mk1.xml",
+      "sha256": "976dec8ac80f805804f386f3059df039564db61462978465e0c78cc6bcd990fe"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_M_GATLING_01_MK1_DATA.ANI",
+      "sha256": "3e3009b16bc71e7c1e635d8cc8826d81f568228f569aaa8179d89426ee3300b5"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_m_gatling_02_mk1_macro.xml",
+      "sha256": "f6aa7671645d99c6b9a28b99eba8cb735d505bd8c9c4ea1ae81a9919ea349b2b"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_m_gatling_02_mk1.xml",
+      "sha256": "922cc7e37deb65848de06e52307191023c2c5f8b5d01b02582eb9ec2142f4ad9"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_M_GATLING_02_MK1_DATA.ANI",
+      "sha256": "360f77d61114ccef763254919659f6124d88c7efe5125d1ed1f29174684709ba"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_arg_m_laser_01_mk1_macro.xml",
+      "sha256": "0aedad9dde79c10847f8b98797e65887c5c45a2ef72838fca9677300354ad419"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_arg_m_laser_01_mk1.xml",
+      "sha256": "f29e9d365dc1834236beb135797368dc6959a37630ebbefeaa07f6eaea9110ad"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_ARG_M_LASER_01_MK1_DATA.ANI",
+      "sha256": "84592424dac832eba1edbe2aeb0a3853517a9b9fd7cbe197f7cfaaea50c82380"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_arg_m_laser_02_mk1_macro.xml",
+      "sha256": "1a27fd897502aecf5e8e400388b23e7b00dd1492e893b766092575581abe1e40"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_arg_m_laser_02_mk1.xml",
+      "sha256": "65097820c01e61b91cc41a767d75a9d0e248b2d9c7fb650b7cc2160e3a5f737f"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_ARG_M_LASER_02_MK1_DATA.ANI",
+      "sha256": "faf2e4be32a31595833aae2d78bd3288c35c3c39eb855ac27fc3c467a967e609"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_m_plasma_01_mk1_macro.xml",
+      "sha256": "cbf138dc94b88c03603760ba4bd5ed7f9a22902dfffb252b81bab71d932b9af0"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_m_plasma_01_mk1.xml",
+      "sha256": "39aaecc0ee07f7f536bd09a893d4a10c26d734e33d57be236d80a1d5ccadada0"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_M_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "63bc7bc7178776e891d65223b9f537af769a14ccea738edaa716790a45d654ec"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_arg_m_plasma_02_mk1_macro.xml",
+      "sha256": "86497b5e830ce270434274ed739eb63ab5ad416b903a55328daac532102508b8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_arg_m_plasma_02_mk1.xml",
+      "sha256": "e1b9f6763c330767e1cf663f1072db4f9ca0f81c67f4aae02f7143a3e68e2ee5"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_ARG_M_PLASMA_02_MK1_DATA.ANI",
+      "sha256": "808c32d9a3afa0f2729da035306ecea8f969fdca1b7ff9f03612e36aca741a43"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_arg_m_shotgun_01_mk1_macro.xml",
+      "sha256": "5e75fff256405e83e24249784495f85d3198b56301f5e9c9f7ea6fac20fdec52"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_arg_m_shotgun_01_mk1.xml",
+      "sha256": "3bc94a6076874a409f00c40087cbc19d7e620f406cd0a55dde1e1cbb5bcc3660"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_ARG_M_SHOTGUN_01_MK1_DATA.ANI",
+      "sha256": "050037f2aba118eacb9f23503cc3ae49c83981e70de128d1e170f2fe4d649ae8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_arg_m_shotgun_02_mk1_macro.xml",
+      "sha256": "86ec961fe309c0d9ba9743832692eae0f2e8915daa6a27b8c50f4f445589e529"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_arg_m_shotgun_02_mk1.xml",
+      "sha256": "7e512cd29f81224b43b40cb76eaa09a52058195e46c78aa27c59d78111f8c403"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_ARG_M_SHOTGUN_02_MK1_DATA.ANI",
+      "sha256": "c9cbb77599c915de0896bdf3e915862d3d82ae564fcee3283d567edf1fe07ab9"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_l_disruptor_01_mk1_macro.xml",
+      "sha256": "0d68d54e6b23ca81c504f19e5fd37c730aad78b70b9293a9941dd3d5a3cb4927"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_l_disruptor_01_mk1.xml",
+      "sha256": "3130832ac762a9dc77665f3acf3c6ae3067723beb87b6b9eef90ae4aa914ba4a"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_l_disruptor_01_mk1_data.ani",
+      "sha256": "a1a06f687733a03a69726dcde0c60456cbe70c9704692fc218d185d80c26509a"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_l_flak_01_mk1_macro.xml",
+      "sha256": "354ea9056ba4d11101193ae5d2b9514f0c350f1621122c96ff3fff7644b64289"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_l_flak_01_mk1.xml",
+      "sha256": "eda1fbbc6c2c2b6605824fa1813026de4c4b8039636c52028961ea804a860428"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_l_flak_01_mk1_data.ani",
+      "sha256": "dffbf0348519c20e8982a64753d6fda917e830a6867dbaa86942e756273b875e"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_l_laser_01_mk1_macro.xml",
+      "sha256": "650ba9cf9d64797525eea6dea61603d27fee33cda2a60912b5e4fb57b27dc5e7"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_l_laser_01_mk1.xml",
+      "sha256": "270f30fa2ca28c77bd22dfabfec8c8efe3fe8bb49879bfcf25d22118015250b8"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_l_laser_01_mk1_data.ani",
+      "sha256": "19cb93bca03eb30cbccd38ec49580c5344583fd4cbb5d0b10c6616e6800b206b"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_m_arc_01_mk1_macro.xml",
+      "sha256": "d5e906a0752b49222ef0b2539da5753d711ecc1773518683c2f2d2802411b00f"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_m_arc_01_mk1.xml",
+      "sha256": "5b3add50f1fcd46ebb0cd8625117331ccc1a8f0188a42b168bf02599f5ab9318"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_m_arc_01_mk1_data.ani",
+      "sha256": "6f024f4c07741ca6e1f68fc9149d72fc0ed6a7e53a465aab6f1be950827f69d8"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_m_arc_02_mk1_macro.xml",
+      "sha256": "ae4244e20fac8ac72572b3e122ca92a3099b9939606c57058a69c8d97a03cf1b"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_m_arc_02_mk1.xml",
+      "sha256": "93a65f6006dac52906d16340ce96d2b0e5332bf2dea96b9385fa14e06ac6c897"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_m_arc_02_mk1_data.ani",
+      "sha256": "070789ef81212a1bbfa2931d9b5fe29a06847ab4579b30a2db2cd0c8b4dbc42f"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_m_laser_01_mk1_macro.xml",
+      "sha256": "9aa8b1bd878283de52a875377b799cbb7cab2c1c597efc5a47ebc4d5e65e096e"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_m_laser_01_mk1.xml",
+      "sha256": "e57684643becf8edc5334f6410a1da26d285ed3fd05270a89d87f52ccf2de774"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_m_laser_01_mk1_data.ani",
+      "sha256": "d4c34935fbb256e18827e27eb4b19b0eb23db758a7f6d1b1325bbd68a60bf6ca"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_m_laser_02_mk1_macro.xml",
+      "sha256": "635edd5a935911828645f9d943523fa2fd3cc3b3a6889f0c21574cfd47e3eede"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_m_laser_02_mk1.xml",
+      "sha256": "219c5517ed8a4fc850fe056a9f1b26dbcfd2c2fb12b3eafd79907235aceab4be"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_m_laser_02_mk1_data.ani",
+      "sha256": "f0de5c03e16d0cd70ce8b98bf5593ecf241361e91036f2bc8617fd186d90865f"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_m_railgun_01_mk1_macro.xml",
+      "sha256": "99c9c3d93e9a9f703e5285d5a02c7cdd4e2f377e603684b14d11e02049c18694"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_m_railgun_01_mk1.xml",
+      "sha256": "021171b609024beb202f6767703b8f7ca22332ca819223f178cb93708b0a0802"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_m_railgun_01_mk1_data.ani",
+      "sha256": "425f31a8ea915f1e40c28bf1e1f3675ef8be37c298ea11e23e33b912467c1ea5"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/macros/turret_bor_m_railgun_02_mk1_macro.xml",
+      "sha256": "0fbbbcc40e46f8b134a4a45225fe6e3264194aad65836b54142de95e5d27a989"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "assets/props/weaponsystems/boron/turret_bor_m_railgun_02_mk1.xml",
+      "sha256": "b4c4d75210a12f667a2b095b92797265c9a2185dab28e4a0d251aa4d69742771"
+    },
+    {
+      "source": "ego_dlc_boron",
+      "path": "extensions/ego_dlc_boron/assets/props/weaponsystems/boron/turret_bor_m_railgun_02_mk1_data.ani",
+      "sha256": "ce3180f89a64fa89e998fd404ee9d69ee4e1cc9f910237d63e9bac6a8c9149a3"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "assets/props/weaponsystems/standard/macros/turret_gen_m_disabler_01_mk1_macro.xml",
+      "sha256": "1b02802bfa6be7fc859853c8a2b68ac23fd43fbd8aef41e5c6f66a3a388c068c"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "assets/props/weaponsystems/standard/turret_gen_m_disabler_01_mk1.xml",
+      "sha256": "5b7f71962b0b75abad751961cfa4e8b134782e8ed934c539bb4a6fbf3664cc73"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "extensions/ego_dlc_mini_02/assets/props/weaponsystems/standard/turret_gen_m_disabler_01_mk1_data.ani",
+      "sha256": "1be70a7e71712f08110b89257fde303aed021c124bd14344585abaea166b0c9b"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "assets/props/weaponsystems/standard/macros/turret_gen_m_gatling_01_mk1_macro.xml",
+      "sha256": "b3bccf94d6ff944134c992dbce703a4c044e11aff0d8aff8ce4fb92289eb5160"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "assets/props/weaponsystems/standard/turret_gen_m_gatling_01_mk1.xml",
+      "sha256": "d9860946dbf0c878ef338c1e8a08b8828bb8ea182ab1f4549de6f7adf08a1fab"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "extensions/ego_dlc_mini_02/assets/props/weaponsystems/standard/turret_gen_m_gatling_01_mk1_data.ani",
+      "sha256": "fdb599cb34346778540eb0f567116a418837346576b7ec8fac6d62021cec324f"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "assets/props/weaponsystems/standard/macros/turret_gen_m_shieldpierce_01_mk1_macro.xml",
+      "sha256": "01a1919b78784b8a15b6030da8bfab63e990f9092419d74fe439c8656255eb5f"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "assets/props/weaponsystems/standard/turret_gen_m_shieldpierce_01_mk1.xml",
+      "sha256": "8ea2f97e3893ef4e986dadb955894cf7702d58998159ef7d0ab686cf6e5d3d84"
+    },
+    {
+      "source": "ego_dlc_mini_02",
+      "path": "extensions/ego_dlc_mini_02/assets/props/weaponsystems/standard/turret_gen_m_shieldpierce_01_mk1_data.ani",
+      "sha256": "c58ed1f79264b6217b7b20275f74dc6059da420f2da1e778dd3a66f42b5ab202"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "assets/props/weaponsystems/standard/macros/turret_gen_m_yacht_01_mk1_macro.xml",
+      "sha256": "3d4a31c4d73b03d8fd2bb0376d506c6aa9e2749906d6d116163e73dbbd924b56"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "assets/props/weaponsystems/standard/turret_gen_m_yacht_01_mk1.xml",
+      "sha256": "fd093056fe2c86ea2286a29b9bc2862e733af9051a11df5d23fb96596af5a8ea"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "extensions/ego_dlc_pirate/assets/props/weaponsystems/standard/TURRET_GEN_M_YACHT_01_MK1_DATA.ANI",
+      "sha256": "198afc562801c3fea7ff3aa87d47e0f126a89571b0607d6f5794593a091273fb"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_kha_l_beam_01_mk1_macro.xml",
+      "sha256": "7c72d64cbf557076a4de0bb9ac210e6227e6b7be874ea9b71ec2b53609030ae3"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_kha_l_beam_01_mk1.xml",
+      "sha256": "639ff1e4cd2bdaf7ff9bc0dd82e0bab21e0454d3fd9ade0b6ae1582689e395a6"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_kha_l_beam_01_mk1_data.ani",
+      "sha256": "a414d18d7c1f25e354dc8255894463dc98838a1b2aa232deb70b1b6567140464"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_kha_m_beam_01_mk1_macro.xml",
+      "sha256": "51a5c3aa81236bd8b0dff25b3424214396bc7432e6fccd89808f28655fa05d17"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_kha_m_beam_01_mk1.xml",
+      "sha256": "1d220b3f185d02dd3b85138a757b714c68118bd55f1ad094931101551b7d34f5"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_KHA_M_BEAM_01_MK1_DATA.ANI",
+      "sha256": "58ebaa31289c7083139936b4e61c687829e1cb3eadfe1422c382e8d0fedea626"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_par_l_beam_01_mk1_macro.xml",
+      "sha256": "67dcd6f068c332f1fe7f3fe247690189d0555396429ac3a1d5e82cb25977d8de"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_par_l_beam_01_mk1.xml",
+      "sha256": "f4cad1f2c831637216f16c9fedc811f89b66c0bfec8e44d7f7efa9fd700208ee"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_PAR_L_BEAM_01_MK1_DATA.ANI",
+      "sha256": "1344dd8c675a0608575585a144ef8b016711db8bd57d1d6af4f5c45afeebc3c4"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_par_l_laser_01_mk1_macro.xml",
+      "sha256": "d630201dcac30cbf33dacf37b58490c22974013b09915d34d3d42bed9e3242c0"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_par_l_laser_01_mk1.xml",
+      "sha256": "7f4f774e6781b59269cbe85f6f400a14ff0b16c4d8e7c1dd8cb1f510064dc7bf"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_PAR_L_LASER_01_MK1_DATA.ANI",
+      "sha256": "426bfdd96ff1b3b6b302b32f25370caab47602904a5f99b2228d6b56b2c16088"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_par_l_plasma_01_mk1_macro.xml",
+      "sha256": "0f67182ee5dbafb74087a47c4121db470c88541f810f4a4ca4bfa6157f8659b8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_par_l_plasma_01_mk1.xml",
+      "sha256": "7b040b15800eb868430a2411b2db8048b6e0ee550d67f4aa3805e5342a080f76"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_PAR_L_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "4021af678dd21a9e5bece313e59f32028a7f36d94e647da99c1b8d71a40b1009"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_par_m_beam_01_mk1_macro.xml",
+      "sha256": "0636d459778a67b389990cd3360299288ec314371e00e9c2f8dee407afe398e2"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_par_m_beam_01_mk1.xml",
+      "sha256": "561135072784dae67cfaead4f5eee79656bf5247bec263ef321255a0009feaef"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_PAR_M_BEAM_01_MK1_DATA.ANI",
+      "sha256": "6678f48482c994d3ff09bcb348888e7afbe20f4f249e8468c463edab92c86a78"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_par_m_beam_02_mk1_macro.xml",
+      "sha256": "b0e895517d9164bdd1c691cb7ce60d72e819eec108258bbe6d63caa6f66c627c"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_par_m_beam_02_mk1.xml",
+      "sha256": "e6988449d8a5067c5f139deaae311454960c30567413aa1d1be1e79adf9a89a2"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_PAR_M_BEAM_02_MK1_DATA.ANI",
+      "sha256": "98a8b6e7751d9ef5c7ed452d81d20d9a566aeaa47787249c04de518719507ec7"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_par_m_gatling_01_mk1_macro.xml",
+      "sha256": "7effd1a6df4c0a9e0b37acbf4850e44d7d5319d3d3e443c39e7321296de0b2fd"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_par_m_gatling_01_mk1.xml",
+      "sha256": "d6646ab495d87dee33384410d08693cba550b7dae7a14fcddec3491d79ebb371"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_PAR_M_GATLING_01_MK1_DATA.ANI",
+      "sha256": "f4efc050aefa7156d01c4084b7242ddb36800c9364a8ec4a018849c14e253688"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_par_m_gatling_02_mk1_macro.xml",
+      "sha256": "baa23f8d9cc642aa07bdd34a7cad4ca358510404a2fef1fb668944cb82aa98e6"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_par_m_gatling_02_mk1.xml",
+      "sha256": "9cadbfb7ddbb2155eaed610534778ac4aa051cf8e8a5f4b46f74e358f37df6d2"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_PAR_M_GATLING_02_MK1_DATA.ANI",
+      "sha256": "f4cd4568320d64a95b0549a0e44add803e28ce56b1f56a9877f6f97bdb46ec01"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_par_m_laser_01_mk1_macro.xml",
+      "sha256": "9081542f71b0928fa581a5d39104dc456145ab779a79a1fb43d2cbb31da17fb6"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_par_m_laser_01_mk1.xml",
+      "sha256": "f6f8eb311993d05917c6b1e634118f1d64608a743dd5b1c425d0666602123b06"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_PAR_M_LASER_01_MK1_DATA.ANI",
+      "sha256": "b9b1fd79ec22659681502955c23c69be3343ad0ee367fce7fc28658835651a78"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_par_m_laser_02_mk1_macro.xml",
+      "sha256": "a91b87a585d2e8e3db8bf8604b40078e6495c514c8bd059787dc3090aea3eb05"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_par_m_laser_02_mk1.xml",
+      "sha256": "68d65f2445b44a4c70f83030222825639072f1d0df0b835d7b5e98f49b041e78"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_PAR_M_LASER_02_MK1_DATA.ANI",
+      "sha256": "dad578843f83c3b3c920877c1dc129fad8c4bd7c950cda05b3a2d4efe1a4fbbc"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_par_m_plasma_01_mk1_macro.xml",
+      "sha256": "ae59bc544091b99bbff8509ed23350bf5997c96ac757ab52d7e249d1bc2648fe"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_par_m_plasma_01_mk1.xml",
+      "sha256": "9cc07725d8fadc089d2858967b3685d0614a9f0c55a28b54e199cb52f856742e"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_PAR_M_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "0dfd9f71da31db2d71f7f5cabc8182febdfbddc1c968009cd8ebda61310fa7df"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_par_m_plasma_02_mk1_macro.xml",
+      "sha256": "c28f439316c546b5120ed25b2e4a9dd4429f3e3f838f38b165b894a89c556249"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_par_m_plasma_02_mk1.xml",
+      "sha256": "db22ed004430c21ecf102812b30eab3d9db69054aa8f333f69533db5c9568dc1"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_PAR_M_PLASMA_02_MK1_DATA.ANI",
+      "sha256": "ef4aa989abd5d13f673ae993543294543ffda3ff1c5e99609de571e9f89f6534"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_par_m_shotgun_01_mk1_macro.xml",
+      "sha256": "ec7e8e88b5e98fdd3d0475adcfc81f09dcb072e72e4a73b9d676e890b4d72279"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_par_m_shotgun_01_mk1.xml",
+      "sha256": "59422cb721d7f05359ec0e68d93593e935e3754a94b1dd4249445f44854b3352"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_PAR_M_SHOTGUN_01_MK1_DATA.ANI",
+      "sha256": "ce7a76262eb2883c7bf74ec1fc1b2442843d92cc50d098753a72e11123fbfca5"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_par_m_shotgun_02_mk1_macro.xml",
+      "sha256": "f791c79167e2ba0a1854bbc4a54fc66432ae31eae2d6d020004a99aaeac6fd18"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_par_m_shotgun_02_mk1.xml",
+      "sha256": "56e7dbf9397dce40251e5f043c6c36ae4c3e060047e10f3c34be978ad52f6613"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_PAR_M_SHOTGUN_02_MK1_DATA.ANI",
+      "sha256": "c9cbb77599c915de0896bdf3e915862d3d82ae564fcee3283d567edf1fe07ab9"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "assets/props/weaponsystems/standard/macros/turret_pir_l_battleship_01_laser_01_mk1_macro.xml",
+      "sha256": "2a7d7bd4e8881528b785cbc0709562d5ba65b4f2f7b6c6dccd264252279240d9"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "assets/props/weaponsystems/standard/turret_pir_l_battleship_01_laser_01_mk1.xml",
+      "sha256": "ab294a5d150a10c03aaf79c0d77306361ffcc150fe5dcbd44e56c5330dfae162"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "extensions/ego_dlc_pirate/assets/props/weaponsystems/standard/TURRET_PIR_L_BATTLESHIP_01_LASER_01_MK1_DATA.ANI",
+      "sha256": "8031071fcffa89036a0b651d72635660181cfcd29a4da9f9251d9d57564456a8"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "assets/props/weaponsystems/heavy/macros/turret_pir_m_battleship_01_gatling_02_mk1_macro.xml",
+      "sha256": "086f493ac170d3097dd3fc603679d12cb8828038e06fd37dc986b2ad3a14f8df"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "assets/props/weaponsystems/heavy/turret_pir_m_battleship_01_gatling_02_mk1.xml",
+      "sha256": "58e36bd29b53cbfe35f4d572a01aba9ee8210b1a8eaa933419890384b2336d2e"
+    },
+    {
+      "source": "ego_dlc_pirate",
+      "path": "extensions/ego_dlc_pirate/assets/props/weaponsystems/heavy/TURRET_PIR_M_BATTLESHIP_01_GATLING_02_MK1_DATA.ANI",
+      "sha256": "b0bebcf4014b9ac36ab7cda5773426a57c1a03e6621a8510f555b58154c9e74d"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_spl_l_beam_01_mk1_macro.xml",
+      "sha256": "28604d8d812006dc25b6a2b49b41b37467908e28011c6d2950f896e86f1a0505"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/energy/turret_spl_l_beam_01_mk1.xml",
+      "sha256": "8b3304f4e1c641ce6d32dca8677e7dac3b532063aa2054dbaaa74ce47485c565"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/energy/TURRET_SPL_L_BEAM_01_MK1_DATA.ANI",
+      "sha256": "fc4bd6f74dcc47c5d37cb07d143925cd339fde112d22bb2ceb6cf9b12145853d"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_spl_l_laser_01_mk1_macro.xml",
+      "sha256": "528b20126307d7a764c9f6238873186bff479d15027a1f750931d26b589f216c"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/turret_spl_l_laser_01_mk1.xml",
+      "sha256": "bbd65850beedb7a60290cc8e092e58184a5f69c15f4594defce5d47fcf60b096"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/standard/TURRET_SPL_L_LASER_01_MK1_DATA.ANI",
+      "sha256": "0b12a7d54078d2b1a777582d6701d2a9d8162068b3d871acbcd4c8c4522e5ffc"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_l_plasma_01_mk1_macro.xml",
+      "sha256": "232e5bea932c893ca7e34592b7a77c4610641de8e1e4f8ef6548f6483cba2bff"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_l_plasma_01_mk1.xml",
+      "sha256": "bf494099dd2e94ab6c16e0dc3845a6da303192c1b3f20c2c08b77a0e2394a05f"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_L_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "6ac79266b754a1d9d35a2630c7d99c3ce582fdfa1757745cef76c0e48f4f62d6"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_spl_m_beam_01_mk1_macro.xml",
+      "sha256": "d02437a882413b88754b7ce55aa3eee6c3e29231fc0a4b40ff9c48a65f318134"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/energy/turret_spl_m_beam_01_mk1.xml",
+      "sha256": "30bbf9d760d980234aec96f65256a9ee6b6bf9c51d1ddc6c69fc304d3c98da09"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/energy/TURRET_SPL_M_BEAM_01_MK1_DATA.ANI",
+      "sha256": "05d3aa0a370152dd2ddca216b3787c9de9964c90918b7df920f9a853127f3dba"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_spl_m_beam_02_mk1_macro.xml",
+      "sha256": "06de2349c09ee18f4eaee35ce4668905a25b10a4eb28eecaab5d9a56ec071ccd"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/energy/turret_spl_m_beam_02_mk1.xml",
+      "sha256": "69185d6c567f0975dd440b8b38d6917f921e24e7d56f72811d213db95e90ec95"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/energy/TURRET_SPL_M_BEAM_02_MK1_DATA.ANI",
+      "sha256": "4466012838e17600270e08fff3bd58425c22c0a118707dbf28a6144703fe88db"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_m_flak_01_mk1_macro.xml",
+      "sha256": "ec92e99e13dfa02ac70708fa6120150b195ed620b8b60c361b23fff0a33e3d68"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_m_flak_01_mk1.xml",
+      "sha256": "3252a3476693e2837e31e51228875a591a591e5ea97f99ed5ee3d26b0f06d58e"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_M_FLAK_01_MK1_DATA.ANI",
+      "sha256": "e1abc603c91e5901c9c9f1feee1506eed8a0675fc5a38cab03c9bfbef4eed8fe"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_m_flak_02_mk1_macro.xml",
+      "sha256": "5c7988e510829b968effcf923c3722b0ef54505be74d1147040ec1ae221a29e2"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_m_flak_02_mk1.xml",
+      "sha256": "abf489c19bed28505a4c9ba6472d4fdf0f0407857756d9dfbd86d5002816c908"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_M_FLAK_02_MK1_DATA.ANI",
+      "sha256": "573e5335f95fbdf71f03607535b33fbca24f3a5d2303d7b26a9968e531bc6602"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_m_gatling_01_mk1_macro.xml",
+      "sha256": "a808dbca33f808a1a17dae5b760fea99149cbc16955a6fc948dad1b74fef1383"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_m_gatling_01_mk1.xml",
+      "sha256": "e9bdd498d8dd4eecfbcb56c3620f41e2ab23afcfdeddeb8ff9a412f748232566"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_M_GATLING_01_MK1_DATA.ANI",
+      "sha256": "9da87207b609446bbcd8cd5ede8b7ed1007998fb55a75b14c55955a79a10cc7e"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_m_gatling_02_mk1_macro.xml",
+      "sha256": "97cd1fb389fc2b72b4fcc1df108c66259489cb89eb7f974a7021b700b1278dc5"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_m_gatling_02_mk1.xml",
+      "sha256": "96113a083e67ce576266eca878fdc6e2c4b6db044e23a0d1d36e5bd9d1febf68"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_M_GATLING_02_MK1_DATA.ANI",
+      "sha256": "31228684294a4401be90987ed43527872d91503390b400bf5a527e933b34fa26"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_spl_m_laser_01_mk1_macro.xml",
+      "sha256": "ca9035c3d0c9b084f1093f59e092ae843c61010a3b81009963304a37831bee64"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/turret_spl_m_laser_01_mk1.xml",
+      "sha256": "a2450b12627b74fc61eaf508caf32d9eff21bf1fd8b05273c23d9d3935a2177f"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/standard/TURRET_SPL_M_LASER_01_MK1_DATA.ANI",
+      "sha256": "620cfd11c845c0e549bcd88f762c6942045f5d684a955d14cd3611b9ed63e045"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_spl_m_laser_02_mk1_macro.xml",
+      "sha256": "22b785363c424f5b29872fa3db3bcb678ca7e0aeeb5fae0ed858f412bf5eec01"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/turret_spl_m_laser_02_mk1.xml",
+      "sha256": "284878f660ef729d45820ed86db5b3c9d1c0a6278fb6827d735cd82bd928cc7b"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/standard/TURRET_SPL_M_LASER_02_MK1_DATA.ANI",
+      "sha256": "ae684415bfaa1c92e357fb2abe8a9b83d1fc3445721b2d05d0efd2f4b49d2094"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_m_plasma_01_mk1_macro.xml",
+      "sha256": "46fc9f3abd262be2aad9ab3d91811dca862ae839bc1226763ee9c2db1a4e9122"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_m_plasma_01_mk1.xml",
+      "sha256": "891ce61a1328e11ac9c03fa7c6701d5fa462c8dffddd639cfd159851874aba04"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_M_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "7043b614e58cce1178cd85b62faa68a800ca0cc5ce24a2758bfa6c8bd2fcb448"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_spl_m_plasma_02_mk1_macro.xml",
+      "sha256": "5cb7293104a7b0d5437ed8bf95d349f81fc80324b372a8c17f28af8f9aae0c19"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/heavy/turret_spl_m_plasma_02_mk1.xml",
+      "sha256": "d7da91b3894761c91a7a29fe15bf5924da8403373d3140af7076c2b69ced13f6"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/heavy/TURRET_SPL_M_PLASMA_02_MK1_DATA.ANI",
+      "sha256": "61b1909adcba84cecaee15689b24e0f496e38d0dc341b2a569966d9169fa8a40"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_spl_m_shotgun_01_mk1_macro.xml",
+      "sha256": "d43cee28e52f972a4e134f5d4a798d348e66979eadd6a870cc33db80dc0a9bc1"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/turret_spl_m_shotgun_01_mk1.xml",
+      "sha256": "eb7cb565a7000e9ed59993b03846cebb4c569e7ba7f85d3208b240b839954463"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/standard/TURRET_SPL_M_SHOTGUN_01_MK1_DATA.ANI",
+      "sha256": "fec6a0c76c794fff22330522a3eeac02c2141ee406f7eb69630b65c57564479b"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_spl_m_shotgun_02_mk1_macro.xml",
+      "sha256": "f13ad60b8c4727f4a150aa7e719f4972e571310fee4182c9fe53e3a25e3239c1"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "assets/props/WeaponSystems/standard/turret_spl_m_shotgun_02_mk1.xml",
+      "sha256": "ced12bf9c22f232a46ce64ce5c39080b7adb3aa3c13bb9e8f404c008089f4635"
+    },
+    {
+      "source": "ego_dlc_split",
+      "path": "extensions/ego_dlc_split/assets/props/WeaponSystems/standard/TURRET_SPL_M_SHOTGUN_02_MK1_DATA.ANI",
+      "sha256": "718e722551064a1a2546154bc290ef9c6a57c634b92e963370ec4fbd858da7b8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_tel_l_beam_01_mk1_macro.xml",
+      "sha256": "5a693944ca5f0d9a3e09e2794d1dd17e91da12b8db9633b946ca7f5bf4cd2f2c"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_tel_l_beam_01_mk1.xml",
+      "sha256": "7797148d4c012bc036657735e0c1c7c9fe11d443ed18de16cc649b147c744418"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_TEL_L_BEAM_01_MK1_DATA.ANI",
+      "sha256": "759f3c6eb50ecb2f2d3f97611f28e2bce2cfd12346860052b8f0c28c09999a98"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_tel_l_laser_01_mk1_macro.xml",
+      "sha256": "709ecb0a290a1ac3adb9d1c611fa3c4cfadc8c44092dfbb8c73a6e764749ba7a"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_tel_l_laser_01_mk1.xml",
+      "sha256": "5d175f5c752b531071c00d09411f1d42afa6209405a8be400196fc9e7b07af5f"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_TEL_L_LASER_01_MK1_DATA.ANI",
+      "sha256": "70c2ab7cf98ef4c49cde940f1355936372355661e919614699aa25f64f9fe25a"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_tel_l_plasma_01_mk1_macro.xml",
+      "sha256": "0957ecfa3644e9b1ef48125c5677308f3337417a1a3eeabbb340b88369f34180"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_tel_l_plasma_01_mk1.xml",
+      "sha256": "e845320e99da43303f9cd84d0721183a7df8d07c2ddf70f380eafd7084056cd3"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_TEL_L_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "c1e30901688f34a300c0f3a93e18f06a8cd1e0784cb758422c88c56bd5a83575"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_tel_m_beam_01_mk1_macro.xml",
+      "sha256": "3a73522164c648fbd81693729d9ea472fcec7889b61948ef79d3d10d89efd190"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_tel_m_beam_01_mk1.xml",
+      "sha256": "b67a71519791b0400b22a66b5ef81cd5704071c12a99472a07b231a9b8a7d765"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_TEL_M_BEAM_01_MK1_DATA.ANI",
+      "sha256": "1533246c2e7139908b6bb43ea47f57d97e1a14e0691aedcd2f1f69f7856ecee8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/macros/turret_tel_m_beam_02_mk1_macro.xml",
+      "sha256": "e4feb17cf978b7fb67bd21a4171958148295b4f6422659b4146bc15268824de3"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/turret_tel_m_beam_02_mk1.xml",
+      "sha256": "31512e373091bd246c27a02a17f0a4c5c50b73b91dbab2658f71a247053acc69"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/energy/TURRET_TEL_M_BEAM_02_MK1_DATA.ANI",
+      "sha256": "98a8b6e7751d9ef5c7ed452d81d20d9a566aeaa47787249c04de518719507ec7"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_tel_m_gatling_01_mk1_macro.xml",
+      "sha256": "6c7abd77cc3b4647eb2501bd522ce03c5cc59490a22d89f82213067ee4ef48da"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_tel_m_gatling_01_mk1.xml",
+      "sha256": "c3308883dfe478ad664522cab354c30f400c45a766173c2404c218a0c6f1e4f8"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_TEL_M_GATLING_01_MK1_DATA.ANI",
+      "sha256": "f67076148f160ae03797fb08daf51818cd1b24bafc2cdb1ec54e485bb0c14a74"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_tel_m_gatling_02_mk1_macro.xml",
+      "sha256": "acbceb8e4180dc6e2a56abbe1b0422b4a50d69a09927fa6fbba8e4cc507b03b7"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_tel_m_gatling_02_mk1.xml",
+      "sha256": "48dd12247274c5f4afbf03c77ef703599217d1a252e9467069334db09c23bee9"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_TEL_M_GATLING_02_MK1_DATA.ANI",
+      "sha256": "d9ddf960c64c02a11152bdade2c10d02c69943a4bd7145d136847fc3806307da"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_tel_m_laser_01_mk1_macro.xml",
+      "sha256": "a5581c849c38a4a5b254d38bcad4e3009945bcec9cad93587ab1207e3cd34427"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_tel_m_laser_01_mk1.xml",
+      "sha256": "e8eae1ceefce1070781c4fcb00437854587efef0316aa3dc989afa219816f344"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_TEL_M_LASER_01_MK1_DATA.ANI",
+      "sha256": "d47adcd4a7ae8cdf1eeea471bad4a10a345eb9ae9fade120597bf88ea30c0633"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_tel_m_laser_02_mk1_macro.xml",
+      "sha256": "a506eee87d314b6bf4be86e74a2d6bea56ff933ecdad7730878f0ceea1d1bfd6"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_tel_m_laser_02_mk1.xml",
+      "sha256": "656737094d9d9645c8b07168d85ed2ab1af8a3666f336c6e1e5561a975a29e2a"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_TEL_M_LASER_02_MK1_DATA.ANI",
+      "sha256": "dad578843f83c3b3c920877c1dc129fad8c4bd7c950cda05b3a2d4efe1a4fbbc"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_tel_m_plasma_01_mk1_macro.xml",
+      "sha256": "ffa5e025e0e6c3da0b517155d9cef92fb7bf6768279d02b9a3d6a03fcd024321"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_tel_m_plasma_01_mk1.xml",
+      "sha256": "fcbac13f86ba604e8a5d75fbdcd43b7fe572517e94624e436d00cd120b46ba2b"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_TEL_M_PLASMA_01_MK1_DATA.ANI",
+      "sha256": "af3f5b57d3ee417bd8915a398d134393dee71a7bfc1fdb99c4955f7d4d550492"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_tel_m_plasma_02_mk1_macro.xml",
+      "sha256": "98bd31103fd3532c40e986d99d5d40f74d1045d88eecade1aa6d707d2a517561"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_tel_m_plasma_02_mk1.xml",
+      "sha256": "d638c98ed64cddceb5e8c87809be74527a6a974580d8bb31e949cf6669aa3ba4"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/TURRET_TEL_M_PLASMA_02_MK1_DATA.ANI",
+      "sha256": "e8fbfa8b7ccf41a904d270260d4569ffd6274f0c7bcdc835a4afb817d9605aec"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_tel_m_shotgun_01_mk1_macro.xml",
+      "sha256": "0261a35f5542543df7e51636ba957c524f32e5a0e06ba49dbefb7fb1065d99a9"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_tel_m_shotgun_01_mk1.xml",
+      "sha256": "44ef12b398c68e2309858f1e937e1e1ed657a86624e3a2f5f1be57850e3cb017"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_TEL_M_SHOTGUN_01_MK1_DATA.ANI",
+      "sha256": "f71792191e3f4c936f22a8e749015bedf5963ed1a1430060f48dbdf2b14a0a8a"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_tel_m_shotgun_02_mk1_macro.xml",
+      "sha256": "810f624c70e716e86c2e424e3d3afafd4cc58e43237fb5843e0fe165a946545b"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_tel_m_shotgun_02_mk1.xml",
+      "sha256": "ae37841e746690b3a079e321a7b2c849790550400837f0fc3b0cdcbe61cca793"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_TEL_M_SHOTGUN_02_MK1_DATA.ANI",
+      "sha256": "c9cbb77599c915de0896bdf3e915862d3d82ae564fcee3283d567edf1fe07ab9"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/energy/macros/turret_ter_l_beam_01_mk1_macro.xml",
+      "sha256": "8228f4ee7804d5589e2eb4decc098ad8e2ea6ae0647c63f43d7baca694512268"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/energy/turret_ter_l_beam_01_mk1.xml",
+      "sha256": "c4051ce337c8589d3286e458a355d9e10820a5256e64d4cb7182d8a63e7c7214"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/energy/TURRET_TER_L_BEAM_01_MK1_DATA.ANI",
+      "sha256": "efb76bbf9f42170b2fea50de23628e025819f425d2d2cb2cf1c42ef116dd157a"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/heavy/macros/turret_ter_l_gatling_01_mk1_macro.xml",
+      "sha256": "4fb650feb0bf605021a665c4958f5ec9e83868bbc662f43e9690dafb66928988"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/heavy/turret_ter_l_gatling_01_mk1.xml",
+      "sha256": "839e6af968a642153915ee43207fa9ab7668d436ae4a6a44ca9afcda25c79bfd"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/heavy/TURRET_TER_L_GATLING_01_MK1_DATA.ANI",
+      "sha256": "6211fb36df9c1286726f7230a58647ae2f44d6434e8a79221db3614196485509"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/standard/macros/turret_ter_l_laser_01_mk1_macro.xml",
+      "sha256": "09b26161d57b5878a4f222e23d4f6c8a3c9c1fcf81fe0eaa7d4452eb834d8127"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/standard/turret_ter_l_laser_01_mk1.xml",
+      "sha256": "bf75a3f0163e299ef3c71405300add7a6f6df9c718f53e391b39b012fbce2e46"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/standard/TURRET_TER_L_LASER_01_MK1_DATA.ANI",
+      "sha256": "710c9ee50a22ece1852377b0c714fe0d3d78c1c607ced6ec0b1c15f3d42d2dee"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/energy/macros/turret_ter_m_beam_01_mk1_macro.xml",
+      "sha256": "102c3303b5313279d66a51306dec9287f0f3871ae0f9de28165b0da8021dcab0"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/energy/turret_ter_m_beam_01_mk1.xml",
+      "sha256": "3f2b801194c73ff965c6b26413621230e90a7b0645c438f1cea2dfe70ab6e644"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/energy/TURRET_TER_M_BEAM_01_MK1_DATA.ANI",
+      "sha256": "c2db27f910ace388521ba7d88a6301b8e5edf3c53939986458fcf1cafe57ae31"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/energy/macros/turret_ter_m_beam_02_mk1_macro.xml",
+      "sha256": "ac5d4b49448e72e445ef8f48b0de7eb2307f67c19bced7d1ea92d6c4edc1fbbb"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/energy/turret_ter_m_beam_02_mk1.xml",
+      "sha256": "d92e5f435734e238553159df8e0782fe46de7c1b269d343644603840d40f0a81"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/energy/TURRET_TER_M_BEAM_02_MK1_DATA.ANI",
+      "sha256": "60223283f5646018486b5f8690a3d1d785f22c6e734ea2fd610d1699980c1897"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/heavy/macros/turret_ter_m_gatling_01_mk1_macro.xml",
+      "sha256": "2740a098ecbdedeb1065cf882ffe4a0f5c571d46ab2b495267beda2c62e2a6ee"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/heavy/turret_ter_m_gatling_01_mk1.xml",
+      "sha256": "da6213d8711d7dc76a939fb66b2bc26f96dac83c63c78c0fc7368100bd35902e"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/heavy/TURRET_TER_M_GATLING_01_MK1_DATA.ANI",
+      "sha256": "3fe6e400b82e5a3fe9c695d5f6409a18b260576c3eb176221d3bb48f501357c9"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/heavy/macros/turret_ter_m_gatling_02_mk1_macro.xml",
+      "sha256": "81b8c20e4be59e9af96c05fbfb19f7050b7577c6e4cee3a29d85f86d3e9028da"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/heavy/turret_ter_m_gatling_02_mk1.xml",
+      "sha256": "25e6df6f0691c75d755442a4f2607b090686391993ee724feadfceb1668d9c98"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/heavy/TURRET_TER_M_GATLING_02_MK1_DATA.ANI",
+      "sha256": "768e00140d44f13fbae04441f31ba3629de374a48a277fb1a57626a73ec5ad10"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/standard/macros/turret_ter_m_laser_01_mk1_macro.xml",
+      "sha256": "57d33ead6cf23bd3a9fcbe53c46a4e64ef6da5f17fbcdb9ab0b86c902746abc6"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/standard/turret_ter_m_laser_01_mk1.xml",
+      "sha256": "3b3655c714002d795e98510c4036bdcc531e69845565ed6a2ca7c9f3c1dae37d"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/standard/TURRET_TER_M_LASER_01_MK1_DATA.ANI",
+      "sha256": "e96c7066c9ee6c81685ccd61064c30719c1fd06d014f86e378a03ec32aa38afd"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/standard/macros/turret_ter_m_laser_02_mk1_macro.xml",
+      "sha256": "5d877c8ac6e7c8efa597af12a3795ac222773c1111ada050d5007d5b6bec10c4"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "assets/props/weaponsystems/standard/turret_ter_m_laser_02_mk1.xml",
+      "sha256": "fd222a121febd36664550b54aeef71096aae65a0ff9a1185170489726a09c323"
+    },
+    {
+      "source": "ego_dlc_terran",
+      "path": "extensions/ego_dlc_terran/assets/props/weaponsystems/standard/TURRET_TER_M_LASER_02_MK1_DATA.ANI",
+      "sha256": "80ffdb227755da6414badbe2ee7b16267a4521566bcd087f5bac7d14b94292ca"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "assets/props/weaponsystems/standard/macros/turret_ter_m_laser_03_mk1_macro.xml",
+      "sha256": "25b694736df456d20df9abe3ff220e38f6d4f214a084af35cf2c1b880fd3d3c7"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "assets/props/weaponsystems/standard/turret_ter_m_laser_03_mk1.xml",
+      "sha256": "22bdc62da27d7734ba5960e3f20a96843a2e9cc35f3d2ee0073d71b99ba0ee2e"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "extensions/ego_dlc_timelines/assets/props/weaponsystems/standard/turret_ter_m_laser_03_mk1_data.ani",
+      "sha256": "6eff085b52ae57187200c322bf71c1b7d8e82f3b602fb9f3488873c2ca9dc8e8"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "assets/props/weaponsystems/standard/macros/turret_ter_m_laser_04_mk1_macro.xml",
+      "sha256": "848a8acaa51b2e65fc20d80833022c54284dc19f9ab369dfd7181248096ac917"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "assets/props/weaponsystems/standard/turret_ter_m_laser_04_mk1.xml",
+      "sha256": "4f5f9bd176499597d05b39e834ca3a8faa281baad8f9b77b0ef288b01ed14517"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "extensions/ego_dlc_timelines/assets/props/weaponsystems/standard/turret_ter_m_laser_04_mk1_data.ani",
+      "sha256": "114557452bc1012824579ba0e07fcdbacb317b1d45e1953a91834ce14d5f56b0"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_xen_l_laser_01_mk1_macro.xml",
+      "sha256": "c958409830fa38fe5e7791ef98de908b2f66feddd6218fe606ffee1f8ed36917"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_xen_l_laser_01_mk1.xml",
+      "sha256": "97737ed58d9497624ddad2f3027c66ffb6e14444460fa0abeb17bea6d8d5312c"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_XEN_L_LASER_01_MK1_DATA.ANI",
+      "sha256": "d995056cb7516ad0c255f6d324ba864131e328ca579fe5fc7bf64ad0d34d8858"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_xen_l_plasma_01_mk1_macro.xml",
+      "sha256": "c2483de7fbb2e12a676e41ef9351392ae0b56c910c3fa5a5f8a6a1a0422838fa"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_xen_l_plasma_01_mk1.xml",
+      "sha256": "f21851a0e4f648241f3def19c7044ee09a9501ba2f879d0f14378ab73e1cf4ce"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_xen_l_plasma_01_mk1_data.ani",
+      "sha256": "9f2527f860b1323d9ceda0068283c5b945e1a5c85120453115fae3095ab934af"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_xen_m_beam_02_mk1_macro.xml",
+      "sha256": "ca00261195f9d6eff6d09e534ed7a8fa3385311b41cf99123e7bc9a194e2aca4"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_xen_m_laser_02_mk1.xml",
+      "sha256": "87f118b85dde1fb64f74938575271cab2331091b50a547277da30f47d6be9917"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_XEN_M_LASER_02_MK1_DATA.ANI",
+      "sha256": "a37f24ccec1166cf2dd716ffa1a18ab7dcc004002a070373234e01c25c98e678"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_xen_m_gatling_01_mk1_macro.xml",
+      "sha256": "75924b5d82565bf75e68252c28ce8e2a5436b7e73f88ba4cefd55b87887c5051"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_xen_m_gatling_01_mk1.xml",
+      "sha256": "bf0c1a1a624f8d0d7d0542eb870a0c85ada17833204e9641a4a9c364f0d4ec43"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_xen_m_gatling_01_mk1_data.ani",
+      "sha256": "ec4341695e3d8cd3ba3270b88a48e37a0323d13dfdeb5f6a647ec2f28d2cfeda"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/macros/turret_xen_m_gatling_02_mk1_macro.xml",
+      "sha256": "fe6fbe9507daf7b213b7b404aefeb68630c2269cf483ca68e3660f684e22ec88"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_xen_m_gatling_02_mk1.xml",
+      "sha256": "cf3c4e444dafb023c5baa4e0e7ca037775de552abd4ee16ed6f57869fa689bd1"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/heavy/turret_xen_m_gatling_02_mk1_data.ani",
+      "sha256": "cd0eec678daec3e742ab4ee70a3329745fae73e96a9a6ab4bd3f9530f512cfde"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_xen_m_laser_01_mk1_macro.xml",
+      "sha256": "5bfb83f7fad0178936e253d89ff1c31f096221d0b7b88094492210491ebda4c2"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/turret_xen_m_laser_01_mk1.xml",
+      "sha256": "91c82817ea5239db6b85f0ea4daba597bc8f2465cbff1ac55058611efcdbbe22"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/TURRET_XEN_M_LASER_01_MK1_DATA.ANI",
+      "sha256": "67b1f6cebc154e677ffe26841c0a071a8b50120496bbc7c321404e83fbc93b60"
+    },
+    {
+      "source": "base",
+      "path": "assets/props/WeaponSystems/standard/macros/turret_xen_m_laser_02_mk1_macro.xml",
+      "sha256": "e8979efd4ac188c0375aa7d241bfcf3f4def33106a15466f4a4faefceb0c5a29"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "assets/props/weaponsystems/standard/macros/turret_xen_xl_battleship_01_mk1_macro.xml",
+      "sha256": "631419150ee663794b8ed60b8c3104778ee9e762ee8907efecd5bcd399c187ad"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "assets/props/weaponsystems/standard/turret_xen_xl_battleship_01_mk1.xml",
+      "sha256": "88ef1df75fe8e7dccf5f9f335df528f3f478a5aed60dcbcbe570e9e11c2a6f5e"
+    },
+    {
+      "source": "ego_dlc_timelines",
+      "path": "extensions/ego_dlc_timelines/assets/props/weaponsystems/standard/turret_xen_xl_battleship_01_mk1_data.ani",
+      "sha256": "ccb214f1ef2c27e09aac780fd37bbb35387106e34b2210eb7d9935fe0cc3165a"
+    }
+  ]
+}
