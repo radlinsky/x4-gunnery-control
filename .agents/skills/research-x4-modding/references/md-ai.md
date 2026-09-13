@@ -1476,3 +1476,21 @@ whole-object, engine, shield, turret, and station-module surface tests.
   separately: engine `0x179141` read `0 / 1` at 249125.03 (pinned,
   `hull_percent=18`) yet was hit at 249125.11 and 249129.11 with
   `aimed=0x179141 istgt=1` under `mode=autoassist`.
+
+### Turret animation state families have a shipped transition graph
+- X4: 9.00, installed official catalogs checked 2026-09-13
+- Status: shipped-source
+- Source: `libraries/animation_sequences.xml`, states `turret_inactive`
+  through `turret_deactivating`, and `turretloop_inactive` through
+  `turretloop_deactivating`
+- Live test: no — source lookup only
+- Finding: both families explicitly transition from activating to active.
+  The ordinary active state transitions to `gun_firing` on fire and returns
+  afterward; the loop family uses `turretloop_firing` and also declares an
+  active self-transition. Both families declare deactivation transitions.
+- Research route: inspect this library together with component animation
+  selectors and ANI descriptor identities before treating an unfamiliar
+  state-family name as a runtime-discovery requirement.
+- Boundary: the transition graph does not establish ANI channel composition,
+  interpolation, selector inheritance, instantaneous phase, or barrel endpoint
+  selection. Those require separate evidence.

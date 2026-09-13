@@ -11,7 +11,7 @@ before relying on any claim.
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
 | External-menu lifecycle and persistent Gunnery overlay | [external-menu-lifecycle.md](external-menu-lifecycle.md) | X4 9.00 source-backed custom-view overlay and fullscreen takeover boundary, plus live-tested normal `InteractMenu` overlay and normal Map takeover/restore |
-| MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
+| MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings; shipped turret and turretloop transition graph in `libraries/animation_sequences.xml` |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
 | Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
