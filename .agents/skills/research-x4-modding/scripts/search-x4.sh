@@ -6,16 +6,16 @@ usage() {
 Usage: search-x4.sh [--x4-root DIR] [--extracted DIR] [--extensions DIR] [--dry-run] -- PATTERN [RG_OPTIONS...]
 
 Search this skill's KB and project first, then optional already-unpacked game and
-installed-extension directories. Never writes files. Configure defaults with
-X4GC_EXTRACTED_ROOT and X4GC_X4_ROOT; explicit paths take precedence. When
-unset, the repository's ignored extracted cache and common X4 install paths are
-discovered automatically.
+installed-extension directories. Never writes files. Explicit paths take
+precedence. When unset, unpacked source defaults to the main checkout's
+.x4-research-cache/official-source-sets directory and common X4 install paths
+are discovered automatically.
 EOF
 }
 
 skill_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 repo_dir=$(CDPATH= cd -- "$skill_dir/../../.." && pwd)
-extracted=${X4GC_EXTRACTED_ROOT:-}
+extracted=
 x4_root=${X4GC_X4_ROOT:-}
 extensions=
 dry_run=false
@@ -37,8 +37,13 @@ pattern=$1
 shift
 rg_options=("$@")
 
-if [[ -z "$extracted" && -d "$repo_dir/.x4-research-cache/extracted" ]]; then
-  extracted="$repo_dir/.x4-research-cache/extracted"
+if [[ -z "$extracted" ]]; then
+  git_common_dir=$(git -C "$repo_dir" rev-parse --path-format=absolute --git-common-dir)
+  main_repo_dir=$(dirname "$git_common_dir")
+  candidate="$main_repo_dir/.x4-research-cache/official-source-sets"
+  if [[ -d "$candidate" ]]; then
+    extracted=$candidate
+  fi
 fi
 if [[ -z "$x4_root" ]]; then
   for candidate in \

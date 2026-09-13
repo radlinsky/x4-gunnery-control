@@ -81,6 +81,6 @@ if grep -v '^ *rem ' "$launcher" | grep -i 'WSLENV' | grep -i 'X4GC_TAIL_LOG'; t
   exit 1
 fi
 
-grep -Fq 'set "WSLENV=X4GC_INSTALL_TESTLAB:X4GC_EXTRACTED_ROOT:%WSLENV%"' "$testlab_launcher"
+grep -Fq 'set "WSLENV=X4GC_INSTALL_TESTLAB:%WSLENV%"' "$testlab_launcher"
 
 echo "Windows development launcher checks passed"

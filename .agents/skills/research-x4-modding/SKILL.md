@@ -97,9 +97,9 @@ the current working directory is the skill directory. Invoke every helper as
 `"$SKILL_DIR/scripts/<helper>"`.
 
 - Run `"$SKILL_DIR/scripts/discover-x4-roots.sh" --help` before relying on
-  default paths.
-  Prefer `X4GC_X4_ROOT` and `X4GC_EXTRACTED_ROOT` or explicit options; do not
-  use a home-directory variable as a target.
+  default paths. The complete reusable XML corpus lives at the main checkout's
+  `.x4-research-cache/official-source-sets/`; linked worktrees share that same
+  directory. Use explicit root options only for one-off research.
 - Run `"$SKILL_DIR/scripts/search-x4.sh" --help`. Search with
   `"$SKILL_DIR/scripts/search-x4.sh" --dry-run -- PATTERN`; the `--` before the
   pattern is mandatory. It searches the KB/project and discovered or selected

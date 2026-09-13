@@ -112,9 +112,9 @@ grep -Fqx "root=$tmp/extracted" <<<"$search_dry"
 "$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle >/dev/null
 search_glob=$("$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle -g '*.lua')
 grep -Fq "$tmp/extensions/example/source.lua" <<<"$search_glob"
-search_root=$(X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" --dry-run -- root-discovered)
+search_root=$(X4GC_X4_ROOT="$tmp/game" "$scripts/search-x4.sh" --dry-run -- root-discovered)
 grep -Fqx "root=$tmp/game/extensions" <<<"$search_root"
-X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" -- root-discovered >/dev/null
+X4GC_X4_ROOT="$tmp/game" "$scripts/search-x4.sh" -- root-discovered >/dev/null
 
 index_dry=$("$scripts/index-lua-ffi.sh" --source "$tmp/extracted" --dry-run)
 grep -Fqx "source=$tmp/extracted" <<<"$index_dry"

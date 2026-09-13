@@ -13,7 +13,7 @@ if [[ -n "${X4GC_INSTALL_TESTLAB:-}" ]]; then
   roots=$(.agents/skills/research-x4-modding/scripts/discover-x4-roots.sh)
   extracted_root=$(sed -n 's/^extracted_root=//p' <<<"$roots")
   if [[ -z "$extracted_root" || ! -d "$extracted_root" ]]; then
-    echo "Test Lab preflight requires unpacked official X4 XML source; set X4GC_EXTRACTED_ROOT to its source-set root." >&2
+    echo "Test Lab preflight requires complete official X4 XML source sets at .x4-research-cache/official-source-sets in the main checkout." >&2
     exit 3
   fi
   python3 scripts/preflight_testlab_loadouts.py --source-root "$extracted_root"
