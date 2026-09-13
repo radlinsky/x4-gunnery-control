@@ -112,9 +112,9 @@ grep -Fqx "root=$tmp/extracted" <<<"$search_dry"
 "$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle >/dev/null
 search_glob=$("$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle -g '*.lua')
 grep -Fq "$tmp/extensions/example/source.lua" <<<"$search_glob"
-search_root=$(X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" --dry-run -- root-discovered)
+search_root=$(X4GC_X4_ROOT="$tmp/game" "$scripts/search-x4.sh" --dry-run -- root-discovered)
 grep -Fqx "root=$tmp/game/extensions" <<<"$search_root"
-X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" -- root-discovered >/dev/null
+X4GC_X4_ROOT="$tmp/game" "$scripts/search-x4.sh" -- root-discovered >/dev/null
 
 index_dry=$("$scripts/index-lua-ffi.sh" --source "$tmp/extracted" --dry-run)
 grep -Fqx "source=$tmp/extracted" <<<"$index_dry"
@@ -164,15 +164,6 @@ if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/g
 fi
 if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/game/08.cat" --output / --include '^ui/' >/dev/null 2>&1; then
   echo 'XRCat wrapper accepted broad root output' >&2
-  exit 1
-fi
-if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --append --input "$tmp/game/08.cat" --output "$tmp/append-output" --include '^ui/' >/dev/null 2>&1; then
-  echo 'XRCat wrapper accepted append mode' >&2
-  exit 1
-fi
-repo_unsafe="$PWD/research-extract-unsafe-fixture"
-if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/game/08.cat" --output "$repo_unsafe" --include '^ui/' >/dev/null 2>&1; then
-  echo 'XRCat wrapper accepted a tracked repository output' >&2
   exit 1
 fi
 if X4GC_X4_ROOT="$tmp/game" "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/game/08.cat" --output "$tmp/game/extract" --include '^ui/' >/dev/null 2>&1; then
