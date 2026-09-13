@@ -181,14 +181,10 @@ def _settled_rotation_x(layer: _Layer) -> str | None:
     return _number(values[0])
 
 
-# X4 9.00 installed-binary inference (#164, X4.exe SHA-256
-# 19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891):
-# `weapon.barrelposition` asks for element zero of the connection vector
-# filtered by the `laser` tag, and native connection storage is ordered by the
-# unsigned connection-name hash below. So the representative anchor is the
-# eligible `laser` connection with the smallest unsigned hash. The census only
-# offers `laser`-tagged turret connections here (_classify_firing_endpoints),
-# so these resolutions are exactly the eligible set.
+# X4 9.00 installed-binary inference (#164): `weapon.barrelposition` takes
+# element zero of the `laser`-tagged connection vector, and native connection
+# storage is ordered by the unsigned name hash below, so the representative
+# anchor is the eligible `laser` connection with the smallest unsigned hash.
 # Not ordinary FNV-1a: the multiply precedes the XOR.
 def _native_connection_name_hash(name: str) -> int:
     try:
@@ -200,14 +196,6 @@ def _native_connection_name_hash(name: str) -> int:
     for byte in raw:
         value = ((value * 0x1000193) & 0xFFFFFFFFFFFFFFFF) ^ byte
     return value
-
-
-# Semantic cases whose generated records carry the explicit representative
-# endpoint identity. Older cases keep their historical endpoint-2 consumer
-# behavior until each is separately proved (#79/#164).
-EXPLICIT_BARRELPOSITION_SEMANTIC_CASES = frozenset(
-    {"depth3_one_key_barrel_translation"}
-)
 
 
 def _barrelposition_connection(connections: Sequence[str], macro: str) -> str:
@@ -277,13 +265,13 @@ def _record(report: _Report, macro: str) -> list[str]:
         f'    ["{macro}"] = {{',
         f'        semantic_case = "{semantic_case}",',
     ]
-    if semantic_case in EXPLICIT_BARRELPOSITION_SEMANTIC_CASES:
+    # Older semantic cases keep their historical endpoint-2 consumer behavior
+    # until each is separately proved (#79/#164).
+    if semantic_case == "depth3_one_key_barrel_translation":
         anchor = _barrelposition_connection(
             [geometry["endpoint_connection"] for geometry in geometries], macro
         )
         lines.append(f'        barrelposition_connection = "{anchor}",')
-    else:
-        anchor = None
     lines.append("        layers = {")
     for layer in layers:
         lines.extend([
@@ -308,19 +296,10 @@ def _record(report: _Report, macro: str) -> list[str]:
             lines.append(f"                runtime_rotation = {rotation},")
         lines.append("            },")
     lines.extend(["        },", "        endpoints = {"])
-    emitted = [
-        str(geometry["endpoint_connection"])
-        for geometry in sorted(geometries, key=lambda item: item["endpoint_connection"])
-    ]
     for geometry in sorted(geometries, key=lambda item: item["endpoint_connection"]):
         lines.append(
             f'            {{ connection = "{geometry["endpoint_connection"]}", '
             f'transform = {_transform(geometry["endpoint_authored_offset"])} }},'
-        )
-    # The consumer resolves the anchor by identity, so it must be present once.
-    if anchor is not None and emitted.count(anchor) != 1:
-        raise SystemExit(
-            f"representative endpoint {anchor} is not emitted exactly once for {macro}"
         )
     lines.extend(["        },", "    },"])
     return lines

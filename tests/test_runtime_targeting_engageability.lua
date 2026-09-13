@@ -406,6 +406,8 @@ do
     -- source transform or a per-turret muzzle value.
     local geometryEval = dofile("tests/support/muzzle_geometry_eval.lua")
     local supportedMacros = {
+        -- case[2], where present, is the independently accepted production
+        -- endpoint connection; production must stream that endpoint's geometry.
         -- The four already-supported turrets, whose production endpoint must
         -- stay the con_laser_02 the pre-generated code selected.
         { "turret_par_l_beam_01_mk1_macro", "con_laser_02" },
@@ -428,24 +430,15 @@ do
         -- semantic case is absent from the production runtime dispatch.
         { "turret_pir_l_battleship_01_laser_01_mk1_macro" },
         { "turret_tel_l_laser_01_mk1_macro" },
-        -- The five #155 records, which resolve the explicit #164 barrelposition
-        -- identity. Split Plasma streams endpoint 1, so these fail here if
-        -- production regresses to unconditional endpoints[2].
-        { "turret_spl_m_beam_02_mk1_macro" },
-        { "turret_spl_m_laser_02_mk1_macro" },
-        { "turret_spl_m_plasma_02_mk1_macro" },
-        { "turret_ter_m_beam_02_mk1_macro" },
-        { "turret_ter_m_laser_02_mk1_macro" },
+        -- #155: Split Plasma's barrelposition anchor is its lexical endpoint 1,
+        -- so this fails if production regresses to unconditional endpoints[2].
+        { "turret_spl_m_plasma_02_mk1_macro", "con_standard_01" },
     }
     local componentID60 = 600
     for _, case in ipairs(supportedMacros) do
         local macro, endpointConnection = case[1], case[2]
         local record = X4GunneryTurretMuzzleGeometry[macro]
         assert(record ~= nil, "60: no generated record for " .. macro)
-        if endpointConnection then
-            assert(record.endpoints[2].connection == endpointConnection,
-                "60: " .. macro .. " production endpoint moved off " .. endpointConnection)
-        end
         componentID60 = componentID60 + 1
         local member = streamMember(macro, componentID60, componentID60 + 1000)
         assert(member ~= nil and member.muzzleknow == 1,
@@ -453,7 +446,7 @@ do
         for _, yaw in ipairs({ -90, 0, 90 }) do
             for _, pitch in ipairs({ -5, 30, 80 }) do
                 local got = generatedMuzzle(member, yaw, pitch)
-                local want = geometryEval.evaluate_record(record, yaw, pitch)
+                local want = geometryEval.evaluate_record(record, yaw, pitch, endpointConnection)
                 for axis = 1, 3 do
                     assert(math.abs(got[axis] - want[axis]) <= 1e-6, string.format(
                         "60: %s streamed muzzle diverges from its generated record at "

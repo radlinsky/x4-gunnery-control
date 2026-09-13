@@ -121,18 +121,17 @@ semanticCaseBehaviors.depth4_p6_translation =
 semanticCaseBehaviors.depth4_p8_translation =
     semanticCaseBehaviors.depth4_dual_translation
 
--- The representative barrelposition anchor is generated identity, not array
--- order (#164): endpoints are emitted in lexical name order, which is not the
--- engine semantic. Records without the explicit field keep their historical
--- endpoint-2 behavior until each older semantic case is separately proved.
+-- Endpoints are emitted in lexical name order, which is not the engine's
+-- barrelposition semantic, so a record naming its representative endpoint is
+-- resolved by that identity. Records without the field keep the historical
+-- second entry. Returns nil if a named identity is absent, so no prospective
+-- geometry is streamed rather than guessing an endpoint.
 local function barrelpositionEndpoint(geometry)
     local connection = geometry.barrelposition_connection
     if not connection then return geometry.endpoints[2] end
     for _, endpoint in ipairs(geometry.endpoints) do
         if endpoint.connection == connection then return endpoint end
     end
-    -- Falls through to nil, so a declared identity the record does not carry
-    -- streams no prospective geometry. The generator emits it exactly once.
 end
 
 -- Returns nil for an unknown semantic case, so no prospective geometry is
