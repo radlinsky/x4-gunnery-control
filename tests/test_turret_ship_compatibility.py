@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent))
@@ -116,6 +117,59 @@ class TurretShipCompatibilityTests(unittest.TestCase):
 
 
 class TestLabLoadoutPreflightTests(unittest.TestCase):
+    def test_multiple_pairs_collect_official_source_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            roots = _source_roots(root)
+            _write_case(
+                roots,
+                """
+                  <connection name="con_beam" tags="advanced combat medium turret unhittable"/>
+                  <connection name="con_laser" tags="standard combat medium turret unhittable"/>
+                """,
+            )
+            _write(
+                roots["base"],
+                "assets/second_turret.xml",
+                """<root>
+                  <components>
+                    <component name="second_turret_component" class="turret">
+                      <connections>
+                        <connection name="mating" tags="component standard combat medium turret unhittable"/>
+                      </connections>
+                    </component>
+                  </components>
+                  <macros>
+                    <macro name="second_turret_macro" class="turret">
+                      <component ref="second_turret_component"/>
+                    </macro>
+                  </macros>
+                </root>""",
+            )
+            loadouts = root / "loadouts.xml"
+            loadouts.write_text(
+                """<loadouts>
+                  <loadout id="fixture" macro="ship_macro">
+                    <macros>
+                      <turret macro="turret_macro" path="../con_beam"/>
+                      <turret macro="second_turret_macro" path="../con_laser"/>
+                    </macros>
+                    <groups/>
+                  </loadout>
+                </loadouts>""",
+                encoding="utf-8",
+            )
+
+            from turret_ship_compatibility import _collect_xml_identities
+
+            with patch(
+                "turret_ship_compatibility._collect_xml_identities",
+                wraps=_collect_xml_identities,
+            ) as collect:
+                validate_loadouts(roots, loadouts)
+
+            self.assertEqual(collect.call_count, 1)
+
     def test_ungrouped_compatible_path_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
