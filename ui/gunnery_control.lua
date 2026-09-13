@@ -121,9 +121,22 @@ semanticCaseBehaviors.depth4_p6_translation =
 semanticCaseBehaviors.depth4_p8_translation =
     semanticCaseBehaviors.depth4_dual_translation
 
+-- The representative barrelposition anchor is generated identity, not array
+-- order (#164): endpoints are emitted in lexical name order, which is not the
+-- engine semantic. Records without the explicit field keep their historical
+-- endpoint-2 behavior until each older semantic case is separately proved.
+local function barrelpositionEndpoint(geometry)
+    local connection = geometry.barrelposition_connection
+    if not connection then return geometry.endpoints[2] end
+    for _, endpoint in ipairs(geometry.endpoints) do
+        if endpoint.connection == connection then return endpoint end
+    end
+    -- Falls through to nil, so a declared identity the record does not carry
+    -- streams no prospective geometry. The generator emits it exactly once.
+end
+
 -- Returns nil for an unknown semantic case, so no prospective geometry is
 -- streamed and the prospective generated-geometry path is not entered.
--- ponytail: the generated endpoints are an ordered pair; take the second.
 local function deriveProspectiveMuzzle(geometry)
     local behavior = semanticCaseBehaviors[geometry.semantic_case]
     if not behavior then return nil end
@@ -132,7 +145,7 @@ local function deriveProspectiveMuzzle(geometry)
         chainTranslate(chain, layer.connection_transform.position)
         behavior(chain, layer)
     end
-    local endpoint = geometry.endpoints[2]
+    local endpoint = barrelpositionEndpoint(geometry)
     if not (chain.origin and chain.pivot and endpoint) then return nil end
     local downstream = vadd(chain.segment, rotateInFrame(chain.fixed, endpoint.transform.position))
     return { origin = chain.origin, pivot = chain.pivot, downstream = downstream }

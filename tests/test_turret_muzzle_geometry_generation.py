@@ -166,10 +166,81 @@ def _check_resolution_cardinality():
                 assert count in accepted, f"{macro} must reject {count}"
 
 
+def _check_barrelposition_hash():
+    """The recovered #164 native connection-name hash, not ordinary FNV-1a."""
+    # Census corpus.csv values for the analyzed X4 9.00 binary.
+    for name, expected in (
+        ("con_laser_02", 0x0C9442E72BBE5380),
+        ("con_heavy_004", 0xD036B5AC8B234172),
+    ):
+        actual = _gen._native_connection_name_hash(name)
+        assert actual == expected, f"{name}: {actual:#x} != {expected:#x}"
+    try:
+        _gen._native_connection_name_hash("con_l\u00e4ser_02")
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("non-ASCII connection name must fail closed")
+
+
+def _check_barrelposition_selection():
+    """Prove the selector is the unsigned-hash minimum, not an index rule."""
+    macro = "turret_spl_m_plasma_02_mk1_macro"
+    cases = {
+        # one eligible endpoint
+        ("con_laser_01",): "con_laser_01",
+        # lexical endpoint 2 wins (Beam/Laser pattern)
+        ("con_beam_01", "con_beam_02"): "con_beam_02",
+        ("con_laser_01", "con_laser_02"): "con_laser_02",
+        # lexical endpoint 1 wins (the Split Plasma counterexample)
+        ("con_standard_01", "con_standard_02"): "con_standard_01",
+        # five-endpoint Gatling family: neither index 1 nor 2
+        (
+            "con_heavy_001",
+            "con_heavy_002",
+            "con_heavy_003",
+            "con_heavy_004",
+            "con_heavy_005",
+        ): "con_heavy_004",
+    }
+    for connections, expected in cases.items():
+        assert _gen._barrelposition_connection(connections, macro) == expected
+        # Input order must not matter.
+        assert (
+            _gen._barrelposition_connection(tuple(reversed(connections)), macro)
+            == expected
+        )
+
+    for label, connections in (
+        ("no eligible endpoint", ()),
+        ("hash collision", ("con_a", "con_a")),
+    ):
+        try:
+            _gen._barrelposition_connection(connections, macro)
+        except SystemExit:
+            continue
+        raise AssertionError(f"{label} must fail closed")
+
+
+def _check_barrelposition_emission():
+    """Only the bounded #155 case gains the explicit identity field."""
+    order = ("con_standard_01", "con_standard_02")
+    report = _report(order)
+    for macro, (semantic_case, _) in _gen.MACROS.items():
+        text = "\n".join(_gen._record(report, macro))
+        explicit = 'barrelposition_connection = "con_standard_01",' in text
+        expected = semantic_case in _gen.EXPLICIT_BARRELPOSITION_SEMANTIC_CASES
+        assert explicit == expected, f"{macro} explicit identity {explicit}"
+        assert "barrelposition_connection" in text or not expected
+
+
 def main():
     _check_settled_rotation_x()
     _check_shared_component()
     _check_resolution_cardinality()
+    _check_barrelposition_hash()
+    _check_barrelposition_selection()
+    _check_barrelposition_emission()
     order = ("con_laser_01", "con_laser_02")
 
     first = _gen._render(_report(order), X4_VERSION)

@@ -1271,6 +1271,7 @@ X4GunneryTurretMuzzleGeometry = {
     },
     ["turret_spl_m_beam_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
+        barrelposition_connection = "con_beam_02",
         layers = {
             {
                 source_part = "detail_xl_rotator",
@@ -1302,6 +1303,7 @@ X4GunneryTurretMuzzleGeometry = {
     },
     ["turret_spl_m_laser_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
+        barrelposition_connection = "con_laser_02",
         layers = {
             {
                 source_part = "part_rotator",
@@ -1333,6 +1335,7 @@ X4GunneryTurretMuzzleGeometry = {
     },
     ["turret_spl_m_plasma_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
+        barrelposition_connection = "con_standard_01",
         layers = {
             {
                 source_part = "part_rotator",
@@ -1364,6 +1367,7 @@ X4GunneryTurretMuzzleGeometry = {
     },
     ["turret_ter_m_beam_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
+        barrelposition_connection = "con_beam_02",
         layers = {
             {
                 source_part = "detail_xl_rotator",
@@ -1395,6 +1399,7 @@ X4GunneryTurretMuzzleGeometry = {
     },
     ["turret_ter_m_laser_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
+        barrelposition_connection = "con_laser_02",
         layers = {
             {
                 source_part = "part_rotator",

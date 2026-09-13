@@ -116,10 +116,22 @@ function M.evaluate_depth5(geometry, endpoint_connection, yaw, pitch)
   error("missing endpoint " .. endpoint_connection)
 end
 
--- Evaluate a generated record at its production endpoint (the ordered pair's
--- second entry) for the semantic case it declares. Yaw/pitch are degrees.
+-- The production representative barrelposition endpoint: explicit generated
+-- identity where present (#164), else the historical ordered-pair second entry.
+function M.production_endpoint_connection(geometry)
+  if geometry.barrelposition_connection then
+    return geometry.barrelposition_connection
+  end
+  -- One-endpoint records have no endpoints[2]; production streams no
+  -- prospective geometry for them, so there is no production connection.
+  local endpoint = geometry.endpoints[2]
+  return endpoint and endpoint.connection or nil
+end
+
+-- Evaluate a generated record at its production endpoint for the semantic case
+-- it declares. Yaw/pitch are degrees.
 function M.evaluate_record(geometry, yaw, pitch)
-  local connection = geometry.endpoints[2].connection
+  local connection = M.production_endpoint_connection(geometry)
   if geometry.semantic_case == "depth5_additive_x_rotation" then
     return M.evaluate_depth5(geometry, connection, math.rad(yaw), math.rad(pitch))
   end

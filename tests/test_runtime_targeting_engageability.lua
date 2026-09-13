@@ -428,6 +428,14 @@ do
         -- semantic case is absent from the production runtime dispatch.
         { "turret_pir_l_battleship_01_laser_01_mk1_macro" },
         { "turret_tel_l_laser_01_mk1_macro" },
+        -- The five #155 records, which resolve the explicit #164 barrelposition
+        -- identity. Split Plasma streams endpoint 1, so these fail here if
+        -- production regresses to unconditional endpoints[2].
+        { "turret_spl_m_beam_02_mk1_macro" },
+        { "turret_spl_m_laser_02_mk1_macro" },
+        { "turret_spl_m_plasma_02_mk1_macro" },
+        { "turret_ter_m_beam_02_mk1_macro" },
+        { "turret_ter_m_laser_02_mk1_macro" },
     }
     local componentID60 = 600
     for _, case in ipairs(supportedMacros) do
