@@ -106,6 +106,11 @@ semanticCaseBehaviors.depth4_zero_translation =
 semanticCaseBehaviors.depth4_one_key_barrel_translation =
     semanticCaseBehaviors.depth4_dual_translation
 
+-- The shortened rank-1 one-key case (#137) has the same translation/split
+-- ordering over three source layers; only its source-evidence boundary differs.
+semanticCaseBehaviors.depth3_one_key_barrel_translation =
+    semanticCaseBehaviors.depth4_dual_translation
+
 -- P6 uses the already-proved depth-4 translation composition; its separate
 -- semantic case only preserves the narrower source-evidence boundary.
 semanticCaseBehaviors.depth4_p6_translation =

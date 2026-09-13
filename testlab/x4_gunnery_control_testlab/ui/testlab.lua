@@ -162,6 +162,9 @@ local function validateSpec(raw)
                 return nil, where .. "." .. field .. " requires loadout"
             end
         end
+        if loadout ~= "" and expected.expectedWeapons < expected.expectedTurrets then
+            return nil, where .. ".expectedWeapons must be greater than or equal to expectedTurrets"
+        end
         if role == "shooter" and loadout == "" then
             return nil, where .. ".loadout must be set for role=shooter"
         end

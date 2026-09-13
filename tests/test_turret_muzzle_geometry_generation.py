@@ -127,6 +127,14 @@ def _check_shared_component():
             continue
         raise AssertionError(f"{label} must fail closed")
 
+    # The accepted Terran production macro shares a component with one
+    # story-only alias outside the production boundary.
+    terran = "turret_ter_m_laser_02_mk1_macro"
+    story = "turret_ter_m_laser_story_mk1_macro"
+    report = _shared_report((terran, story))
+    assert _gen._record(report, terran)
+    assert story not in _gen.MACROS
+
 
 def _check_resolution_cardinality():
     connections = tuple(f"con_{index}" for index in range(5))

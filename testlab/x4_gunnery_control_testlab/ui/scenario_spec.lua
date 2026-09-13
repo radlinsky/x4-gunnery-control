@@ -50,12 +50,12 @@
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
 --
--- Issue #151 C4: live-test the five newly supported rank-2 turret macros on
--- two sparse remote shooters. Shooter A is selected automatically by its
--- exact single-turret macro; FIRED records attribute shots to weapon macros.
+-- Issue #155 C4: live-test five exact rank-1 turret macros on two sparse
+-- remote shooters. Shooter A's upper turrets are selected automatically;
+-- FIRED records attribute shots to weapon macros.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-151-endpoint-count-rank2-gorgon-live-r2",
+    id      = "issue-155-endpoint-count-rank1-odysseus-live-r5",
     enabled = false,
 
     location = {
@@ -67,21 +67,23 @@ X4GunneryTestLabScenarioSpec = {
 
     setup = {
         remote          = true,
-        shipMacro       = "ship_par_m_frigate_01_a_macro",
-        shipLabel       = "ISSUE151 C4 SHOOTER A 1",
-        singleTurretMacro = "turret_par_m_gatling_01_mk1_macro",
-        turretLabel     = "PAR M Gatling Single",
-        expectedTurrets = 1,
+        shipMacro       = "ship_par_l_destroyer_01_a_macro",
+        shipLabel       = "ISSUE155 C4 SHOOTER A 1",
+        turretGroup     = "group_rear_up_left",
+        turretLabel     = "Issue 155 Shooter A upper turrets",
+        expectedTurrets = 3,
         expectedMemberMacros = {
-            "turret_par_m_gatling_01_mk1_macro",
+            "turret_spl_m_beam_02_mk1_macro",
+            "turret_spl_m_laser_02_mk1_macro",
+            "turret_spl_m_plasma_02_mk1_macro",
         },
-        selectAll = false,
+        selectAll = true,
     },
 
     groups = {
         {
-            label     = "ISSUE151 C4 SHOOTER A",
-            macro     = "ship_par_m_frigate_01_a_macro",
+            label     = "ISSUE155 C4 SHOOTER A",
+            macro     = "ship_par_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
             distance  = 0,
@@ -95,15 +97,15 @@ X4GunneryTestLabScenarioSpec = {
             preserveOrientation = true,
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_par_m_frigate_01_rank2_gatling_c4",
+            loadout   = "x4gc_testlab_par_l_destroyer_01_issue155_a_c4",
             expectedWeapons        = 3,
             expectedTurrets        = 3,
             expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE151 C4 SHOOTER B",
-            macro     = "ship_par_m_frigate_01_a_macro",
+            label     = "ISSUE155 C4 SHOOTER B",
+            macro     = "ship_par_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
             distance  = 0,
@@ -117,14 +119,14 @@ X4GunneryTestLabScenarioSpec = {
             preserveOrientation = true,
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_par_m_frigate_01_rank2_shotgun_c4",
+            loadout   = "x4gc_testlab_par_l_destroyer_01_issue155_b_c4",
             expectedWeapons        = 2,
             expectedTurrets        = 2,
             expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE151 C4 TARGET",
+            label     = "ISSUE155 C4 TARGET",
             macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "xenon",
             count     = 1,
