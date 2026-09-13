@@ -166,6 +166,15 @@ if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/g
   echo 'XRCat wrapper accepted broad root output' >&2
   exit 1
 fi
+if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --append --input "$tmp/game/08.cat" --output "$tmp/append-output" --include '^ui/' >/dev/null 2>&1; then
+  echo 'XRCat wrapper accepted append mode' >&2
+  exit 1
+fi
+repo_unsafe="$PWD/research-extract-unsafe-fixture"
+if "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/game/08.cat" --output "$repo_unsafe" --include '^ui/' >/dev/null 2>&1; then
+  echo 'XRCat wrapper accepted a tracked repository output' >&2
+  exit 1
+fi
 if X4GC_X4_ROOT="$tmp/game" "$scripts/extract-selected-xrcat.sh" --tool "$tmp/fake-xrcat" --input "$tmp/game/08.cat" --output "$tmp/game/extract" --include '^ui/' >/dev/null 2>&1; then
   echo 'XRCat wrapper accepted X4 installation output' >&2
   exit 1
