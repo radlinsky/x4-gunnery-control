@@ -142,6 +142,16 @@
           </conditions>
           <actions>
             <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
+            <!-- A loaded save can already contain ObserveRoot and therefore
+                 skip newly added conditionless root actions after refreshmd.
+                 Initialize this disposable session state on the user-driven
+                 enable path before ObserveArm can accept a firing event. -->
+            <do_if value="ObserveRoot.$Enabled">
+              <set_value name="ObserveRoot.$LastFired" exact="table[]"/>
+              <set_value name="ObserveRoot.$Complete" exact="table[]"/>
+              <set_value name="ObserveRoot.$Done" exact="table[]"/>
+              <set_value name="ObserveRoot.$BurstCount" exact="0"/>
+            </do_if>
             <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
             <reset_cue cue="ObserveArm"/>
           </actions>
@@ -554,8 +564,8 @@
                  Attribution first, geometry second: a FIRED event is what
                  establishes which exact turret is engaging which target, so the
                  burst hangs off it rather than sweeping every turret.  The
-                 500 ms parent delay plus the first 100 ms sample delay puts the
-                 window at +600/+700/+800 ms, which makes the whole preceding
+                 immediate parent actions plus the child's first 600 ms delay
+                 put the window at +600/+700/+800 ms, which makes the preceding
                  500 ms of every sample quiet-testable against $LastFired.  Any
                  trigger-pull inside the preceding 500 ms or inside the 200 ms
                  window pushes $LastFired forward and fails at least one sample,
@@ -586,11 +596,23 @@
                                  or event.object.macro == macro.turret_ter_m_laser_02_mk1_macro"/>
                 <check_value value="not @ObserveRoot.$Done.{event.object}"/>
               </conditions>
-              <delay exact="500ms"/>
               <actions>
+                <!-- Capture the event instance before its sampling child can
+                     activate.  A delay on this parent does not postpone its
+                     child: LIVE proved the child starts its own clock as soon
+                     as the parent becomes active. -->
                 <set_value name="$Weapon" exact="event.object"/>
                 <set_value name="$Sample" exact="0"/>
                 <set_value name="$Target" exact="null"/>
+                <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                  <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
+                </do_if>
+                <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                  <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+                </do_elseif>
+                <do_elseif value="player.target?">
+                  <set_value name="$Target" exact="player.target"/>
+                </do_elseif>
                 <set_value name="ObserveRoot.$BurstCount" exact="ObserveRoot.$BurstCount + 1"/>
                 <set_value name="$Burst" exact="ObserveRoot.$BurstCount"/>
               </actions>
@@ -600,7 +622,7 @@
                      checkinterval plus a trailing self reset is what froze the
                      game and wrote a runaway log once already. -->
                 <cue name="ObserveAutoGeometrySample">
-                  <delay exact="100ms"/>
+                  <delay exact="if parent.$Sample == 0 then 600ms else 100ms"/>
                   <actions>
                     <set_value name="$Weapon" exact="parent.$Weapon"/>
                     <!-- No recorded trigger-pull reads as zero quiet time and
@@ -634,12 +656,12 @@
                     <do_elseif value="not $Weapon.exists
                                    or $Weapon.mode != weaponmode.autoassist
                                    or $Quiet lt 500ms
+                                   or not parent.$Target
                                    or not $Target
-                                   or (parent.$Sample gt 0 and $Target != parent.$Target)">
+                                   or $Target != parent.$Target">
                       <cancel_cue cue="this"/>
                     </do_elseif>
                     <do_else>
-                      <set_value name="parent.$Target" exact="$Target"/>
                       <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
                       <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
                         <position object="$Weapon" space="$Weapon"/>

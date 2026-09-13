@@ -197,6 +197,25 @@ grep -Fq '<cue name="ObserveFired" instantiate="true">' "$md" \
 grep -Fq '<cue name="ObserveHit" instantiate="true">' "$md" \
   || fail "ObserveHit observer cue is missing"
 
+# The disposable automatic-geometry session must be safe on refreshmd into an
+# existing save: enabling observation recreates all four state values before
+# ObserveArm is reset.  Candidate identity is then captured by immediate parent
+# actions, and only the sampling child owns the initial 600 ms delay.
+for state in LastFired Complete Done; do
+  [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='table[]'])" "$md") == "1" ]] \
+    || fail "observation enable does not reset AUTOGEO \$$state"
+done
+[[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$BurstCount' and @exact='0'])" "$md") == "1" ]] \
+  || fail "observation enable does not reset AUTOGEO \$BurstCount"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/delay)" "$md") == "0" ]] \
+  || fail "AUTOGEO event cue must initialize its candidate without delay"
+for state in Weapon Sample Target Burst; do
+  [[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/actions/set_value[@name='\$$state'])" "$md") == "1" ]] \
+    || fail "AUTOGEO event cue does not initialize candidate \$$state"
+done
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample']/delay[@exact='if parent.\$Sample == 0 then 600ms else 100ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO samples must run at +600 ms and then at 100 ms intervals"
+
 # Lua: a newly accepted aim target (different from lastObservedAimTarget) emits
 # the same observe_mark event the Mark button emits and logs auto_mark_initial.
 grep -Fq 'and aimTarget ~= lastObservedAimTarget then' "$testlab_ui" \
