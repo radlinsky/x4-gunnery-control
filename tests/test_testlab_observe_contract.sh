@@ -200,7 +200,7 @@ grep -Fq '<cue name="ObserveHit" instantiate="true">' "$md" \
 # The disposable automatic-geometry session must be safe on refreshmd into an
 # existing save: enabling observation recreates all four state values before
 # ObserveArm is reset.  Candidate identity is then captured by immediate parent
-# actions, and only the sampling child owns the initial 600 ms delay.
+# actions.  Three completion-event stages then sample at +600/+700/+800 ms.
 for state in LastFired Complete Done; do
   [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='table[]'])" "$md") == "1" ]] \
     || fail "observation enable does not reset AUTOGEO \$$state"
@@ -209,12 +209,34 @@ done
   || fail "observation enable does not reset AUTOGEO \$BurstCount"
 [[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/delay)" "$md") == "0" ]] \
   || fail "AUTOGEO event cue must initialize its candidate without delay"
-for state in Weapon Sample Target Burst; do
+for state in Weapon Target Burst; do
   [[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/actions/set_value[@name='\$$state'])" "$md") == "1" ]] \
     || fail "AUTOGEO event cue does not initialize candidate \$$state"
 done
-[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample']/delay[@exact='if parent.\$Sample == 0 then 600ms else 100ms'])" "$md") == "1" ]] \
-  || fail "AUTOGEO samples must run at +600 ms and then at 100 ms intervals"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometry']/actions/set_value[@name='\$Sample'] | //cue[@name='ObserveAutoGeometry']//delay[contains(@exact, 'parent.\$Sample')])" "$md") == "0" ]] \
+  || fail "AUTOGEO sequencing must not depend on parent.\$Sample"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample1']/conditions/event_cue_completed[@cue='parent'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 1 must wait for candidate parent completion"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample1']/delay[@exact='600ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 1 must wait 600 ms"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample2']/conditions/event_cue_completed[@cue='ObserveAutoGeometrySample1'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 2 must wait for sample 1 completion"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample2']/delay[@exact='100ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 2 must wait 100 ms"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/conditions/event_cue_completed[@cue='ObserveAutoGeometrySample2'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 3 must wait for sample 2 completion"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/delay[@exact='100ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 3 must wait 100 ms"
+for sample in 1 2 3; do
+  [[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample$sample']/actions//cancel_cue[@cue='parent'])" "$md") == "2" ]] \
+    || fail "AUTOGEO sample $sample must cancel the candidate parent on invalid input"
+done
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample1' or @name='ObserveAutoGeometrySample2']/actions//set_value[contains(@name, 'Complete') or contains(@name, 'Done')])" "$md") == "0" ]] \
+  || fail "AUTOGEO completion state must not be written before sample 3"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/actions//set_value[@name='ObserveRoot.\$Complete.{\$Weapon}'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 3 must count a completed window"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveAutoGeometrySample3']/actions//set_value[@name='ObserveRoot.\$Done.{\$Weapon}'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sample 3 must retire a turret after five windows"
 
 # Lua: a newly accepted aim target (different from lastObservedAimTarget) emits
 # the same observe_mark event the Mark button emits and logs auto_mark_initial.
