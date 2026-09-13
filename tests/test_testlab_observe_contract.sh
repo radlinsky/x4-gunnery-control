@@ -69,7 +69,8 @@ grep -Fq "' shipdist_500ms='" "$md" \
 
 # The candidate mechanical-arc bearing uses the target's weapon-consistent aim
 # point in the turret mount's local frame; keep it diagnostic until live proof.
-aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")
+aimlocal=$(awk '/<cue name="ObserveMark"/{inside=1} /<cue name="ObserveState"/{inside=0} inside' "$md" \
+  | grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>")
 [[ "$aimlocal" -eq 2 ]] || fail "expected local aim orientation in both weapon snapshot loops, found $aimlocal"
 
 # A selected surface component is a valid aim target. The hit event carries

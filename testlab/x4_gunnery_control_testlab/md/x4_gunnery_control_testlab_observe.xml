@@ -117,6 +117,13 @@
              (suffix s, scriptproperties.xml:2396) and comparing a time against
              a plain number is a type error, not a false. -->
         <set_value name="$LastSample" exact="player.age - 1s"/>
+        <!-- Issue #155 automatic geometry burst state.  Disposable: delete with
+             the ObserveAutoGeometry cue once that LIVE gate is scored.
+             $LastFired is the per-turret trigger-pull clock the quiet-period
+             test reads; $Done caps each turret at one scored burst. -->
+        <set_value name="$LastFired" exact="table[]"/>
+        <set_value name="$Done" exact="table[]"/>
+        <set_value name="$BurstCount" exact="0"/>
       </actions>
       <cues>
 
@@ -371,6 +378,10 @@
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
                 <set_value name="$Barrel" exact="event.object.barrelposition"/>
+                <!-- The quiet-period clock for ObserveAutoGeometry.  Written
+                     here because this cue has no delay, so it stamps the real
+                     instant of fire. -->
+                <set_value name="ObserveRoot.$LastFired.{event.object}" exact="player.age"/>
                 <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
                 <set_value name="$TargetMountBearing" exact="if $Aimed then $Aimed.relativeposition.{event.object} else null"/>
                 <debug_text text="'[X4GC TEST FIRED] t=' + player.age
@@ -525,6 +536,107 @@
                   + ' softtgt=' + (if ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget then ObserveRoot.$SoftTarget else 'none')
                   + ' modes=' + $Census"/>
               </actions>
+            </cue>
+
+            <!-- ObserveAutoGeometry  (issue #155, disposable)
+                 The owner cannot reach the manual "Mark moment" button while
+                 seated in a remote shooter, so the geometry the #155 gate needs
+                 has to be captured without a click.  Same fields the Mark
+                 snapshot logs, restricted to the one turret that just fired and
+                 to the predeclared measurement window.
+
+                 Attribution first, geometry second: a FIRED event is what
+                 establishes which exact turret is engaging which target, so the
+                 burst hangs off it rather than sweeping every turret.  The
+                 500 ms parent delay plus the first 100 ms sample delay puts the
+                 window at +600/+700/+800 ms, which makes the whole preceding
+                 500 ms of every sample quiet-testable against $LastFired.  Any
+                 trigger-pull inside the preceding 500 ms or inside the 200 ms
+                 window pushes $LastFired forward and fails at least one sample,
+                 which aborts the burst rather than logging a spoiled window.
+
+                 One scored burst per turret ($Done).  Later FIRED events during
+                 a settled burst are cheap: they are cancelled at the parent.
+                 Nothing here feeds production; FIRED/HIT keep their setup and
+                 attribution role only. -->
+            <cue name="ObserveAutoGeometry" instantiate="true">
+              <conditions>
+                <event_weapon_fired group="$FiringWeapons"/>
+              </conditions>
+              <delay exact="500ms"/>
+              <actions>
+                <set_value name="$Weapon" exact="event.object"/>
+                <set_value name="$Sample" exact="0"/>
+                <set_value name="ObserveRoot.$BurstCount" exact="ObserveRoot.$BurstCount + 1"/>
+                <set_value name="$Burst" exact="ObserveRoot.$BurstCount"/>
+                <do_if value="@ObserveRoot.$Done.{$Weapon}">
+                  <cancel_cue cue="this"/>
+                </do_if>
+              </actions>
+              <cues>
+                <!-- Three samples 100 ms apart from one actions block.  The
+                     self reset is delay driven, never checkinterval driven:
+                     checkinterval plus a trailing self reset is what froze the
+                     game and wrote a runaway log once already. -->
+                <cue name="ObserveAutoGeometrySample">
+                  <delay exact="100ms"/>
+                  <actions>
+                    <set_value name="$Weapon" exact="parent.$Weapon"/>
+                    <!-- No recorded trigger-pull reads as zero quiet time and
+                         aborts, rather than as an infinitely quiet turret. -->
+                    <set_value name="$Quiet" exact="if @ObserveRoot.$LastFired.{$Weapon} then player.age - ObserveRoot.$LastFired.{$Weapon} else 0s"/>
+                    <!-- Same target precedence as the Mark snapshot and the
+                         FIRED line, re-resolved per sample so a target change
+                         inside the window is visible rather than assumed. -->
+                    <set_value name="$Target" exact="null"/>
+                    <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                      <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
+                    </do_if>
+                    <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                      <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+                    </do_elseif>
+                    <do_elseif value="player.target?">
+                      <set_value name="$Target" exact="player.target"/>
+                    </do_elseif>
+                    <do_if value="$Quiet lt 500ms or not $Target or not $Weapon.exists">
+                      <debug_text text="'[X4GC TEST AUTOGEO ABORT] t=' + player.age
+                        + ' burst=' + parent.$Burst
+                        + ' weapon=' + $Weapon
+                        + ' sample=' + (parent.$Sample + 1)
+                        + ' quiet=' + $Quiet
+                        + ' tgt=' + (if $Target then $Target else 'none')"/>
+                      <cancel_cue cue="this"/>
+                    </do_if>
+                    <do_else>
+                      <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
+                        <position object="$Weapon" space="$Weapon"/>
+                      </create_orientation>
+                      <set_value name="parent.$Sample" exact="parent.$Sample + 1"/>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' burst=' + parent.$Burst
+                        + ' sample=' + parent.$Sample
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' tgt=' + $Target
+                        + ' quiet=' + $Quiet
+                        + ' aim_yaw=' + $AimLocal.yaw
+                        + ' aim_pitch=' + $AimLocal.pitch
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                      <do_if value="parent.$Sample lt 3">
+                        <reset_cue cue="this"/>
+                      </do_if>
+                      <do_else>
+                        <set_value name="ObserveRoot.$Done.{$Weapon}" exact="true"/>
+                      </do_else>
+                    </do_else>
+                  </actions>
+                </cue>
+              </cues>
             </cue>
 
           </cues>
