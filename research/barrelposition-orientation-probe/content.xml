@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<content version="900" id="x4_barrel_orientation_probe" name="Barrel Orientation Probe" description="Disposable build-pinned native research probe." author="X4 Gunnery Control research" date="2026-09-13" save="0" enabled="1">
+  <dependency id="x4native" optional="false" />
+</content>
