@@ -128,11 +128,17 @@ These are method decisions, not X4 facts:
 ## Reuse contract for later runs
 
 Rerun `validate-measurement.py DEBUG_LOG BARREL_ORIENTATION_LOG` on each new
-run. It fails on: missing/unhooked STATUS or wrong RVAs; sequence gaps; capture
-count above capacity; OVERFLOW; foreign caller; non-finite matrices;
-a degenerate or left-handed basis; missing AUTOGEO; a sample farther
-than 1 mm from every capture translation; a weapon pairing to several native
-identities; or two weapons sharing one. It reports identities, determinant,
+run. Pairing is order-aware: AUTOGEO samples are processed in debug-log order,
+and each must match a later native capture within 1 mm, so matched captures
+keep strictly increasing sequence order. Unmatched extra captures are allowed.
+
+It fails on: missing/unhooked STATUS or wrong RVAs; sequence gaps; capture
+count above capacity; OVERFLOW; a present SUMMARY with `dropped > 0` (missing
+SUMMARY is non-blocking); foreign caller; non-finite matrices; a degenerate or
+left-handed basis; a native weapon changing connection; missing AUTOGEO;
+missing or duplicate AUTOGEO ticks; a sample with no in-order capture within
+1 mm; an AUTOGEO weapon mapping to more than one native identity; or two AUTOGEO
+weapons sharing one. It reports identities, determinant,
 row-norm and row-dot diagnostics, AUTOGEO tick span, and maximum pairing
 distance. Articulation magnitude and pose matching remain per-batch analysis.
 
