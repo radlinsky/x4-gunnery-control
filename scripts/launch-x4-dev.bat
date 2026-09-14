@@ -132,12 +132,12 @@ echo Removed stale native probe log: %X4GC_PROBE_LOG%
 goto launch
 
 :logdirunknown
+if defined X4GC_CLEAR_BARREL_PROBE_LOG goto probelogdirunknown
 echo Launching:
 echo   "%X4GC_EXE%" -prefersinglefiles -debug all -logfile debug.log
 echo Gunnery diagnostics will be written to:
 echo   ^<X4 userdata folder^>\debug.log   (could not auto-detect; look under Documents\Egosoft\X4\)
 echo X4 truncates debug.log on every launch; the previous run's log is lost.
-if defined X4GC_CLEAR_BARREL_PROBE_LOG goto probelogdirunknown
 
 :launch
 rem If X4GC_TAIL_LOG is set, open a second console window running tail-gunnery-log.sh
