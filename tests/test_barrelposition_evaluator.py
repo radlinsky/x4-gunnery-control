@@ -78,6 +78,26 @@ class BarrelpositionEvaluatorTests(unittest.TestCase):
             for got, want in zip(result["transform"]["z"], (0.0, 1.0, 0.0)):
                 self.assertAlmostEqual(got, want)
 
+    def test_loop_with_moving_cubic_handles_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = _source_roots(Path(tmp))
+            _write(roots["base"], "turret_t.xml",
+                   _component().replace("turret_active", "turretloop_active"))
+            _write(roots["base"], "macros.xml",
+                   f'<macros><macro name="{MACRO}" class="turret"><component ref="turret_t"/></macro></macros>')
+            # Enum-5 keys equal at both ends, but key 0's out-handle x (raw slot 8) is 1.0.
+            def cubic(time: float, out_x: float) -> bytes:
+                return _candidate_key_record(
+                    (0.0, 0.0, 0.0, 5, 5, 5, time, 0.0, out_x, *([0.0] * 15), 0, *([0.0] * 6), 0))
+            (roots["base"] / "geometry").mkdir(exist_ok=True)
+            (roots["base"] / "geometry/turret_t.ANI").write_bytes(_ani_bytes(
+                ("rotator", "turretloop_active", 2, 0, 0, 0, 0, 0x3F800000),
+                key_data=cubic(0.0, 1.0) + cubic(1.0, 0.0),
+            ))
+            turret = load_turrets(roots, roots, [MACRO])[MACRO]
+            with self.assertRaises(EvaluatorError):
+                evaluate(turret, 0.0, 0.0)
+
     def test_unsupported_restriction_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             turret = self._load(Path(tmp), pitch_restriction="translation_x")

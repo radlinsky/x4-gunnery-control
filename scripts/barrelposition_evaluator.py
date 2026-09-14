@@ -195,6 +195,31 @@ def evaluate_track(keys: list[dict[str, object]], time: float, *, rotation: bool
     return tuple(result)
 
 
+_LOOP_TOLERANCE = 1e-6  # float32 handle noise in the Xenon corpus is ~6e-8
+
+
+def track_is_constant(keys: list[dict[str, object]]) -> bool:
+    """True only if the track stays within _LOOP_TOLERANCE of key 0 at every time.
+
+    Per axis: every enum is 1/2/5, and every control point that can shape the
+    curve (all key values; for enum 5 also its out handle and the next key's in
+    handle) is within tolerance of key 0. Enum 1/2 stay between key values and
+    a cubic Bezier stays inside its control hull, so the bound covers the whole curve.
+    """
+    for axis in range(3):
+        base = keys[0]["value"][axis] if keys else 0.0
+        for index, key in enumerate(keys):
+            enum = key["enums"][axis]
+            controls = [key["value"][axis]]
+            if enum == 5:
+                controls.append(key["out"][axis])
+                if index + 1 < len(keys):
+                    controls.append(keys[index + 1]["in"][axis])
+            if enum not in (1, 2, 5) or any(abs(c - base) > _LOOP_TOLERANCE for c in controls):
+                return False
+    return True
+
+
 # --- source resolution -----------------------------------------------------------
 
 def _raise_census(anomalies: list[dict[str, object]]) -> None:
@@ -367,13 +392,8 @@ def evaluate(turret: dict[str, object], rotation_x: float, rotation_y: float) ->
             # ponytail: loop reference at phase 0; refuse phase-dependent loops
             # (none in the corpus, A7) rather than pick a phase.
             time = 0.0
-            for keys, is_rotation in ((position, False), (rotation, True)):
-                if keys and any(
-                    evaluate_track(keys, k["time"], rotation=is_rotation)
-                    != evaluate_track(keys, 0.0, rotation=is_rotation)
-                    for k in keys if k["time"] < duration
-                ):
-                    raise EvaluatorError(f"phase-dependent loop descriptor on {part}")
+            if not (track_is_constant(position) and track_is_constant(rotation)):
+                raise EvaluatorError(f"phase-dependent loop descriptor on {part}")
         t = evaluate_track(position, time, rotation=False) if position else ZERO
         r = ani_euler(*evaluate_track(rotation, time, rotation=True)) if rotation else stored[1]
         return (t, r), {"source": "ani", "selector": selector, "time": time,
