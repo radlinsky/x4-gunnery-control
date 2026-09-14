@@ -86,7 +86,6 @@ grep -Fq 'set "WSLENV=X4GC_INSTALL_TESTLAB:%WSLENV%"' "$testlab_launcher"
 grep -Fq 'set "X4GC_CLEAR_BARREL_PROBE_LOG=1"' "$testlab_launcher"
 grep -Fq 'set "X4GC_PROBE_LOG=%X4GC_LOG_DIR%\x4native\x4_barrel_orientation_probe\barrel-orientation.log"' "$launcher"
 grep -Fq 'if exist "%X4GC_PROBE_LOG%" goto probelogfailed' "$launcher"
-# Cleanup requested but profile folder unknown must fail closed before :launch.
 unknown_block=$(sed -n '/^:logdirunknown/,/^:launch/p' "$launcher")
 grep -Fq 'if defined X4GC_CLEAR_BARREL_PROBE_LOG goto probelogdirunknown' <<<"$unknown_block"
 sed -n '/^:probelogdirunknown/,/^goto finish/p' "$launcher" | grep -Fq 'X4GC_EXIT_CODE=6'
