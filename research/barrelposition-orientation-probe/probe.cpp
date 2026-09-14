@@ -51,7 +51,6 @@ TransformFn g_original = nullptr;
 Capture g_captures[kCapacity]{};
 volatile LONG64 g_reserved = 0;
 volatile LONG64 g_dropped = 0;
-volatile LONG64 g_null_rejected = 0;
 volatile LONG g_recording = 0;
 uint64_t g_flushed = 0;
 uint64_t g_reported_dropped = 0;
@@ -149,10 +148,7 @@ __declspec(noinline) void* detour(void* weapon, void* output, void* connection) 
     if (InterlockedCompareExchange(&g_recording, 0, 0) == 0 ||
         reinterpret_cast<uintptr_t>(caller) != g_api->exe_base + kCallerRva)
         return result;
-    if (!output || !connection) {
-        InterlockedIncrement64(&g_null_rejected);
-        return result;
-    }
+    if (!output || !connection) return result;
 
     LONG64 slot_index = InterlockedIncrement64(&g_reserved) - 1;
     if (slot_index >= static_cast<LONG64>(kCapacity)) {
@@ -279,12 +275,4 @@ X4NATIVE_EXPORT void x4native_shutdown(void) {
     flush_captures();
     if (g_hook_owner > 0) g_api->unhook(g_hook_owner);
     if (g_frame_subscription > 0) g_api->unsubscribe(g_frame_subscription);
-
-    char line[256];
-    std::snprintf(line, sizeof(line),
-                  "SUMMARY {\"captured\":%llu,\"dropped\":%llu,\"null_rejected\":%llu}",
-                  static_cast<unsigned long long>(g_flushed),
-                  static_cast<unsigned long long>(InterlockedCompareExchange64(&g_dropped, 0, 0)),
-                  static_cast<unsigned long long>(InterlockedCompareExchange64(&g_null_rejected, 0, 0)));
-    log_line(X4NATIVE_LOG_INFO, line);
 }

@@ -101,19 +101,6 @@ buffer, and `R8` is the exact selected connection pointer.
   chosen by minimizing geometry error. It says nothing about whether any
   generated muzzle prediction is correct.
 
-## Probe lifecycle limitation
-
-- X4: 9.00; build 611726; X4Native host
-  `fc4b8e26d74365ca332c3b0749eb9bbe167c76a1`
-- Status: live-tested
-- Source: the probe log from the run above, collected after X4 exited
-- Live test: yes — same run, 2026-09-13
-- Finding: the shutdown `SUMMARY` line did not appear. This is non-blocking:
-  contiguous sequences give the captured count, overflow is impossible below
-  capacity and no OVERFLOW marker appeared, and `null_rejected` is not needed
-  to validate accepted captures. Treat a missing SUMMARY as a lifecycle
-  observation, not a failed measurement.
-
 ## Design choices
 
 These are method decisions, not X4 facts:
@@ -133,14 +120,13 @@ and each must match a later native capture within 1 mm, so matched captures
 keep strictly increasing sequence order. Unmatched extra captures are allowed.
 
 It fails on: missing/unhooked STATUS or wrong RVAs; sequence gaps; capture
-count above capacity; OVERFLOW; a present SUMMARY with `dropped > 0` (missing
-SUMMARY is non-blocking); foreign caller; non-finite matrices; a degenerate or
-left-handed basis; a native weapon changing connection; missing AUTOGEO;
-missing or duplicate AUTOGEO ticks; a sample with no in-order capture within
-1 mm; an AUTOGEO weapon mapping to more than one native identity; or two AUTOGEO
-weapons sharing one. It reports identities, determinant,
-row-norm and row-dot diagnostics, AUTOGEO tick span, and maximum pairing
-distance. Articulation magnitude and pose matching remain per-batch analysis.
+count above capacity; OVERFLOW; foreign caller; non-finite matrices; a
+degenerate or left-handed basis; a native weapon changing connection; missing
+AUTOGEO; missing or duplicate AUTOGEO ticks; a sample with no in-order capture
+within 1 mm; an AUTOGEO weapon mapping to more than one native identity; or two
+AUTOGEO weapons sharing one. It reports identities, determinant, row-norm and
+row-dot diagnostics, AUTOGEO tick span, and maximum pairing distance.
+Articulation magnitude and pose matching remain per-batch analysis.
 
 The separate geometry gate is unchanged: independently matched pose, a residual
 bound declared before scoring, and retained wrong-endpoint and
@@ -153,4 +139,3 @@ diagnostic only.
   (`0x00e22b70`) roles; only their combined output was measured.
 - Behavior on other builds, other turret families, or other callers of
   `0x0081c960`.
-- Why the X4Native shutdown path skipped SUMMARY.

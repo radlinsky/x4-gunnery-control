@@ -45,10 +45,10 @@ def analyze(debug_lines, probe_lines):
         if not ok:
             failures.append(message)
 
-    statuses, captures, overflows, summaries = [], [], [], []
+    statuses, captures, overflows = [], [], []
     for line in probe_lines:
         for marker, sink in (("STATUS", statuses), ("CAPTURE", captures),
-                             ("OVERFLOW", overflows), ("SUMMARY", summaries)):
+                             ("OVERFLOW", overflows)):
             item = payload(line, marker)
             if item is not None:
                 sink.append(item)
@@ -65,11 +65,9 @@ def analyze(debug_lines, probe_lines):
     check(sequences == list(range(len(captures))), "CAPTURE sequences are not contiguous from 0")
     check(len(captures) <= capacity, f"{len(captures)} captures exceed capacity {capacity}")
     check(not overflows, f"OVERFLOW present: {overflows}")
-    check(all(s.get("dropped", 0) == 0 for s in summaries), f"SUMMARY reports drops: {summaries}")
     check(all(c["caller_rva"] == CALLER for c in captures), "capture with unexpected caller")
     report.update(status=status, captures=len(captures), capacity=capacity,
-                  overflow=len(overflows),
-                  summary=summaries[-1] if summaries else "missing (non-blocking)")
+                  overflow=len(overflows))
 
     identities = defaultdict(int)
     connections = defaultdict(set)

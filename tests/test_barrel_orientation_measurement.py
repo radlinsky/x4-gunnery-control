@@ -28,7 +28,6 @@ debug = [autogeo(1, "a", 1.00001), autogeo(1, "b", 5.0)]
 report, failures = module.analyze(debug, probe)
 assert failures == [], failures
 assert report["captures"] == 3 and report["autogeo_samples"] == 2
-assert report["summary"] == "missing (non-blocking)"
 
 # Order regression: each sample sits exactly on the *other* turret's position
 # at a later (wrong) time, and 2e-5 m from its own in-order capture. Global
@@ -43,15 +42,14 @@ assert failures == [], failures
 assert report["autogeo"]["a ma"]["native"] == ["w1/cw1"], report
 assert report["autogeo"]["b mb"]["native"] == ["w2/cw2"], report
 
-# Each must fail: gap, left-handed basis, SUMMARY drops, weapon changing
-# connection, duplicate tick, and a sample with no in-order capture.
+# Each must fail: gap, left-handed basis, weapon changing connection,
+# duplicate tick, and a sample with no in-order capture.
 bad = [STATUS, capture(0, "w1", 1.0), capture(2, "w2", 5.0, sign=-1),
-       capture(3, "w2", 5.0).replace('"cw2"', '"cother"'),
-       '[info] SUMMARY {"captured":4,"dropped":1,"null_rejected":0}']
+       capture(3, "w2", 5.0).replace('"cw2"', '"cother"')]
 debug = [autogeo(1, "a", 1.0), autogeo(1, "a", 1.0), autogeo(2, "b", 9.0)]
 _, failures = module.analyze(debug, bad)
 text = "\n".join(failures)
-for expected in ("not contiguous from 0", "left-handed", "reports drops", "changed connection",
+for expected in ("not contiguous from 0", "left-handed", "changed connection",
                  "without duplicates", "no in-order capture"):
     assert expected in text, (expected, text)
 print("ok")

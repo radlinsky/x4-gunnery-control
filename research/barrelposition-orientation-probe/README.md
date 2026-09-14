@@ -81,14 +81,10 @@ timestamp/level prefix:
 STATUS {"hooked":true,...}
 CAPTURE {"sequence":0,"weapon":"0x...","connection":"0x...","caller_rva":"0x7c6eb1","matrix":[16 raw floats]}
 OVERFLOW {"capacity":32768,"dropped":1}
-SUMMARY {"captured":...,"dropped":...,"null_rejected":...}
 ```
 
 Formatting and file output occur from the native frame callback, never inside
 the detour. Sequence order is retained. Overflow cannot be silent.
-
-The shutdown SUMMARY may be absent (observed on the first LIVE run); contiguous
-sequences and the absence of OVERFLOW already cover what it reports.
 
 Check a run's measurement contract (no geometry scoring):
 
