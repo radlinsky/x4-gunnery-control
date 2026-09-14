@@ -34,19 +34,64 @@ def _unresolved(
     return result
 
 
-def query_compatibility(
-    source_sets: Mapping[str, Path], turret_macro: str, ship_macro: str
-) -> dict[str, object]:
+class CompatibilityIndex:
+    """Reusable official-source identities for one or more compatibility queries."""
+
+    def __init__(
+        self,
+        components: dict[str, list[dict[str, object]]],
+        macro_records: list[dict[str, str]],
+        source_anomalies: list[dict[str, object]],
+        source_set_anomalies: list[dict[str, object]],
+    ) -> None:
+        self._components = components
+        self._macro_records = macro_records
+        self._source_anomalies = source_anomalies
+        self._source_set_anomalies = source_set_anomalies
+
+    def query(self, turret_macro: str, ship_macro: str) -> dict[str, object]:
+        if self._source_set_anomalies:
+            return _unresolved(
+                turret_macro, ship_macro, "source_sets", self._source_set_anomalies
+            )
+
+        names = frozenset((turret_macro, ship_macro))
+        anomalies = [
+            anomaly
+            for anomaly in self._source_anomalies
+            if "macro" not in anomaly or anomaly["macro"] in names
+        ]
+        if anomalies:
+            return _unresolved(turret_macro, ship_macro, "source_identity", anomalies)
+
+        macro_records = [
+            record for record in self._macro_records if record["name"] in names
+        ]
+        return _query_indexed_compatibility(
+            self._components, macro_records, turret_macro, ship_macro
+        )
+
+
+def build_compatibility_index(
+    source_sets: Mapping[str, Path], macro_names: frozenset[str]
+) -> CompatibilityIndex:
     try:
         roots = _validate_source_sets(source_sets)
     except CensusError as exc:
-        return _unresolved(turret_macro, ship_macro, "source_sets", exc.anomalies)
+        return CompatibilityIndex({}, [], [], exc.anomalies)
 
     components, macro_records, _wares, anomalies = _collect_xml_identities(
-        roots, macro_names=frozenset((turret_macro, ship_macro))
+        roots, macro_names=macro_names
     )
-    if anomalies:
-        return _unresolved(turret_macro, ship_macro, "source_identity", anomalies)
+    return CompatibilityIndex(components, macro_records, anomalies, [])
+
+
+def _query_indexed_compatibility(
+    components: dict[str, list[dict[str, object]]],
+    macro_records: list[dict[str, str]],
+    turret_macro: str,
+    ship_macro: str,
+) -> dict[str, object]:
 
     records, anomalies = _resolve_macro_identities(macro_records)
     if anomalies:
@@ -120,6 +165,15 @@ def query_compatibility(
         "compatible_connections": compatible,
         "compatible_mount_count": len(compatible),
     }
+
+
+def query_compatibility(
+    source_sets: Mapping[str, Path], turret_macro: str, ship_macro: str
+) -> dict[str, object]:
+    index = build_compatibility_index(
+        source_sets, frozenset((turret_macro, ship_macro))
+    )
+    return index.query(turret_macro, ship_macro)
 
 
 def _source_set(value: str) -> tuple[str, Path]:
