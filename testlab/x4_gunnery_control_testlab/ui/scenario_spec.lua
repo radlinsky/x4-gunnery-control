@@ -49,13 +49,9 @@
 --     expectedWeapons / expectedTurrets / expectedMissileTurrets
 --                        Required non-negative exact operational totals whenever
 --                        loadout is set. READY fails if any loaded ship differs.
---
--- Issue #155 C4: live-test five exact rank-1 turret macros on two sparse
--- remote shooters. Shooter A's upper turrets are selected automatically;
--- FIRED records attribute shots to weapon macros.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-155-endpoint-count-rank1-odysseus-live-r5",
+    id      = "issue-155-endpoint-count-rank1-odysseus-live-r6",
     enabled = false,
 
     location = {
@@ -68,14 +64,13 @@ X4GunneryTestLabScenarioSpec = {
     setup = {
         remote          = true,
         shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE155 C4 SHOOTER A 1",
+        shipLabel       = "ISSUE155 C4 SHOOTER B 1",
         turretGroup     = "group_rear_up_left",
-        turretLabel     = "Issue 155 Shooter A upper turrets",
-        expectedTurrets = 3,
+        turretLabel     = "Issue 155 Shooter B upper turrets",
+        expectedTurrets = 2,
         expectedMemberMacros = {
-            "turret_spl_m_beam_02_mk1_macro",
-            "turret_spl_m_laser_02_mk1_macro",
-            "turret_spl_m_plasma_02_mk1_macro",
+            "turret_ter_m_beam_02_mk1_macro",
+            "turret_ter_m_laser_02_mk1_macro",
         },
         selectAll = true,
     },
