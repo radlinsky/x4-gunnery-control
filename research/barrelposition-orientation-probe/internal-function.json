@@ -1,0 +1,12 @@
+{
+  "BarrelpositionConnectionTransform": {
+    "_find_hints": {
+      "method": "build_pinned_byte_signature",
+      "byte_sig": "4C 8B DC 55 53 57 41 56 49 8D 6B A1 48 81 EC 88",
+      "byte_sig_note": "First 16 bytes at RVA 0x0081C960 in the pinned executable. The probe independently verifies the complete executable SHA-256 and call-path bytes before hooking."
+    },
+    "900-611726": {
+      "rva": "0x0081C960"
+    }
+  }
+}

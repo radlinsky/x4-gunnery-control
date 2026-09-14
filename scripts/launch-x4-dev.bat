@@ -122,9 +122,17 @@ echo   "%X4GC_EXE%" -prefersinglefiles -debug all -logfile debug.log
 echo Gunnery diagnostics will be written to:
 echo   %X4GC_LOG_DIR%\debug.log
 echo X4 truncates debug.log on every launch; the previous run's log is lost.
+rem Test Lab launches clear the stale native barrel probe log so old and new evidence never mix.
+if not defined X4GC_CLEAR_BARREL_PROBE_LOG goto launch
+set "X4GC_PROBE_LOG=%X4GC_LOG_DIR%\x4native\x4_barrel_orientation_probe\barrel-orientation.log"
+if not exist "%X4GC_PROBE_LOG%" goto launch
+del /f /q "%X4GC_PROBE_LOG%"
+if exist "%X4GC_PROBE_LOG%" goto probelogfailed
+echo Removed stale native probe log: %X4GC_PROBE_LOG%
 goto launch
 
 :logdirunknown
+if defined X4GC_CLEAR_BARREL_PROBE_LOG goto probelogdirunknown
 echo Launching:
 echo   "%X4GC_EXE%" -prefersinglefiles -debug all -logfile debug.log
 echo Gunnery diagnostics will be written to:
@@ -177,6 +185,19 @@ echo ERROR: install-dev.sh failed; X4 was not launched.
 echo The game was not started because it would have run stale mod code.
 echo Fix the install error above, then re-run the launcher.
 set "X4GC_EXIT_CODE=4"
+goto finish
+
+:probelogfailed
+echo ERROR: could not delete stale native probe log; X4 was not launched.
+echo   %X4GC_PROBE_LOG%
+echo Close anything holding the file open, then re-run the launcher.
+set "X4GC_EXIT_CODE=5"
+goto finish
+
+:probelogdirunknown
+echo ERROR: could not locate the X4 profile folder to clear the stale native probe log; X4 was not launched.
+echo Expected Documents\Egosoft\X4\^<profile^> under %%USERPROFILE%% or %%OneDrive%%.
+set "X4GC_EXIT_CODE=6"
 goto finish
 
 :failed

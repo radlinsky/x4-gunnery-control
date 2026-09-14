@@ -69,7 +69,8 @@ grep -Fq "' shipdist_500ms='" "$md" \
 
 # The candidate mechanical-arc bearing uses the target's weapon-consistent aim
 # point in the turret mount's local frame; keep it diagnostic until live proof.
-aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")
+aimlocal=$(awk '/<cue name="ObserveMark"/{inside=1} /<cue name="ObserveState"/{inside=0} inside' "$md" \
+  | grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>")
 [[ "$aimlocal" -eq 2 ]] || fail "expected local aim orientation in both weapon snapshot loops, found $aimlocal"
 
 # A selected surface component is a valid aim target. The hit event carries
@@ -82,12 +83,12 @@ grep -Fq "event.param == \$Aimed or @event.param3.{1} == \$Aimed" "$md" \
 # regular weapons/turrets and the separate missile-turret property list.
 weapons=$(grep -Fc 'in="player.ship.weapons.operational.list"' "$md")
 missiles=$(grep -Fc 'in="player.ship.missileturrets.operational.list"' "$md")
-ship_weapons=$(grep -Fc "in=\"\$Ship.weapons.operational.list\"" "$md")
-ship_missiles=$(grep -Fc "in=\"\$Ship.missileturrets.operational.list\"" "$md")
 [[ "$weapons" -eq 1 ]] || fail "expected one player weapons snapshot loop, found $weapons"
 [[ "$missiles" -eq 1 ]] || fail "expected one player missile-turret snapshot loop, found $missiles"
-[[ "$ship_weapons" -eq 1 ]] || fail "expected one census weapons loop, found $ship_weapons"
-[[ "$ship_missiles" -eq 1 ]] || fail "expected one census missile-turret loop, found $ship_missiles"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.weapons.operational.list'])" "$md") == "1" ]] \
+  || fail "expected one census weapons loop"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.missileturrets.operational.list'])" "$md") == "1" ]] \
+  || fail "expected one census missile-turret loop"
 
 # Issue #54 Task 2: inrange must mirror shipped combat-AI reachability —
 # bounding-box distance under maxfirerange, no size term — in both snapshot
@@ -195,6 +196,34 @@ grep -Fq '<cue name="ObserveFired" instantiate="true">' "$md" \
   || fail "ObserveFired observer cue is missing"
 grep -Fq '<cue name="ObserveHit" instantiate="true">' "$md" \
   || fail "ObserveHit observer cue is missing"
+
+# The disposable geometry capture is one bounded, rate-agnostic raw sampler.
+for obsolete in LastFired Complete Done BurstCount ObserveAutoGeometry ObserveAutoGeometrySample1 ObserveAutoGeometrySample2 ObserveAutoGeometrySample3; do
+  ! grep -Fq "$obsolete" "$md" || fail "obsolete shot-timed AUTOGEO state/cue remains: $obsolete"
+done
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler' and @instantiate='true' and @checkinterval='100ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sampler does not use instantiate=true checkinterval=100ms"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler']//reset_cue | //cue[@name='ObserveGeometrySampler']/cues | //cue[@name='ObserveGeometrySampler']//event_cue_completed | //cue[@name='ObserveGeometrySampler']//delay)" "$md") == "0" ]] \
+  || fail "AUTOGEO sampler contains self-reset, nested, completion-event, or delay pacing"
+for reset in \
+  "GeometryCaptureActive:true" \
+  "GeometryTick:0" \
+  "LastGeometrySample:player.age - 1s"; do
+  state=${reset%%:*}
+  value=${reset#*:}
+  [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='$value'])" "$md") == "1" ]] \
+    || fail "observation enable does not start AUTOGEO with \$$state"
+done
+[[ $(grep -Fc 'GeometryCaptureActive" exact="true' "$md") == 1 && $(grep -Fc 'GeometryTick" exact="0' "$md") == 2 ]] \
+  || fail "AUTOGEO capture can start or restart outside observation enable"
+sampler=$(xmllint --xpath "//cue[@name='ObserveGeometrySampler']" "$md")
+printf '%s\n' "$sampler" | grep -Fq "ObserveRoot.\$GeometryTick lt 600" \
+  || fail "AUTOGEO sampler is not bounded to 600 ticks"
+printf '%s\n' "$sampler" | grep -Fq "player.age gt ObserveRoot.\$LastGeometrySample" \
+  || fail "AUTOGEO sampler lacks duplicate-player.age protection"
+for field in "t=" "tick=" "weapon=" "macro=" "tgt=" "mode=" "ready=" "aim_yaw=" "aim_pitch=" "barrel_x=" "barrel_y=" "barrel_z="; do
+  printf '%s\n' "$sampler" | grep -Fq "$field" || fail "AUTOGEO raw log lost field: $field"
+done
 
 # Lua: a newly accepted aim target (different from lastObservedAimTarget) emits
 # the same observe_mark event the Mark button emits and logs auto_mark_initial.

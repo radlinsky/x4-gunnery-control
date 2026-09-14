@@ -94,6 +94,18 @@ MACROS = {
     # turret_xen_m_laser_02_mk1, so they must share one contract.
     "turret_xen_m_beam_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
     "turret_xen_m_laser_02_mk1_macro": ("depth4_one_key_barrel_translation", 4),
+    "turret_spl_m_beam_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_spl_m_laser_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_spl_m_plasma_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_ter_m_beam_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+    "turret_ter_m_laser_02_mk1_macro": ("depth3_one_key_barrel_translation", 3),
+}
+
+# This story-only alias shares the accepted Terran laser component but is not
+# part of the Issue #137 production boundary. Its presence may not prevent the
+# explicitly accepted macro from being generated, and it is not emitted itself.
+ALLOWED_UNGENERATED_ALIASES = {
+    "turret_ter_m_laser_02_mk1_macro": {"turret_ter_m_laser_story_mk1_macro"},
 }
 
 
@@ -169,6 +181,43 @@ def _settled_rotation_x(layer: _Layer) -> str | None:
     return _number(values[0])
 
 
+# X4 9.00 installed-binary inference (#164): `weapon.barrelposition` takes
+# element zero of the `laser`-tagged connection vector, and native connection
+# storage is ordered by the unsigned name hash below, so the representative
+# anchor is the eligible `laser` connection with the smallest unsigned hash.
+# Not ordinary FNV-1a: the multiply precedes the XOR.
+def _native_connection_name_hash(name: str) -> int:
+    try:
+        raw = name.encode("ascii")
+    except UnicodeEncodeError:
+        # The recovered native equivalence only covers the ASCII corpus.
+        raise SystemExit(f"unsupported non-ASCII connection name: {name!r}")
+    value = 0x811C9DC5
+    for byte in raw:
+        value = ((value * 0x1000193) & 0xFFFFFFFFFFFFFFFF) ^ byte
+    return value
+
+
+def _barrelposition_connection(connections: Sequence[str], macro: str) -> str:
+    """The eligible `laser` connection with the smallest unsigned native hash."""
+    if not connections:
+        raise SystemExit(f"no eligible firing endpoint for {macro}")
+    hashes: dict[int, list[str]] = {}
+    for connection in connections:
+        hashes.setdefault(_native_connection_name_hash(connection), []).append(
+            connection
+        )
+    collisions = sorted(
+        name for names in hashes.values() if len(names) > 1 for name in names
+    )
+    if collisions:
+        # Native storage order is undefined for us here; do not invent a tiebreak.
+        raise SystemExit(
+            f"colliding connection-name hashes for {macro}: {collisions}"
+        )
+    return hashes[min(hashes)][0]
+
+
 def _record(report: _Report, macro: str) -> list[str]:
     semantic_case, layer_count = MACROS[macro]
     matches = [
@@ -185,7 +234,14 @@ def _record(report: _Report, macro: str) -> list[str]:
     aliases = component["macros"]
     if len(set(aliases)) != len(aliases):
         raise SystemExit(f"duplicate macro alias on the census component for {macro}")
-    if any(MACROS.get(alias) != MACROS[macro] for alias in aliases):
+    generated_aliases = [alias for alias in aliases if alias in MACROS]
+    ungenerated_aliases = set(aliases) - set(generated_aliases)
+    if (
+        any(MACROS[alias] != MACROS[macro] for alias in generated_aliases)
+        or not ungenerated_aliases.issubset(
+            ALLOWED_UNGENERATED_ALIASES.get(macro, set())
+        )
+    ):
         raise SystemExit(f"unsupported shared component for {macro}")
     resolutions = component["source_semantic_resolutions"]
     accepted_resolution_counts = (
@@ -208,8 +264,15 @@ def _record(report: _Report, macro: str) -> list[str]:
     lines = [
         f'    ["{macro}"] = {{',
         f'        semantic_case = "{semantic_case}",',
-        "        layers = {",
     ]
+    # Older semantic cases keep their historical endpoint-2 consumer behavior
+    # until each is separately proved (#79/#164).
+    if semantic_case == "depth3_one_key_barrel_translation":
+        anchor = _barrelposition_connection(
+            [geometry["endpoint_connection"] for geometry in geometries], macro
+        )
+        lines.append(f'        barrelposition_connection = "{anchor}",')
+    lines.append("        layers = {")
     for layer in layers:
         lines.extend([
             "            {",

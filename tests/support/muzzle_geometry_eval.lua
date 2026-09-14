@@ -116,10 +116,11 @@ function M.evaluate_depth5(geometry, endpoint_connection, yaw, pitch)
   error("missing endpoint " .. endpoint_connection)
 end
 
--- Evaluate a generated record at its production endpoint (the ordered pair's
--- second entry) for the semantic case it declares. Yaw/pitch are degrees.
-function M.evaluate_record(geometry, yaw, pitch)
-  local connection = geometry.endpoints[2].connection
+-- Evaluate a generated record for the semantic case it declares. Yaw/pitch are
+-- degrees. endpoint_connection defaults to the ordered pair's second entry;
+-- pass it explicitly for a record whose production endpoint is another one.
+function M.evaluate_record(geometry, yaw, pitch, endpoint_connection)
+  local connection = endpoint_connection or geometry.endpoints[2].connection
   if geometry.semantic_case == "depth5_additive_x_rotation" then
     return M.evaluate_depth5(geometry, connection, math.rad(yaw), math.rad(pitch))
   end

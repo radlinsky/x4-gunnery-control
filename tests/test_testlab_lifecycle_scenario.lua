@@ -263,7 +263,7 @@ do
             group({
                 role = "shooter",
                 loadout = "x4gc_testlab_future_fixture",
-                expectedWeapons = 3,
+                expectedWeapons = 2,
                 expectedTurrets = 2,
                 expectedMissileTurrets = 1,
             }),
@@ -273,7 +273,7 @@ do
     assert(#events == 3, "one declarative group must stream begin + group + commit")
     local params = events[2].params
     assert(params.loadout == "x4gc_testlab_future_fixture"
-            and params.expectedWeapons == 3
+            and params.expectedWeapons == 2
             and params.expectedTurrets == 2
             and params.expectedMissileTurrets == 1,
         "arbitrary named loadout identity and exact totals must survive flat transport")
@@ -293,6 +293,11 @@ local malformed = {
       spec = { id = "bad-angle", enabled = true,
           groups = { group({ pitch = math.huge }) } },
       reason = "groups_1_.pitch_must_be_a_finite_number" },
+    { label = "fewer weapons than turrets",
+      spec = { id = "bad-loadout-census", enabled = true,
+          groups = { group({ loadout = "synthetic_loadout", expectedWeapons = 1,
+              expectedTurrets = 2, expectedMissileTurrets = 0 }) } },
+      reason = "expectedWeapons_must_be_greater_than_or_equal_to_expectedTurrets" },
     { label = "remote without location",
       spec = { id = "remote-no-location", enabled = false,
           setup = {

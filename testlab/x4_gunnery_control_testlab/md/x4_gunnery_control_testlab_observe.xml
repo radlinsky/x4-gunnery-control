@@ -117,6 +117,9 @@
              (suffix s, scriptproperties.xml:2396) and comparing a time against
              a plain number is a type error, not a false. -->
         <set_value name="$LastSample" exact="player.age - 1s"/>
+        <set_value name="$GeometryCaptureActive" exact="false"/>
+        <set_value name="$GeometryTick" exact="0"/>
+        <set_value name="$LastGeometrySample" exact="player.age - 1s"/>
       </actions>
       <cues>
 
@@ -132,6 +135,14 @@
           </conditions>
           <actions>
             <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
+            <!-- A loaded save can already contain ObserveRoot and therefore
+                 skip newly added conditionless root actions after refreshmd.
+                 Restart the bounded capture on every user-driven enable. -->
+            <do_if value="ObserveRoot.$Enabled">
+              <set_value name="ObserveRoot.$GeometryCaptureActive" exact="true"/>
+              <set_value name="ObserveRoot.$GeometryTick" exact="0"/>
+              <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age - 1s"/>
+            </do_if>
             <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
             <reset_cue cue="ObserveArm"/>
           </actions>
@@ -524,6 +535,74 @@
                   + ' hardtgt=' + (if player.target then player.target else 'none')
                   + ' softtgt=' + (if ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget then ObserveRoot.$SoftTarget else 'none')
                   + ' modes=' + $Census"/>
+              </actions>
+            </cue>
+
+            <!-- Observation enable starts one raw 100 ms capture, before any
+                 target is assigned. Firing does not influence its clock. -->
+            <cue name="ObserveGeometrySampler" instantiate="true" checkinterval="100ms">
+              <conditions>
+                <check_value value="ObserveRoot.$GeometryCaptureActive
+                                 and ObserveRoot.$GeometryTick lt 600
+                                 and player.age gt ObserveRoot.$LastGeometrySample"/>
+              </conditions>
+              <actions>
+                <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age"/>
+                <set_value name="ObserveRoot.$GeometryTick" exact="ObserveRoot.$GeometryTick + 1"/>
+                <set_value name="$Target" exact="null"/>
+                <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                  <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
+                </do_if>
+                <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                  <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+                </do_elseif>
+                <do_elseif value="player.target?">
+                  <set_value name="$Target" exact="player.target"/>
+                </do_elseif>
+                <do_for_each name="$Weapon" in="$Ship.weapons.operational.list">
+                  <do_if value="$Weapon.macro == macro.turret_spl_m_beam_02_mk1_macro
+                                or $Weapon.macro == macro.turret_spl_m_laser_02_mk1_macro
+                                or $Weapon.macro == macro.turret_spl_m_plasma_02_mk1_macro
+                                or $Weapon.macro == macro.turret_ter_m_beam_02_mk1_macro
+                                or $Weapon.macro == macro.turret_ter_m_laser_02_mk1_macro">
+                    <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                    <do_if value="$Target">
+                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
+                        <position object="$Weapon" space="$Weapon"/>
+                      </create_orientation>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' tick=' + ObserveRoot.$GeometryTick
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' tgt=' + $Target
+                        + ' tgtname=' + $Target.knownname
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' aim_yaw=' + $AimLocal.yaw
+                        + ' aim_pitch=' + $AimLocal.pitch
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                    </do_if>
+                    <do_else>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' tick=' + ObserveRoot.$GeometryTick
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' tgt=none'
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' aim_yaw=none'
+                        + ' aim_pitch=none'
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                    </do_else>
+                  </do_if>
+                </do_for_each>
+                <do_if value="ObserveRoot.$GeometryTick ge 600">
+                  <set_value name="ObserveRoot.$GeometryCaptureActive" exact="false"/>
+                </do_if>
               </actions>
             </cue>
 

@@ -106,6 +106,11 @@ semanticCaseBehaviors.depth4_zero_translation =
 semanticCaseBehaviors.depth4_one_key_barrel_translation =
     semanticCaseBehaviors.depth4_dual_translation
 
+-- The shortened rank-1 one-key case (#137) has the same translation/split
+-- ordering over three source layers; only its source-evidence boundary differs.
+semanticCaseBehaviors.depth3_one_key_barrel_translation =
+    semanticCaseBehaviors.depth4_dual_translation
+
 -- P6 uses the already-proved depth-4 translation composition; its separate
 -- semantic case only preserves the narrower source-evidence boundary.
 semanticCaseBehaviors.depth4_p6_translation =
@@ -116,9 +121,21 @@ semanticCaseBehaviors.depth4_p6_translation =
 semanticCaseBehaviors.depth4_p8_translation =
     semanticCaseBehaviors.depth4_dual_translation
 
+-- Endpoints are emitted in lexical name order, which is not the engine's
+-- barrelposition semantic, so a record naming its representative endpoint is
+-- resolved by that identity. Records without the field keep the historical
+-- second entry. Returns nil if a named identity is absent, so no prospective
+-- geometry is streamed rather than guessing an endpoint.
+local function barrelpositionEndpoint(geometry)
+    local connection = geometry.barrelposition_connection
+    if not connection then return geometry.endpoints[2] end
+    for _, endpoint in ipairs(geometry.endpoints) do
+        if endpoint.connection == connection then return endpoint end
+    end
+end
+
 -- Returns nil for an unknown semantic case, so no prospective geometry is
 -- streamed and the prospective generated-geometry path is not entered.
--- ponytail: the generated endpoints are an ordered pair; take the second.
 local function deriveProspectiveMuzzle(geometry)
     local behavior = semanticCaseBehaviors[geometry.semantic_case]
     if not behavior then return nil end
@@ -127,7 +144,7 @@ local function deriveProspectiveMuzzle(geometry)
         chainTranslate(chain, layer.connection_transform.position)
         behavior(chain, layer)
     end
-    local endpoint = geometry.endpoints[2]
+    local endpoint = barrelpositionEndpoint(geometry)
     if not (chain.origin and chain.pivot and endpoint) then return nil end
     local downstream = vadd(chain.segment, rotateInFrame(chain.fixed, endpoint.transform.position))
     return { origin = chain.origin, pivot = chain.pivot, downstream = downstream }

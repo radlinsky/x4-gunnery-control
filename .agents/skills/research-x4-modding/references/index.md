@@ -11,7 +11,7 @@ before relying on any claim.
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
 | External-menu lifecycle and persistent Gunnery overlay | [external-menu-lifecycle.md](external-menu-lifecycle.md) | X4 9.00 source-backed custom-view overlay and fullscreen takeover boundary, plus live-tested normal `InteractMenu` overlay and normal Map takeover/restore |
-| MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings |
+| MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings; shipped turret and turretloop transition graph in `libraries/animation_sequences.xml` |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
 | Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
@@ -30,6 +30,7 @@ before relying on any claim.
 | Rank-2 Teladi candidate-channel-0 resolution | [turret-rank2-teladi-channel0-resolution.md](turret-rank2-teladi-channel0-resolution.md) | X4 9.00 bounded resolution for the three Teladi rank-2 members: retain the exact rotator-base channel-0 vector as local-position translation; no Teladi-specific semantic split |
 | Paranid L Beam candidate-channel-0 semantics | [paranid-l-beam-channel0-semantics.md](paranid-l-beam-channel0-semantics.md) | X4 9.00 live-tested for the exact Beam path: full source-derived translation model was under 1 m from runtime barrel position at two fired bearings; omitted control was over 20.6 m away |
 | Paranid L Beam mount geometry | [paranid-l-beam-mount-geometry.md](paranid-l-beam-mount-geometry.md) | X4 9.00 shipped-source ventral-rear centerline mount geometry used to diagnose the invalid forward/above live fixture |
+| Live orientation of the selected `barrelposition` connection | [barrelposition-live-connection-orientation.md](barrelposition-live-connection-orientation.md) | X4 9.00 build 611726 live-tested: filtered post-call interception measures the selected connection's 64-byte transform (translation then right-handed +X/+Y/+Z rows), pairs with Test Lab AUTOGEO, and has a reusable log validator; intermediate call roles remain inference |
 | Live tests and observations | [testing-experiments.md](testing-experiments.md) | Historical experiment archive and regression matrix |
 
 Search these references before adding a record. Keep one primary source per

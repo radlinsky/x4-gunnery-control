@@ -127,6 +127,14 @@ def _check_shared_component():
             continue
         raise AssertionError(f"{label} must fail closed")
 
+    # The accepted Terran production macro shares a component with one
+    # story-only alias outside the production boundary.
+    terran = "turret_ter_m_laser_02_mk1_macro"
+    story = "turret_ter_m_laser_story_mk1_macro"
+    report = _shared_report((terran, story))
+    assert _gen._record(report, terran)
+    assert story not in _gen.MACROS
+
 
 def _check_resolution_cardinality():
     connections = tuple(f"con_{index}" for index in range(5))
@@ -158,10 +166,53 @@ def _check_resolution_cardinality():
                 assert count in accepted, f"{macro} must reject {count}"
 
 
+def _check_barrelposition_selection():
+    """The recovered #164 hash and the anchor it selects."""
+    # Census corpus.csv values for the analyzed X4 9.00 binary. Ordinary FNV-1a
+    # (XOR before multiply) does not produce these.
+    for name, expected in (
+        ("con_laser_02", 0x0C9442E72BBE5380),
+        ("con_heavy_004", 0xD036B5AC8B234172),
+    ):
+        actual = _gen._native_connection_name_hash(name)
+        assert actual == expected, f"{name}: {actual:#x} != {expected:#x}"
+
+    # The anchor is neither lexical order nor a fixed index: endpoint 2 wins for
+    # the Laser pair, endpoint 1 for the Split Plasma pair, endpoint 4 for the
+    # five-endpoint Gatling family.
+    macro = "turret_spl_m_plasma_02_mk1_macro"
+    for connections, expected in (
+        (("con_laser_01", "con_laser_02"), "con_laser_02"),
+        (("con_standard_01", "con_standard_02"), "con_standard_01"),
+        (
+            (
+                "con_heavy_001",
+                "con_heavy_002",
+                "con_heavy_003",
+                "con_heavy_004",
+                "con_heavy_005",
+            ),
+            "con_heavy_004",
+        ),
+    ):
+        assert _gen._barrelposition_connection(connections, macro) == expected
+
+
+def _check_barrelposition_emission():
+    """The #155 semantic case emits the selected identity; others do not."""
+    report = _report(("con_standard_01", "con_standard_02"))
+    for macro, (semantic_case, _) in _gen.MACROS.items():
+        text = "\n".join(_gen._record(report, macro))
+        explicit = 'barrelposition_connection = "con_standard_01",' in text
+        assert explicit == (semantic_case == "depth3_one_key_barrel_translation"), macro
+
+
 def main():
     _check_settled_rotation_x()
     _check_shared_component()
     _check_resolution_cardinality()
+    _check_barrelposition_selection()
+    _check_barrelposition_emission()
     order = ("con_laser_01", "con_laser_02")
 
     first = _gen._render(_report(order), X4_VERSION)
