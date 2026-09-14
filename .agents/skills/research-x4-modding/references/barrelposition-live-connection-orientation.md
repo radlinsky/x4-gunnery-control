@@ -1,17 +1,23 @@
 # Live orientation of the selected `barrelposition` connection
 
-This reference preserves the smallest accepted route for measuring the live
-orientation of the exact connection selected by `weapon.barrelposition`. It
-does not specify or implement a native probe.
+This reference preserves the build-pinned route for measuring the live
+orientation of the exact connection selected by `weapon.barrelposition`, and
+the first accepted in-process measurement through that route. The disposable
+probe lives in `research/barrelposition-orientation-probe/`; it is research
+equipment and never a production dependency.
+
+Build pin for every record below unless stated otherwise: X4 9.00 build
+611726, `X4.exe` SHA-256
+`19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`. RVAs assume
+image base `0x140000000`.
 
 ## Supported API boundary
 
-- X4: 9.00; `X4.exe` SHA-256
-  `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`
-- Status: inference
-- Source: pinned executable export inventory, relevant native callers and data
-  flow; shipped Lua, MD, schemas, and exported-function surface
-- Live test: no — static binary and shipped-source investigation only
+- X4: 9.00; build 611726; executable hash as above
+- Status: shipped-source
+- Source: pinned executable export inventory; shipped Lua, MD, schemas, and
+  exported-function surface
+- Live test: no — shipped-source and export-surface search only
 - Finding: no sufficiently evidenced supported/public Lua or MD route, or
   exported function, was found that returns the live orientation of the exact
   internal connection selected by `weapon.barrelposition`. This is bounded to
@@ -25,89 +31,120 @@ enumeration APIs identify turret instances, not the selected endpoint.
 
 ## Build-pinned native path
 
-- X4: 9.00; executable hash as above
+- X4: 9.00; build 611726; executable hash as above
 - Status: inference
 - Source: static disassembly and data-flow trace of the pinned executable
-- Live test: no — inferred function roles have not been instrumented in process
+- Live test: partial — the target and wrapper-caller roles below were
+  confirmed live (next record); the intermediate endpoint-selection and
+  scene-composition roles were not instrumented individually
 - Finding: the public-property evaluator calls the fixed-index transform path
-  below. Addresses are preferred-base virtual addresses; RVAs assume image base
-  `0x140000000`.
+  below.
 
 ```text
 public-property evaluator call
   0x140d045cf / RVA 0x00d045cf
     -> 0x1407c6e80 / RVA 0x007c6e80
-       inferred weapon.barrelposition transform wrapper; endpoint index zero
+       weapon.barrelposition transform wrapper; endpoint index zero
        -> 0x1405bebc0 / RVA 0x005bebc0
           inferred endpoint selection from the weapon endpoint vector
        -> 0x14081c960 / RVA 0x0081c960
-          inferred complete runtime transform of the selected connection
+          complete runtime transform of the selected connection
           -> 0x140e22b70 / RVA 0x00e22b70
              inferred scene-backed connection/part transform composition
 ```
 
 `0x140d04598` is the switch/case entry, not the call instruction; the actual
-call into the wrapper is at `0x140d045cf`.
+call into the wrapper is at `0x140d045cf`. At entry to `0x14081c960`, `RCX` is
+the runtime weapon/turret pointer, `RDX` points to a 64-byte output transform
+buffer, and `R8` is the exact selected connection pointer.
 
-At entry to `0x14081c960`, `RCX` is the runtime weapon/turret pointer, `RDX`
-points to a 64-byte output transform buffer, and `R8` is the exact selected
-connection pointer. The observed output shape is four 16-byte float vectors:
-one position/affine-origin vector and three basis vectors. The raw basis-vector
-order, axis signs, and handedness are not proved.
+## Selected-connection transform measurement
 
-## Preferred measurement
+- X4: 9.00; build 611726; executable hash as above; X4Native host
+  `fc4b8e26d74365ca332c3b0749eb9bbe167c76a1`; repository head
+  `5e82f38392f34b36dc9e3277b185a47c4008cd19`
+- Status: live-tested
+- Source: correlated X4 `debug.log` (Test Lab `AUTOGEO`) and probe
+  `barrel-orientation.log` from one controlled Shooter A run, reviewed
+  mechanically with `research/barrelposition-orientation-probe/validate-measurement.py`
+- Live test: yes — one controlled run, 2026-09-13
+- Finding: intercepting RVA `0x0081c960` and accepting only return address
+  RVA `0x007c6eb1` measures the live transform of the selected connection.
+  - STATUS reported hooked, target RVA `0x0081c960`, caller RVA `0x007c6eb1`.
+  - 2,879 captures, sequences 0..2878 contiguous; every capture has caller
+    RVA `0x7c6eb1`; capacity 32,768; no OVERFLOW.
+  - Exactly three stable weapon/connection pointer pairs, one per Shooter A
+    turret (Split Plasma, Split Beam, Split Laser).
+  - 600 `AUTOGEO` ticks per turret, 1,800 samples. Target acquisition begins
+    at tick 103, so the run spans rest, articulation, and settled/firing pose.
+  - All 1,800 samples paired unambiguously to one native identity each;
+    maximum public-`barrelposition` versus native translation difference
+    about 0.049 mm. Translation was used only for pairing/provenance, never to
+    solve orientation.
+  - Orientation changed with articulation while identities stayed fixed.
+    Initial-to-trained rotation: Split Plasma about 89.93°, Split Beam about
+    58.30°, Split Laser about 57.65°.
+  - Every basis was finite and nondegenerate; determinant about
+    0.99999926..0.99999991; row-length and orthogonality errors at
+    floating-point scale.
 
-- X4: 9.00; executable hash as above
-- Status: inference
-- Source: build-pinned call graph and Windows x64 calling-context trace above
-- Live test: no — design decision awaiting a disposable native experiment
-- Finding: intercept `0x14081c960` in process and accept a record only when its
-  return address is `0x1407c6eb1` / RVA `0x007c6eb1`, the continuation in the
-  fixed-index `weapon.barrelposition` wrapper. After the original call returns,
-  copy its already-computed 64-byte output transform.
+## Returned transform layout
 
-This observes the transform evaluation requested by the public property,
-retains the exact selected connection pointer from `R8`, avoids reimplementing
-endpoint selection, and avoids a second scene-transform evaluation whose timing
-would require synchronization. A separate direct, read-only invocation of the
-known path is a fallback, not the preferred first measurement.
+- X4: 9.00; build 611726; executable hash as above
+- Status: live-tested
+- Source: pinned-binary source/runtime motion evidence, confirmed against the
+  run above
+- Live test: yes — same run, 2026-09-13
+- Finding: the 64-byte output is four 16-byte float rows: translation, then
+  right-handed `+X`, `+Y`, `+Z` basis rows. This interpretation was fixed from
+  motion evidence before any prospective-muzzle residual scoring and was not
+  chosen by minimizing geometry error. It says nothing about whether any
+  generated muzzle prediction is correct.
 
-The filtered public-property call plus its selected `R8` pointer is the primary
-native identity evidence. Do not assume `weapon + 0x08` is a runtime
-UniverseID, require a connection-hash field from the runtime connection object,
-or retain other speculative fields. Any readable UniverseID or hash mapping
-must be verified independently before it is used.
+## Probe lifecycle limitation
 
-An ignored `.x4-research-cache/x4native/` checkout currently exists locally,
-but it is local research tooling, not repository-supported infrastructure. A
-future implementation must inspect it separately to determine whether it can
-safely hook an address-only internal function without introducing a framework.
+- X4: 9.00; build 611726; X4Native host
+  `fc4b8e26d74365ca332c3b0749eb9bbe167c76a1`
+- Status: live-tested
+- Source: the probe log from the run above, collected after X4 exited
+- Live test: yes — same run, 2026-09-13
+- Finding: the shutdown `SUMMARY` line did not appear. This is non-blocking:
+  contiguous sequences give the captured count, overflow is impossible below
+  capacity and no OVERFLOW marker appeared, and `null_rejected` is not needed
+  to validate accepted captures. Treat a missing SUMMARY as a lifecycle
+  observation, not a failed measurement.
 
-## Minimum acceptance boundary
+## Design choices
 
-A future measurement is trustworthy only after it proves:
+These are method decisions, not X4 facts:
 
-- the exact executable hash/build guard and filtered `0x1407c6eb1` caller;
-- a non-null exact selected connection pointer in `R8`;
-- use of the scene-backed/live path rather than the static fallback;
-- a finite, nondegenerate transform basis;
-- basis-axis order, signs, and handedness by independent evidence before any
-  geometry evaluation;
-- unambiguous pairing with the accepted Test Lab `AUTOGEO` sample;
-- captured translation agreement with public `weapon.barrelposition` strictly
-  as a pairing/provenance check—never as orientation-solving or fitting input;
-- an articulation change that changes captured orientation while the runtime
-  turret and connection identities remain fixed.
+- Copy the already-computed output after the original call returns instead of
+  re-invoking the path, so capture timing matches the public-property request.
+- The filtered caller plus `R8` pointer is the native identity. Do not assume
+  `weapon + 0x08` is a UniverseID or read connection-hash fields.
+- The validator checks only the reusable measurement contract. Geometry scoring
+  for any turret batch lives with that batch, not in the validator.
 
-The final geometry gate remains separate: all five scoped macros, independently
-matched pose, maximum residual `<= 0.020 m`, and retained wrong-endpoint and
+## Reuse contract for later runs
+
+Rerun `validate-measurement.py DEBUG_LOG BARREL_ORIENTATION_LOG` on each new
+run. It fails on: missing/unhooked STATUS or wrong RVAs; sequence gaps; capture
+count above capacity; OVERFLOW; foreign caller; non-finite matrices;
+a degenerate or left-handed basis; missing AUTOGEO; a sample farther
+than 1 mm from every capture translation; a weapon pairing to several native
+identities; or two weapons sharing one. It reports identities, determinant,
+row-norm and row-dot diagnostics, AUTOGEO tick span, and maximum pairing
+distance. Articulation magnitude and pose matching remain per-batch analysis.
+
+The separate geometry gate is unchanged: independently matched pose, a residual
+bound declared before scoring, and retained wrong-endpoint and
 omitted-barrel-translation controls. `look_at` and projectile bore remain
 diagnostic only.
 
-## Open implementation uncertainties
+## Still inference
 
-- Raw basis-vector semantic order, signs, and handedness.
-- Reliable correlation of a native capture with the Test Lab weapon/sample.
-- A safe interception and trampoline mechanism.
-- Whether existing ignored local native research tooling can hook this
-  address-only function without adding a new framework.
+- The intermediate endpoint-selection (`0x005bebc0`) and scene-composition
+  (`0x00e22b70`) roles; only their combined output was measured.
+- Behavior on other builds, other turret families, or other callers of
+  `0x0081c960`.
+- Why the X4Native shutdown path skipped SUMMARY.

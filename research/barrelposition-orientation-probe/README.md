@@ -87,6 +87,15 @@ SUMMARY {"captured":...,"dropped":...,"null_rejected":...}
 Formatting and file output occur from the native frame callback, never inside
 the detour. Sequence order is retained. Overflow cannot be silent.
 
+The shutdown SUMMARY may be absent (observed on the first LIVE run); contiguous
+sequences and the absence of OVERFLOW already cover what it reports.
+
+Check a run's measurement contract (no geometry scoring):
+
+```text
+python3 research/barrelposition-orientation-probe/validate-measurement.py debug.log barrel-orientation.log
+```
+
 After capture, exit X4 before removing files. Delete the disposable extension
 directory and remove the ignored-local resolver entry:
 
