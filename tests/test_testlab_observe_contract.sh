@@ -201,29 +201,24 @@ grep -Fq '<cue name="ObserveHit" instantiate="true">' "$md" \
 for obsolete in LastFired Complete Done BurstCount ObserveAutoGeometry ObserveAutoGeometrySample1 ObserveAutoGeometrySample2 ObserveAutoGeometrySample3; do
   ! grep -Fq "$obsolete" "$md" || fail "obsolete shot-timed AUTOGEO state/cue remains: $obsolete"
 done
-[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler' and @instantiate='true' and @checkinterval='50ms'])" "$md") == "1" ]] \
-  || fail "AUTOGEO sampler does not use instantiate=true checkinterval=50ms"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler' and @instantiate='true' and @checkinterval='100ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sampler does not use instantiate=true checkinterval=100ms"
 [[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler']//reset_cue | //cue[@name='ObserveGeometrySampler']/cues | //cue[@name='ObserveGeometrySampler']//event_cue_completed | //cue[@name='ObserveGeometrySampler']//delay)" "$md") == "0" ]] \
   || fail "AUTOGEO sampler contains self-reset, nested, completion-event, or delay pacing"
 for reset in \
-  "GeometryCaptureActive:false" \
+  "GeometryCaptureActive:true" \
   "GeometryTick:0" \
   "LastGeometrySample:player.age - 1s"; do
   state=${reset%%:*}
   value=${reset#*:}
   [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='$value'])" "$md") == "1" ]] \
-    || fail "observation enable does not reset AUTOGEO \$$state"
+    || fail "observation enable does not start AUTOGEO with \$$state"
 done
-fired_start=$(xmllint --xpath "//cue[@name='ObserveFired']/actions/do_if[contains(@value, 'not ObserveRoot.\$GeometryCaptureActive')]" "$md")
-printf '%s\n' "$fired_start" | grep -Fq "ObserveRoot.\$GeometryTick == 0" \
-  || fail "AUTOGEO capture start is not limited to the first scoped FIRED event"
-[[ $(printf '%s\n' "$fired_start" | grep -Fc "ObserveRoot.\$GeometryCaptureActive\" exact=\"true") == 1 ]] \
-  || fail "first scoped FIRED event does not latch AUTOGEO capture active"
-! printf '%s\n' "$fired_start" | grep -Fq 'GeometryTick" exact="0' \
-  || fail "subsequent FIRED events can restart the AUTOGEO tick clock"
+[[ $(grep -Fc 'GeometryCaptureActive" exact="true' "$md") == 1 && $(grep -Fc 'GeometryTick" exact="0' "$md") == 2 ]] \
+  || fail "AUTOGEO capture can start or restart outside observation enable"
 sampler=$(xmllint --xpath "//cue[@name='ObserveGeometrySampler']" "$md")
-printf '%s\n' "$sampler" | grep -Fq "ObserveRoot.\$GeometryTick lt 1200" \
-  || fail "AUTOGEO sampler is not bounded to 1200 ticks"
+printf '%s\n' "$sampler" | grep -Fq "ObserveRoot.\$GeometryTick lt 600" \
+  || fail "AUTOGEO sampler is not bounded to 600 ticks"
 printf '%s\n' "$sampler" | grep -Fq "player.age gt ObserveRoot.\$LastGeometrySample" \
   || fail "AUTOGEO sampler lacks duplicate-player.age protection"
 for field in "t=" "tick=" "weapon=" "macro=" "tgt=" "mode=" "ready=" "aim_yaw=" "aim_pitch=" "barrel_x=" "barrel_y=" "barrel_z="; do

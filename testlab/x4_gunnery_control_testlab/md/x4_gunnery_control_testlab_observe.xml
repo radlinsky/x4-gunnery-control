@@ -137,9 +137,9 @@
             <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
             <!-- A loaded save can already contain ObserveRoot and therefore
                  skip newly added conditionless root actions after refreshmd.
-                 Reset the bounded capture on every user-driven enable. -->
+                 Restart the bounded capture on every user-driven enable. -->
             <do_if value="ObserveRoot.$Enabled">
-              <set_value name="ObserveRoot.$GeometryCaptureActive" exact="false"/>
+              <set_value name="ObserveRoot.$GeometryCaptureActive" exact="true"/>
               <set_value name="ObserveRoot.$GeometryTick" exact="0"/>
               <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age - 1s"/>
             </do_if>
@@ -382,15 +382,6 @@
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
                 <set_value name="$Barrel" exact="event.object.barrelposition"/>
-                <do_if value="not ObserveRoot.$GeometryCaptureActive
-                              and ObserveRoot.$GeometryTick == 0
-                              and (event.object.macro == macro.turret_spl_m_beam_02_mk1_macro
-                                or event.object.macro == macro.turret_spl_m_laser_02_mk1_macro
-                                or event.object.macro == macro.turret_spl_m_plasma_02_mk1_macro
-                                or event.object.macro == macro.turret_ter_m_beam_02_mk1_macro
-                                or event.object.macro == macro.turret_ter_m_laser_02_mk1_macro)">
-                  <set_value name="ObserveRoot.$GeometryCaptureActive" exact="true"/>
-                </do_if>
                 <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
                 <set_value name="$TargetMountBearing" exact="if $Aimed then $Aimed.relativeposition.{event.object} else null"/>
                 <debug_text text="'[X4GC TEST FIRED] t=' + player.age
@@ -547,12 +538,12 @@
               </actions>
             </cue>
 
-            <!-- The first scoped FIRED event starts one raw 50 ms capture.
-                 Firing cadence does not influence its clock or its samples. -->
-            <cue name="ObserveGeometrySampler" instantiate="true" checkinterval="50ms">
+            <!-- Observation enable starts one raw 100 ms capture, before any
+                 target is assigned. Firing does not influence its clock. -->
+            <cue name="ObserveGeometrySampler" instantiate="true" checkinterval="100ms">
               <conditions>
                 <check_value value="ObserveRoot.$GeometryCaptureActive
-                                 and ObserveRoot.$GeometryTick lt 1200
+                                 and ObserveRoot.$GeometryTick lt 600
                                  and player.age gt ObserveRoot.$LastGeometrySample"/>
               </conditions>
               <actions>
@@ -609,7 +600,7 @@
                     </do_else>
                   </do_if>
                 </do_for_each>
-                <do_if value="ObserveRoot.$GeometryTick ge 1200">
+                <do_if value="ObserveRoot.$GeometryTick ge 600">
                   <set_value name="ObserveRoot.$GeometryCaptureActive" exact="false"/>
                 </do_if>
               </actions>
