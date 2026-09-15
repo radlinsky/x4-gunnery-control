@@ -10,12 +10,11 @@ Unsupported source structure raises EvaluatorError instead of guessing.
 """
 from __future__ import annotations
 
-import importlib.util
 import math
 import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from census_ani_parser import AniDescriptorError, _parse_ani_descriptors
 from census_common import CensusError
@@ -44,13 +43,35 @@ class EvaluatorError(Exception):
     """Source structure outside the recovered engine rules, or bad input."""
 
 
-# ponytail: reuse the #164 hash/selection from the hyphenated generator script
-# instead of copying it; move both into a shared module when production adopts A9.
-_spec = importlib.util.spec_from_file_location(
-    "_muzzle_generator", Path(__file__).with_name("generate-turret-muzzle-geometry.py")
-)
-_generator = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_generator)
+# X4 9.00 installed-binary inference (#164): `weapon.barrelposition` takes
+# element zero of the `laser`-tagged connection vector, and native connection
+# storage is ordered by the unsigned name hash below, so the representative
+# anchor is the eligible `laser` connection with the smallest unsigned hash.
+# Not ordinary FNV-1a: the multiply precedes the XOR.
+def _native_connection_name_hash(name: str) -> int:
+    try:
+        raw = name.encode("ascii")
+    except UnicodeEncodeError:
+        # The recovered native equivalence only covers the ASCII corpus.
+        raise EvaluatorError(f"unsupported non-ASCII connection name: {name!r}")
+    value = 0x811C9DC5
+    for byte in raw:
+        value = ((value * 0x1000193) & 0xFFFFFFFFFFFFFFFF) ^ byte
+    return value
+
+
+def _barrelposition_connection(connections: Sequence[str], macro: str) -> str:
+    """The eligible `laser` connection with the smallest unsigned native hash."""
+    if not connections:
+        raise EvaluatorError(f"no eligible firing endpoint for {macro}")
+    hashes: dict[int, list[str]] = {}
+    for connection in connections:
+        hashes.setdefault(_native_connection_name_hash(connection), []).append(connection)
+    collisions = sorted(name for names in hashes.values() if len(names) > 1 for name in names)
+    if collisions:
+        # Native storage order is undefined for us here; do not invent a tiebreak.
+        raise EvaluatorError(f"colliding connection-name hashes for {macro}: {collisions}")
+    return hashes[min(hashes)][0]
 
 
 # --- matrix algebra (A5/A6, row-vector) ----------------------------------------
@@ -276,12 +297,9 @@ def load_turrets(
         ]
         if len(elements) != 1:
             raise EvaluatorError(f"component element not unique in {xml_path}")
-        try:
-            selected = _generator._barrelposition_connection(
-                [endpoint["connection"] for endpoint in endpoints], macro
-            )
-        except SystemExit as exc:
-            raise EvaluatorError(str(exc)) from exc
+        selected = _barrelposition_connection(
+            [endpoint["connection"] for endpoint in endpoints], macro
+        )
         turrets[macro] = {
             "macro": macro,
             "component": definition["component"],
