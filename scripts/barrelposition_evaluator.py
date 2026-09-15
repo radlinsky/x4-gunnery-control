@@ -296,7 +296,8 @@ def load_turrets(
 
 # --- evaluation -------------------------------------------------------------------
 
-def evaluate(turret: dict[str, object], rotation_x: float, rotation_y: float) -> dict[str, object]:
+def _selected_path(turret: dict[str, object]) -> tuple[list[object], str, list[dict[str, object]]]:
+    """Leaf-first path ops: fixed transforms plus "rotation_x"/"rotation_y" joint markers."""
     connections = turret["connections"]
     xml_connections = {
         c.get("name", ""): c
@@ -351,7 +352,7 @@ def evaluate(turret: dict[str, object], rotation_x: float, rotation_y: float) ->
     used_types: set[str] = set()
     trace = []
 
-    def joint(name: str) -> Mat:
+    def joints(name: str) -> list[str]:
         restrictions = connections[name]["authored_restrictions"]
         types = [r["type_token"] for r in restrictions]
         if len(set(types)) != len(types) or not set(types) <= {"rotation_x", "rotation_y"}:
@@ -360,12 +361,8 @@ def evaluate(turret: dict[str, object], rotation_x: float, rotation_y: float) ->
             if token in used_types:
                 raise EvaluatorError(f"more than one {token} joint on the selected path")
             used_types.add(token)
-        if not types:
-            return IDENTITY
-        return joint_matrix(
-            rotation_x if "rotation_x" in types else 0.0,
-            rotation_y if "rotation_y" in types else 0.0,
-        )
+        # A6 order Rx(-x)·Ry(+y) on one connection.
+        return [t for t in ("rotation_x", "rotation_y") if t in types]
 
     def part_local(part: str, owner: str) -> tuple[Transform, dict[str, object]]:
         part_xml = [
@@ -399,21 +396,46 @@ def evaluate(turret: dict[str, object], rotation_x: float, rotation_y: float) ->
         return (t, r), {"source": "ani", "selector": selector, "time": time,
                         "position_keys": len(position), "rotation_keys": len(rotation)}
 
-    def connection_world(name: str) -> Transform:
-        c_authored = read_offset(xml_connections[name])
-        local = compose((ZERO, joint(name)), c_authored)
+    def connection_ops(name: str) -> list[object]:
+        ops: list[object] = [*joints(name), read_offset(xml_connections[name])]
         parent_part = connections[name]["parent_part"]
         entry = {"connection": name, "restrictions": [
             r["type_token"] for r in connections[name]["authored_restrictions"]]}
         trace.append(entry)
         if parent_part is None:
-            return local
+            return ops
         owner = part_owner[parent_part]
         local_part, entry["parent_part_local"] = part_local(parent_part, owner)
         entry["parent_part"] = parent_part
-        return compose(local, compose(local_part, connection_world(owner)))
+        return ops + [local_part] + connection_ops(owner)
 
-    translation, rows = connection_world(turret["selected_connection"])
+    return connection_ops(turret["selected_connection"]), family, trace
+
+
+def _compose_ops(ops: list[object], rotation_x: float, rotation_y: float) -> Transform:
+    total: Transform = (ZERO, IDENTITY)
+    for op in ops:
+        if op == "rotation_x":
+            op = (ZERO, joint_matrix(rotation_x, 0.0))
+        elif op == "rotation_y":
+            op = (ZERO, joint_matrix(0.0, rotation_y))
+        total = compose(total, op)
+    return total
+
+
+def joint_segments(turret: dict[str, object]) -> dict[str, Transform]:
+    """Split the selected path as T = L ∘ Rx(-x) ∘ G ∘ Ry(y) ∘ H (row-vector composition)."""
+    ops, _family, _trace = _selected_path(turret)
+    if ops.count("rotation_x") != 1 or ops.count("rotation_y") != 1 or ops.index("rotation_x") > ops.index("rotation_y"):
+        raise EvaluatorError("selected path is not one rotation_x below one rotation_y")
+    ix, iy = ops.index("rotation_x"), ops.index("rotation_y")
+    return {"L": _compose_ops(ops[:ix], 0.0, 0.0), "G": _compose_ops(ops[ix + 1:iy], 0.0, 0.0),
+            "H": _compose_ops(ops[iy + 1:], 0.0, 0.0)}
+
+
+def evaluate(turret: dict[str, object], rotation_x: float, rotation_y: float) -> dict[str, object]:
+    ops, family, trace = _selected_path(turret)
+    translation, rows = _compose_ops(ops, rotation_x, rotation_y)
     return {
         "macro": turret["macro"],
         "component": turret["component"],

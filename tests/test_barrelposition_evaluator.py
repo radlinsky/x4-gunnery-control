@@ -78,6 +78,25 @@ class BarrelpositionEvaluatorTests(unittest.TestCase):
             for got, want in zip(result["transform"]["z"], (0.0, 1.0, 0.0)):
                 self.assertAlmostEqual(got, want)
 
+    def test_joint_segments_recompose_and_expose_yaw_geometry(self) -> None:
+        from barrelposition_evaluator import ZERO, compose, joint_segments, rx, ry
+        from yaw_rest_gate import yaw_geometry
+
+        with tempfile.TemporaryDirectory() as tmp:
+            turret = self._load(Path(tmp))
+            seg = joint_segments(turret)
+            x, y = 0.3, -1.2
+            chain = seg["L"]
+            for op in ((ZERO, rx(-x)), seg["G"], (ZERO, ry(y)), seg["H"]):
+                chain = compose(chain, op)
+            for got, want in zip(chain[0], self._translation(turret, x, y)):
+                self.assertAlmostEqual(got, want)
+            geometry = yaw_geometry(turret)
+            # Pitch pivot = pitch offset z1 + rotator ANI (-1,0,0); rest aim is +Z.
+            for got, want in zip(geometry["t_G"], (-1.0, 0.0, 1.0)):
+                self.assertAlmostEqual(got, want)
+            self.assertAlmostEqual(geometry["beta"], 0.0)
+
     def test_loop_with_moving_cubic_handles_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             roots = _source_roots(Path(tmp))
