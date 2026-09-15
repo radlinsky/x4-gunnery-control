@@ -123,7 +123,12 @@ def _trig_roots(p) -> list[float]:
 
 
 def classify(geometry: dict[str, object], target: tuple[float, float, float]) -> dict[str, object]:
-    """Return {"class": "one"|"several"|"none", "resting": [yaw...], "traps": [yaw...]}."""
+    """Return {"class", "resting", "traps", "state_independent"}.
+
+    "class" counts resting yaws only ("one"|"several"|"none"). "state_independent"
+    is true only for exactly one resting yaw and no traps: a "one" with a trap
+    still lets unreadable current yaw/mover state keep the turret in the trap.
+    """
     gx, gy, gz = geometry["t_G"]
     rh = geometry["R_H"]
     rht = tuple(zip(*rh))
@@ -174,7 +179,11 @@ def classify(geometry: dict[str, object], target: tuple[float, float, float]) ->
         dz = [0.0 if m else ks * c - kc * s for m, (k0, kc, ks) in zip(mask, e)]
         dh, ddh = vec_mul(z, rht), vec_mul(dz, rht)
         f = math.atan2(dh[0], dh[2]) - beta
-        slope = (dh[2] * ddh[0] - dh[0] * ddh[2]) / (dh[0] * dh[0] + dh[2] * dh[2])
+        horizontal = dh[0] * dh[0] + dh[2] * dh[2]
+        if horizontal == 0.0:
+            # target exactly at the pivot: the solver skips (0x140e2114a), no settled slope exists
+            return (f - y + math.pi) % (2 * math.pi) - math.pi, math.inf
+        slope = (dh[2] * ddh[0] - dh[0] * ddh[2]) / horizontal
         return (f - y + math.pi) % (2 * math.pi) - math.pi, slope
 
     points = sorted((y + math.pi) % (2 * math.pi) - math.pi for y in events)
@@ -199,4 +208,4 @@ def classify(geometry: dict[str, object], target: tuple[float, float, float]) ->
             settles = all(abs(g) < SNAP and abs(slope) < 1.0 for g, slope in sides)
             (resting if settles else traps).append(y)
     return {"class": "one" if len(resting) == 1 else "several" if resting else "none",
-            "resting": resting, "traps": traps}
+            "resting": resting, "traps": traps, "state_independent": len(resting) == 1 and not traps}

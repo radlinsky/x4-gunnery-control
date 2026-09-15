@@ -70,8 +70,9 @@ Inference boundaries:
     settles. It either holds the target astern (`|g|` near π) or oscillates
     (`F' ≤ -1`).
 
-  Classes: `one` = exactly one resting point; `several` = more than one;
-  `none` = no resting point, with or without traps.
+  Classes count resting points only: `one` = exactly one; `several` = more
+  than one; `none` = no resting point, with or without traps. The gate also
+  returns `state_independent`, true only for `one` with zero traps.
 
   Without zeroing, with pivot offsets κ (lateral) and f (forward) in the yaw
   frame, target horizontal distance ρ from the yaw axis and `s = sqrt(ρ² - κ²)`:
@@ -159,10 +160,17 @@ Inference boundaries:
 - Status: inference
 - Source: same offline validation; prospective pitch and muzzle from the A9 transform
 - Live test: no
-- Finding: a `one` result depends on the target alone. A `several` result
-  depends on hidden current yaw and mover velocity. Neither is
-  production-readable, so which rest the turret reaches stays unknowable. Across
-  784 `several` samples:
+- Finding: the settled yaw depends on the target alone only for `one` with zero
+  traps (`state_independent`). The other results depend on hidden state:
+  - `one` with one or more traps: current yaw and mover velocity decide whether
+    the turret reaches the resting point or stays caught in a trap. The census
+    found 18 such samples.
+  - `several`: current yaw and mover velocity select between valid resting
+    points.
+  - `none`: no settled yaw exists.
+
+  Neither current yaw nor mover velocity is production-readable. Across the 784
+  `several` samples:
   - the authored pitch-arc result differed in 66;
   - the prospective muzzles differed by more than 1 m in 662, up to 114.4 m;
   - the muzzle-to-target range differed by up to 27.7 m, with targets up to
@@ -171,6 +179,4 @@ Inference boundaries:
   Range, arc and line-of-fire outcomes can therefore all differ. Line of fire
   was not evaluated offline.
 
-  `none` means no settled pose exists for that target. 18 `one` samples also had
-  a trap, so a turret already caught in it would not reach the resting point.
-  No product policy for `several`, `none` or rest-plus-trap is chosen here.
+  No product policy for `several`, `none` or `one` with traps is chosen here.

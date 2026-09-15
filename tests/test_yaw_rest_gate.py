@@ -42,6 +42,20 @@ class YawRestGateTests(unittest.TestCase):
         self.assertEqual(result["class"], "one")
         self.assert_yaws(result["resting"], [0.7])
         self.assertEqual(result["traps"], [])
+        self.assertTrue(result["state_independent"])
+
+    def test_one_rest_with_a_trap_is_not_state_independent(self):
+        # Target straight above the pivot at yaw 0: the zenith window rests there,
+        # while just outside it the atan2 target jumps and holds a trap.
+        result = classify(geometry((1.0, 1.0, 2.0), beta=math.pi / 2), (1.0, 20.0, 2.0))
+        self.assertEqual(result["class"], "one")
+        self.assert_yaws(result["resting"], [0.0])
+        self.assertEqual(len(result["traps"]), 1)
+        self.assertFalse(result["state_independent"])
+
+    def test_target_on_the_pivot_does_not_divide_by_zero(self):
+        result = classify(geometry((0.0, 1.0, 2.0)), (0.0, 1.0, 2.0))
+        self.assertIn(result["class"], ("one", "several", "none"))
 
     def test_target_inside_forward_pivot_offset_is_a_trap_not_a_rest(self):
         result = classify(geometry((0.0, 1.0, 2.0)), target(1.0, 0.7, 20.0))
