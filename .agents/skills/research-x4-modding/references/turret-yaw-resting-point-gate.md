@@ -60,10 +60,13 @@ Inference boundaries:
   `sign(g)`.
   - An **attractor** is a yaw where `g` changes from positive to negative.
   - Near its target the mover either snaps (distance under 1e-4f) or lands
-    exactly on it (the sqrt-profile step exceeds the remaining distance whenever
-    that distance is below ~1.62·acceleration·dt²). Close to an attractor the
-    engine therefore iterates `y ← F(y)` each frame, whatever the speed,
-    acceleration or frame time.
+    exactly on it. Landing needs `|y + v·dt - t| < v·dt` and
+    `|v - v_desired| < acceleration·dt`. The first test compares against the
+    signed step, so only positive-velocity steps can land. Negative approaches
+    reach the snap window by ordinary steps. The `y ← F(y)` iteration argument
+    is therefore exact only for landing or snapping frames. The retarget
+    emulation below uses the exact rule and matched every rest and trap it
+    tested.
   - A **resting point** is an attractor where `|g| < 1e-4f` and `|F'| < 1` on
     both sides.
   - Any other attractor is a **trap**: the turret is drawn there but never
@@ -180,3 +183,83 @@ Inference boundaries:
   was not evaluated offline.
 
   No product policy for `several`, `none` or `one` with traps is chosen here.
+
+## Yaw mover state across target changes
+
+- X4: 9.00 build 611726
+- Status: shipped-source
+- Source: static trace of `X4.exe`:
+  - IKValue record (0x680 stride, RTTI `U::IKValue`): constructor
+    `0x140e6acc0`, virtual setter `0x140474620`;
+  - `Turret` per-frame update, vtable slot 674 `0x1408132d0`;
+  - aim `0x14081c580` → `0x1407569a0` → `0x140e221a0` → `0x140e21110`/`0x140e2132d`
+    → mover `0x140e1f840`;
+  - stop `0x14081c7a0` → park `0x140756a80`;
+  - MD `AimTurretAction` `0x140bd0b20` and `TurretAction` stop event `0x9af`;
+  - `Turret` vtable slot 683 `0x14080ca10`.
+- Live test: no — static trace only
+- Finding: normal turret retargeting does not reset the yaw mover.
+  - Fields: angle `+0x08` and velocity `+0x18` persist between calls.
+    - `+0x10` stores the last step time and only blocks a second step in the
+      same frame; the step length is the global frame delta.
+    - `+0x1c` is rewritten on every call from the current angle and the new
+      yaw target, so it carries no target history.
+    - `+0x21` selects the angle unwrap.
+  - Writers: angle and velocity are written only by the constructor (all
+    zero) and by the mover. The setter writes angle and time. An audit of every
+    function that walks the 0x680 IK records found no other angle or velocity
+    write.
+  - Each frame, `Turret::Update` either aims at the current target or calls
+    stop.
+    - Aim does no mover initialisation. On the first aim it only sets
+      `[turret+0x354]` and posts an event. The solver then calls the mover with
+      `instant = 0`.
+    - Stop calls park with `instant = 0`. Park steps every joint toward angle 0
+      with the ordinary mover step. It is not a reset: a turret idle long
+      enough ends at yaw 0 with zero velocity, while a shorter gap leaves it
+      part way.
+    - Aiming at a new target therefore starts from the current angle and
+      velocity, whether it follows another target directly or after some
+      stopped frames.
+    - Slot 683 calls stop and then only reads the IK records to estimate the
+      settle time.
+  - The mover's `instant` snap is set only on a separate DockingBay-owned path
+    (`0x140544cc0`), not on the turret update or MD aim paths.
+  - The mover's 7th argument is the target's angular rate `(r × v)/|r|²`,
+    projected onto the joint axis. It is added as a velocity feed-forward and
+    is zero for a static target.
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: offline float32 emulation of the traced mover and park step on the
+  decoded yaw map, using the gate's test geometry (not committed). Checked first
+  against ordinary behaviour:
+  - a `state_independent` target settled at its rest from 60 random states;
+  - `s = 5, f = 2` rests and `s = 3, f = 2` never settles, under three
+    synthetic speed/acceleration/frame-time settings.
+- Live test: no
+- Finding: the prior mover states used were only those the traced paths can
+  produce:
+  - freshly constructed, or fully parked (`0, 0`);
+  - settled on an ordinary previous target (8 bearings), then retargeted;
+  - interrupted after 5, 20 or 60 slewing frames;
+  - stopped for 10, 60 or 240 frames before retargeting.
+
+  Same turret, same target, only the prior state varied:
+  - `several`: pivot `(0, 1, -5)`, target at `ρ = 3`, bearing 0; rests at 0
+    and -π. From (0, 0) or most prior targets the turret settles at yaw 0.
+    Settled on a target at bearing 180°, it stays at -π indefinitely (spread
+    7e-7 rad, zero velocity) in all three settings.
+  - `one` with a trap: pivot `(1, 1, 2)`, `β = π/2`, target `(1, 20, 2)`. From
+    (0, 0) it settles at yaw 0. With a fast setting (3 rad/s, 10 rad/s², 30 Hz),
+    settled on a target at bearing 45° first, it never settles (0.9 rad
+    oscillation over 20,000 frames); 23 more prior states also failed to
+    settle. With the two slower settings every prior state settled at 0.
+  - `none`: pivot `(0, 1, 2)`, target at `ρ = 1`, bearing 0.7. No run settles,
+    from any prior state.
+
+  `state_independent` therefore marks a real limit, not an artefact of assumed
+  arbitrary state. The only deterministic start is fresh construction or a
+  complete park. Whether a turret has parked completely depends on
+  unobservable mover state and how long it has been stopped. A
+  moving target's feed-forward also perturbs the start state.
