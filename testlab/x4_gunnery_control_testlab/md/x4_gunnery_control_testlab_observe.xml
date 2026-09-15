@@ -148,44 +148,23 @@
           </actions>
         </cue>
 
-        <!-- TEMPORARY issue #167 probe; delete after the live result.
-             Fires by itself, no Mark: once per spawned ISSUE167 TARGET object,
-             after the owner is aboard ISSUE167 SHOOTER 1 and the par L beam is
-             operational. Same-action useaimtarget look_at rays from four
-             turret-local origins; raw forward vectors only. -->
-        <cue name="ObserveIssue167AimRay" instantiate="true" checkinterval="1s">
+        <!-- TEMPORARY issue #167 P3c probe; delete after the live result.
+             Fires once, no Mark: when scenario issue-167-macro-bbox-r1 has
+             spawned. Raw macro.boundingbox properties for five macros. -->
+        <cue name="ObserveIssue167MacroBbox" checkinterval="1s">
           <conditions>
-            <check_value value="player.ship and player.ship.knownname == 'ISSUE167 SHOOTER 1' and md.X4GunneryTestLabScenario.ScenarioRoot.$Spawned?"/>
+            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-167-macro-bbox-r1'"/>
           </conditions>
           <actions>
-            <do_for_each name="$AimShip" in="md.X4GunneryTestLabScenario.ScenarioRoot.$Spawned">
-              <do_if value="$AimShip.exists and $AimShip.knownname == 'ISSUE167 TARGET 1' and $AimShip != @ObserveRoot.$Issue167AimRayTarget">
-                <do_for_each name="$Weapon" in="player.ship.turrets.operational.list">
-                  <do_if value="$Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
-                    <set_value name="ObserveRoot.$Issue167AimRayTarget" exact="$AimShip"/>
-                    <do_for_each name="$Off" in="[position.[0m, 0m, 0m], position.[50m, 0m, 0m], position.[0m, 50m, 0m], position.[0m, 0m, 50m]]">
-                      <create_orientation name="$AimRay" orientation="look_at" refobject="$AimShip" useaimtarget="true">
-                        <position value="$Off" object="$Weapon" space="$Weapon"/>
-                      </create_orientation>
-                      <debug_text text="'[X4GC TEST AIMRAY] label=auto'
-                        + ' t=' + player.age
-                        + ' weapon=' + $Weapon
-                        + ' macro=' + $Weapon.macro
-                        + ' tgt=' + $AimShip
-                        + ' tgtmacro=' + $AimShip.macro
-                        + ' tgtname=' + $AimShip.knownname
-                        + ' origin_x=' + $Off.x
-                        + ' origin_y=' + $Off.y
-                        + ' origin_z=' + $Off.z
-                        + ' fwd_x=' + $AimRay.forward.x
-                        + ' fwd_y=' + $AimRay.forward.y
-                        + ' fwd_z=' + $AimRay.forward.z
-                        + ' yaw=' + $AimRay.yaw
-                        + ' pitch=' + $AimRay.pitch"/>
-                    </do_for_each>
-                  </do_if>
-                </do_for_each>
-              </do_if>
+            <do_for_each name="$Macro" in="[macro.ship_tel_xl_builder_01_a_macro, macro.ship_arg_m_frigate_01_a_macro, macro.turret_tel_m_gatling_01_mk1_macro, macro.engine_arg_l_allround_01_mk1_macro, macro.ship_tel_l_trans_container_03_a_macro]">
+              <debug_text text="'[X4GC TEST MACROBBOX] macro=' + $Macro.id
+                + ' exists=' + $Macro.boundingbox.exists
+                + ' center_x=' + $Macro.boundingbox.center.x
+                + ' center_y=' + $Macro.boundingbox.center.y
+                + ' center_z=' + $Macro.boundingbox.center.z
+                + ' max_x=' + $Macro.boundingbox.max.x
+                + ' max_y=' + $Macro.boundingbox.max.y
+                + ' max_z=' + $Macro.boundingbox.max.z"/>
             </do_for_each>
           </actions>
         </cue>

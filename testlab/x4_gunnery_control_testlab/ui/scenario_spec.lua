@@ -51,8 +51,8 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- TEMPORARY issue #167 aim-point stability probe; delete after the live result.
-    id      = "issue-167-aimtarget-stability-r1",
+    -- TEMPORARY issue #167 P3c macro.boundingbox probe; delete after the live result.
+    id      = "issue-167-macro-bbox-r1",
     enabled = true,
 
     location = {
@@ -94,7 +94,6 @@ X4GunneryTestLabScenarioSpec = {
             expectedMissileTurrets = 0,
         },
 
-        -- ship_tel_l_trans_container_03 authors two aimtarget connections.
         -- Non-hostile Teladi with no loadout: it has no reason to attack.
         {
             label     = "ISSUE167 TARGET",
