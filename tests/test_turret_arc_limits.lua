@@ -44,4 +44,20 @@ assert(X4GunneryTurretArcLimits.turret_bor_m_railgun_02_mk1_macro[1] == -10,
 assert(X4GunneryTurretArcLimits.turret_bor_l_disruptor_01_mk1_macro[1] == -5,
     "Ray L disruptor must preserve its shipped -5 degree depression limit")
 
+-- Arc limits stay the pitch-limit authority for the #166 chain geometry (#167):
+-- every conventional combat turret with a generated chain must have one.
+X4GunneryTurretMuzzleGeometry = nil
+dofile("ui/turret_muzzle_geometry.lua")
+local chains = 0
+for macro, record in pairs(X4GunneryTurretMuzzleGeometry) do
+    if record.chain ~= nil then
+        chains = chains + 1
+        local limits = X4GunneryTurretArcLimits[macro]
+        assert(type(limits) == "table" and type(limits[1]) == "number"
+                and type(limits[2]) == "number" and limits[1] <= limits[2],
+            "chain geometry has no valid arc limits for " .. macro)
+    end
+end
+assert(chains == 92, "expected 92 chain geometry records, got " .. tostring(chains))
+
 print("turret arc limit tests passed")
