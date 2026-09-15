@@ -51,8 +51,9 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-75-a3-par-l-beam-strict-geometry-r1",
-    enabled = false,
+    -- TEMPORARY issue #167 aim-point stability probe; delete after the live result.
+    id      = "issue-167-aimtarget-stability-r1",
+    enabled = true,
 
     location = {
         sectorMacro = "Cluster_29_Sector001_macro",
@@ -64,7 +65,7 @@ X4GunneryTestLabScenarioSpec = {
     setup = {
         remote            = true,
         shipMacro         = "ship_par_l_destroyer_01_a_macro",
-        shipLabel         = "ISSUE75 A3 SHOOTER 1",
+        shipLabel         = "ISSUE167 SHOOTER 1",
         singleTurretMacro = "turret_par_l_beam_01_mk1_macro",
         turretLabel       = "Rear Lower Mid Beam",
         expectedTurrets   = 1,
@@ -72,7 +73,7 @@ X4GunneryTestLabScenarioSpec = {
 
     groups = {
         {
-            label     = "ISSUE75 A3 SHOOTER",
+            label     = "ISSUE167 SHOOTER",
             macro     = "ship_par_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
@@ -93,54 +94,23 @@ X4GunneryTestLabScenarioSpec = {
             expectedMissileTurrets = 0,
         },
 
+        -- ship_tel_l_trans_container_03 authors two aimtarget connections.
+        -- Non-hostile Teladi with no loadout: it has no reason to attack.
         {
-            label     = "ISSUE75 A3 TARGET A",
-            macro     = "ship_par_m_trans_container_01_a_macro",
-            faction   = "xenon",
+            label     = "ISSUE167 TARGET",
+            macro     = "ship_tel_l_trans_container_03_a_macro",
+            faction   = "teladi",
             count     = 1,
             distance  = -4000,
             x         = 0,
             y         = -4000,
             spread    = 0,
             behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
             yaw   = 0,
             pitch = 0,
             roll  = 0,
             preserveOrientation = true,
-
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE75 A3 TARGET B",
-            macro     = "ship_par_m_trans_container_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = -2500,
-            x         = 3000,
-            y         = -5500,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
             stripDefenceUnits = true,
-            repairGuard       = true,
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
-
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
         },
     },
 }
