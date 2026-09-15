@@ -560,11 +560,7 @@
                   <set_value name="$Target" exact="player.target"/>
                 </do_elseif>
                 <do_for_each name="$Weapon" in="$Ship.weapons.operational.list">
-                  <do_if value="$Weapon.macro == macro.turret_spl_m_beam_02_mk1_macro
-                                or $Weapon.macro == macro.turret_spl_m_laser_02_mk1_macro
-                                or $Weapon.macro == macro.turret_spl_m_plasma_02_mk1_macro
-                                or $Weapon.macro == macro.turret_ter_m_beam_02_mk1_macro
-                                or $Weapon.macro == macro.turret_ter_m_laser_02_mk1_macro">
+                  <do_if value="$Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
                     <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
                     <do_if value="$Target">
                       <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">

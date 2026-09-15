@@ -51,7 +51,7 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-155-endpoint-count-rank1-odysseus-live-r6",
+    id      = "issue-75-a3-par-l-beam-strict-geometry-r1",
     enabled = false,
 
     location = {
@@ -62,27 +62,22 @@ X4GunneryTestLabScenarioSpec = {
     },
 
     setup = {
-        remote          = true,
-        shipMacro       = "ship_par_l_destroyer_01_a_macro",
-        shipLabel       = "ISSUE155 C4 SHOOTER B 1",
-        turretGroup     = "group_rear_up_left",
-        turretLabel     = "Issue 155 Shooter B upper turrets",
-        expectedTurrets = 2,
-        expectedMemberMacros = {
-            "turret_ter_m_beam_02_mk1_macro",
-            "turret_ter_m_laser_02_mk1_macro",
-        },
-        selectAll = true,
+        remote            = true,
+        shipMacro         = "ship_par_l_destroyer_01_a_macro",
+        shipLabel         = "ISSUE75 A3 SHOOTER 1",
+        singleTurretMacro = "turret_par_l_beam_01_mk1_macro",
+        turretLabel       = "Rear Lower Mid Beam",
+        expectedTurrets   = 1,
     },
 
     groups = {
         {
-            label     = "ISSUE155 C4 SHOOTER A",
+            label     = "ISSUE75 A3 SHOOTER",
             macro     = "ship_par_l_destroyer_01_a_macro",
             faction   = "player",
             count     = 1,
             distance  = 0,
-            x         = -200,
+            x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
@@ -92,42 +87,45 @@ X4GunneryTestLabScenarioSpec = {
             preserveOrientation = true,
 
             role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_issue155_a_c4",
-            expectedWeapons        = 3,
-            expectedTurrets        = 3,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE155 C4 SHOOTER B",
-            macro     = "ship_par_l_destroyer_01_a_macro",
-            faction   = "player",
-            count     = 1,
-            distance  = 0,
-            x         = 200,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            yaw       = 0,
-            pitch     = 0,
-            roll      = 0,
-            preserveOrientation = true,
-
-            role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_issue155_b_c4",
+            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
             expectedWeapons        = 2,
             expectedTurrets        = 2,
             expectedMissileTurrets = 0,
         },
 
         {
-            label     = "ISSUE155 C4 TARGET",
+            label     = "ISSUE75 A3 TARGET A",
             macro     = "ship_par_m_trans_container_01_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = 500,
+            distance  = -4000,
             x         = 0,
-            y         = 1000,
+            y         = -4000,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+            yaw   = 0,
+            pitch = 0,
+            roll  = 0,
+            preserveOrientation = true,
+
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE75 A3 TARGET B",
+            macro     = "ship_par_m_trans_container_01_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = -2500,
+            x         = 3000,
+            y         = -5500,
             spread    = 0,
             behaviour = "wait",
             hostile   = true,
