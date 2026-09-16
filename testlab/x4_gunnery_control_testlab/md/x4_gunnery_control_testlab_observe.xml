@@ -148,16 +148,40 @@
           </actions>
         </cue>
 
-        <!-- TEMPORARY issue #167 P3c probe; delete after the live result.
-             Fires once, no Mark: when scenario issue-167-macro-bbox-r1 has
-             spawned. Raw macro.boundingbox properties for five macros. -->
-        <cue name="ObserveIssue167MacroBbox" checkinterval="1s">
+        <!-- TEMPORARY issue #168 runtime-geometry probe; delete after the
+             live result.
+
+             Question: when macro.boundingbox is exactly zero, does the RUNTIME
+             component still expose usable geometry through the public
+             component.* properties, or does it collapse too?
+
+             Fires once, automatically, no Mark and no owner action: when
+             scenario issue-168-runtime-bbox-r1 has spawned and settled. Logs,
+             for the zero-box turret, the nonzero control turret and the parent
+             ship, the raw macro.boundingbox slot next to component.size /
+             safesize / width / height / length, then nine fixed
+             component-local bboxdistanceto probes (2 m, 10 m, 100 m along each
+             of X, Y and Z) with distanceto alongside as a diagnostic.
+
+             The three probe radii discriminate the outcomes: a ZERO box
+             returns the full offset, a turret-scale box returns slightly less,
+             and a ship-scale box returns 0 at 2 m and 10 m.
+
+             shield_ter_m_standard_01_mk2_video_macro is NOT probed as a
+             component. Shipped source references it only as
+             <icon video="..."/> in ego_dlc_terran/libraries/wares.xml; it is an
+             encyclopedia preview asset and is never equipped or spawned, so no
+             runtime component for it can be reached from MD. Its macro-level
+             box is logged instead, and the limitation is logged explicitly. -->
+        <cue name="ObserveIssue168RuntimeBbox" checkinterval="1s">
           <conditions>
-            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-167-macro-bbox-r1'"/>
+            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-168-runtime-bbox-r1'"/>
           </conditions>
+          <delay exact="5s"/>
           <actions>
-            <do_for_each name="$Macro" in="[macro.ship_tel_xl_builder_01_a_macro, macro.ship_arg_m_frigate_01_a_macro, macro.turret_tel_m_gatling_01_mk1_macro, macro.engine_arg_l_allround_01_mk1_macro, macro.ship_tel_l_trans_container_03_a_macro]">
-              <debug_text text="'[X4GC TEST MACROBBOX] macro=' + $Macro.id
+            <debug_text text="'[X4GC TEST ISSUE168 LIMIT] macro=shield_ter_m_standard_01_mk2_video_macro reachable_as_component=false reason=icon_video_asset_only source=ego_dlc_terran/libraries/wares.xml'"/>
+            <do_for_each name="$Macro" in="[macro.shield_ter_m_standard_01_mk2_video_macro, macro.turret_par_m_beam_01_mk1_macro, macro.turret_arg_m_beam_01_mk1_macro, macro.ship_par_m_frigate_01_a_macro]">
+              <debug_text text="'[X4GC TEST ISSUE168 MACROBBOX] macro=' + $Macro.id
                 + ' exists=' + $Macro.boundingbox.exists
                 + ' center_x=' + $Macro.boundingbox.center.x
                 + ' center_y=' + $Macro.boundingbox.center.y
@@ -165,6 +189,61 @@
                 + ' max_x=' + $Macro.boundingbox.max.x
                 + ' max_y=' + $Macro.boundingbox.max.y
                 + ' max_z=' + $Macro.boundingbox.max.z"/>
+            </do_for_each>
+
+            <set_value name="$PX" exact="[2, 0, 0, 10, 0, 0, 100, 0, 0]"/>
+            <set_value name="$PY" exact="[0, 2, 0, 0, 10, 0, 0, 100, 0]"/>
+            <set_value name="$PZ" exact="[0, 0, 2, 0, 0, 10, 0, 0, 100]"/>
+
+            <do_for_each name="$Ship" in="md.X4GunneryTestLabScenario.ScenarioRoot.$Spawned">
+              <do_if value="$Ship.exists and $Ship.macro == macro.ship_par_m_frigate_01_a_macro">
+                <set_value name="$Probed" exact="[$Ship]"/>
+                <do_for_each name="$Turret" in="$Ship.turrets.operational.list">
+                  <append_to_list name="$Probed" exact="$Turret"/>
+                </do_for_each>
+
+                <do_for_each name="$Comp" in="$Probed">
+                  <set_value name="$Role" exact="'OTHER'"/>
+                  <do_if value="$Comp == $Ship">
+                    <set_value name="$Role" exact="'PARENT_SHIP'"/>
+                  </do_if>
+                  <do_elseif value="$Comp.macro == macro.turret_par_m_beam_01_mk1_macro">
+                    <set_value name="$Role" exact="'ZEROBOX_TURRET'"/>
+                  </do_elseif>
+                  <do_elseif value="$Comp.macro == macro.turret_arg_m_beam_01_mk1_macro">
+                    <set_value name="$Role" exact="'CONTROL_TURRET'"/>
+                  </do_elseif>
+
+                  <debug_text text="'[X4GC TEST ISSUE168 GEOM] role=' + $Role
+                    + ' comp=' + $Comp
+                    + ' macro=' + $Comp.macro.id
+                    + ' mbb_exists=' + $Comp.macro.boundingbox.exists
+                    + ' mbb_center_x=' + $Comp.macro.boundingbox.center.x
+                    + ' mbb_center_y=' + $Comp.macro.boundingbox.center.y
+                    + ' mbb_center_z=' + $Comp.macro.boundingbox.center.z
+                    + ' mbb_max_x=' + $Comp.macro.boundingbox.max.x
+                    + ' mbb_max_y=' + $Comp.macro.boundingbox.max.y
+                    + ' mbb_max_z=' + $Comp.macro.boundingbox.max.z
+                    + ' size=' + $Comp.size
+                    + ' safesize=' + $Comp.safesize
+                    + ' width=' + $Comp.width
+                    + ' height=' + $Comp.height
+                    + ' length=' + $Comp.length"/>
+
+                  <do_for_each name="$Unused" in="$PX" counter="$Index">
+                    <create_position name="$Sample" object="$Comp" space="$Comp"
+                                     x="$PX.{$Index} * 1m" y="$PY.{$Index} * 1m" z="$PZ.{$Index} * 1m"/>
+                    <debug_text text="'[X4GC TEST ISSUE168 PROBE] role=' + $Role
+                      + ' comp=' + $Comp
+                      + ' i=' + $Index
+                      + ' px=' + $PX.{$Index}
+                      + ' py=' + $PY.{$Index}
+                      + ' pz=' + $PZ.{$Index}
+                      + ' bboxdistanceto=' + $Comp.bboxdistanceto.[$Comp, $Sample]
+                      + ' distanceto=' + $Comp.distanceto.[$Comp, $Sample]"/>
+                  </do_for_each>
+                </do_for_each>
+              </do_if>
             </do_for_each>
           </actions>
         </cue>

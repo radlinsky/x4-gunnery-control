@@ -51,33 +51,30 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- TEMPORARY issue #167 P3c macro.boundingbox probe; delete after the live result.
-    id      = "issue-167-macro-bbox-r1",
+    -- TEMPORARY issue #168 runtime-geometry probe; delete after the live result.
+    -- One Paranid M frigate carries a zero-macro.boundingbox turret and an
+    -- ordinary nonzero control turret on identical medium mounts. The probe
+    -- reads geometry from MD on the spawned frigate and needs no seat, no
+    -- teleport and no selection; the setup block below only satisfies Test
+    -- Lab's existing preflight contract against the owner's current ship.
+    id      = "issue-168-runtime-bbox-r1",
     enabled = true,
 
-    location = {
-        sectorMacro = "Cluster_29_Sector001_macro",
-        x = 500000,
-        y = 0,
-        z = 0,
-    },
-
     setup = {
-        remote            = true,
-        shipMacro         = "ship_par_l_destroyer_01_a_macro",
-        shipLabel         = "ISSUE167 SHOOTER 1",
-        singleTurretMacro = "turret_par_l_beam_01_mk1_macro",
-        turretLabel       = "Rear Lower Mid Beam",
-        expectedTurrets   = 1,
+        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
+        shipLabel       = "Ray",
+        turretGroup     = "group_front_up_left",
+        turretLabel     = "Front Upper Left",
+        expectedTurrets = 2,
     },
 
     groups = {
         {
-            label     = "ISSUE167 SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
+            label     = "ISSUE168 PROBE",
+            macro     = "ship_par_m_frigate_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 0,
+            distance  = 2000,
             x         = 0,
             y         = 0,
             spread    = 0,
@@ -87,29 +84,10 @@ X4GunneryTestLabScenarioSpec = {
             roll      = 0,
             preserveOrientation = true,
 
-            role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
+            loadout   = "x4gc_testlab_par_m_frigate_01_issue168",
             expectedWeapons        = 2,
             expectedTurrets        = 2,
             expectedMissileTurrets = 0,
-        },
-
-        -- Non-hostile Teladi with no loadout: it has no reason to attack.
-        {
-            label     = "ISSUE167 TARGET",
-            macro     = "ship_tel_l_trans_container_03_a_macro",
-            faction   = "teladi",
-            count     = 1,
-            distance  = -4000,
-            x         = 0,
-            y         = -4000,
-            spread    = 0,
-            behaviour = "wait",
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
-            stripDefenceUnits = true,
         },
     },
 }
