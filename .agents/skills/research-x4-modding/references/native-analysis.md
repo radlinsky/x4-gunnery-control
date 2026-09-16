@@ -14,20 +14,18 @@ extracted proprietary bytes. Keep scratch tooling under the ignored
 
 ## Pinned installation
 
-### Installed X4 executable and build pin
 - X4: 9.00 build 611726
-- Status: shipped-source
-- Source: `/mnt/c/Program Files (x86)/Steam/steamapps/common/X4 Foundations/X4.exe`
-- Live test: no — static file identity
-- Finding: the analysed executable is the Steam install above, SHA-256
-  `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`, image
-  base `0x140000000`. Verify the SHA-256 once per session before using or
-  extending any stored native finding:
-  `sha256sum "/mnt/c/Program Files (x86)/Steam/steamapps/common/X4 Foundations/X4.exe"`.
-  A different hash means every stored RVA and struct offset below is stale;
-  re-derive it against the new build instead of shifting addresses by hand.
-  Record addresses as RVAs. The absolute form is the RVA plus the image base,
-  so RVA `0x0081c960` is `0x14081c960`.
+- Executable: `/mnt/c/Program Files (x86)/Steam/steamapps/common/X4 Foundations/X4.exe`
+- SHA-256: `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`
+- Image base: `0x140000000`
+
+Verify the SHA-256 once per session before using or extending any stored native
+finding:
+`sha256sum "/mnt/c/Program Files (x86)/Steam/steamapps/common/X4 Foundations/X4.exe"`.
+A different hash means every stored RVA and struct offset below is stale;
+re-derive it against the new build instead of shifting addresses by hand.
+Record addresses as RVAs. The absolute form is the RVA plus the image base, so
+RVA `0x0081c960` is `0x14081c960`.
 
 ## Standing disassembly recipe
 
