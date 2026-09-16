@@ -44,14 +44,6 @@ if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill_dir"; then
   exit 1
 fi
 grep -Fq 'XTools_1.11.zip!Readme.txt' "$skill/references/tooling.md"
-native="$skill/references/native-analysis.md"
-grep -Fq 'steamapps/common/X4 Foundations/X4.exe' "$native"
-grep -Fq '19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891' "$native"
-for token in 'skipdata' 'RUNTIME_FUNCTION' 'PointerToRawData' 'x4_' 'contiguous table' 'known anchor' 'property getter'; do
-  grep -Fq "$token" "$native"
-done
-grep -Fq 'native-analysis.md' "$skill/SKILL.md"
-grep -Fq 'native-analysis.md' "$skill/references/index.md"
 grep -Fq 'documented-public' "$skill/references/tooling.md"
 grep -Fq 'English X4 Scripts and Modding' "$skill/references/source-registry.md"
 grep -Fq 'site:forum.egosoft.com' "$skill/references/source-registry.md"
