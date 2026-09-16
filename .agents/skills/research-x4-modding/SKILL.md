@@ -81,6 +81,10 @@ not give it a higher classification.
 - Read [references/md-ai.md](references/md-ai.md) for MD/XSD lookup and AI
   semantics.
 - Read [references/tooling.md](references/tooling.md) before using XRCatTool.
+- Read [references/native-analysis.md](references/native-analysis.md) before
+  analysing `X4.exe`. It pins the installed executable and its SHA-256, holds
+  verified RVAs and struct offsets, and carries the PE/`.pdata`/Capstone recipe,
+  the native-search rules, and the native prompt/output convention.
 - Read [references/debug-logging.md](references/debug-logging.md) for X4
   `-logfile` argument form, log location, and missing-log diagnosis.
 - Search [references/testing-experiments.md](references/testing-experiments.md)
