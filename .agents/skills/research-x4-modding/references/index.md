@@ -13,6 +13,7 @@ before relying on any claim.
 | External-menu lifecycle and persistent Gunnery overlay | [external-menu-lifecycle.md](external-menu-lifecycle.md) | X4 9.00 source-backed custom-view overlay and fullscreen takeover boundary, plus live-tested normal `InteractMenu` overlay and normal Map takeover/restore |
 | MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings; shipped turret and turretloop transition graph in `libraries/animation_sequences.xml` |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |
+| Native executable analysis | [native-analysis.md](native-analysis.md) | Pinned X4 9.00 build 611726 `X4.exe` path and SHA-256, durable home for verified RVAs and struct offsets, PE/`.pdata`/Capstone recipe, native-search rules, and the `inference`-by-default reporting convention |
 | Debug logging | [debug-logging.md](debug-logging.md) | X4 9.00 `-logfile` argument form and log location |
 | Ware `<use>` entries and purpose restriction | [x4-ware-use-semantics.md](x4-ware-use-semantics.md) | X4 9.00 shipped-source ware `<use>` corpus; COMBAT_RULE_SUPPORTED for multi-entry wares with no `purposes` |
 | Turret macros with no equipment ware | [turret-no-ware-macros.md](turret-no-ware-macros.md) | X4 9.00 shipped-source COMBAT_CANDIDATE evidence for `turret_xen_l_laser_01_mk1_scenario_macro` |
