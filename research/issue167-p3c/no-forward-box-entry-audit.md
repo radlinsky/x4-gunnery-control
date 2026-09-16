@@ -25,11 +25,19 @@ authored aim point is outside the collision-filtered `macro.boundingbox`
 | Unquantized ray grazes the box; quantized query ray misses by 0.26–36 mm | 129 |
 | Selected point inside box | 0 |
 
-The 129 grazes are all at radius ≥1,000 m (76 at 20 km). 88 graze before
-reaching the point, 41 would enter only beyond it. The miss is caused by the
-2^-18 rad direction quantization, but it is only possible because the point is
-outside the box: a ray aimed at an interior point cannot miss. **Unexplained
-remainder after #169: 0.**
+The two causes are separate:
+
+- **161,334: direct consequence of #169.** The selected point is outside the
+  box and the real aim line misses it.
+- **129: study direction-rounding artifact.** The real aim line touches the
+  box, 88 before reaching the point and 41 only beyond it. The frozen study's
+  simulated 2^-18 rad direction rounding moves the queried line off the box.
+  That rounding is the offline study's approximation of X4 direction
+  precision, not proven X4 runtime behavior. Every one is at radius ≥1,000 m
+  (76 at 20 km). The outside-box point is what makes a near-edge graze
+  possible, but #169 alone does not produce the miss.
+
+No third cause remains.
 
 ## Frame and slab checks
 
@@ -50,6 +58,9 @@ The #169/#79 population rules were reused unchanged.
 | No compatible L/XL/station mount | 3 | 16,077 |
 | Integrated hull | 2 | 4,401 |
 
+Of the 129 rounding cases, 108 are production-eligible (35 records) and 21
+have no compatible L/XL/station mount.
+
 ## Box-entry probe step
 
 The step supplies a **range estimate**, and the triangulation needs one. With
@@ -59,8 +70,8 @@ reconstructs the point within E in only 55,288/161,463 trials. It fails with
 
 Requiring the ray to **enter** the box is an **unnecessary restriction**.
 Diagnostic rerun of only these 161,463 trials, changing just the missing-entry
-case to use the query ray's nearest approach to the box: 161,463/161,463 then
-reconstruct the selected point within E, and all still end at the separate
+case to use the query ray's nearest approach to the box: 161,463/161,463,
+including all 129 rounding cases, then reconstruct the selected point within E, and all still end at the separate
 #169 containment rejection.
 
 The step is also **not a safe "before the target" guarantee** once points may
@@ -83,10 +94,11 @@ These are diagnostic outcomes only. ENGAGEABLE rates stay diagnostic until
 
 ## Classification
 
-- The whole bucket is a consequence of #169's outside-box aim points, which
-  expose a wrong box-entry requirement in Route A.
-- 129 of those trials also depend on direction quantization near a grazing
-  edge.
+- 161,334 trials are a direct consequence of #169's outside-box aim points,
+  which expose a wrong box-entry requirement in Route A.
+- 129 trials are a separate artifact of the study's simulated direction
+  rounding near a box edge. The same entry requirement turns that into a
+  failure.
 - No slab, frame, or reconstruction defect was found. No stress-only family
   contributes.
 - The original 161,463 remains the correct frozen broad-corpus count. Its
@@ -94,4 +106,7 @@ These are diagnostic outcomes only. ENGAGEABLE rates stay diagnostic until
   caused by that restriction.
 
 No LIVE X4 test is needed. The box geometry is already LIVE-backed in #169,
-and the rest is offline algebra over the frozen inputs.
+and the rest is offline algebra over the frozen inputs. The 129 rounding cases
+do not need one either. Whether real X4 precision would hit or miss those
+edges, the nearest-approach range works in both cases, so the Route A
+conclusion does not depend on it.
