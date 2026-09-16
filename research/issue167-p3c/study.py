@@ -177,7 +177,7 @@ def geometry(turret, R, O, p):
     aim = L[1][2]
     x = math.remainder(math.atan2(qv[1], qv[2]) - math.atan2(aim[1], aim[2]), 2 * math.pi)
     lo, hi = turret["arc"]
-    ok = math.radians(lo) <= x <= math.radians(hi)
+    ok = round(lo, 4) <= round(math.degrees(x), 4) <= round(hi, 4)  # 4-dp degrees absorbs float noise at an authored limit
     muzzle = compose(compose(compose(L, ((0.0, 0.0, 0.0), joint_matrix(x, 0.0))), G), compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))[0]
     return {"state": "IN_ARC" if ok else "OUT_OF_ARC", "decision": ok, "yaw": y, "pitch": x, "muzzle": muzzle}
 
