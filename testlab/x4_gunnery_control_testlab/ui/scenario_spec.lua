@@ -51,14 +51,10 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- TEMPORARY issue #168 runtime-geometry probe; delete after the live result.
-    -- One Paranid M frigate carries a zero-macro.boundingbox turret and an
-    -- ordinary nonzero control turret on identical medium mounts. The probe
-    -- reads geometry from MD on the spawned frigate and needs no seat, no
-    -- teleport and no selection; the setup block below only satisfies Test
-    -- Lab's existing preflight contract against the owner's current ship.
-    id      = "issue-168-runtime-bbox-r1",
-    enabled = true,
+    -- The spawned ship only triggers the macro-property dump; no target,
+    -- weapon loadout, teleport, or firing measurement is required.
+    id      = "issue-169-outside-box-r1",
+    enabled = false,
 
     setup = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
@@ -70,7 +66,7 @@ X4GunneryTestLabScenarioSpec = {
 
     groups = {
         {
-            label     = "ISSUE168 PROBE",
+            label     = "ISSUE169 BOX PROBE",
             macro     = "ship_par_m_frigate_01_a_macro",
             faction   = "player",
             count     = 1,
@@ -83,11 +79,6 @@ X4GunneryTestLabScenarioSpec = {
             pitch     = 0,
             roll      = 0,
             preserveOrientation = true,
-
-            loadout   = "x4gc_testlab_par_m_frigate_01_issue168",
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
-            expectedMissileTurrets = 0,
         },
     },
 }

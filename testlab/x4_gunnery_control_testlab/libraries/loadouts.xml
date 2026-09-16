@@ -110,26 +110,4 @@
       <thruster macro="thruster_gen_l_allround_01_mk3_macro"/>
     </virtualmacros>
   </loadout>
-  <loadout id="x4gc_testlab_par_m_frigate_01_issue168" macro="ship_par_m_frigate_01_a_macro">
-    <macros>
-      <engine macro="engine_par_m_allround_01_mk1_macro" path="../con_engine_01"/>
-      <engine macro="engine_par_m_allround_01_mk1_macro" path="../con_engine_02"/>
-      <engine macro="engine_par_m_allround_01_mk1_macro" path="../con_engine_03"/>
-      <shield macro="shield_par_m_standard_01_mk1_macro" path="../con_shield_front"/>
-      <!-- ZEROBOX: reconstructs to an exactly zero macro.boundingbox (issue #168). -->
-      <turret macro="turret_par_m_beam_01_mk1_macro" path="../con_turret_front_L"/>
-      <!-- CONTROL: ordinary nonzero macro.boundingbox, same size class and mount kind. -->
-      <turret macro="turret_arg_m_beam_01_mk1_macro" path="../con_turret_front_R"/>
-    </macros>
-    <software>
-      <software ware="software_dockmk2"/>
-      <software ware="software_flightassistmk1"/>
-      <software ware="software_scannerlongrangemk2"/>
-      <software ware="software_scannerobjectmk2"/>
-      <software ware="software_targetmk1"/>
-    </software>
-    <virtualmacros>
-      <thruster macro="thruster_gen_m_allround_01_mk3_macro"/>
-    </virtualmacros>
-  </loadout>
 </loadouts>

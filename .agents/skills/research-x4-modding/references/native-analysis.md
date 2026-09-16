@@ -94,6 +94,7 @@ are real native names.
 
 | Subject | Reference |
 |---|---|
+| Macro box slots, collision eligibility, and raw authored aim selector | [macro-box-aimtargets.md](macro-box-aimtargets.md) |
 | Turret yaw map, mover state, and resting-point gate | [turret-yaw-resting-point-gate.md](turret-yaw-resting-point-gate.md) |
 | Target-point turret joint solver route and RVA table | [turret-target-point-joint-solver.md](turret-target-point-joint-solver.md) |
 | Selected-connection transform composition entry points | [barrelposition-offline-transform-semantics.md](barrelposition-offline-transform-semantics.md) |

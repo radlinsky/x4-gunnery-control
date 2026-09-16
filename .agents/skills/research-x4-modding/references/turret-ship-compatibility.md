@@ -41,3 +41,23 @@ This also explains the failure class without an exception: an embedded medium
 turret requiring `advanced` and `unhittable` does not fit a capital-ship slot
 authored as `standard` and `hittable`, even when that slot has a valid turret
 group id. A compatible variant is not evidence for a different exact macro.
+
+### Mount compatibility does not establish surface-target eligibility
+
+- X4: 9.00 build 611726
+- Status: shipped-source
+- Source: `aiscripts/lib.target.selection.xml:338,344`;
+  `aiscripts/order.fight.attack.object.xml:642–648`;
+  `libraries/common.xsd:5643–5648`;
+  `assets/props/WeaponSystems/energy/macros/turret_kha_l_beam_01_mk1_macro.xml`;
+  `ego_dlc_timelines/assets/props/weaponsystems/energy/macros/turret_kha_l_beam_01_mk1_scenario_macro.xml`.
+- Live test: no — source filtering, checked 2026-09-16.
+- Finding: shipped surface-target searches explicitly exclude integrated
+  components; the schema describes integrated as built into the parent.
+  A macro's resolved hull properties must therefore be checked separately
+  from mating tags when constructing a destructible surface-target corpus.
+  A variant can override `hull integrated` while sharing the same component:
+  the Kha'ak L beam has `integrated="1"`, while its scenario variant explicitly
+  sets `integrated="0"`. Neither shared geometry nor compatible sockets alone
+  establishes membership in the target population. Runtime invulnerability,
+  destruction and mission restrictions remain additional instance conditions.
