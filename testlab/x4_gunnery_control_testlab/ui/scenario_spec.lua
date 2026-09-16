@@ -53,7 +53,7 @@
 X4GunneryTestLabScenarioSpec = {
     -- The spawned ship only triggers the macro-property dump; no target,
     -- weapon loadout, teleport, or firing measurement is required.
-    id      = "issue-169-outside-box-r1",
+    id      = "issue-171-origin-inside-box-r1",
     enabled = false,
 
     setup = {
@@ -66,8 +66,8 @@ X4GunneryTestLabScenarioSpec = {
 
     groups = {
         {
-            label     = "ISSUE169 BOX PROBE",
-            macro     = "ship_par_m_frigate_01_a_macro",
+            label     = "ISSUE171 BOX PROBE",
+            macro     = "ship_arg_s_fighter_01_a_macro",
             faction   = "player",
             count     = 1,
             distance  = 2000,
@@ -79,6 +79,7 @@ X4GunneryTestLabScenarioSpec = {
             pitch     = 0,
             roll      = 0,
             preserveOrientation = true,
+            stripDefenceUnits = true,
         },
     },
 }

@@ -150,14 +150,14 @@
 
         <!-- Temporary box-property discriminator; authored aim points are
              compared offline, not presented as runtime point measurements. -->
-        <cue name="ObserveIssue169OutsideBox" checkinterval="1s">
+        <cue name="ObserveIssue171OriginInsideBox" checkinterval="1s">
           <conditions>
-            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-169-outside-box-r1'"/>
+            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-171-origin-inside-box-r1'"/>
           </conditions>
           <delay exact="5s"/>
           <actions>
-            <do_for_each name="$Macro" in="[macro.turret_arg_m_beam_02_mk1_macro, macro.turret_bor_m_guided_01_mk1_macro, macro.turret_ter_m_beam_02_mk1_macro, macro.engine_arg_l_allround_01_mk1_macro]">
-              <debug_text text="'[X4GC TEST ISSUE169 MACROBBOX] spec=issue-169-outside-box-r1 t=' + player.age
+            <do_for_each name="$Macro" in="[macro.engine_tfm_xl_carrier_02_allround_01_mk1_macro, macro.ship_arg_xl_carrier_02_a_macro]">
+              <debug_text text="'[X4GC TEST ISSUE171 MACROBBOX] spec=issue-171-origin-inside-box-r1 t=' + player.age
                 + ' macro=' + $Macro.id
                 + ' exists=' + $Macro.boundingbox.exists
                 + ' center_x=' + $Macro.boundingbox.center.x
@@ -167,7 +167,7 @@
                 + ' max_y=' + $Macro.boundingbox.max.y
                 + ' max_z=' + $Macro.boundingbox.max.z"/>
             </do_for_each>
-            <debug_text text="'[X4GC TEST ISSUE169 COMPLETE] spec=issue-169-outside-box-r1 records=4 t=' + player.age"/>
+            <debug_text text="'[X4GC TEST ISSUE171 COMPLETE] spec=issue-171-origin-inside-box-r1 records=2 t=' + player.age"/>
           </actions>
         </cue>
 
