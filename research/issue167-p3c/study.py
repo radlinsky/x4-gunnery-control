@@ -182,6 +182,11 @@ def geometry(turret, R, O, p):
     return {"state": "IN_ARC" if ok else "OUT_OF_ARC", "decision": ok, "yaw": y, "pitch": x, "muzzle": muzzle}
 
 
+def engageable(turret, R, O, solutions):
+    """#79/#176: ENGAGEABLE if any passing solution (A2 consensus dict) scores in arc."""
+    return any(s["status"] == "pass" and geometry(turret, R, O, s["point"])["decision"] for s in solutions)
+
+
 def fibonacci(n=1024):
     ga = math.pi * (3 - math.sqrt(5))
     out = []
