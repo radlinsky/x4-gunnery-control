@@ -28,8 +28,13 @@ pickles. Outputs stay in the ignored `.x4-research-cache/issue176-a4/`:
   `study.geometry`, through final scorer SHA `a72cf7e`. `IN_ARC` counts as YES,
   `OUT_OF_ARC` as NO, and any `UNKNOWN_*` state (a trap, or no resting yaw) as
   UNKNOWN.
-- The truth point is the aim point that the selector picks from the case origin
-  O. The scorer places the turret component origin at O. Turret and rotation
+- The sampled case origin O is the prospective muzzle and the query origin: the
+  truth point is the aim point the selector picks from O, and every probe,
+  selected point and distance is measured from O.
+- The scorer origin is the turret component origin, placed so the turret's
+  rest-pose muzzle (yaw = pitch = 0, `L∘Rx(0)∘G∘Ry(0)∘H`) lands on O:
+  `component_origin = O - rest_muzzle_offset · R`, the inverse of the scorer's
+  `(p - O)·Rᵀ`. `compare.py` asserts the round trip. Turret and rotation
   cycle as in P3c: turret `i % 92`, axis rotation `(i // 92) % 24`.
 - The A2 corpus (`simulate.corpus`), the medium three-ray rule
   (`.03 × rough`, 1–128 m, 90°) and `simulate.consensus` are used unchanged.

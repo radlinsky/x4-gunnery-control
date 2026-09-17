@@ -105,12 +105,19 @@ def same_ray(o, d0, rough, pts):
 def evaluate(index):
     pop, sub, s, ti, ri = CASES[index]
     turret, R, o = old.CORPUS['turrets'][ti], old.ROT[ri], np.asarray(s['O'], float)
+    # Sampled O is the prospective muzzle; the scorer takes the component origin, so back out the rest-pose
+    # (yaw = pitch = 0) muzzle offset L∘Rx(0)∘G∘Ry(0)∘H, rotated to world by the scorer's inverse (p-O)·Rᵀ.
+    seg, rest = turret['seg'], ((0., 0., 0.), old.joint_matrix(0., 0.))
+    muzzle = np.asarray(old.compose(old.compose(old.compose(seg['L'], rest), seg['G']), old.compose(rest, seg['H']))[0])
+    body = o - muzzle @ np.asarray(R)
+    assert np.allclose((o - body) @ np.asarray(R).T, muzzle, atol=1e-6 * max(1., *abs(o))), (index, o, body)
+    body = tuple(map(float, body))
     memo = {}
 
     def score(p):
         key = tuple(map(float, p))
         if key not in memo:
-            state = old.geometry(turret, R, tuple(map(float, o)), key)['state']  # plain floats: the gate rejects numpy bools
+            state = old.geometry(turret, R, body, key)['state']  # plain floats: the gate rejects numpy bools
             memo[key] = 'YES' if state == 'IN_ARC' else 'NO' if state == 'OUT_OF_ARC' else 'UNKNOWN'
         return memo[key]
 
