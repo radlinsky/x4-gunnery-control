@@ -11,7 +11,7 @@ subgroup tables for single-point, multi-point, boundary and known172) is in
 ignored `.x4-research-cache/issue176-a4/`.
 
 The sampled origin O is the prospective muzzle and every query origin; the
-scorer gets the turret component origin whose rest-pose muzzle is at O (see
+scorer gets the turret component origin whose reference-pose muzzle is at O (see
 README). This run replaces an earlier one that put the component origin at O.
 
 How to read the tables:
