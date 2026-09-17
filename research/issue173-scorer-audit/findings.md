@@ -39,91 +39,95 @@ inside it.
   to the yaw axis, ±π wrap, NaN/inf, asymmetric/negative arcs, and a (-180,180)
   arc = 480.
 
+Buckets are `cause|yaw class:rest pattern|direction`. The rest pattern is the
+oracle's arc result over all resting yaws (`all_in`, `mixed`, `none_in`).
+
+### Before (417e9b0, scorer = one state-independent yaw, no zeroing)
+
 | Population | Agree | Hidden-state (scorer UNKNOWN) | float32-indeterminate | missing zeroing | other buckets |
 |---|---|---|---|---|---|
 | ordinary | 96,569 | 26 | 5 | 0 | 0 |
-| adversarial | 27,031 | 751 | 5,270 | **804** | 0 |
+| adversarial | 27,031 | 751 | 5,270 | 804 | 0 |
 | stress | 331 | 45 | 6 | 2 | full_circle_arc 84, missing_projection_rule 8, pivot_skip 4 |
 
-Hidden-state breakdown (resting-yaw arc results from the oracle):
-- ordinary: several all_in 8, none_in 16; one+trap all_in 1, none_in 1.
-- adversarial: several all_in 404, mixed 92, none_in 133; none+trap 122.
-- stress: none 45.
+### After (this commit)
 
-In every hidden-state case the scorer returned False. No NaN or inf input
-raised or scored ENGAGEABLE.
+| Population | Agree (one / several all_in / mixed / none_in) | Hidden-state (traps or no rest) | float32-indeterminate | missing zeroing | other buckets |
+|---|---|---|---|---|---|
+| ordinary | 96,569 + 8 + 0 + 16 = 96,593 | 2 (one+trap) | 5 | 0 | 0 |
+| adversarial | 27,694 + 404 + 92 + 109 = 28,299 | 122 (none+trap) | 5,435 | **0** | 0 |
+| stress | 333 | 45 (none) | 6 | 0 | full_circle_arc 84, missing_projection_rule 8, pivot_skip 4 |
 
-## Disagreements by cause
+- **Zeroing.** All 804 real-turret `missing_component_zeroing` disagreements
+  and both stress ones are gone. `turret_xen_m_beam_02_mk1_macro` with target
+  `(0, 1000, -0.3)` now scores exactly 90.0° IN_ARC and agrees with the oracle.
+- **Several yaws.** Every several-rest case agrees: 412 all_in (ENGAGEABLE),
+  92 mixed (ENGAGEABLE), 125 none_in (not ENGAGEABLE).
+- **False ENGAGEABLE.** No supported (ordinary or adversarial) false ENGAGEABLE
+  is outside the float32-indeterminate band.
+  - 5,432 adversarial and 5 ordinary cases are within EPS of a limit (max
+    1.9e-6 rad), where the accepted 4-dp rule is looser than strict float32.
 
-1. **Missing component zeroing: current scorer bug (806; 804 on real turrets).**
-   All 804 real-turret cases come from the 24 turrets with an upper limit of 90°,
-   reference angle 0, and a near-zero pivot offset, with the target inside the
-   1e-3 cone around vertical. Zeroing turns the direction into exactly `(0,1,0)`.
-   The yaw gate then gives one resting yaw at 0 (state-independent), and X4
-   requests exactly 90°, which is in arc. The scorer measures up to ~90.06°
-   and returns OUT_OF_ARC. Every case is scorer False and native True: a false
-   NOT-ENGAGEABLE, never a false ENGAGEABLE. The ordinary grid has no such case
-   because its only vertical direction is exact.
-   Smallest real counterexample: `turret_xen_m_beam_02_mk1_macro`, target
-   `(0, 1000, -0.3)` in component space (1 km overhead, 30 cm aft). The scorer
-   returns OUT_OF_ARC at 90.0173°. The oracle gives yaw 0 and `x = f32(π/2)` = the limit, IN.
-   The earlier `issue173-flips` P3c cases on vertical targets are the same mechanism.
-   **Correction:** before the pitch `atan2`, normalize `P - C(y)` in component
-   space, zero components `< 1e-3f`, and renormalize, exactly as the yaw gate
-   already does.
-2. **float32-indeterminate (5,281).** `x` lies within EPS of a limit, or a
-   component lies within 1e-9 of a threshold. This includes a native quirk: one
-   ulp inside the upper limit, the float32 `wrap(x-lo)` can equal the span, and
-   X4 then clamps to the far limit (`turret_kha_m_beam_01_mk1_macro`,
-   hi − 1e-7). The 5 ordinary cases are exact vertical targets on the beam_02
-   family, whose reference angle is −0.0. X4 cannot resolve these reliably
-   either, so they are not scorer bugs.
-3. **Missing projection rule (8, stress only).** These need the pitch axis
-   parallel to the yaw axis (R_G = Rz 90°), and no corpus turret has that. For
-   example, `pitchaxis(-60,-5)` with target `(1e-5, 1000, 1e-5)`: the scorer
-   says IN, but X4 requests 0 and it is out of arc. **Correction** (for
-   completeness): use request 0 when `|u_y|, |u_z| < 1e-4f`.
-4. **Pivot skip (4, stress only).** For a target `(0, 1e-30, 0)` at the pivot,
-   the scorer says IN_ARC but X4 skips the solve. The correct result is UNKNOWN.
-5. **Full-circle arc (84, stress only).** `(-180, 180)` wraps to a span of 0 in
-   X4, so everything clamps. No authored arc is like this (all 92 spans are
-   <180°).
+  - 8 adversarial cases are the native far-limit clamp quirk one ulp inside
+    `turret_kha_m_beam_01_mk1_macro`'s upper limit.
+  - No non-indeterminate supported counterexample exists, so the 4-dp policy is
+    unchanged.
+- **Stress.** Stress-only false ENGAGEABLE (full circle 84, pivot skip 4) and
+  false NOT ENGAGEABLE (projection rule 8) are documented limits and are not
+  implemented.
+
+## Scorer corrections (`study.geometry`)
+
+1. Pitch now zeroes components of `P - C(y)` below `1e-3f·|P - C(y)|` in
+   component space before rotating into the pitch frame. The second
+   normalization is omitted because `atan2` is scale-invariant.
+2. #176 any-solution: when there are no traps, every resting yaw is scored and
+   any in-arc rest makes the point IN_ARC. The result's `yaws` field records
+   `one`/`several`. Traps or no rest return `UNKNOWN_<class>[_trap]`.
 
 ## Yaw + pitch and several solutions
 
-- Several resting yaws can disagree on pitch arc: reference geometry
-  `several_mixed` (rest −π OUT, rest 0 IN), plus 92 adversarial `mixed` cases.
-  The #79/#176 "any valid solution" rule applies to *passing target-point
-  solutions*, not to hidden yaw alternatives. "Any rest" would be unsound for
-  `mixed`, so the scorer's UNKNOWN (False) is the correct conservative result.
-- Known conservative UNKNOWN, not a bug: 412 `several` + `all_in` cases (8
-  ordinary). Offline mover emulation always settled at one of the resting yaws
-  when there was no trap (522/522), so every such rest is in arc and these
-  cases could soundly be ENGAGEABLE. That is a possible policy upgrade, not
-  something source behavior forces.
-- `engageable()` was checked over every permutation of: empty → False;
-  valid+valid → True; out + in-but-failed-status → False; only one of three
-  engageable → True; several_mixed + several_all_in → False; several + trap +
-  none + one in-arc point → True. The result is order-independent in all of
-  them.
+- Reference geometry (asserted in `yaw_cases`):
+  - `several_mixed` (rest −π out, rest 0 in) → IN_ARC;
+  - `several_all_in` → IN_ARC;
+  - `several_all_out` → OUT_OF_ARC;
+  - `one_trap` (rest in arc) → UNKNOWN_one_trap;
+  - `none` → UNKNOWN_none_trap.
+- `engageable()` is asserted over every permutation of:
+  - empty → False;
+  - one_in + one_out → True;
+  - one_out + failed-status one_in → False;
+  - several_mixed + one_out → True;
+  - several_all_out + one_out + failed-status several_mixed → False;
+  - several_all_out + several_all_in + one_out → True.
+  Trap-only and no-rest solution sets are never ENGAGEABLE.
+- **One + trap stays conservative.** The gate reference establishes that a trap
+  can hold the turret indefinitely from reachable prior states (the
+  0.9 rad oscillation example). #176's "bounded hidden yaw alternatives" does
+  not say whether a rest that the mover may never reach counts as an accepted
+  solution. That is a product decision, not source evidence, so traps (with one
+  or several rests) remain UNKNOWN. This affects 2 ordinary cases here.
 
-## Unproven / LIVE
+## Known limits (not corrected, stress-only or indeterminate)
 
-- Authored degrees → float32 radians conversion path, native `atan2`/`fmod` bit
-  behavior, and float32 world positions: these only move results inside EPS.
-- The sign convention of pitch versus authored limits is inherited from #166
-  and was not re-audited. `turret_xen_xl_battleship_01` (reference 18°, arc
-  18..89) is the case worth a second look.
-- No LIVE test is needed for the correction. The zeroing is the same traced
-  caller code the yaw gate already depends on. If one is ever wanted, the
-  smallest discriminator is a beam_02 turret with a static target 1 km
-  directly overhead, offset 0.3 m aft. X4 should settle at yaw 0 and pitch
-  exactly 90° (turret fires), while the current scorer predicts out of arc.
+- 1e-4f pitch projection rule: needs a pitch axis parallel to the yaw axis; no corpus turret.
+- Target at the pivot: X4 skips the solve; the scorer still scores it.
+- Full-circle (−180, 180) arc: X4 wraps it to span 0; no authored arc.
+- float32 boundary: the 4-dp rule vs strict float32 compare, and the
+  far-limit clamp quirk one ulp inside a limit.
+- The degrees→float32 radians conversion, native `atan2`/`fmod` bits, and the
+  pitch sign convention inherited from #166 (`turret_xen_xl_battleship_01`,
+  reference 18°, arc 18..89) are not re-audited.
+
+## LIVE
+
+No LIVE test is needed. Zeroing is the traced caller code the yaw gate already
+uses, and the several-yaw rule is policy over already validated rests. The
+optional discriminator is unchanged: a beam_02 turret with a static target 1 km
+overhead and 0.3 m aft should settle at yaw 0 / pitch 90° and fire.
 
 ## Verdict
 
-**CORRECTION REQUIRED.** Add the 1e-3f component zeroing before the pitch angle.
-The 1e-4f projection rule and pivot skip → UNKNOWN only affect stress geometry.
-The error is conservative (false NOT-ENGAGEABLE only) and confined to
-near-vertical targets on 90°-limit turrets. It does not affect #176 A4 any
-further than that.
+**PASS** for supported geometry after this correction. Every remaining supported
+disagreement is float32-indeterminate. Stress-only limits and the one+trap
+policy question are documented above.

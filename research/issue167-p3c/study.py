@@ -10,7 +10,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE.parents[1] / ".x4-research-cache/issue167-p3c"
 sys.path.insert(0, str(HERE.parents[1] / "scripts"))
 from barrelposition_evaluator import compose, joint_matrix  # noqa: E402
-from yaw_rest_gate import classify  # noqa: E402
+from yaw_rest_gate import ZEROING, classify  # noqa: E402
 
 u, q = 2.0 ** -24, 2.0 ** -18
 delta = 2 * q
@@ -165,21 +165,31 @@ def approximate(O, C, H, pts):
 
 
 def geometry(turret, R, O, p):
-    """#166 split T = L∘Rx(-x)∘G∘Ry(y)∘H; U13 yaw gate; arc from rotation_x limits. False unless predictable and in arc."""
+    """#166 split T = L∘Rx(-x)∘G∘Ry(y)∘H; U13 yaw gate; arc from rotation_x limits.
+
+    #176 any-solution: every resting yaw is scored and one in arc suffices. Traps (hidden mover state) and
+    no-rest targets stay UNKNOWN. Pitch uses X4's 1e-3f component zeroing of the pivot direction.
+    """
     pt = tuple(sum((p[k] - O[k]) * R[j][k] for k in range(3)) for j in range(3))  # (p-O)·Rᵀ
     gate = classify(turret["yaw"], pt)
-    if not gate["state_independent"]:
-        return {"state": "UNKNOWN_" + gate["class"] + ("_trap" if gate["traps"] else ""), "decision": False}
-    y = gate["resting"][0]
+    if gate["traps"] or not gate["resting"]:
+        return {"state": "UNKNOWN_" + gate["class"] + ("_trap" if gate["traps"] else ""), "decision": False, "yaws": gate["class"]}
     L, G, H = turret["seg"]["L"], turret["seg"]["G"], turret["seg"]["H"]
-    frame = compose(G, compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))
-    qv = row(sub(pt, frame[0]), tuple(zip(*frame[1])))
     aim = L[1][2]
-    x = math.remainder(math.atan2(qv[1], qv[2]) - math.atan2(aim[1], aim[2]), 2 * math.pi)
     lo, hi = turret["arc"]
-    ok = round(lo, 4) <= round(math.degrees(x), 4) <= round(hi, 4)  # 4-dp degrees absorbs float noise at an authored limit
-    muzzle = compose(compose(compose(L, ((0.0, 0.0, 0.0), joint_matrix(x, 0.0))), G), compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))[0]
-    return {"state": "IN_ARC" if ok else "OUT_OF_ARC", "decision": ok, "yaw": y, "pitch": x, "muzzle": muzzle}
+    scored = []
+    for y in gate["resting"]:
+        frame = compose(G, compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))
+        d = sub(pt, frame[0])
+        n = norm(d)
+        d = tuple(0.0 if abs(c) < ZEROING * n else c for c in d)  # caller 0x140e22425; atan2 ignores the renormalization
+        qv = row(d, tuple(zip(*frame[1])))
+        x = math.remainder(math.atan2(qv[1], qv[2]) - math.atan2(aim[1], aim[2]), 2 * math.pi)
+        ok = round(lo, 4) <= round(math.degrees(x), 4) <= round(hi, 4)  # 4-dp degrees absorbs float noise at an authored limit
+        muzzle = compose(compose(compose(L, ((0.0, 0.0, 0.0), joint_matrix(x, 0.0))), G), compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))[0]
+        scored.append((not ok, y, x, muzzle))
+    miss, y, x, muzzle = min(scored, key=lambda r: r[0])
+    return {"state": "OUT_OF_ARC" if miss else "IN_ARC", "decision": not miss, "yaws": gate["class"], "yaw": y, "pitch": x, "muzzle": muzzle}
 
 
 def engageable(turret, R, O, solutions):

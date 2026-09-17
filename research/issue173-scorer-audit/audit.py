@@ -75,17 +75,17 @@ def audit(case):
         scored = study.geometry(turret, I3, (0.0, 0.0, 0.0), pt)
     except Exception as e:  # noqa: BLE001
         return pop, "scorer_raises:" + type(e).__name__, None
-    if not g["state_independent"]:
-        rests = [oracle(turret, pt, y) for y in g["resting"]]
-        ins = {r and r["in"] for r in rests}
-        pattern = "no_rest" if not rests else "all_in" if ins == {True} else "mixed" if True in ins else "none_in"
-        cause = f"hidden_state:{g['class']}{'+trap' if g['traps'] else ''}:{pattern}"
-        return pop, cause, None if scored["decision"] is False else case_row(case, scored, rests)
-    o = oracle(turret, pt, g["resting"][0])
-    native = bool(o and o["in"])
+    rests = {y: oracle(turret, pt, y) for y in g["resting"]}
+    ins = {bool(r and r["in"]) for r in rests.values()}
+    pattern = f"{g['class']}{'+trap' if g['traps'] else ''}:" + (
+        "no_rest" if not rests else "all_in" if ins == {True} else "mixed" if True in ins else "none_in")
+    if g["traps"] or not rests:
+        return pop, f"hidden_state|{pattern}", None if scored["decision"] is False else case_row(case, scored, rests)
+    native = True in ins
     if native == scored["decision"]:
-        return pop, "agree", None
-    nozero = oracle(turret, pt, g["resting"][0], zeroing=False)
+        return pop, f"agree|{pattern}", None
+    y = scored["yaw"] if scored["decision"] else next(y for y, r in rests.items() if r and r["in"])
+    o, nozero = rests[y], oracle(turret, pt, y, zeroing=False)
     if o is None:
         cause = "pivot_skip"
     elif abs(math.remainder(math.radians(turret["arc"][1] - turret["arc"][0]), 2 * math.pi)) < EPS:
@@ -98,7 +98,8 @@ def audit(case):
         cause = "float32_indeterminate"
     else:
         cause = "other"
-    return pop, cause, case_row(case, scored, o)
+    side = "false_ENGAGEABLE" if scored["decision"] else "false_NOT_ENGAGEABLE"
+    return pop, f"{cause}|{pattern}|{side}", case_row(case, scored, o)
 
 
 def case_row(case, scored, o):
@@ -152,38 +153,41 @@ def cases():
 
 
 def yaw_cases():
-    """Reference geometries: several rests, one rest + trap, no rest; plus multi-solution engageable()."""
+    """Reference geometries: several rests (all in / mixed / all out), one rest + trap, no rest; multi-solution engageable()."""
     several = synthetic("several", (-10.0, 60.0), t_g=(0.0, 1.0, -5.0))
     trap = synthetic("trap", (-10.0, 90.0), t_g=(1.0, 1.0, 2.0), rg=ry(math.pi / 2))
     none = synthetic("none", (-10.0, 90.0), t_g=(0.0, 1.0, 2.0))
-    one = synthetic("one", (-10.0, 60.0))
     pts = {"several_mixed": (several, (0.0, 9.0, 3.0)), "several_all_in": (several, (0.0, 1.5, 3.0)),
-           "one_trap": (trap, (1.0, 20.0, 2.0)), "none": (none, (math.sin(0.7), 1.0, math.cos(0.7))),
-           "one_in": (one, (0.0, 100.0, 1000.0)), "one_out": (one, (0.0, 1000.0, 100.0))}
+           "several_all_out": (several, (0.0, -2.0, 3.0)), "one_out": (several, (0.0, -500.0, 1000.0)),
+           "one_in": (several, (0.0, 100.0, 1000.0)),
+           "one_trap": (trap, (1.0, 20.0, 2.0)), "none": (none, (math.sin(0.7), 1.0, math.cos(0.7)))}
+    want = {"several_mixed": ("several", {True, False}, True), "several_all_in": ("several", {True}, True),
+            "several_all_out": ("several", {False}, False), "one_out": ("one", {False}, False), "one_in": ("one", {True}, True),
+            "one_trap": ("one", {True}, False), "none": ("none", set(), False)}
     report = {}
     for k, (t, pt) in pts.items():
         g = classify(t["yaw"], pt)
-        report[k] = {"class": g["class"], "traps": len(g["traps"]), "state_independent": g["state_independent"],
-                     "rest_pitch_in_arc": [(round(y, 6), (oracle(t, pt, y) or {}).get("in")) for y in g["resting"]],
-                     "scorer": study.geometry(t, I3, (0.0, 0.0, 0.0), pt)["decision"]}
-    assert report["several_mixed"]["class"] == "several" and {v for _, v in report["several_mixed"]["rest_pitch_in_arc"]} == {True, False}
-    assert report["one_trap"]["class"] == "one" and report["one_trap"]["traps"] and report["none"]["class"] == "none"
+        rests = [(round(y, 6), oracle(t, pt, y)["in"]) for y in g["resting"]]
+        scored = study.geometry(t, I3, (0.0, 0.0, 0.0), pt)
+        report[k] = {"class": g["class"], "traps": len(g["traps"]), "rest_in_arc": rests, "scorer": scored["state"]}
+        assert (g["class"], {v for _, v in rests}, scored["decision"]) == want[k], (k, report[k])
+    assert report["one_trap"]["traps"] and not report["several_mixed"]["traps"]
 
     def sol(k, status="pass"):
-        return {"status": status, "point": pts[k][1], "turret": pts[k][0]}
+        return {"status": status, "point": pts[k][1]}
 
-    def eng(sols):  # engageable() scores every point on the first solution's turret
-        return study.engageable(sols[0]["turret"] if sols else one, I3, (0.0, 0.0, 0.0), sols)
-
-    sets = {"empty": ([], False), "valid+valid": ([sol("one_in"), sol("one_out")], True),
-            "valid_in+invalid_in": ([sol("one_out"), sol("one_in", "miss")], False),
-            "only_one_engageable": ([sol("one_out"), sol("one_out"), sol("one_in")], True),
-            "several_mixed+several_all_in": ([sol("several_mixed"), sol("several_all_in")], False),
-            "several_mixed+one_trap+none+one_in": ([sol("several_mixed"), sol("one_trap"), sol("none"), sol("one_in")], True)}
-    for k, (s, want) in sets.items():
-        got = {eng(list(p)) for p in itertools.permutations(s)} or {eng([])}
-        assert got == {want}, (k, got)
-        report["engageable:" + k] = sorted(got)
+    sets = {"empty": ([], False), "one_in+one_out": ([sol("one_in"), sol("one_out")], True),
+            "one_out+failed_one_in": ([sol("one_out"), sol("one_in", "miss")], False),
+            "several_mixed+one_out": ([sol("several_mixed"), sol("one_out")], True),
+            "several_all_out+one_out+failed_mixed": ([sol("several_all_out"), sol("one_out"), sol("several_mixed", "miss")], False),
+            "several_all_out+several_all_in+one_out": ([sol("several_all_out"), sol("several_all_in"), sol("one_out")], True)}
+    for k, (s, expected) in sets.items():
+        got = {study.engageable(several, I3, (0.0, 0.0, 0.0), list(p)) for p in itertools.permutations(s)}
+        assert got == {expected}, (k, got)
+        report["engageable:" + k] = expected
+    trap_sets = [[sol("one_trap")], []]
+    assert not any(study.engageable(trap, I3, (0.0, 0.0, 0.0), s) for s in trap_sets)
+    assert not study.engageable(none, I3, (0.0, 0.0, 0.0), [{"status": "pass", "point": pts["none"][1]}])
     return report
 
 
