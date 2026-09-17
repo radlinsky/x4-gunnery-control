@@ -24,7 +24,7 @@ The eight bounded-`rotation_y` cases are `turret_s_gauntlet_macro`,
 - Live test: no
 - Finding: 13 macros have a selected-path root connection whose `parent` names an undeclared part; 1 turret macro (`weapon_kx5_s_turret_macro`) references a component classed `weapon`; and all 4 SWI `missileturret` macros use `rocket`-tagged firing endpoints instead of `laser`. These are source-ingestion differences, not additional joint signatures.
 
-The 13 undeclared-parent cases are the nine `turret_m_llaser_*`,
+The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 `turret_yuv_l_beam_macro`, `turret_gravity_well_macro`,
 `turret_m_tractor_heavy_macro`, plus the four SWI missile-turret macros
 `turret_m_borontube_macro`, `turret_m_conctube_macro`,
