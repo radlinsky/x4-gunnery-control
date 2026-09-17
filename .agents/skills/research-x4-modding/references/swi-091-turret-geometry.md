@@ -72,13 +72,13 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Live test: no
 - Finding: the traced joint solver operates over restriction records rather than firing-endpoint tag family. The four SWI missile turrets therefore fit the same joint-solving model when their single `rocket` endpoint is used for offline path geometry. Whether script-visible `weapon.barrelposition` exposes missile-turret endpoints is not established by this evidence.
 
-### Only 77 of the 169 resolve a mating connection
+### Mating-connection resolvability: 77 of the 169
 
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: third-party-technique
 - Source: same SWI WeaponSystems XML corpus; the accepted rule in `turret-ship-compatibility.md`; the official control recorded above
 - Live test: no
-- Finding: the accepted compatibility rule resolves a turret's mating connection as its unique connection tagged `component`. Only 77 of the 169 SWI macros have one, against 147 of 147 in the official control above; the other 92 have none. Those 92 are not missing a turret connection — each has exactly one `turret`-tagged connection carrying ordinary size/variant/hittability tags — they omit the structural `component` token that the rule requires. Under the repository's fail-closed policy the mating connection is therefore unresolved for those 92 and they cannot enter production scope on current evidence, whatever the ware answer turns out to be.
+- Finding: the accepted compatibility rule resolves a turret's mating connection as its unique connection tagged `component`. Only 77 of the 169 SWI macros have one, against 147 of 147 in the official control above; the other 92 have none. Those 92 are not missing a turret connection — each has exactly one `turret`-tagged connection carrying ordinary size/variant/hittability tags — they omit the structural `component` token that the rule requires. Under the repository's fail-closed policy the mating connection is therefore unresolved for those 92, so the accepted compatibility rule cannot currently resolve a mount for them. That is a statement about mount resolvability only. It is not evidence that those macros are non-combat or non-equipable, and membership in either the 77 or the 92 does not by itself decide #176 production scope.
 
   The 77 mount-resolvable macros are 73 SWI-component macros plus 4 that reuse
   official X4 components: `turret_xen_l_laser_01_mk1_macro`,
@@ -86,31 +86,32 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
   `turret_yuv_m_bioplasma_macro`. The last four declare the normal `turret_*`
   selector family and carry no SWI-specific ANI or loader uncertainty.
 
-### Unusual-case recount over the 77 mount-resolvable macros
+### Diagnostic unusual-case recount within the mount-resolvable subset
 
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: third-party-technique
 - Source: same corpus, recomputed per macro rather than inherited from the 169 census
 - Live test: no
-- Finding: recounted against the mount-resolvable subset instead of the 169 structural census:
+- Finding: these are diagnostic counts within the mount-resolvable subset, not production-scope counts. No case is placed in or out of the final #176 corpus by this table; every identity below remains a live structural fact awaiting ware-backed combat + equipable classification.
 
-| Case | 169 census | Of the 77 | Identities within the 77 |
+| Case | 169 census | Within the 77 | Identities |
 |---|---|---|---|
 | unbounded `rotation_y` → bounded `rotation_x` | 159 | 75 | — |
 | bounded `rotation_y` → bounded `rotation_x` | 8 | 1 | `turret_m_ion_nk7_ball_macro` |
 | reversed `rotation_x` → `rotation_y` | 1 | 1 | `turret_m_wall_sith_macro` |
-| unbounded `rotation_z` → bounded `rotation_x` | 1 | 0 | `turret_arrestor_dish_macro` falls out |
+| unbounded `rotation_z` → bounded `rotation_x` | 1 | 0 | `turret_arrestor_dish_macro` (in the 92) |
 | `missileturret` macros | 4 | 4 | `turret_m_borontube_macro`, `turret_m_conctube_macro`, `turret_m_conctubelight_macro`, `turret_m_torptube_macro` |
 | component classed `weapon` | 1 | 1 | `weapon_kx5_s_turret_macro` |
 | undeclared-parent root connection | 13 | 7 | the four missile turrets above plus `turret_gravity_well_macro`, `turret_m_tractor_heavy_macro`, `turret_yuv_l_beam_macro` |
-| metre-scale missing-selector ANI uncertainty | 88 | 36 | the six `turret_m_llaser_*` macros all fall out with the 92 |
+| metre-scale missing-selector ANI uncertainty | 88 | 36 | the six `turret_m_llaser_*` macros are in the 92 |
 
-  Seven of the eight bounded-`rotation_y` macros fall out, as does the sole
-  `rotation_z` case, so the arrestor-dish clock-plus-cone interpretation is no
-  longer needed for supported geometry. Every other unusual case survives: the
-  reversed X/Y wall turret, all four missile turrets, the `weapon`-class
-  component mismatch, and seven undeclared-parent macros remain in scope and
-  still require explicit handling.
+  Seven of the eight bounded-`rotation_y` macros and the sole `rotation_z`
+  case sit in the 92 rather than the 77. That does not retire them: the
+  arrestor-dish clock-plus-cone interpretation and the bounded-yaw records
+  stay valid and may still be required, because a macro in the 92 can still
+  turn out to be combat and equipable. Every unusual case recorded in this
+  reference keeps its identity and structural facts until ware evidence
+  decides the corpus.
 
 ### Ware-backed equipability and combat purpose remain unresolved
 
@@ -118,14 +119,15 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Status: third-party-technique
 - Source: inventory of the locally retained SWI research data
 - Live test: no
-- Finding: the accepted model decides equipability and combat-versus-utility from equipment wares — an equipment ware whose direct `<component ref>` exactly equals the turret macro name, with empty `<use>` purpose tokens meaning combat and exactly `mine` or `salvage` meaning non-combat utility. The retained SWI extraction covers `props/WeaponSystems/` XML and 41 ANI resources only; it contains no SWI `libraries/wares.xml`, no ship macros, and no macro index, and the SWI catalogs are no longer present on this machine. Neither axis can be derived from the retained data, so no SWI macro is yet classified combat or equipable. 77 is an upper bound on the final corpus, not the corpus.
+- Finding: the accepted model decides equipability and combat-versus-utility from equipment wares — an equipment ware whose direct `<component ref>` exactly equals the turret macro name, with empty `<use>` purpose tokens meaning combat and exactly `mine` or `salvage` meaning non-combat utility. The retained SWI extraction covers `props/WeaponSystems/` XML and 41 ANI resources only; it contains no SWI `libraries/wares.xml`, no ship macros, and no macro index, and the SWI catalogs are no longer present on this machine. Neither axis can be derived from the retained data, so no SWI macro is yet classified combat or equipable and the final #176 SWI scope remains unknown. The 77 is neither the final corpus nor an upper or lower bound on it: the two conditions are independent of mating-connection resolvability.
 
   To close this, extract SWI `libraries/wares.xml` from the SWI catalogs into
-  the ignored cache and apply the accepted ware rule to the 77. Two members
-  are the obvious purpose-test candidates on their authored mating tags
-  (`turret_gravity_well_macro` tagged `gravitywell`, `turret_m_tractor_heavy_macro`
-  tagged `tractorh`); neither is classified here, because the accepted rule
-  decides purpose from the ware, not from tags or names.
+  the ignored cache and apply the accepted ware rule to all 169. Two members
+  of the 77 are the obvious purpose-test candidates on their authored mating
+  tags (`turret_gravity_well_macro` tagged `gravitywell`,
+  `turret_m_tractor_heavy_macro` tagged `tractorh`); neither is classified
+  here, because the accepted rule decides purpose from the ware, not from tags
+  or names.
 
 ### SWI ANI extraction and path-relevant translations
 - X4: 9.00 build 611726; SWI 0.9.1 HF
@@ -139,18 +141,18 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Status: inference
 - Source: SWI ANI/XML comparison above, official X4 turret selector census, and the accepted offline selector-binding model
 - Live test: no — no compatible SWI/X4 9.00 runtime is currently available
-- Finding: 165 SWI-component macros do not declare the normal `turret_*` state selector family, while the affected ANI resources still contain `turret_active` records. Official X4 9.00 turret sources do not provide a matching control where path-relevant ANI records exist but no effective selector declares that animation name. Therefore the evidence does not establish whether X4 binds those records anyway. The two interpretations differ by metre-scale geometry for 88 of the 165 SWI-component macros, and for 36 of the 77 mount-resolvable macros, so neither interpretation should be promoted to runtime truth without new evidence.
+- Finding: 165 SWI-component macros do not declare the normal `turret_*` state selector family, while the affected ANI resources still contain `turret_active` records. Official X4 9.00 turret sources do not provide a matching control where path-relevant ANI records exist but no effective selector declares that animation name. Therefore the evidence does not establish whether X4 binds those records anyway. The two interpretations differ by metre-scale geometry for 88 of the 165 SWI-component macros, and for 36 within the mount-resolvable subset, so neither interpretation should be promoted to runtime truth without new evidence.
 
 ### Undeclared-parent loader behavior remains unresolved
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: inference
 - Source: SWI source geometry for the 13 affected macros plus official source scan showing no equivalent undeclared-parent control
 - Live test: no — no compatible SWI/X4 9.00 runtime is currently available
-- Finding: this affects 13 of the 169 and 7 of the 77 mount-resolvable macros. Source inspection cannot distinguish whether X4 attaches a connection whose `parent` names an undeclared part at the component root or drops that connection/subtree. ANI evidence confirms the source art contains a `part_socket` identity in the affected family but does not resolve loader behavior. Treat root-attachment as an explicit inference, not a proven runtime fact.
+- Finding: this affects 13 of the 169, of which 7 are in the mount-resolvable subset. Source inspection cannot distinguish whether X4 attaches a connection whose `parent` names an undeclared part at the component root or drops that connection/subtree. ANI evidence confirms the source art contains a `part_socket` identity in the affected family but does not resolve loader behavior. Treat root-attachment as an explicit inference, not a proven runtime fact.
 
 ### Current evidence boundary for offline truth geometry
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: inference
 - Source: combined source and static-trace evidence recorded above
 - Live test: no
-- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Within the 77 mount-resolvable macros, runtime truth remains conditional for 36 affected by missing-selector ANI binding and 7 affected by undeclared-parent loader behavior, until compatible live evidence or stronger native evidence resolves those two facts. The corresponding 88 and 13 figures describe the 169 structural census and must not be quoted as production scope.
+- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Runtime truth remains conditional for the 88 macros affected by missing-selector ANI binding and the 13 affected by undeclared-parent loader behavior, until compatible live evidence or stronger native evidence resolves those two facts. The 36 and 7 figures are the same counts restricted to the mount-resolvable subset; both sets are diagnostic, and neither is a production-scope count while the #176 corpus is undetermined.
