@@ -61,10 +61,20 @@ Truth-UNKNOWN rows are excluded from TP/FP/TN/FN and from the derived rates.
 
 ## Methods
 
-Every method starts from the anchor query `d0 = Q(O)`. An invalid anchor makes
-every method UNKNOWN at a cost of one query.
+Every geometry method starts from the anchor query `d0 = Q(O)`. An invalid
+anchor makes every geometry method UNKNOWN at a cost of one query.
 
-- **direction**: direction-only, the known weak baseline. It scores the point
+This is an arc/bearing-only comparison. Range, line of sight and every other
+non-arc gate are intentionally outside it and assumed to pass.
+
+- **baseline**: the historical zero-prebuilt-turret behaviour. It had no turret
+  turning-limit check, so with the non-arc gates passing it always answers
+  ENGAGEABLE (`YES`). It makes no anchor query, so it stays `YES` even when the
+  anchor is invalid. `baseline_q = 0` counts arc-determination queries only; it
+  does not claim the historical runtime method did zero total work. It is a
+  standalone method only and appears in no fallback stack.
+- **direction**: direction-only, a known weak geometry method (distinct from
+  the zero-prebuilt baseline above). It scores the point
   `O + 1e9 m · d0`, which is the "infinitely far" reading of the direction.
   Cost: 1 query.
 - **three_ray**: the A2 medium triple. A pass scores the consensus point; any
@@ -132,7 +142,8 @@ scored.
 A stack tries its methods in order and returns the first non-UNKNOWN answer.
 The anchor query is shared, so each fallback that is actually used adds its
 query count minus one. Direction-only fallback therefore costs nothing extra.
-`report.py` builds the stacks from the per-method answers:
+`report.py` builds the stacks from the per-method answers (no stack contains
+the baseline):
 
 - `three_ray > same_ray`
 - `three_ray4 > same_ray`

@@ -5,7 +5,8 @@ from collections import Counter, defaultdict
 
 from compare import OUT
 
-METHODS = ('direction', 'same_ray', 'three_ray', 'three_ray4')
+# baseline is standalone only; no stack contains it.
+METHODS = ('baseline', 'direction', 'same_ray', 'three_ray', 'three_ray4')
 STACKS = METHODS + (('three_ray', 'same_ray'), ('three_ray4', 'same_ray'), ('same_ray', 'three_ray4'),
                     ('three_ray4', 'direction'), ('same_ray', 'direction'), ('three_ray4', 'same_ray', 'direction'))
 POPULATIONS = ('normal', 'difficult', 'stress')
@@ -56,6 +57,8 @@ def mechanism(row, method):
                 f"probe_switch={row.get('probe_switch')} hidden_switch={row.get('hidden_switch')}")
     if method.startswith('three_ray'):
         return f"{row.get(method + '_status')} mixed={row.get(method + '_mixed')}"
+    if method == 'baseline':
+        return 'zero-prebuilt always ENGAGEABLE'
     return 'far-point direction'
 
 

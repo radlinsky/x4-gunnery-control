@@ -130,7 +130,8 @@ def evaluate(index):
         _, d0, anchor = log[0]
         truth_point = np.asarray(pts[anchor], float)
         row = dict(index=index, population=pop, subgroup=sub, name=s['name'], rough=s['rough'], factor=factor,
-                   turret=turret['macro'], rotation=ri, aim_points=len(pts), truth=score(truth_point))
+                   turret=turret['macro'], rotation=ri, aim_points=len(pts), truth=score(truth_point),
+                   baseline='YES', baseline_q=0)  # zero-prebuilt: no arc check, no anchor query
         if d0 is None:
             row.update(direction='UNKNOWN', direction_q=1, same_ray='UNKNOWN', same_ray_q=1, same_ray_reason='invalid',
                        three_ray='UNKNOWN', three_ray_q=len(log[:3]), three_ray4='UNKNOWN', three_ray4_q=len(log))

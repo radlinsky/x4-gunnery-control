@@ -22,12 +22,23 @@ How to read the tables:
 - Query columns count the whole stack for each row.
 - Truth-UNKNOWN rows are excluded from TP/FP/TN/FN and from every rate.
 
+`baseline` is the historical zero-prebuilt-turret behaviour, added in A4B. It
+had no turret turning-limit check, so in this arc/bearing-only comparison it
+always answers ENGAGEABLE. Range, line of sight and other non-arc gates are
+outside A4 and assumed to pass. `baseline_q = 0` counts arc-determination
+queries only, not the historical runtime's total work. It needs no anchor
+query, so it stays ENGAGEABLE on invalid-anchor rows where every geometry
+method is UNKNOWN. It is distinct from `direction`, the direction-only geometry
+method, and is not part of any fallback stack. Adding it changed no existing
+method or stack result.
+
 ## Headline: rough factor 1
 
 ### Normal / current-game supported (8,790 cases: 6,990 single-point, 1,800 multi-point)
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 5240 | 3546 | 0 | 0 | 1.0 | 0.0 | 0.5964 | 0.5964 | 4 | 0 | 0 | 0 | 1.0 | 0.5964 | 0.0 | 0 |
 | direction | 5144 | 36 | 3510 | 96 | 0.9817 | 0.9898 | 0.9931 | 0.985 | 4 | 0 | 0 | 0 | 1.0 | 0.985 | 1.0 | 1 |
 | same_ray | 5183 | 1 | 3545 | 57 | 0.9891 | 0.9997 | 0.9998 | 0.9934 | 4 | 132 | 57 | 72 | 0.9853 | 0.9999 | 4.0 | 4 |
 | three_ray | 5233 | 0 | 3546 | 7 | 0.9987 | 1.0 | 1.0 | 0.9992 | 4 | 16 | 7 | 5 | 0.9986 | 1.0 | 3.0 | 3 |
@@ -43,6 +54,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 2588 | 2046 | 0 | 0 | 1.0 | 0.0 | 0.5585 | 0.5585 | 0 | 0 | 0 | 0 | 1.0 | 0.5585 | 0.0 | 0 |
 | direction | 2575 | 8 | 2038 | 13 | 0.995 | 0.9961 | 0.9969 | 0.9955 | 0 | 0 | 0 | 0 | 1.0 | 0.9955 | 1.0 | 1 |
 | same_ray | 2563 | 1 | 2045 | 25 | 0.9903 | 0.9995 | 0.9996 | 0.9944 | 0 | 59 | 25 | 34 | 0.9873 | 0.9998 | 4.0 | 4 |
 | three_ray | 1680 | 0 | 2046 | 908 | 0.6491 | 1.0 | 1.0 | 0.8041 | 0 | 1617 | 908 | 709 | 0.6511 | 1.0 | 3.0 | 3 |
@@ -58,6 +70,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 810 | 191 | 0 | 0 | 1.0 | 0.0 | 0.8092 | 0.8092 | 11 | 0 | 0 | 0 | 1.0 | 0.8092 | 0.0 | 0 |
 | direction | 567 | 0 | 191 | 243 | 0.7 | 1.0 | 1.0 | 0.7572 | 11 | 92 | 91 | 0 | 0.9091 | 0.833 | 1.0 | 1 |
 | same_ray | 622 | 0 | 191 | 188 | 0.7679 | 1.0 | 1.0 | 0.8122 | 11 | 288 | 188 | 89 | 0.7233 | 1.0 | 3.727 | 4 |
 | three_ray | 541 | 0 | 191 | 269 | 0.6679 | 1.0 | 1.0 | 0.7313 | 11 | 377 | 269 | 97 | 0.6344 | 1.0 | 3.0 | 3 |
@@ -75,6 +88,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 5240 | 3546 | 0 | 0 | 1.0 | 0.0 | 0.5964 | 0.5964 | 4 | 0 | 0 | 0 | 1.0 | 0.5964 | 0.0 | 0 |
 | direction | 5144 | 36 | 3510 | 96 | 0.9817 | 0.9898 | 0.9931 | 0.985 | 4 | 0 | 0 | 0 | 1.0 | 0.985 | 1.0 | 1 |
 | same_ray | 5175 | 1 | 3545 | 65 | 0.9876 | 0.9997 | 0.9998 | 0.9925 | 4 | 161 | 65 | 93 | 0.982 | 0.9999 | 4.0 | 4 |
 | three_ray | 5236 | 0 | 3546 | 4 | 0.9992 | 1.0 | 1.0 | 0.9995 | 4 | 12 | 4 | 4 | 0.9991 | 1.0 | 3.0 | 3 |
@@ -90,6 +104,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 2588 | 2046 | 0 | 0 | 1.0 | 0.0 | 0.5585 | 0.5585 | 0 | 0 | 0 | 0 | 1.0 | 0.5585 | 0.0 | 0 |
 | direction | 2575 | 8 | 2038 | 13 | 0.995 | 0.9961 | 0.9969 | 0.9955 | 0 | 0 | 0 | 0 | 1.0 | 0.9955 | 1.0 | 1 |
 | same_ray | 2566 | 1 | 2045 | 22 | 0.9915 | 0.9995 | 0.9996 | 0.995 | 0 | 74 | 22 | 52 | 0.984 | 0.9998 | 4.0 | 4 |
 | three_ray | 1797 | 0 | 2046 | 791 | 0.6944 | 1.0 | 1.0 | 0.8293 | 0 | 1398 | 791 | 607 | 0.6983 | 1.0 | 3.0 | 3 |
@@ -105,6 +120,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 810 | 191 | 0 | 0 | 1.0 | 0.0 | 0.8092 | 0.8092 | 11 | 0 | 0 | 0 | 1.0 | 0.8092 | 0.0 | 0 |
 | direction | 567 | 0 | 191 | 243 | 0.7 | 1.0 | 1.0 | 0.7572 | 11 | 92 | 91 | 0 | 0.9091 | 0.833 | 1.0 | 1 |
 | same_ray | 662 | 0 | 191 | 148 | 0.8173 | 1.0 | 1.0 | 0.8521 | 11 | 161 | 148 | 2 | 0.8501 | 1.0 | 3.727 | 4 |
 | three_ray | 541 | 0 | 191 | 269 | 0.6679 | 1.0 | 1.0 | 0.7313 | 11 | 377 | 269 | 97 | 0.6344 | 1.0 | 3.0 | 3 |
@@ -122,6 +138,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 5240 | 3546 | 0 | 0 | 1.0 | 0.0 | 0.5964 | 0.5964 | 4 | 0 | 0 | 0 | 1.0 | 0.5964 | 0.0 | 0 |
 | direction | 5144 | 36 | 3510 | 96 | 0.9817 | 0.9898 | 0.9931 | 0.985 | 4 | 0 | 0 | 0 | 1.0 | 0.985 | 1.0 | 1 |
 | same_ray | 1056 | 0 | 3546 | 4184 | 0.2015 | 1.0 | 1.0 | 0.5238 | 4 | 7019 | 4184 | 2831 | 0.2016 | 1.0 | 4.0 | 4 |
 | three_ray | 5225 | 0 | 3546 | 15 | 0.9971 | 1.0 | 1.0 | 0.9983 | 4 | 32 | 15 | 13 | 0.9968 | 1.0 | 3.0 | 3 |
@@ -137,6 +154,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 2588 | 2046 | 0 | 0 | 1.0 | 0.0 | 0.5585 | 0.5585 | 0 | 0 | 0 | 0 | 1.0 | 0.5585 | 0.0 | 0 |
 | direction | 2575 | 8 | 2038 | 13 | 0.995 | 0.9961 | 0.9969 | 0.9955 | 0 | 0 | 0 | 0 | 1.0 | 0.9955 | 1.0 | 1 |
 | same_ray | 1027 | 1 | 2045 | 1561 | 0.3968 | 0.9995 | 0.999 | 0.6629 | 0 | 2695 | 1561 | 1134 | 0.4184 | 0.9995 | 4.0 | 4 |
 | three_ray | 1621 | 0 | 2046 | 967 | 0.6264 | 1.0 | 1.0 | 0.7913 | 0 | 1728 | 967 | 761 | 0.6271 | 1.0 | 3.0 | 3 |
@@ -152,6 +170,7 @@ How to read the tables:
 
 | method | TP | FP | TN | FN | sensitivity | specificity | precision | accuracy | truth_unknown | model_unknown | unknown_on_yes | unknown_on_no | coverage | decided_accuracy | mean_queries | max_queries |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 810 | 191 | 0 | 0 | 1.0 | 0.0 | 0.8092 | 0.8092 | 11 | 0 | 0 | 0 | 1.0 | 0.8092 | 0.0 | 0 |
 | direction | 567 | 0 | 191 | 243 | 0.7 | 1.0 | 1.0 | 0.7572 | 11 | 92 | 91 | 0 | 0.9091 | 0.833 | 1.0 | 1 |
 | same_ray | 273 | 0 | 191 | 537 | 0.337 | 1.0 | 1.0 | 0.4635 | 11 | 737 | 537 | 189 | 0.2747 | 1.0 | 3.727 | 4 |
 | three_ray | 541 | 0 | 191 | 269 | 0.6679 | 1.0 | 1.0 | 0.7313 | 11 | 377 | 269 | 97 | 0.6344 | 1.0 | 3.0 | 3 |
@@ -201,6 +220,11 @@ Switching counts per population, factor 1:
 
 ## Failure groups for A5 (factor 1 unless stated)
 
+0. **Zero-prebuilt baseline errors.** Every truth-NO row is a false
+   ENGAGEABLE and there are no false NOT ENGAGEABLE, identically at every
+   factor: normal 3,546 (single-point 2,753, multi-point 793), difficult 2,046
+   (boundary 2,004, known172 42), stress 191. Normal errors are spread across
+   all radii (525 to 576 single-point rows per radius).
 1. **Direction-only errors near the target.** Normal has 132 wrong answers:
    36 false ENGAGEABLE and 96 false NOT ENGAGEABLE. By radius, 103 are at 10 m,
    24 at 100 m and 5 at 1 km. Difficult has 21 (8 false ENGAGEABLE), 16 of them
