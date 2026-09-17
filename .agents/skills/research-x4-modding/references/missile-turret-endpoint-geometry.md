@@ -85,18 +85,83 @@ which covers the 92 conventional combat candidates only.
   read in only one place in the image, inside `Controllable::CreateDynamicInterior`,
   so no missile-specific tag branch exists on the transform path.
 
-### Unresolved: which `rocket` endpoint the engine selects
+### Endpoint selection uses the same role-parameterised collection builder
 
 - X4: 9.00 build 611726
 - Status: inference
-- Source: pinned executable; this repository's accepted endpoint-selection rule
+- Source: pinned executable; RTTI-named `Defaults` constructors and the shared
+  endpoint-collection builder
 - Live test: no
-- Finding: the accepted "element zero of the role-tagged connection vector,
-  ordered by the native connection-name hash" selection rule was recovered
-  against the `laser` role. Nothing found here proves the same rule applies to
-  the `rocket` role, and the native code that supplies the connection argument
-  was not traced to a shared, role-parameterised selector. For the 2
-  single-endpoint components (`turret_bor_m_dumbfire_01_mk1`,
-  `turret_bor_m_guided_01_mk1`) the selection is unambiguous regardless. For
-  the other 30 the selected leaf offset is one of 2 or 4 authored candidates,
-  all of which are derivable offline; only the choice among them is open.
+- Finding: every weapon class builds its firing-endpoint collection through one
+  shared, non-virtual function at `0x14081f7f0(defaults, macro, roleTagId)`. It
+  stores the role tag id at `Defaults+0x798`, then enumerates the macro's
+  connection store through the macro vtable slot `+0xa8`
+  (`0x140973ba0` → `0x14088cc80`) with a tag predicate built by `0x140884010`
+  and the clear flag set, so the destination vector at
+  `Defaults+0x7a0..+0x7a8` is reset to empty and refilled. The enumerator walks
+  the contiguous connection array `[store+0x170]..[store+0x178]` in native
+  storage order and appends each passing connection without reordering, which
+  is the accepted unsigned connection-name-hash order.
+
+  That function has exactly four callers, one per weapon role:
+  `U::Weapon::Defaults` (`0x14081e2d0`, at `0x14081f0a4`) passes the interned
+  `laser` tag id from `0x14395ccd8`; `U::MissileTurret::Defaults`
+  (`0x14060b400`, at `0x14060b44c`) and `U::MissileLauncher::Defaults`
+  (`0x14060a570`, at `0x14060a5a2`) pass the interned `rocket` tag id from
+  `0x14395ce00`; a fourth caller at `0x140849fa2` serves the remaining
+  launcher class. `U::MissileTurret::Defaults` chains
+  `U::Turret::Defaults` (`0x14080cf60`) → `U::Weapon::Defaults`, so the
+  `laser`-filtered vector is built first and then cleared and rebuilt with the
+  `rocket` role. The selection rule for missile turrets is therefore the
+  accepted conventional rule with `rocket` substituted for `laser`, evaluated
+  by the same code.
+
+### `barrelposition` always takes element zero; firing cycles separately
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned executable; call-site census of the two endpoint accessors
+- Live test: no
+- Finding: the script property reaches `0x1407c6e80`, which clears `edx` and
+  calls `0x1405bebc0(weapon, 0)` — element zero of the same
+  `Defaults+0x7a0` vector — then invokes vtable slot `+0x1EC8`
+  (`0x14081c960`, the identical pointer in `U::Turret` and `U::MissileTurret`)
+  on that connection. `0x1407c6e80` has exactly one caller, the property
+  evaluator case at `0x140d045cf`, so nothing else consumes the index-zero
+  endpoint.
+
+  A separate accessor `0x1405bec50` indexes the same vector with the per-shot
+  counter at `weapon+0x2f0`, which `0x1407c6ed0` advances modulo the endpoint
+  count. The firing function that consumes it (`0x1408132d0`) is vtable slot
+  674 and is the same pointer in `U::Turret` and `U::MissileTurret`. Per-shot
+  barrel cycling therefore exists identically for conventional and missile
+  turrets and never changes what `barrelposition` reports.
+
+### Missile components declare no `laser` connections
+
+- X4: 9.00 build 611726
+- Status: shipped-source
+- Source: the 32 official `missileturret` component XML files
+- Live test: no
+- Finding: no missile-turret component declares any `laser`-tagged connection,
+  so the rebuild described above yields a `rocket`-only collection on this
+  corpus whether or not the builder clears first. Sibling `rocket` endpoints
+  are not interchangeable for geometry: on the Argon M guided component the
+  two outermost endpoints are about 6.2 m apart and carry opposite-sign
+  quaternions, so endpoint identity materially changes the muzzle pose even
+  though every sibling shares one parent part and therefore one bearing/arc
+  chain.
+
+### Coverage
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: the records above plus the accepted 32-macro corpus audit
+- Live test: no
+- Finding: all 32 official missile turrets are deterministic offline. Guided
+  and dumbfire macros are both class `missileturret`, construct the same
+  `U::MissileTurret::Defaults`, and therefore share one selection path; no
+  class-specific branch alters the result. The representative firing endpoint
+  is the `rocket`-tagged connection with the smallest unsigned native
+  connection-name hash, and the accepted evaluator resolves it for all 32 with
+  no hash collision.
