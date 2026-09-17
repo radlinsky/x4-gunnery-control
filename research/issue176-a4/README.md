@@ -32,8 +32,10 @@ pickles. Outputs stay in the ignored `.x4-research-cache/issue176-a4/`:
   truth point is the aim point the selector picks from O, and every probe,
   selected point and distance is measured from O.
 - The scorer origin is the turret component origin, placed so the turret's
-  rest-pose muzzle (yaw = pitch = 0, `L∘Rx(0)∘G∘Ry(0)∘H`) lands on O:
-  `component_origin = O - rest_muzzle_offset · R`, the inverse of the scorer's
+  reference-pose muzzle lands on O. The reference pose is horizontal angle 0
+  with the allowed vertical angle nearest 0 (0 if the arc contains it, else the
+  nearer arc limit), `L∘Rx(x)∘G∘Ry(0)∘H`:
+  `component_origin = O - reference_muzzle_offset · R`, the inverse of the scorer's
   `(p - O)·Rᵀ`. `compare.py` asserts the round trip. Turret and rotation
   cycle as in P3c: turret `i % 92`, axis rotation `(i // 92) % 24`.
 - The A2 corpus (`simulate.corpus`), the medium three-ray rule

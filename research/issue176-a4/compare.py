@@ -105,10 +105,13 @@ def same_ray(o, d0, rough, pts):
 def evaluate(index):
     pop, sub, s, ti, ri = CASES[index]
     turret, R, o = old.CORPUS['turrets'][ti], old.ROT[ri], np.asarray(s['O'], float)
-    # Sampled O is the prospective muzzle; the scorer takes the component origin, so back out the rest-pose
-    # (yaw = pitch = 0) muzzle offset L∘Rx(0)∘G∘Ry(0)∘H, rotated to world by the scorer's inverse (p-O)·Rᵀ.
-    seg, rest = turret['seg'], ((0., 0., 0.), old.joint_matrix(0., 0.))
-    muzzle = np.asarray(old.compose(old.compose(old.compose(seg['L'], rest), seg['G']), old.compose(rest, seg['H']))[0])
+    # Sampled O is the prospective muzzle; the scorer takes the component origin, so back out the reference-pose
+    # muzzle offset L∘Rx(x)∘G∘Ry(0)∘H (yaw 0, pitch the allowed arc value nearest 0), rotated to world by the
+    # scorer's inverse (p-O)·Rᵀ.
+    seg, (lo, hi) = turret['seg'], turret['arc']
+    pitch = math.radians(0. if lo <= 0 <= hi else lo if lo > 0 else hi)
+    muzzle = np.asarray(old.compose(old.compose(old.compose(seg['L'], ((0., 0., 0.), old.joint_matrix(pitch, 0.))), seg['G']),
+                                    old.compose(((0., 0., 0.), old.joint_matrix(0., 0.)), seg['H']))[0])
     body = o - muzzle @ np.asarray(R)
     assert np.allclose((o - body) @ np.asarray(R).T, muzzle, atol=1e-6 * max(1., *abs(o))), (index, o, body)
     body = tuple(map(float, body))
