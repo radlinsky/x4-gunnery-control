@@ -28,10 +28,11 @@ authored `ammunition` `guided`/`dumbfire` token. SWI: 160 / 4 / 0 / 0.
 Each record is an ordered leaf-to-root op list of fixed transforms and
 axis-tagged rotation joints with authored limits, plus `mechanical_class`
 (`ordinary_xy`, `bounded_traverse`, `reversed_xy`, `rotation_z`, `other`) and
-explicit `uncertainty` flags. Nothing about the two unresolved SWI runtime
-facts is guessed: `missing_selector_ani` (84) keeps the stored part local and
-carries the unbound ANI local alongside it as `ani_alternative`;
-`undeclared_parent` (11) records the assumed root attachment.
+explicit `uncertainty` flags. SWI parts whose components declare no animation
+selector use the stored XML part local; their `turret_active` ANI descriptors
+never bind, so no ANI alternative is carried. The one unresolved SWI runtime
+fact is not guessed: `undeclared_parent` (11) records the assumed root
+attachment.
 
 See `.agents/skills/research-x4-modding/references/swi-091-turret-geometry.md`
 and `missile-turret-endpoint-geometry.md` for the accepted evidence.

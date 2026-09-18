@@ -47,7 +47,7 @@ EXPECTED = {
     "official_total": 124, "official_conventional": 92, "official_missile": 32,
     "swi_total": 164, "swi_ordinary_xy": 154, "swi_bounded_traverse": 8,
     "swi_reversed_xy": 1, "swi_rotation_z": 1, "swi_missile": 4,
-    "swi_missing_selector": 84, "swi_undeclared_parent": 11,
+    "swi_undeclared_parent": 11,
     "official_conventional_gun": 92, "official_guided_missile": 16,
     "official_dumbfire_missile": 16, "official_unresolved_other": 0,
 }
@@ -308,7 +308,7 @@ def _swi_records(supported, combat, projectiles):
             descriptors = {(str(d["part"]).lower(), str(d["subname"]).lower()): d
                            for d in _parse_ani_descriptors(anis[stem])}
 
-        ops, ani_offpath, ani_nonzero = [], False, False
+        ops = []
         for index, name in enumerate(chain):
             connection = connections[name]
             restrictions = [r for group in _direct_children(connection, "restrictions")
@@ -331,25 +331,14 @@ def _swi_records(supported, combat, projectiles):
             stored = read_offset(part[0])
             op = dict(kind="fixed", role="part_local", part=parent, owner=host,
                       transform=_transform(stored), local_source="stored_part_local")
+            # Without a declared selector the part is not animated and X4 uses the stored part local;
+            # its turret_active ANI descriptor never binds (swi-091-turret-geometry.md).
             descriptor = descriptors.get((parent.lower(), "turret_active"))
-            if descriptor is not None:
-                alternative = _descriptor_local(descriptor, stored[1])
-                op["ani_alternative"] = _transform(alternative)
-                if declares_active:
-                    op["transform"], op["local_source"] = _transform(alternative), "ani"
-                    op.pop("ani_alternative")
-                else:
-                    op["local_source"] = "stored_part_local_ani_unbound"
-                    ani_offpath = True
-                    ani_nonzero |= any(abs(v) > 1e-9 for v in alternative[0])
+            if descriptor is not None and declares_active:
+                op["transform"], op["local_source"] = _transform(_descriptor_local(descriptor, stored[1])), "ani"
             ops.append(op)
 
         uncertainty = {}
-        if ani_nonzero:
-            uncertainty["missing_selector_ani"] = ("path parts carry non-zero turret_active ANI translations "
-                                                   "but no effective selector declares that animation")
-        elif ani_offpath:
-            uncertainty["missing_selector_ani_zero"] = "unbound turret_active descriptors are zero-translation"
         if undeclared:
             uncertainty["undeclared_parent"] = ("selected-path root connection names a part no connection declares; "
                                                 "loader behaviour unresolved, root attachment assumed")
@@ -380,7 +369,6 @@ def _validate(records):
         "swi_reversed_xy": classes["reversed_xy"],
         "swi_rotation_z": classes["rotation_z"],
         "swi_missile": sum(r["macro_class"] == "missileturret" for r in swi),
-        "swi_missing_selector": sum("missing_selector_ani" in r["uncertainty"] for r in swi),
         "swi_undeclared_parent": sum("undeclared_parent" in r["uncertainty"] for r in swi),
     }
     for behavior in BEHAVIORS:
