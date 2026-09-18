@@ -242,7 +242,7 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 | `missileturret` with `rocket` endpoints | 4 | 4 | yes — all four |
 | component classed `weapon` (`weapon_kx5_s_turret_macro`) | 1 | 1 | yes |
 | undeclared-parent root connection | 13 | 11 | yes; `turret_yuv_l_beam_macro` and `turret_gravity_well_macro` drop out |
-| non-zero missing-selector ANI translations | 88 | 84 | yes |
+| non-zero missing-selector ANI translations (unbound; resolved) | 88 | 84 | yes |
 | geometry source with an SWI ANI resource | 129 | 124 | — |
 | path-relevant `turret_active` descriptors | 106 | 102 | — |
 
@@ -265,14 +265,65 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Status: third-party-technique
 - Source: owner-provided SWI catalogs; 41 needed ANI resources extracted under ignored `.x4-research-cache/issue176-swi-ani/` with manifest; all 41 extracted bytes matched their catalog MD5 values
 - Live test: no
-- Finding: of the 165 macros using SWI-authored components, 129 reference geometry sources with an SWI ANI resource. The 41 relevant SWI ANI files contain path-relevant `turret_active` descriptors for 106 of them; 88 have non-zero path translations. Restricted to the 77 mount-resolvable macros the same measurement gives 60, 50 and 36. The non-zero family translates `part_rotator` by approximately +2.96209 m on Y and `part_barrel` by approximately +3.521184 m on Z, a combined rest-muzzle displacement of about 4.6014 m if those descriptors bind. The examined path-relevant rotation channels are zero, so this evidence can change pivots/fixed translations but not joint axis, order, or authored limits.
+- Finding: of the 165 macros using SWI-authored components, 129 reference geometry sources with an SWI ANI resource. The 41 relevant SWI ANI files contain path-relevant `turret_active` descriptors for 106 of them; 88 have non-zero path translations. Restricted to the 77 mount-resolvable macros the same measurement gives 60, 50 and 36. The non-zero family translates `part_rotator` by approximately +2.96209 m on Y and `part_barrel` by approximately +3.521184 m on Z, a combined rest-muzzle displacement of about 4.6014 m if those descriptors bind. The examined path-relevant rotation channels are zero, so this evidence can change pivots/fixed translations but not joint axis, order, or authored limits. Those descriptors do **not** bind: see the resolved missing-selector record below. These translations are art data X4 never reaches on these components.
 
-### Missing-selector ANI binding remains unresolved
+### Missing-selector ANI binding is resolved: the descriptors never bind
+
 - X4: 9.00 build 611726; SWI 0.9.1 HF
-- Status: inference
-- Source: SWI ANI/XML comparison above, official X4 turret selector census, and the accepted offline selector-binding model
-- Live test: no — no compatible SWI/X4 9.00 runtime is currently available
-- Finding: 165 SWI-component macros do not declare the normal `turret_*` state selector family, while the affected ANI resources still contain `turret_active` records. Official X4 9.00 turret sources do not provide a matching control where path-relevant ANI records exist but no effective selector declares that animation name. Therefore the evidence does not establish whether X4 binds those records anyway. The two interpretations differ by metre-scale geometry for 88 of the 165 SWI-component macros — **84 of the final 164-macro combat + equipable corpus**, of which 34 are also mount-resolvable — so neither interpretation should be promoted to runtime truth without new evidence.
+- Status: shipped-source
+- Source: build-pinned `X4.exe` SHA-256
+  `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`,
+  re-disassembled for this record at `0x14088a203` (animated-part bit 9),
+  `0x140754fa0`–`0x140754ffa` (instance animation-entry creation),
+  `0x140880d10` (per-part animation source object), `0x14074c2d0`
+  (part local-transform branch); plus the accepted #166 A7 selector/state
+  trace and a per-connection re-scan of the affected SWI component XML under
+  ignored `.x4-research-cache/issue179/swi_xml/`
+- Live test: no — static native trace plus source scan
+- Finding: this supersedes the earlier "remains unresolved" record. The
+  engine decides whether a part is animated from authored `<animation>`
+  records alone, before any ANI file is consulted:
+
+  - `0x14088a203` sets the animated bit only when the connection's own
+    `<animations>` list is non-empty, or when its parent part is animated and
+    the tag gate passes. A component with no `<animation>` record anywhere
+    therefore has no animated part.
+  - `0x140754fa0` creates a per-instance animation entry only for parts
+    carrying that bit, so no `SequenceControlUnit`, no state, and no initial
+    `Turret`/`MissileTurret` `turret_active`/`turret_inactive` selection
+    happens for such a part.
+  - `0x140880d10` returns a null animation source object when the connection
+    has no selector list and no animated ancestor, so no ANI descriptor is
+    ever bound. Descriptor binding is per selector name; a `turret_active`
+    descriptor with no `turret_active` selector has nothing to bind to.
+  - `0x14074c2d0` branches on that same bit and, when it is clear, copies the
+    stored part matrix directly. The animated evaluator is not called.
+
+  Re-scanning the affected SWI sources: the 84 in-scope macros resolve to 64
+  distinct components, and **all 64 contain zero `<animation>` records on any
+  connection**, on or off the selected path. No SWI file redefines or `<diff>`s
+  those components. The ANI `turret_active` descriptors exist in the art but
+  are unreachable.
+
+  **Therefore the physical transform X4 uses for every affected path part is
+  the stored XML part local**, not the ANI descriptor and not a runtime choice
+  between them. The stored part translation is zero on all 325 affected-macro
+  path parts, which is also what the animation-default branch would give, so
+  the two non-ANI branches coincide and only the ANI branch would have
+  differed — by up to 3.521184 m on a single axis, about 4.6014 m combined.
+
+  Consequence for prediction: geometry is fixed at load/instance-init from
+  static data. The target position enters only the downstream joint solver, so
+  the engine can never try one geometry, fail, and reach for the other. An
+  "either candidate geometry can bear on the target" rule has no runtime
+  referent and must not be used. The stored-part-local geometry is
+  authoritative; the ANI alternative is not a second runtime geometry and
+  should be dropped rather than scored.
+
+  The 84 macros are **no longer uncertain on this ground**. The separate
+  undeclared-parent question below is unaffected: it applies to 11 macros, all
+  of which are inside the 84, and it does not interact with the bit-9 decision,
+  because those components declare no animation records either way.
 
 ### Undeclared-parent loader behavior remains unresolved
 - X4: 9.00 build 611726; SWI 0.9.1 HF
@@ -286,4 +337,4 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Status: inference
 - Source: combined source and static-trace evidence recorded above
 - Live test: no
-- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Runtime truth remains conditional for the 84 in-scope macros affected by missing-selector ANI binding and the 11 affected by undeclared-parent loader behavior, until compatible live evidence or stronger native evidence resolves those two facts. Both uncertainties survive the ware filter and remain unresolved for the final #176 corpus.
+- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Missing-selector ANI binding is now resolved by native evidence: the 84 affected in-scope macros take the stored XML part local and carry a single geometry. The one remaining offline-truth uncertainty for the final #176 corpus is undeclared-parent loader behavior, affecting 11 in-scope macros, all of which sit inside those 84. The runtime handedness caveat on the rotation-Z arrestor dish is a separate, narrower open item.
