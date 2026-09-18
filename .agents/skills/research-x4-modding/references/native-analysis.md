@@ -97,6 +97,7 @@ are real native names.
 | Macro box slots, collision eligibility, and raw authored aim selector | [macro-box-aimtargets.md](macro-box-aimtargets.md) |
 | Turret yaw map, mover state, and resting-point gate | [turret-yaw-resting-point-gate.md](turret-yaw-resting-point-gate.md) |
 | Target-point turret joint solver route and RVA table | [turret-target-point-joint-solver.md](turret-target-point-joint-solver.md) |
+| Aim-feasibility surface: HUD aim exports, `Weapon::Defaults` limits, solver clamp, `GetDistanceBetween`, data-getter key hash | [turret-aim-feasibility-surface.md](turret-aim-feasibility-surface.md) |
 | Selected-connection transform composition entry points | [barrelposition-offline-transform-semantics.md](barrelposition-offline-transform-semantics.md) |
 | Live interception of the selected `barrelposition` transform | [barrelposition-live-connection-orientation.md](barrelposition-live-connection-orientation.md) |
 | PE export table of the engine (2493 named exports) | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) |
