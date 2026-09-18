@@ -200,3 +200,43 @@ native names used are export names, RTTI type names and shipped strings.
   So a query from a chosen probe origin should return the direction from that
   origin to the aim point nearest it. That combination is inference until one
   live check confirms it.
+
+## No normal-mod route reaches authored connection restrictions
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: `libraries/scriptproperties.xml` (`componentslot` 1471-1491,
+  `macroslot` 1493-1503, `macro` datatype); `libraries/common.xsd`; every
+  `ffi.cdef` in `ui-9.00`; `GetLibraryEntry` builder `0x00297F00`;
+  `GetMacroData` `0x00283680`; `GetComponentData` `0x00278AC0`; undeclared
+  export names
+- Live test: no — static search, 2026-09-18
+- Finding: no MD, AI, Lua or FFI path can walk the chain from equipment macro
+  to component, to connection, to `rotation_x`/`rotation_y`/`rotation_z`
+  restriction min/max.
+  - **Connection-carrying types expose no restrictions.** `componentslot` and
+    `macroslot` offer only name, tags, group, offset and rotation (plus static
+    variants and distances). The FFI `UIComponentSlot` is only
+    `{component, connection}`.
+  - **Component slots come only from NPC, chair, room, control-position,
+    dock and trade-parking sources.** Macroslots come only from door lookups.
+    No path yields a turret joint connection.
+  - **FFI getters that take a connection name** (`GetComponentDetails`,
+    `IsDestructible2`, `IsDetailUIElement`, `GetRelationStatus3/4`,
+    `GetCompSlot*`) return name, hull, shield, speed, relation or
+    control-position data. `TriggerCompSlotAnimation` is an action.
+  - **Upgrade and fitting structs** (`UpgradeGroupInfo`, `UILoadoutSlot`,
+    `EquipmentCompatibilityInfo`, `UpgradeGroup`) carry the mounted
+    component, macro, slot size, counts and compatibility tags only.
+  - **`GetLibraryEntry` does not carry limits.** The full key list was
+    recovered from its string table. Turret entries give DPS, damage, reload,
+    heat, bullet speed, range and `rotation`, which the encyclopedia labels
+    rotation speed. Missile-turret entries give hull, `rotation` and storage.
+    `maxpitchangle`, `maxyawangle` and `maxangle` exist only on long-range
+    scanner software entries. No shipped UI displays or compares turret arcs.
+  - **No data getter reads connection restriction records.** Neither
+    `GetMacroData` nor `GetComponentData` reads the connection restriction
+    records or the `Weapon::Defaults` limit pair. Their `+0x1C8` and `+0x150`
+    touches are a name string and stack locals.
+  - **No undeclared export concerns components, connections, animation or
+    macro structure** beyond ship-macro lists and launched-missile selection.
