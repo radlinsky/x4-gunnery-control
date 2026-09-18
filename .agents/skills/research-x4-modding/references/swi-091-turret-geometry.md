@@ -10,7 +10,7 @@ evidence and derived conclusions.
 - Status: third-party-technique
 - Source: owner-provided SWI catalogs; ignored extracted WeaponSystems XML under `.x4-research-cache/issue179/swi_xml/`
 - Live test: no — SWI 0.9.1 HF is not available in the current X4 9.00 runtime environment
-- Finding: the SWI turret-equipment structural census is 169 macros (165 `turret`, 4 `missileturret`). This is the structural corpus, not the production scope; see the mating-connection record below for the supported subset. The 169 reduce to four source-level joint signatures, root-side to leaf-side: 159 `rotation_y` unbounded then `rotation_x` bounded; 8 bounded `rotation_y` then bounded `rotation_x`; 1 `rotation_x` bounded then `rotation_y` bounded (`turret_m_wall_sith_macro`); and 1 `rotation_z` unbounded then `rotation_x` bounded (`turret_arrestor_dish_macro`). All 169 selected endpoint paths use rotation restrictions only.
+- Finding: the SWI turret-equipment structural census is 169 macros (165 `turret`, 4 `missileturret`). This is the structural corpus; the production scope is the 167 combat + equipable subset recorded below. The 169 reduce to four source-level joint signatures, root-side to leaf-side: 159 `rotation_y` unbounded then `rotation_x` bounded; 8 bounded `rotation_y` then bounded `rotation_x`; 1 `rotation_x` bounded then `rotation_y` bounded (`turret_m_wall_sith_macro`); and 1 `rotation_z` unbounded then `rotation_x` bounded (`turret_arrestor_dish_macro`). All 169 selected endpoint paths use rotation restrictions only.
 
 The eight bounded-`rotation_y` cases are `turret_s_gauntlet_macro`,
 `turret_s_lambda_macro`, `turret_m_ion_nk7_ball_macro`, the four
@@ -92,7 +92,7 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Status: third-party-technique
 - Source: same corpus, recomputed per macro rather than inherited from the 169 census
 - Live test: no
-- Finding: these are diagnostic counts within the mount-resolvable subset, not production-scope counts. No case is placed in or out of the final #176 corpus by this table; every identity below remains a live structural fact awaiting ware-backed combat + equipable classification.
+- Finding: these are diagnostic counts within the mount-resolvable subset, not production-scope counts. The production-scope recount is the 167-macro table further below; this table is retained only to show how mount resolvability cuts across the unusual cases.
 
 | Case | 169 census | Within the 77 | Identities |
 |---|---|---|---|
@@ -106,28 +106,103 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 | metre-scale missing-selector ANI uncertainty | 88 | 36 | the six `turret_m_llaser_*` macros are in the 92 |
 
   Seven of the eight bounded-`rotation_y` macros and the sole `rotation_z`
-  case sit in the 92 rather than the 77. That does not retire them: the
-  arrestor-dish clock-plus-cone interpretation and the bounded-yaw records
-  stay valid and may still be required, because a macro in the 92 can still
-  turn out to be combat and equipable. Every unusual case recorded in this
-  reference keeps its identity and structural facts until ware evidence
-  decides the corpus.
+  case sit in the 92 rather than the 77. Ware evidence has since confirmed all
+  of them combat and equipable, so they are required despite being
+  mount-unresolvable: the arrestor-dish clock-plus-cone interpretation and the
+  bounded-yaw records stay in scope.
 
-### Ware-backed equipability and combat purpose remain unresolved
+### Final #176 scope: 167 combat + equipable of the 169
 
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: third-party-technique
-- Source: inventory of the locally retained SWI research data
-- Live test: no
-- Finding: the accepted model decides equipability and combat-versus-utility from equipment wares — an equipment ware whose direct `<component ref>` exactly equals the turret macro name, with empty `<use>` purpose tokens meaning combat and exactly `mine` or `salvage` meaning non-combat utility. The retained SWI extraction covers `props/WeaponSystems/` XML and 41 ANI resources only; it contains no SWI `libraries/wares.xml`, no ship macros, and no macro index, and the SWI catalogs are no longer present on this machine. Neither axis can be derived from the retained data, so no SWI macro is yet classified combat or equipable and the final #176 SWI scope remains unknown. The 77 is neither the final corpus nor an upper or lower bound on it: the two conditions are independent of mating-connection resolvability.
+- Source: SWI `libraries/wares.xml` recovered from the owner's original
+  `starwarsmod_m1_091hf` archive (`content.xml` `version="091"`,
+  `description="Star Wars 0.9.1 HF"`, `date="2025-12-24"`); catalog entry
+  `ext_02.cat` `libraries/wares.xml`, extracted bytes MD5
+  `c7f87df657c0e1f4058e710defcb0c7b` matching the catalog index. Archive
+  identity against the accepted research was confirmed by re-reading all 41
+  previously extracted ANI resources at their recorded `ext_01.dat` offsets:
+  41/41 byte-identical. Joined against the eight official X4 9.00
+  `libraries/wares.xml` sources under `.x4-research-cache/official-source-sets/`.
+  Raw SWI data stays under ignored `.x4-research-cache/` paths.
+- Live test: no — SWI 0.9.1 HF is not available in the current X4 9.00 runtime
+- Finding: the SWI ware file is a `<diff>` (119 `add`, 662 `replace`, 1008
+  `remove`) applied over the official ware set; no selector in any of the nine
+  sources edits a ware's `<component>` or `<use>` subtree, so ware identity,
+  component reference, and purpose tokens are decided by whole-`<ware>` add,
+  replace, and remove operations alone. Applying the accepted rule — an
+  `equipment`-tagged ware, present in the effective set, whose direct
+  `<component ref>` exactly equals the turret macro name, with no `purposes`
+  token meaning combat and `mine`/`salvage` meaning utility — to all 169 exact
+  macro identities gives **167 combat + equipable**, 0 utility/non-combat, 0
+  ambiguous or unresolved, and 2 with no equipment ware. Every in-scope macro
+  resolves exactly one equipment ware; none carries a `purposes` token. The
+  final corpus is therefore the accepted 169-macro structural census minus
+  exactly these two identities:
 
-  To close this, extract SWI `libraries/wares.xml` from the SWI catalogs into
-  the ignored cache and apply the accepted ware rule to all 169. Two members
-  of the 77 are the obvious purpose-test candidates on their authored mating
-  tags (`turret_gravity_well_macro` tagged `gravitywell`,
-  `turret_m_tractor_heavy_macro` tagged `tractorh`); neither is classified
-  here, because the accepted rule decides purpose from the ware, not from tags
-  or names.
+  - `turret_l_singlexi8_turbolaser_red_macro` — the SWI ware file contains a
+    ware whose `<component ref>` is this macro, but the whole `<ware>` element
+    is inside an XML comment, so no ware exists in the effective set.
+  - `turret_yuv_l_beam_macro` — no ware in any of the nine sources references
+    this macro at all.
+
+  Nothing was classified from macro names, mating tags, display names, or
+  appearance. The two purpose-test candidates flagged earlier on their mating
+  tags, `turret_gravity_well_macro` (`gravitywell`) and
+  `turret_m_tractor_heavy_macro` (`tractorh`), each resolve a single
+  `equipment`-tagged ware with a bare `<use threshold="0" />` and are therefore
+  **in scope** under the ware rule; the tags carried no weight either way. The
+  four macros reusing official X4 components keep official wares that SWI does
+  not remove, and are in scope.
+
+  Reproduction, for a fresh session: enumerate every `macro` with
+  `class="turret"` or `class="missileturret"` in the ignored SWI WeaponSystems
+  XML (this yields the accepted 169, 165 + 4); build the effective ware set by
+  applying the eight official `libraries/wares.xml` sources then the SWI diff,
+  treating whole-`<ware>` add/replace/remove only; keep a macro when exactly one
+  surviving `equipment`-tagged ware names it in `<component ref>` and no `<use>`
+  entry carries `purposes`. The result is the 169 minus the two identities
+  above. The same enumeration reproduces every count in the tables below, which
+  is how the 169 census, the 159/8/1/1 signatures, the 13 undeclared-parent
+  identities, the four `rocket` endpoints, and the 77/92 split were re-verified
+  against the accepted record before the ware filter was applied.
+
+### Unusual-case recount over the final 167-macro corpus
+
+- X4: 9.00 build 611726; SWI 0.9.1 HF
+- Status: third-party-technique
+- Source: same corpus, recomputed per macro over the ware-filtered set
+- Live test: no
+- Finding: these are the production-scope counts for #176. Mount resolvability
+  is reported as a separate property inside the corpus, not as a scope filter.
+
+| Case | 169 census | Final 167 | In scope? |
+|---|---|---|---|
+| unbounded `rotation_y` → bounded `rotation_x` | 159 | 157 | yes; the 2 excluded macros are both from this signature |
+| bounded `rotation_y` → bounded `rotation_x` | 8 | 8 | yes — all eight |
+| reversed `rotation_x` → `rotation_y` (`turret_m_wall_sith_macro`) | 1 | 1 | yes |
+| unbounded `rotation_z` → bounded `rotation_x` (`turret_arrestor_dish_macro`) | 1 | 1 | yes |
+| `missileturret` with `rocket` endpoints | 4 | 4 | yes — all four |
+| component classed `weapon` (`weapon_kx5_s_turret_macro`) | 1 | 1 | yes |
+| undeclared-parent root connection | 13 | 12 | yes; only `turret_yuv_l_beam_macro` drops out |
+| non-zero missing-selector ANI translations | 88 | 87 | yes; only `turret_yuv_l_beam_macro` drops out |
+| geometry source with an SWI ANI resource | 129 | 127 | both excluded macros had one |
+| path-relevant `turret_active` descriptors | 106 | 105 | `turret_l_singlexi8_turbolaser_red_macro`'s ANI has none |
+
+  No unusual geometry case is retired by ware evidence: every bounded-yaw
+  macro, the reversed-order wall turret, the rotation-Z arrestor dish, all four
+  missile turrets, and the component-classed-as-weapon case are combat and
+  equipable and must be supported. Both exclusions are ordinary
+  `rotation_y` → `rotation_x` turrets.
+
+  Mount resolvability inside the final corpus: **75 of the 167** resolve a
+  unique `component`-tagged mating connection and **92 do not**. Both excluded
+  macros came from the 77, so the 92 is unchanged; the two properties are
+  independent, exactly as the mating-connection record states. Within those 75,
+  the unusual cases are 73 ordinary signatures, `turret_m_ion_nk7_ball_macro`
+  (bounded yaw), `turret_m_wall_sith_macro`, all four missile turrets,
+  `weapon_kx5_s_turret_macro`, 6 undeclared-parent macros, and 35 with non-zero
+  ANI translations.
 
 ### SWI ANI extraction and path-relevant translations
 - X4: 9.00 build 611726; SWI 0.9.1 HF
@@ -141,18 +216,18 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 - Status: inference
 - Source: SWI ANI/XML comparison above, official X4 turret selector census, and the accepted offline selector-binding model
 - Live test: no — no compatible SWI/X4 9.00 runtime is currently available
-- Finding: 165 SWI-component macros do not declare the normal `turret_*` state selector family, while the affected ANI resources still contain `turret_active` records. Official X4 9.00 turret sources do not provide a matching control where path-relevant ANI records exist but no effective selector declares that animation name. Therefore the evidence does not establish whether X4 binds those records anyway. The two interpretations differ by metre-scale geometry for 88 of the 165 SWI-component macros, and for 36 within the mount-resolvable subset, so neither interpretation should be promoted to runtime truth without new evidence.
+- Finding: 165 SWI-component macros do not declare the normal `turret_*` state selector family, while the affected ANI resources still contain `turret_active` records. Official X4 9.00 turret sources do not provide a matching control where path-relevant ANI records exist but no effective selector declares that animation name. Therefore the evidence does not establish whether X4 binds those records anyway. The two interpretations differ by metre-scale geometry for 88 of the 165 SWI-component macros — **87 of the final 167-macro combat + equipable corpus**, of which 35 are also mount-resolvable — so neither interpretation should be promoted to runtime truth without new evidence.
 
 ### Undeclared-parent loader behavior remains unresolved
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: inference
 - Source: SWI source geometry for the 13 affected macros plus official source scan showing no equivalent undeclared-parent control
 - Live test: no — no compatible SWI/X4 9.00 runtime is currently available
-- Finding: this affects 13 of the 169, of which 7 are in the mount-resolvable subset. Source inspection cannot distinguish whether X4 attaches a connection whose `parent` names an undeclared part at the component root or drops that connection/subtree. ANI evidence confirms the source art contains a `part_socket` identity in the affected family but does not resolve loader behavior. Treat root-attachment as an explicit inference, not a proven runtime fact.
+- Finding: this affects 13 of the 169, **12 of the final 167-macro combat + equipable corpus**, of which 6 are also mount-resolvable. Source inspection cannot distinguish whether X4 attaches a connection whose `parent` names an undeclared part at the component root or drops that connection/subtree. ANI evidence confirms the source art contains a `part_socket` identity in the affected family but does not resolve loader behavior. Treat root-attachment as an explicit inference, not a proven runtime fact.
 
 ### Current evidence boundary for offline truth geometry
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: inference
 - Source: combined source and static-trace evidence recorded above
 - Live test: no
-- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Runtime truth remains conditional for the 88 macros affected by missing-selector ANI binding and the 13 affected by undeclared-parent loader behavior, until compatible live evidence or stronger native evidence resolves those two facts. The 36 and 7 figures are the same counts restricted to the mount-resolvable subset; both sets are diagnostic, and neither is a production-scope count while the #176 corpus is undetermined.
+- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Runtime truth remains conditional for the 87 in-scope macros affected by missing-selector ANI binding and the 12 affected by undeclared-parent loader behavior, until compatible live evidence or stronger native evidence resolves those two facts. Both uncertainties survive the ware filter and remain unresolved for the final #176 corpus.
