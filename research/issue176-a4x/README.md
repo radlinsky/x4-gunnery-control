@@ -32,7 +32,9 @@ explicit `uncertainty` flags. SWI parts whose components declare no animation
 selector use the stored XML part local; their `turret_active` ANI descriptors
 never bind, so no ANI alternative is carried. Connections naming an
 undeclared parent part attach to the component root, as the X4 loader does.
-No SWI runtime geometry fact remains unresolved.
+The former missing-selector ANI and undeclared-parent uncertainties therefore
+do not require UNKNOWN in this corpus; narrower SWI caveats remain recorded in
+the research reference below.
 
 See `.agents/skills/research-x4-modding/references/swi-091-turret-geometry.md`
 and `missile-turret-endpoint-geometry.md` for the accepted evidence.
