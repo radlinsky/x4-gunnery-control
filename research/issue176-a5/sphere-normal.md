@@ -33,21 +33,27 @@ python3 research/issue176-a5/sphere_normal.py        # ~25 s, prints every table
   - `root`: the yaw/root joint pivot.
   - `leaf`: the pitch pivot, taken at root angle 0.
   - `leaf_on_root_axis`: the pitch pivot projected onto the root rotation axis.
-    It is fixed and runtime-plausible.
+    It is a fixed, simple geometric center, but it needs the authored pivot
+    position, which the runtime cannot read for an unknown turret
+    (`runtime-restriction-access.md`). The universal shipped method cannot use it.
   - `fit_radius`: the least-squares sphere through the muzzle positions.
   - `fit_lines`: the least-squares point nearest every firing line.
-  - `fit_minimax`: the center that minimises the worst direction error, found
-    by local compass search. It is therefore only an upper bound on the best
-    possible cone.
+  - `fit_minimax`: the best center found by a local compass search that tries
+    to minimise the worst direction error. It is not a proven global optimum,
+    and its cone is not a lower bound: another center could do better.
   - None of these centers moves with the turret.
 - **Direction error** is the angle between (muzzle − center) and the launch
   direction. The **cone** for a turret is its worst sampled direction error.
 
-**Mathematically guaranteed:** at every pose,
-error = asin(d / r), where d is the distance from the center to the firing
-line and r = |muzzle − center|. A barrel whose line passes d metres from the
-center is never radial. The error grows as the muzzle gets closer to the
-center.
+**Mathematically guaranteed:** at every pose, the directed error is
+atan2(|v × D|, v · D), where v = muzzle − center and D is the launch
+direction. The script computes exactly this. The perpendicular distance from
+the center to the firing line is d = |v × D|, so sin(error) = d / r with
+r = |v|. That gives error = asin(d / r) only when the error is at most 90°,
+meaning the barrel points outward (v · D ≥ 0). When the barrel points back
+toward the center, the directed error is 180° − asin(d / r). A firing line
+that passes d > 0 from the center is never radial, and for a fixed d the
+error grows as the muzzle gets closer to the center.
 
 ## Headline numbers (observed on the current corpus)
 
@@ -61,7 +67,7 @@ center.
 | **leaf_on_root_axis** | **14.6** | **42.8** | **51.1** | **55.1** | **90.0** |
 | fit_radius | 14.7 | 47.5 | 55.4 | 56.5 | 90.0 |
 | fit_lines | 15.4 | 49.3 | 55.3 | 66.0 | 90.0 |
-| fit_minimax (best possible) | 13.4 | 37.1 | 51.1 | 55.1 | 55.1 |
+| fit_minimax (best found by search) | 13.4 | 37.1 | 51.1 | 55.1 | 55.1 |
 
 ### Turrets whose worst error fits within each cone half-angle (of 288)
 
@@ -113,16 +119,16 @@ concrete geometry.
    Terran and Paranid `m_guided_01/02` and `m_dumbfire_01/02`. The launch
    endpoint sits 4.5 m from the pitch pivot, but its launch line passes 4.1 m
    to the side of the pivot. The missile leaves roughly parallel to the arm,
-   not along it. The error is 51–55° at every center, the best fit included.
+   not along it. The error is 51–55° at every tested center, including the best center found by the search.
    These turrets are fundamentally non-radial. The L missile turrets
    (`spl_l_*` 52°, `par_l_*` 31–40°) behave the same way at larger scale.
 2. **`swi:subjugator_ion_weapon_macro`.** The launch line is perpendicular to a
    94.6 m arm: the barrel fires tangentially. Every mechanical center gives
-   exactly 90°. Only a far-away best-fit center reaches 50°.
+   exactly 90°. The best center the search found lies far away and reaches 50°.
 3. **SWI Imperial dual turbolasers.** These are the eight `bella`/`exe`
    `dual_tl` colours. The pitch pivot is 19.9 m off the yaw axis, and the
    endpoint line misses it by 33 m. That gives 43° at leaf_on_root_axis and
-   33° at best.
+   33° at the best center found by the search.
 4. **Short-arm guns.** Examples: `arg_m_beam` (0.94 m barrel, 67°),
    `bor_m_railgun`, `gen_m_shieldpierce`, and SWI `vcx100_short*`. A small
    sideways offset over a barrel of 1–3 m gives a large angle. Of the 242
@@ -146,23 +152,24 @@ are not a problem in this corpus.
    A long tail exists where the pitch pivot is off the yaw axis or the arm is
    short.
 2. **Is the firing direction approximately radial?** No. Even the best
-   possible fixed center gives a median worst error of 13° and a p90 of 37°.
+   fixed center found by the search gives a median worst error of 13° and a p90 of 37°.
    Official missile turrets are about 51–55°. Only 37 of 288 turrets stay within 5°, and 103
    within 10°.
 3. **Which fixed center works best?** `leaf_on_root_axis`, the pitch pivot
    projected onto the root axis. It is the best simple center for 215 of 288
    turrets. The component origin and the root pivot are clearly worse.
-4. **Is a runtime-plausible center nearly as good as the best fit?**
-   Geometrically yes. leaf_on_root_axis is within 1–2° of the minimax optimum
-   at the median and p95, and it covers 238 turrets within 30° against 247 for
-   the optimum. It lies a median of 0.56 m from the line fit.
-   However, it needs the pitch pivot, and that is authored geometry, which the
-   runtime cannot read for an unknown turret
-   (`runtime-restriction-access.md`). The component origin is the only center
+4. **Is a simple center nearly as good as the best fit?**
+   Geometrically yes. leaf_on_root_axis is within 1–2° of the best center found
+   by the search at the median and p95, and it covers 238 turrets within 30°
+   against 247 for that center. It lies a median of 0.56 m from the line fit.
+   It is not runtime-available. It needs the pitch pivot, which is authored
+   geometry that the runtime cannot read for an unknown turret
+   (`runtime-restriction-access.md`), so the universal shipped method cannot
+   use it. The component origin is the only center
    plainly available, and it is the worst one (a median of 32°).
 5. **What cone covers most turrets?** At the best simple center, 20° covers 202
-   of 288 turrets (70 %) and 30° covers 238 (83 %). Covering all turrets needs
-   55° even at the optimum, and 90° at the simple center. For conventional
+   of 288 turrets (70 %) and 30° covers 238 (83 %). Covering all turrets took
+   55° at the best center found by the search, and 90° at the simple center. For conventional
    guns alone, 30° covers 230 of 252 (91 %).
 6. **Which classes break it?**
    - Official missile turrets (all 32). The 4 SWI missile tubes are only
@@ -182,13 +189,15 @@ are not a problem in this corpus.
 
 ## What is established where
 
-- **Mathematically guaranteed:** error = asin(line offset / radius) at every
-  pose. Any turret whose firing line misses the center is non-radial. No cone
+- **Mathematically guaranteed:** the directed error is
+  atan2(|v × D|, v · D). It equals asin(line offset / radius) only up to 90°,
+  and beyond that it is 180° minus that value. Any turret whose firing line misses the center is non-radial. No cone
   bound holds for an arbitrary turret, because a tangential barrel (90°) is
   mechanically legal.
 - **Observed on the current 288-turret corpus:** every number above. The
   results are sampled on a 5°/37-step grid and use one endpoint per turret.
-  fit_minimax is a local-search upper bound.
+  fit_minimax is the best center found by a local search, not a proven
+  optimum or lower bound.
 - **Possible generalization, unproven:** future or mod turrets probably fall
   into the same mechanism classes, but nothing bounds their offsets. Treat
   every cone figure here as descriptive, not safe.

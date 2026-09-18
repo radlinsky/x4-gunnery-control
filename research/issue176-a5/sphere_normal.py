@@ -85,11 +85,10 @@ def worst_angle(P, D, c):
 
 
 def fit_minimax(P, D, starts):
-    """Compass search for the center minimising the worst direction error (best cone center).
+    """Compass search for a center with a small worst direction error (best center found).
 
-    ponytail: local search from every other candidate, not a global optimiser; it only upper-bounds
-    the true minimax, which is enough to show how radial a turret can possibly be. Use a real
-    solver if a turret lands near a decision threshold.
+    ponytail: local search from every other candidate, not a global optimiser. The result is not a
+    proven optimum or lower bound; use a real solver if a turret lands near a decision threshold.
     """
     scale = np.linalg.norm(P - P.mean(0), axis=1).max() or 1.0
     best = min(starts, key=lambda c: worst_angle(P, D, c))
