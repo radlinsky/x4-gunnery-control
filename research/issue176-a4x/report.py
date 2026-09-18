@@ -163,7 +163,8 @@ def main():
              "multi-point, and boundary scenarios independently assign sorted turrets round-robin "
              "(6,990, 1,800, and 4,560 cases). All 74 known172 scenarios and all 11 synthetic "
              "stress scenarios run against all 288 turrets (21,312 and 3,168 cases). The existing "
-             "24 component rotations cycle deterministically within each subgroup and Cartesian expansion.", "",
+             "24 component rotations cycle deterministically, offset so every turret walks distinct "
+             "rotations across its repeat appearances rather than aliasing onto one.", "",
              "Each scenario/factor computes its direction, same-ray, three-ray, and three-ray4 query "
              "observations once. Turret scoring then places the selected reference endpoint at O using "
              "the record's ordered transforms and nearest-to-zero legal joint pose.", "",
@@ -180,15 +181,22 @@ def main():
         if name in groups:
             lines += [f"### {name} ({len(groups[name]):,} rows)", "",
                       markdown_table(results["nominal_dimensions"][name]), ""]
+    rare = lambda name, stack: metrics(groups[name], stack)  # noqa: E731
+    bt_dir, bt_ray = rare("Bounded traverse", "direction"), rare("Bounded traverse", "same_ray")
+    rx, rz = rare("Reversed X/Y", "direction"), rare("Rotation-Z", "direction")
     lines += ["## Observed group differences", "",
               "Expanded ordinary/official behavior is broadly consistent with historical A4 in showing "
               "few decided false-ENGAGEABLE results for same-ray and three-ray methods, while the changed "
               "corpus and exposure design produce different aggregate coverage and accuracy.", "",
-              "The rare classes are not hidden by the 36,523 nominal ordinary-X/Y rows. Bounded-traverse "
-              "direction has 109 false-NOT-ENGAGEABLE rows and 76 prediction-UNKNOWN rows among 1,046 rows; "
-              "same-ray has 26 false-NOT-ENGAGEABLE and 60 prediction-UNKNOWN. The reversed-X/Y turret has "
-              "only 7 truth-ENGAGEABLE rows among 130, and direction identifies none of them as ENGAGEABLE. "
-              "The rotation-Z turret has 9 truth-ENGAGEABLE rows among 128 truth-known rows; direction identifies 3.", "",
+              f"The rare classes are not hidden by the {len(groups['Ordinary X/Y']):,} nominal ordinary-X/Y rows. "
+              f"Bounded-traverse direction has {bt_dir['FN']} false-NOT-ENGAGEABLE rows "
+              f"(UNKNOWN counted as NOT ENGAGEABLE) and {bt_dir['model_unknown']} prediction-UNKNOWN rows among "
+              f"{bt_dir['cases']:,} rows; same-ray has {bt_ray['FN']} false-NOT-ENGAGEABLE and "
+              f"{bt_ray['model_unknown']} prediction-UNKNOWN. The reversed-X/Y turret has only "
+              f"{rx['TP'] + rx['FN']} truth-ENGAGEABLE rows among {rx['cases']}, and direction identifies "
+              f"{rx['TP']} of them as ENGAGEABLE. The rotation-Z turret has {rz['TP'] + rz['FN']} "
+              f"truth-ENGAGEABLE rows among {rz['cases'] - rz['truth_unknown']} truth-known rows; "
+              f"direction identifies {rz['TP']}.", "",
               "Known172 exposure is the largest prediction-UNKNOWN concentration for three-ray and three-ray4. "
               "Synthetic stress is the main concentration for direction and same-ray UNKNOWN behavior. These are "
               "failure groups for A5, not cause classifications.", ""]

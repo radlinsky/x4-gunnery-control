@@ -74,9 +74,12 @@ def design(pilot=False):
         selected = by_subgroup[subgroup][:1] if pilot else by_subgroup[subgroup]
         for original_index, (population, _subgroup, sample) in enumerate(selected):
             if subgroup in ("known172", "synthetic"):
-                assignments = [(ti, (original_index * 288 + ti) % 24) for ti in range(288)]
+                assignments = [(ti, (ti + original_index) % 24) for ti in range(288)]
             else:
-                assignments = [(original_index % 288, original_index % 24)]
+                # 288 turrets and 24 rotations alias; offset by the round-robin round so each
+                # turret's repeat appearances walk the rotation set instead of repeating one.
+                ti = original_index % 288
+                assignments = [(ti, (ti + original_index // 288) % 24)]
             plans.append((scenario_id, population, subgroup, sample, assignments))
             scenario_id += 1
     if not pilot:
@@ -90,7 +93,23 @@ def design(pilot=False):
         assert counts == {"single-point": 6990, "multi-point": 1800, "boundary": 4560,
                           "known172": 74 * 288, "synthetic": 11 * 288}
         assert all(len(c) == 288 and min(c.values()) > 1 for c in appearances.values())
+        _assert_rotation_coverage(plans)
     return plans
+
+
+def _assert_rotation_coverage(plans):
+    """Fail closed if any turret gets stuck on one benchmark rotation in any subgroup."""
+    seen = {name: {} for name in FAMILY}
+    for _sid, _p, subgroup, _sample, assignments in plans:
+        for ti, ri in assignments:
+            seen[subgroup].setdefault(ti, set()).add(ri)
+    minimum = {"single-point": 24, "multi-point": 6, "boundary": 15,
+               "known172": 24, "synthetic": 11}
+    for subgroup, need in minimum.items():
+        per_turret = seen[subgroup]
+        assert len(per_turret) == 288, (subgroup, len(per_turret))
+        worst = min(len(v) for v in per_turret.values())
+        assert worst >= need, (subgroup, worst, need)
 
 
 def _observation(sample, factor):
@@ -195,7 +214,11 @@ def evaluate(plan):
                     row[method] = ("UNKNOWN" if point is None else
                                    _answer(record, rotation, muzzle, sample["O"], point)[0])
                     row[method + "_q"] = obs[method + "_q"]
-            row.update(same_ray_reason=obs["same_ray_reason"], bracket=obs["bracket"],
+            reason = obs["same_ray_reason"]
+            if reason == "bracket":
+                # Historical A4 diagnostic: did the two scored bracket ends agree?
+                reason = "bracket_agree" if row["same_ray"] != "UNKNOWN" else "bracket_disagree"
+            row.update(same_ray_reason=reason, bracket=obs["bracket"],
                        bracket_holds=obs["bracket_holds"], probes=obs["probes"],
                        probe_switch=obs["probe_switch"], hidden_switch=obs["hidden_switch"])
             for method in ("three_ray", "three_ray4"):

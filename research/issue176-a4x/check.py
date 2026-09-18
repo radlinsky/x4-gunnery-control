@@ -34,6 +34,20 @@ def main():
                             "boundary": 4560 * 3, "known172": 74 * 288 * 3,
                             "synthetic": 11 * 288 * 3}
         assert Counter(r["rough_factor"] for r in rows) == {.5: 37830, 1: 37830, 2: 37830}
+    if not args.pilot:
+        # Each turret must actually walk the 24 benchmark rotations, not alias onto one.
+        seen = {}
+        for r in rows:
+            seen.setdefault(r["historical_subgroup"], {}).setdefault(
+                (r["source"], r["turret_macro"]), set()).add(r["rotation_id"])
+        minimum = {"single-point": 24, "multi-point": 6, "boundary": 15,
+                   "known172": 24, "synthetic": 11}
+        for subgroup, need in minimum.items():
+            per_turret = seen[subgroup]
+            assert len(per_turret) == 288, (subgroup, len(per_turret))
+            worst = min(len(v) for v in per_turret.values())
+            assert worst >= need, (subgroup, worst, need)
+            print("rotation coverage", subgroup, "min per turret", worst, ">=", need)
     print("PASS", path, "rows", len(rows), "turrets", len(turrets))
     print("classes", dict(classes), "sources", dict(sources))
     print("behaviors", dict(behaviors), "scenarios", dict(scenarios))
