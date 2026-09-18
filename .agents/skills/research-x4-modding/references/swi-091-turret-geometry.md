@@ -241,7 +241,7 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 | unbounded `rotation_z` → bounded `rotation_x` (`turret_arrestor_dish_macro`) | 1 | 1 | yes |
 | `missileturret` with `rocket` endpoints | 4 | 4 | yes — all four |
 | component classed `weapon` (`weapon_kx5_s_turret_macro`) | 1 | 1 | yes |
-| undeclared-parent root connection | 13 | 11 | yes; `turret_yuv_l_beam_macro` and `turret_gravity_well_macro` drop out |
+| undeclared-parent root connection (root-attached; resolved) | 13 | 11 | yes; `turret_yuv_l_beam_macro` and `turret_gravity_well_macro` drop out |
 | non-zero missing-selector ANI translations (unbound; resolved) | 88 | 84 | yes |
 | geometry source with an SWI ANI resource | 129 | 124 | — |
 | path-relevant `turret_active` descriptors | 106 | 102 | — |
@@ -320,21 +320,98 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
   authoritative; the ANI alternative is not a second runtime geometry and
   should be dropped rather than scored.
 
-  The 84 macros are **no longer uncertain on this ground**. The separate
-  undeclared-parent question below is unaffected: it applies to 11 macros, all
-  of which are inside the 84, and it does not interact with the bit-9 decision,
-  because those components declare no animation records either way.
+  The 84 macros are **no longer uncertain on this ground**. The 11
+  undeclared-parent macros, all of them inside the 84, were settled separately.
+  See the record below.
 
-### Undeclared-parent loader behavior remains unresolved
+### Undeclared-parent loader behavior is resolved: root attachment
+
 - X4: 9.00 build 611726; SWI 0.9.1 HF
-- Status: inference
-- Source: SWI source geometry for the 13 affected macros plus official source scan showing no equivalent undeclared-parent control
-- Live test: no — no compatible SWI/X4 9.00 runtime is currently available
-- Finding: this affects 13 of the 169, **11 of the final 164-macro combat + equipable corpus**, of which 5 are also mount-resolvable. Source inspection cannot distinguish whether X4 attaches a connection whose `parent` names an undeclared part at the component root or drops that connection/subtree. ANI evidence confirms the source art contains a `part_socket` identity in the affected family but does not resolve loader behavior. Treat root-attachment as an explicit inference, not a proven runtime fact.
+- Status: shipped-source
+- Source: build-pinned `X4.exe` SHA-256
+  `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`,
+  disassembled at `0x1408887b0`–`0x140888891` (post-load parent-part
+  resolution), `0x14088d070` (parent-part lookup), `0x1414ba2b0` (message
+  sink), `0x140889d52` (ancestor count), `0x14081ca87`–`0x14081cac1` and
+  `0x140e22beb`–`0x140e22bf5` (connection transform composition); plus the
+  affected SWI component XML under ignored `.x4-research-cache/issue179/swi_xml/`
+  and a scan of all 3,535 official component definitions
+- Live test: no — static native trace plus source scan
+- Finding: this supersedes the earlier "remains unresolved" record.
+
+  **One structural group covers all 11 in-scope cases.** Each component's
+  selected path is `con_laser_01` → `part_barrel`/`Connection04` →
+  `part_gun`/`Connection03` (bounded `rotation_x`) → `part_rotator`/
+  `Connection02` (unbounded `rotation_y`), and `Connection02` names
+  `parent="part_socket"`. No connection in the component declares a
+  `part_socket` part. In `turret_m_llaser_red`, `turret_m_llaser_red_02`, and
+  `turret_m_llaser_green_02` (5 macros) the `part_socket` connection is
+  present only inside an XML comment; in the other six components it is
+  absent altogether. The two variants are identical after XML parsing.
+  `Connection02`'s authored offset is zero in all 11. The macros are
+  `turret_m_llaser_{red,blue,green}_macro`,
+  `turret_m_llaser_{red,blue,green}_02_macro`, `turret_m_tractor_heavy_macro`,
+  and the four missile turrets `turret_m_borontube_macro`,
+  `turret_m_conctube_macro`, `turret_m_conctubelight_macro`, and
+  `turret_m_torptube_macro`.
+
+  Loader rule:
+
+  - After every connection of a template has been loaded, `0x1408887b0`
+    visits each connection that has a `parent` name. It resolves that name with
+    `0x14088d070`, a linear scan that returns the part owned by a template
+    connection whose part-name hash matches, and NULL otherwise.
+  - The result is stored as the connection's parent-part pointer (`C+0x40`)
+    whether it is NULL or not. On NULL the loader logs `Parent part '%s' as
+    specified in connection '%s' seems to be missing in template '%s'.` at
+    severity 1 and moves on to the next connection. The sink sets its
+    error flag only for severity above 1, so the template is not failed. The
+    connection, its part, its restriction, and every descendant stay in the
+    template. Nothing is dropped, repaired, or re-parented.
+  - A NULL parent part is exactly how a root connection is represented. The
+    ancestor count at `0x140889d52` gives it depth 0. Both
+    connection-composition paths, `0x14081ca87` and `0x140e22beb`, test
+    `C+0x40` and, when it is NULL, return the connection's own restriction and
+    authored offset in component space without composing any parent part.
+
+  Answers for the group:
+
+  1. X4 attaches `Connection02` directly to the component root.
+  2. The behavior is deterministic. It is a pure function of template data and
+     is fixed at load time.
+  3. The selected firing endpoint survives, and its whole ancestor chain is
+     intact.
+  4. The resulting chain is `con_laser_01` offset ∘ `part_barrel` local ∘
+     `Connection04` offset ∘ `part_gun` local ∘ `J_x` ∘ `Connection03` offset ∘
+     `part_rotator` local ∘ `J_y` ∘ `Connection02` offset, then component root.
+     The part locals are stored XML part locals, per the missing-selector
+     record above.
+  5. The A4x mechanical class stays `ordinary_xy`, and no fixed offset changes.
+     The A4x corpus already emits exactly this chain.
+  6. The expanded truth scorer can use this geometry without UNKNOWN.
+
+  Joint solving begins only after this hierarchy exists, and it consumes the
+  one composed chain. The solver has no alternative parent interpretation to
+  choose from.
+
+  Corroboration limits: no official X4 9.00 component has a connection whose
+  `parent` names an undeclared part (0 of 3,535), so no official asset
+  exercises this path. The result rests on the native trace. It is not an
+  analogy.
+
+  Separate and not needed for this verdict: `Connection02` also carries
+  `hidden="true"` in the four missile turrets and in
+  `turret_m_tractor_heavy_macro`. In the connection loader, that attribute sets
+  bit 0 of the connection flags (`0x140881e2c`–`0x140881e3d`). None of the
+  traced selected-endpoint transform functions or joint-solver functions
+  (`0x14081c960`, `0x140e22b70`, `0x14074c2d0`, `0x140e221a0`, `0x140e21110`)
+  reads that bit. That bit's effect on firing is an **inference**, not a proven
+  runtime fact. The bit is on the same path connection in all 5 cases, and no
+  official turret connection sets it.
 
 ### Current evidence boundary for offline truth geometry
 - X4: 9.00 build 611726; SWI 0.9.1 HF
 - Status: inference
 - Source: combined source and static-trace evidence recorded above
 - Live test: no
-- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Missing-selector ANI binding is now resolved by native evidence: the 84 affected in-scope macros take the stored XML part local and carry a single geometry. The one remaining offline-truth uncertainty for the final #176 corpus is undeclared-parent loader behavior, affecting 11 in-scope macros, all of which sit inside those 84. The runtime handedness caveat on the rotation-Z arrestor dish is a separate, narrower open item.
+- Finding: an ordered path of fixed transforms and axis-tagged rotation joints with per-joint limits is sufficient to encode all 169 SWI source-level joint layouts and the observed ANI translations. Both former broad uncertainties are now resolved by native evidence. The 84 missing-selector ANI macros take the stored XML part local. The 11 undeclared-parent macros attach the orphaned connection at the component root. All 164 in-scope macros therefore have one deterministic source-level geometry. The narrower open items are the runtime handedness of the rotation-Z arrestor dish and the effect of `hidden="true"` path connections on firing.
