@@ -1,7 +1,8 @@
-# Expanded A4 turret corpus (Issue #176)
+# Expanded A4 turret corpus and ENGAGEABLE benchmark (Issue #176)
 
-Research-only input layer for the later generalized truth scorer. The accepted
-historical A4 under `research/issue176-a4/` is evidence and is not touched.
+Research-only corpus, generalized mechanical truth scorer, and separate expanded
+A4 benchmark. The accepted historical A4 under `research/issue176-a4/` remains
+unchanged evidence.
 
 ```sh
 python3 research/issue176-a4x/corpus.py
@@ -62,8 +63,44 @@ masking, projectile flight, guidance or readiness. `weapon_behavior` is not used
   neither joint clamps. A 180° root span with the request exactly on a limit is
   `UNKNOWN_root_limit_unwrap`, because a mover parked at the other limit is π
   away.
-- `rotation_z` (1, arrestor dish): uses only the accepted clock-plus-cone reach.
-  Handedness is not assumed. The answer is definite only if the root pivot and
-  the leaf pivot at every clock angle agree, with a 0.1° zeroing margin.
-  Otherwise it is `UNKNOWN_rotation_z`, mostly near targets and targets near
-  the 25° cone edge.
+- `rotation_z` (1, arrestor dish): resolves the actual root-Z resting clocks
+  with the accepted yaw gate, then scores leaf pitch at every resting clock.
+  Trap or no-rest outcomes remain UNKNOWN; any in-arc resting clock suffices.
+
+## Expanded benchmark
+
+`compare.py` imports the historical A4 scenarios and prediction methods rather
+than changing them. It evaluates `baseline`, `direction`, `same_ray`,
+`three_ray`, and `three_ray4`, plus the historical fallback stacks in
+`report.py`, at rough-distance factors 0.5, 1, and 2.
+
+Sampling is deterministic over the sorted `source:macro` corpus keys:
+
+- each of single-point, multi-point, and boundary independently assigns its
+  scenarios round-robin over all 288 turrets and cycles the 24 accepted
+  component rotations;
+- all 74 known172 scenarios run against all 288 turrets;
+- all 11 retained synthetic scenarios, including `collinear_replacement`, run
+  against all 288 turrets.
+
+This gives 37,830 turret/scenario cases and 113,490 factor rows. Query
+observations are computed once per scenario/factor and reused for the assigned
+turrets. For truth scoring, the selected endpoint's ordered A4x transforms and
+nearest-to-zero legal joint angles define a reference pose. The component is
+placed so that endpoint lands at the query/prospective-muzzle origin O.
+
+Run a small structural pilot before the full benchmark:
+
+```sh
+python3 research/issue176-a4x/compare.py --pilot
+python3 research/issue176-a4x/check.py --pilot
+python3 research/issue176-a4x/compare.py
+python3 research/issue176-a4x/report.py
+python3 research/issue176-a4x/check.py
+```
+
+Raw rows, the pilot, and machine-readable metrics are ignored under
+`.x4-research-cache/issue176-a4x/`. Stable results are written to
+`findings.md`. The benchmark is mechanical bearing/arc evidence only. The
+selected endpoint/reference pose is its offline coordinate definition and is
+not new live proof of emitted-muzzle runtime behavior.
