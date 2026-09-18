@@ -30,9 +30,9 @@ axis-tagged rotation joints with authored limits, plus `mechanical_class`
 (`ordinary_xy`, `bounded_traverse`, `reversed_xy`, `rotation_z`, `other`) and
 explicit `uncertainty` flags. SWI parts whose components declare no animation
 selector use the stored XML part local; their `turret_active` ANI descriptors
-never bind, so no ANI alternative is carried. The one unresolved SWI runtime
-fact is not guessed: `undeclared_parent` (11) records the assumed root
-attachment.
+never bind, so no ANI alternative is carried. Connections naming an
+undeclared parent part attach to the component root, as the X4 loader does.
+No SWI runtime geometry fact remains unresolved.
 
 See `.agents/skills/research-x4-modding/references/swi-091-turret-geometry.md`
 and `missile-turret-endpoint-geometry.md` for the accepted evidence.

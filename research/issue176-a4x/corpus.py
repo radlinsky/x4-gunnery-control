@@ -47,7 +47,6 @@ EXPECTED = {
     "official_total": 124, "official_conventional": 92, "official_missile": 32,
     "swi_total": 164, "swi_ordinary_xy": 154, "swi_bounded_traverse": 8,
     "swi_reversed_xy": 1, "swi_rotation_z": 1, "swi_missile": 4,
-    "swi_undeclared_parent": 11,
     "official_conventional_gun": 92, "official_guided_missile": 16,
     "official_dumbfire_missile": 16, "official_unresolved_other": 0,
 }
@@ -284,14 +283,15 @@ def _swi_records(supported, combat, projectiles):
             endpoints = [n for n, c in connections.items() if tag in _tags(c)]
         selected = _barrelposition_connection(sorted(endpoints), macro)
 
-        chain, undeclared, name = [], False, selected
+        chain, name = [], selected
         while True:
             chain.append(name)
             parent = connections[name].get("parent")
             if not parent:
                 break
             if parent not in owner:
-                undeclared = True
+                # X4 stores a NULL parent part and composes this as a root connection
+                # (swi-091-turret-geometry.md).
                 break
             name = owner[parent]
         declares_active = any(
@@ -338,10 +338,6 @@ def _swi_records(supported, combat, projectiles):
                 op["transform"], op["local_source"] = _transform(_descriptor_local(descriptor, stored[1])), "ani"
             ops.append(op)
 
-        uncertainty = {}
-        if undeclared:
-            uncertainty["undeclared_parent"] = ("selected-path root connection names a part no connection declares; "
-                                                "loader behaviour unresolved, root attachment assumed")
         records["swi:" + macro] = _record(
             ops, macro=macro, source="swi", component=component_name,
             macro_class=element.get("class"), component_class=component.get("class"),
@@ -349,7 +345,7 @@ def _swi_records(supported, combat, projectiles):
             combat_verdict=combat[macro]["verdict"],
             endpoint=dict(connection=selected, tag=tag, count=len(endpoints)),
             mount_resolvable=sum("component" in _tags(c) for c in connections.values()) == 1,
-            ani_locals="bound" if declares_active else "unbound", uncertainty=uncertainty)
+            ani_locals="bound" if declares_active else "unbound", uncertainty={})
     return records
 
 
@@ -369,7 +365,6 @@ def _validate(records):
         "swi_reversed_xy": classes["reversed_xy"],
         "swi_rotation_z": classes["rotation_z"],
         "swi_missile": sum(r["macro_class"] == "missileturret" for r in swi),
-        "swi_undeclared_parent": sum("undeclared_parent" in r["uncertainty"] for r in swi),
     }
     for behavior in BEHAVIORS:
         actual["official_" + behavior] = sum(r["weapon_behavior"] == behavior for r in official)
