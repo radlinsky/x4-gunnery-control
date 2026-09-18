@@ -38,3 +38,32 @@ the research reference below.
 
 See `.agents/skills/research-x4-modding/references/swi-091-turret-geometry.md`
 and `missile-turret-endpoint-geometry.md` for the accepted evidence.
+
+## Truth scorer
+
+```sh
+python3 research/issue176-a4x/corpus.py
+python3 research/issue176-a4x/validate.py   # ~4 min, one niced process
+```
+
+`scorer.score(record, point)` gives mechanical bearing/arc truth for a target in
+the turret component frame: `IN_ARC`, `OUT_OF_ARC` or `UNKNOWN_*`. It reads the
+record's ordered `ops` path. It does not check range, line of sight, own-hull
+masking, projectile flight, guidance or readiness. `weapon_behavior` is not used.
+
+- `ordinary_xy` (278): the accepted #173 `study.geometry()` on segments split
+  from the ops. That keeps component zeroing, the 4-dp limit rule, any-rest
+  scoring and trap/no-rest `UNKNOWN`. The split is bit-identical to the
+  accepted 92-turret pickle and to `joint_segments` for all 124 official
+  turrets.
+- `bounded_traverse` (8) and `reversed_xy` (1): both pivots are fixed, which is
+  asserted. The root joint is solved by its authored axis and clamped to the
+  nearer limit, then the leaf is solved in the clamped frame. `IN_ARC` means
+  neither joint clamps. A 180° root span with the request exactly on a limit is
+  `UNKNOWN_root_limit_unwrap`, because a mover parked at the other limit is π
+  away.
+- `rotation_z` (1, arrestor dish): uses only the accepted clock-plus-cone reach.
+  Handedness is not assumed. The answer is definite only if the root pivot and
+  the leaf pivot at every clock angle agree, with a 0.1° zeroing margin.
+  Otherwise it is `UNKNOWN_rotation_z`, mostly near targets and targets near
+  the 25° cone edge.
