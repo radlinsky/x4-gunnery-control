@@ -137,14 +137,27 @@ def check_rotation_z():
     leaf, root, seg = s.segments(dish)
     assert (root["axis"], root["limits"], leaf["axis"], leaf["limits"]) == ("z", None, "x", [-25.0, 25.0])
 
-    def off(theta, clock, r):
+    def off(theta, clock, r):  # clock from +Y toward +X, the traced atan2(u.x, u.y) convention
         t, c = math.radians(theta), math.radians(clock)
-        return (r * math.sin(t) * math.cos(c), r * math.sin(t) * math.sin(c), r * math.cos(t))
+        return (r * math.sin(t) * math.sin(c), r * math.sin(t) * math.cos(c), r * math.cos(t))
 
-    for theta, r, state in ((0, 1e4, "IN_ARC"), (24, 1e4, "IN_ARC"), (26, 1e4, "OUT_OF_ARC"), (25, 1e4, "UNKNOWN_rotation_z"),
-                            (60, 1e4, "OUT_OF_ARC"), (180, 1e4, "OUT_OF_ARC"), (22, 20.0, "UNKNOWN_rotation_z")):
-        states = {s.score(dish, off(theta, clock, r))["state"] for clock in range(0, 360, 15)}
-        assert states == {state}, (theta, r, states)
+    # stable rest: one resting clock at the target clock, leaf request ~ off-axis angle
+    for theta, r, state in ((10, 1e4, "IN_ARC"), (24, 1e4, "IN_ARC"), (26, 1e4, "OUT_OF_ARC"), (60, 1e4, "OUT_OF_ARC"),
+                            (22, 20.0, "IN_ARC"), (80, 8.0, "OUT_OF_ARC")):
+        for clock in range(0, 360, 15):
+            out = s.score(dish, off(theta, clock, r))
+            assert out["state"] == state and out["clocks"] == "one", (theta, r, clock, out)
+            assert abs(math.remainder(out["root"] - math.radians(clock), 2 * math.pi)) < 1e-6, (theta, r, clock, out)
+            if r == 1e4:
+                assert abs(math.degrees(out["leaf"]) - theta) < 0.05, (theta, clock, out)
+    # on-axis far targets: 1e-3f zeroing makes the projection degenerate, request 0 rests at clock 0
+    assert s.score(dish, (0.0, 0.0, 1e4))["state"] == "IN_ARC" and s.score(dish, (0.0, 0.0, -1e4))["state"] == "OUT_OF_ARC"
+    # hidden state / no rest: pivot f = 2.748 m along the clock; rho < 2f oscillates or holds astern -> UNKNOWN
+    for rho in (1.0, 2.0, 4.0, 5.0):
+        for clock in range(15, 360, 30):  # off-axis: an axis-aligned clock can rest inside the 1e-3f zeroing band
+            out = s.score(dish, (rho * math.sin(math.radians(clock)), rho * math.cos(math.radians(clock)), 50.0))
+            assert out["state"].startswith("UNKNOWN") and out["decision"] is None, (rho, clock, out)
+    assert s.score(dish, (0.0, 0.0, 50.0))["state"].startswith("UNKNOWN")  # on axis, close: pivot holds the target astern
     # handedness-free: mirroring the target across either clock plane never changes the answer
     counts = Counter()
     for d in s.study.DIRS:

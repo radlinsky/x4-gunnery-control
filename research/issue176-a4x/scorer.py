@@ -9,9 +9,9 @@ projectile, guidance or readiness. Target points are in the turret component fra
   request. Solve root then leaf in the root's clamped frame (swi-091-turret-geometry.md);
   IN_ARC iff neither joint clamps. A >=180 deg root span whose request sits on a limit is
   UNKNOWN: the mover could be parked pi away at the other limit.
-- rotation_z: runtime handedness and muzzle are unresolved, so only the accepted clock-plus-
-  cone reach is used, over every possible pitch pivot (root pivot or leaf pivot at any clock).
-  Definite only when all pivots agree; otherwise UNKNOWN.
+- rotation_z: the traced root-Z request (turret-target-point-joint-solver.md) is the yaw map with
+  component Y and Z swapped, so the accepted yaw gate finds the resting clocks. Traps or no rest are
+  UNKNOWN; otherwise the leaf X request is scored at every resting clock, any in arc suffices (#173).
 """
 from __future__ import annotations
 
@@ -25,12 +25,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "research/issue167-p3c"), str(ROOT / "scripts")]
 import study  # noqa: E402
 from barrelposition_evaluator import IDENTITY, ZERO, compose, mat_mul, rx, ry, rz, vec_mul  # noqa: E402
-from yaw_rest_gate import ZENITH, ZEROING  # noqa: E402
+from yaw_rest_gate import ZENITH, ZEROING, classify  # noqa: E402
 
 CORPUS = ROOT / ".x4-research-cache/issue176-a4x/corpus.json.gz"
 JOINT = {"x": lambda a: rx(-a), "y": ry, "z": lambda a: rz(-a)}  # A6 J_C = Rz(-z)·Rx(-x)·Ry(+y)
 PLANE = {"x": (1, 2), "y": (0, 2)}  # request = atan2(u[i], u[j]) - atan2(a[i], a[j])
-CONE_MARGIN = 0.1  # ponytail: degrees; covers 1e-3f component zeroing on an unknown pivot (<0.082 deg)
+SWAP = lambda v: (v[0], v[2], v[1])  # noqa: E731  Y<->Z: Rz(-z) becomes Ry(z), atan2(x, y) becomes atan2(x, z)
 
 
 def _chain(ops, lo, hi):
@@ -102,22 +102,25 @@ def _fixed_pivot(leaf, root, seg, pt):
     return out
 
 
-def _cone(leaf, root, seg, pt):
+def _rest_z(leaf, root, seg, pt):
     L, G, H = seg["L"], seg["G"], seg["H"]
-    aim = mat_mul(L[1], G[1])[2]
-    assert H[1] == IDENTITY and math.dist(aim, (0.0, 0.0, 1.0)) < 1e-9, "cone is not about component +Z"
-    lo, hi = leaf["limits"]
-    assert lo == -hi, "asymmetric cone"
-    q = tuple(p - t for p, t in zip(pt, H[0]))
-    rho, r = math.hypot(q[0], q[1]), math.hypot(G[0][0], G[0][1])
-    h = q[2] - G[0][2]
-    angles = [math.degrees(math.atan2(rho, q[2])),  # root pivot
-              math.degrees(math.atan2(abs(rho - r), h)), math.degrees(math.atan2(rho + r, h))]  # leaf pivot, any clock
-    if max(angles) <= hi - CONE_MARGIN:
-        return {"state": "IN_ARC", "decision": True, "off_axis": angles}
-    if min(angles) > hi + CONE_MARGIN:
-        return {"state": "OUT_OF_ARC", "decision": False, "off_axis": angles}
-    return {"state": "UNKNOWN_rotation_z", "decision": None, "off_axis": angles}
+    aim = vec_mul(L[1][2], G[1])  # rest launch +Z in the root frame
+    yaw = {"t_G": SWAP(G[0]), "t_H": SWAP(H[0]), "R_H": tuple(SWAP(r) for r in (H[1][0], H[1][2], H[1][1])),
+           "beta": math.atan2(aim[0], aim[1])}  # traced beta_z; no degenerate guard (0 for the dish)
+    gate = classify(yaw, SWAP(pt))
+    if gate["traps"] or not gate["resting"]:
+        return {"state": "UNKNOWN_" + gate["class"] + ("_trap" if gate["traps"] else ""), "decision": None, "clocks": gate["class"]}
+    Rt = lambda M: tuple(zip(*M))  # noqa: E731
+    scored = []
+    for z in gate["resting"]:
+        frame = compose(G, compose((ZERO, JOINT["z"](z)), H))
+        d = tuple(p - c for p, c in zip(pt, frame[0]))
+        n = math.hypot(*d)
+        d = tuple(0.0 if abs(c) < ZEROING * n else c for c in d)  # caller zeroing; atan2 ignores renormalization
+        x = math.remainder(_request("x", vec_mul(d, Rt(frame[1])), L[1][2]), 2 * math.pi)
+        scored.append((not _in_arc(x, leaf["limits"]), z, x))
+    miss, z, x = min(scored, key=lambda r: r[0])
+    return {"state": "OUT_OF_ARC" if miss else "IN_ARC", "decision": not miss, "clocks": gate["class"], "root": z, "leaf": x}
 
 
 def score(record, pt, _cache={}):
@@ -131,7 +134,7 @@ def score(record, pt, _cache={}):
         return {**out, "decision": None if out["state"].startswith("UNKNOWN") else out["decision"]}
     leaf, root, seg = segments(record)
     assert (root["axis"], leaf["axis"]) in {("y", "x"), ("x", "y"), ("z", "x")}, cls
-    return (_cone if root["axis"] == "z" else _fixed_pivot)(leaf, root, seg, pt)
+    return (_rest_z if root["axis"] == "z" else _fixed_pivot)(leaf, root, seg, pt)
 
 
 def load():
