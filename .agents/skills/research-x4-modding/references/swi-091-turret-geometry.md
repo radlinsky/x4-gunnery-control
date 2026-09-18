@@ -205,14 +205,15 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
   The one unresolved turret is `turret_gravity_well_macro`. Its bullet is the
   only SWI turret projectile whose `<damage>` and `<areadamage>` are both
   `hull="1" repair="1"`, the repair flag that in official source marks the
-  repair laser, so it inflicts no damage on what it hits. It nonetheless
+  repair laser. That source shape does not establish ordinary damaging
+  behavior. It nonetheless
   declares a combat weapon system (`turret_longrange`) and an
   `influencelist="gravity_well"` that `libraries/influenceconfigurations.xml`
   authors as a hostile 30-second `disabletravel` on the target — the same
   mechanic family as SWI's ion torpedo effects and official X4's
   `ion_disrupt_*`. It is demonstrably not mining, salvage, tug, or a
   friendly-repair weapon, but the source does not settle whether a
-  zero-damage hostile-effect turret is in #176 combat scope. Fail closed:
+  repair-flagged hostile-effect turret is in #176 combat scope. Fail closed:
   UNRESOLVED, excluded from the supported corpus until decided.
 
   `turret_m_tractor_heavy_macro`, the other mating-tag suspect, is **COMBAT**:
