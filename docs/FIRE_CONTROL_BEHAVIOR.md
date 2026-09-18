@@ -38,7 +38,7 @@ The situations that matter for this mod. Each is checked against **your target**
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
 | **LINE OF FIRE BLOCKED** | The turret can bear on the target, but an obstruction masks a required projectile path. The obstruction may be the firing ship, terrain, or another object; guided missile turrets do not use a direct muzzle-to-target path for the console's geometry check. |
 | **NO FIRING SOLUTION** | The turret can aim and the target is in range, but the target is moving in a way that leaves no shot that would connect. |
-| **WEAPON NOT READY** | Aiming is fine, but the turret itself cannot fire right now: reloading, overheated, out of ammunition, or destroyed. |
+| **WEAPON NOT READY** | The turret is destroyed. Destroyed turrets cannot be Direct-controlled by Gunnery Control, so they are excluded from ENGAGEABLE evaluation. |
 | **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
 *Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
@@ -105,7 +105,7 @@ Changing the mode while engaged re-applies it to your ticked groups at once. Leg
 | **CANNOT BEAR** | **Attack all enemies:** switches to another target it can aim at. **Attack my current enemy:** no fallback, so it may sit idle. **LIVE** | Own mode | Own mode |
 | **LINE OF FIRE BLOCKED** | Stays aimed at your target and does **not** fire. Does **not** switch to another target. **LIVE** | Own mode | Own mode |
 | **NO FIRING SOLUTION** | Fires at your target and misses; keeps trying. Does not switch, because X4 does not detect this situation. **INFERRED** | Own mode | Own mode |
-| **WEAPON NOT READY** | Holds until the turret is ready. A destroyed turret is skipped, and re-included if it survives. **X4 CODE** | Own mode | Own mode |
+| **WEAPON NOT READY** | A destroyed turret is skipped because it cannot be Direct-controlled. **X4 CODE** | Own mode | Own mode |
 | **FIRE NOT AUTHORIZED** | Neither Direct-control turret mode holds fire on its own. If your target can no longer be attacked, see [Global rules](#global-rules). **UNTESTED** | Own mode | Own mode |
 
 **Why LINE OF FIRE BLOCKED behaves differently from CANNOT BEAR.** This applies to the **Attack all enemies** mode, where a fallback list is sent. X4 decides whether to switch to a fallback target by asking only whether the turret can *aim* at your target, not whether it can *hit* it. A turret with a blocked line of fire is aimed straight at your target, so the game counts it as fine and never switches. A turret that cannot bear cannot aim at your target at all, so the game switches it to a fallback target. Nothing the mod sends changes this, because the decision to switch is the game engine's, not the mod's. Under **Attack my current enemy** no fallback is sent, so nothing switches in either case.
@@ -154,7 +154,7 @@ What the game itself checks, per situation, for a ticked turret on **Attack all 
 | **CANNOT BEAR** | Can the turret aim that far | Switches to a fallback target it can aim at | LIVE |
 | **LINE OF FIRE BLOCKED** | Is the weapon's required projectile path obstructed | Stays aimed, holds fire, does not switch | LIVE |
 | **NO FIRING SOLUTION** | (the game runs no such check) | Fires and misses | INFERRED |
-| **WEAPON NOT READY** | Turret ready to fire | Waits until ready | X4 CODE |
+| **WEAPON NOT READY** | Is the turret destroyed | Destroyed turret is skipped | X4 CODE |
 
 ---
 
