@@ -33,7 +33,7 @@ The situations that matter for this mod. Each is checked against **your target**
 
 | Situation | What it means |
 |---|---|
-| **ENGAGEABLE** | Generic fire-control condition: adequate track, the turret can aim at the target, the target is in range, nothing blocks the shot, and a valid firing/intercept solution exists. |
+| **ENGAGEABLE** | Generic fire-control condition: adequate track where applicable, the turret can aim at the target, the target is in range, nothing blocks the shot, a valid firing/intercept solution exists, and firing at that target is authorized. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
 | **LINE OF FIRE BLOCKED** | The turret can bear on the target, but an obstruction masks a required projectile path. The obstruction may be the firing ship, terrain, or another object; guided missile turrets do not use a direct muzzle-to-target path for the console's geometry check. |
@@ -42,6 +42,8 @@ The situations that matter for this mod. Each is checked against **your target**
 | **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
 *Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
+
+**Readiness and authorization in Gunnery Control.** Direct-control applies its attack mode and armed state before ENGAGEABLE is computed. Destroyed turrets are excluded from the selected/evaluated ENGAGEABLE population, so **WEAPON NOT READY** remains a documented firing situation but is not a retained predictor gate under the current mod design. **FIRE NOT AUTHORIZED** does remain part of prospective ENGAGEABLE. The current target-selection path normally limits Direct-control to enemy targets, so authorization should usually be a cheap PASS, but friendly, neutral, surrendered/captured, ownership-changed, or otherwise non-attackable targets must not be treated as ENGAGEABLE merely because the geometry works.
 
 **What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when its bearing and range gates pass and its weapon-specific direct-line policy passes:
 
@@ -56,7 +58,7 @@ When a required direct ray against a whole ship or station root is blocked — a
 
 The source-backed rationale and live-test boundaries are recorded in the knowledge base under [missile guidance](../.agents/skills/research-x4-modding/references/md-ai.md#missile-guidance-is-a-shipped-fire-control-discriminator-but-missile-turret-launch-los-is-engine-side), [guided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#guided-missiles-launch-through-an-own-hull-masked-direct-ray-and-reach-the-designated-surface), and [unguided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#unguided-missile-turrets-ignore-own-hull-but-retain-an-external-direct-line-check).
 
-The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio does **not** prove adequate fire-control track, a valid ballistic/intercept solution, weapon readiness, fire authorization, or actual firing — the bounding-box range gate and the per-module line-of-fire fallback are geometry evidence only. The generic fire-control concept `ENGAGEABLE` additionally assumes adequate track and a valid firing/intercept solution; weapon readiness and fire authorization remain separate states.
+The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio **today** does not prove adequate fire-control track, a valid ballistic/intercept solution, fire authorization, or actual firing — the current range/arc/line-of-fire checks are geometry evidence only. The #79 prediction program extends this toward the full prospective ENGAGEABLE definition above, including FIRE NOT AUTHORIZED. WEAPON NOT READY remains outside that predictor while destroyed turrets are filtered from the evaluated population by design.
 
 ---
 
