@@ -48,7 +48,11 @@ EXPECTED = {
     "swi_total": 164, "swi_ordinary_xy": 154, "swi_bounded_traverse": 8,
     "swi_reversed_xy": 1, "swi_rotation_z": 1, "swi_missile": 4,
     "swi_missing_selector": 84, "swi_undeclared_parent": 11,
+    "official_conventional_gun": 92, "official_guided_missile": 16,
+    "official_dumbfire_missile": 16, "official_unresolved_other": 0,
 }
+BEHAVIORS = ("conventional_gun", "guided_missile", "dumbfire_missile", "unresolved_other")
+SWI_PROJECTILES = CACHE / "issue176-swi-combat" / "swi_xml"
 ENDPOINT_TAG = {"turret": "laser", "missileturret": "rocket"}
 
 
@@ -94,9 +98,47 @@ def _record(ops, **fields):
                 mechanical_class=_classify(joints), **fields)
 
 
+# --- weapon behavior ----------------------------------------------------------
+
+def _collect_projectile(element, projectiles):
+    if element.get("class") not in ("bullet", "missile"):
+        return
+    missile = element.find("properties/missile")
+    projectiles.setdefault(element.get("name").lower(),
+                           (element.get("class"), None if missile is None else missile.get("guided")))
+
+
+def _collect_swi_projectiles(projectiles):
+    for path in sorted(SWI_PROJECTILES.rglob("*.xml")) + sorted(SWI_XML.rglob("*.xml")):
+        try:
+            root = ET.parse(path).getroot()
+        except ET.ParseError:
+            continue
+        for element in root.iter("macro"):
+            if element.get("name"):
+                _collect_projectile(element, projectiles)
+
+
+def _behavior(element, projectiles):
+    """Authored evidence only: the referenced projectile macro's class and `missile@guided`."""
+    reference = element.find("properties/bullet")
+    if reference is None:
+        reference = element.find("properties/missile")
+    if reference is None or not reference.get("class"):
+        return "unresolved_other"
+    projectile = projectiles.get(reference.get("class").lower())
+    if projectile is None:
+        return "unresolved_other"
+    kind, guided = projectile
+    if kind == "bullet":
+        return "conventional_gun"
+    return {"1": "guided_missile", "0": "dumbfire_missile"}.get(guided, "unresolved_other")
+
+
 # --- official 124 ---------------------------------------------------------------
 
-def _official_macros():
+def _official_macros(projectiles, turrets):
+    """Collect official macros in one pass: turret scope plus every projectile macro."""
     lua = (ROOT / "ui/turret_muzzle_geometry.lua").read_text()
     conventional = sorted(b.split('"', 1)[0] for b in re.split(r'\n    \["', lua)[1:] if "chain = {" in b)
     missile = []
@@ -106,8 +148,14 @@ def _official_macros():
                 root = ET.parse(path).getroot()
             except ET.ParseError:
                 continue
-            if root.tag == "macros":
-                missile += [m.get("name") for m in root.findall("macro") if m.get("class") == "missileturret"]
+            if root.tag != "macros":
+                continue
+            for element in root.findall("macro"):
+                _collect_projectile(element, projectiles)
+                if element.get("class") in ("turret", "missileturret"):
+                    turrets.setdefault(element.get("name"), element)
+                if element.get("class") == "missileturret":
+                    missile.append(element.get("name"))
     missile = sorted(set(missile))
     if len(conventional) != EXPECTED["official_conventional"] or len(missile) != EXPECTED["official_missile"]:
         raise CorpusError(f"official scope drift: {len(conventional)} conventional, {len(missile)} missile")
@@ -117,7 +165,9 @@ def _official_macros():
 
 
 def _official_records():
-    conventional, missile = _official_macros()
+    projectiles, turret_macros = {}, {}
+    conventional, missile = _official_macros(projectiles, turret_macros)
+    _collect_swi_projectiles(projectiles)
     loaded = load_turrets({n: OFFICIAL_SRC / n for n in REQUIRED_SOURCE_SETS},
                           {n: OFFICIAL_ANI / n for n in REQUIRED_SOURCE_SETS}, conventional + missile)
     records = {}
@@ -144,14 +194,20 @@ def _official_records():
                 index += 1
         if index != len(path_ops):
             raise CorpusError(f"{macro}: unconsumed selected-path ops")
+        behavior = _behavior(turret_macros[macro], projectiles)
+        ammunition = turret_macros[macro].find("properties/ammunition")
+        tokens = set((ammunition.get("tags") or "").split()) if ammunition is not None else set()
+        expected = {"guided_missile": "guided", "dumbfire_missile": "dumbfire"}.get(behavior)
+        if expected is not None and expected not in tokens:
+            raise CorpusError(f"{macro}: projectile says {behavior} but ammunition tags are {sorted(tokens)}")
         records["official:" + macro] = _record(
             ops, macro=macro, source="official", component=turret["component"],
             macro_class="missileturret" if macro in missile else "turret",
-            weapon_behavior="COMBAT_CANDIDATE",
+            weapon_behavior=behavior,
             endpoint=dict(connection=turret["selected_connection"],
                           tag=ENDPOINT_TAG["missileturret" if macro in missile else "turret"]),
             animation_family=family, ani_locals="bound", uncertainty={})
-    return records
+    return records, projectiles
 
 
 def _transform(transform):
@@ -204,7 +260,7 @@ def _descriptor_local(descriptor, stored_rows):
     return (t, R)
 
 
-def _swi_records(supported, combat):
+def _swi_records(supported, combat, projectiles):
     components = _index_xml([SWI_XML, OFFICIAL_SRC], "component")
     macros = _index_xml([SWI_XML], "macro")
     anis = _ani_index()
@@ -297,7 +353,8 @@ def _swi_records(supported, combat):
         records["swi:" + macro] = _record(
             ops, macro=macro, source="swi", component=component_name,
             macro_class=element.get("class"), component_class=component.get("class"),
-            weapon_behavior=combat[macro]["verdict"],
+            weapon_behavior=_behavior(element, projectiles),
+            combat_verdict=combat[macro]["verdict"],
             endpoint=dict(connection=selected, tag=tag, count=len(endpoints)),
             mount_resolvable=sum("component" in _tags(c) for c in connections.values()) == 1,
             ani_locals="bound" if declares_active else "unbound", uncertainty=uncertainty)
@@ -323,13 +380,18 @@ def _validate(records):
         "swi_missing_selector": sum("missing_selector_ani" in r["uncertainty"] for r in swi),
         "swi_undeclared_parent": sum("undeclared_parent" in r["uncertainty"] for r in swi),
     }
-    if actual != EXPECTED:
+    for behavior in BEHAVIORS:
+        actual["official_" + behavior] = sum(r["weapon_behavior"] == behavior for r in official)
+        actual["swi_" + behavior] = sum(r["weapon_behavior"] == behavior for r in swi)
+    if {k: actual[k] for k in EXPECTED} != EXPECTED:
         raise CorpusError("count mismatch: " + json.dumps(
             {k: [v, EXPECTED[k]] for k, v in actual.items() if v != EXPECTED[k]}))
     if classes["other"]:
         raise CorpusError("unclassified SWI mechanical layouts: "
                           + str(sorted(r["macro"] for r in swi if r["mechanical_class"] == "other")))
     for record in records.values():
+        if record["weapon_behavior"] not in BEHAVIORS:
+            raise CorpusError(f"{record['macro']}: bad weapon behavior {record['weapon_behavior']!r}")
         if not record["joints_root_to_leaf"]:
             raise CorpusError(f"{record['macro']}: no rotation joint on the selected path")
         if not any(op["kind"] == "fixed" for op in record["ops"]):
@@ -344,9 +406,9 @@ def _validate(records):
 
 
 def main():
-    records = _official_records()
+    records, projectiles = _official_records()
     supported, combat = _swi_scope()
-    swi = _swi_records(supported, combat)
+    swi = _swi_records(supported, combat, projectiles)
     if set(records) & set(swi):
         raise CorpusError("duplicate corpus keys")
     records.update(swi)
@@ -356,6 +418,7 @@ def main():
         json.dump(dict(counts=actual, records=records), stream, indent=1, sort_keys=True)
     print(json.dumps(actual, indent=1))
     print("official classes", dict(Counter(r["mechanical_class"] for r in records.values() if r["source"] == "official")))
+    print("swi behavior", dict(Counter(r["weapon_behavior"] for r in records.values() if r["source"] == "swi")))
     print("swi mount-resolvable", sum(r.get("mount_resolvable") is True for r in records.values()))
     print("wrote", OUT / "corpus.json.gz")
 

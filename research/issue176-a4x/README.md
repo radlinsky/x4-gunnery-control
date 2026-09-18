@@ -19,6 +19,12 @@ records under `.x4-research-cache/issue176-swi-wares/` and
 ignored SWI source XML with the same repository primitives (`read_offset`,
 native endpoint-name hash, ANI descriptor parser).
 
+Each record carries a benchmark `weapon_behavior` class — `conventional_gun`,
+`guided_missile`, `dumbfire_missile` or `unresolved_other` — resolved from the
+referenced projectile macro's own `class` and `missile@guided`, never from a
+macro name. Official: 92 / 16 / 16 / 0, cross-checked against the turret's
+authored `ammunition` `guided`/`dumbfire` token. SWI: 160 / 4 / 0 / 0.
+
 Each record is an ordered leaf-to-root op list of fixed transforms and
 axis-tagged rotation joints with authored limits, plus `mechanical_class`
 (`ordinary_xy`, `bounded_traverse`, `reversed_xy`, `rotation_z`, `other`) and
