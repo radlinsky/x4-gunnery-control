@@ -270,7 +270,7 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 ### Missing-selector ANI binding is resolved: the descriptors never bind
 
 - X4: 9.00 build 611726; SWI 0.9.1 HF
-- Status: shipped-source
+- Status: inference
 - Source: build-pinned `X4.exe` SHA-256
   `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`,
   re-disassembled for this record at `0x14088a203` (animated-part bit 9),
@@ -327,7 +327,7 @@ The 13 undeclared-parent cases are the six `turret_m_llaser_*`,
 ### Undeclared-parent loader behavior is resolved: root attachment
 
 - X4: 9.00 build 611726; SWI 0.9.1 HF
-- Status: shipped-source
+- Status: inference
 - Source: build-pinned `X4.exe` SHA-256
   `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`,
   disassembled at `0x1408887b0`–`0x140888891` (post-load parent-part
