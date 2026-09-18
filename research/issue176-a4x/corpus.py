@@ -104,8 +104,11 @@ def _collect_projectile(element, projectiles):
     if element.get("class") not in ("bullet", "missile"):
         return
     missile = element.find("properties/missile")
-    projectiles.setdefault(element.get("name").lower(),
-                           (element.get("class"), None if missile is None else missile.get("guided")))
+    name = element.get("name").lower()
+    authored = (element.get("class"), None if missile is None else missile.get("guided"))
+    if projectiles.setdefault(name, authored) != authored:
+        raise CorpusError(f"projectile {name} is authored twice with conflicting behavior: "
+                          f"{projectiles[name]} then {authored}")
 
 
 def _collect_swi_projectiles(projectiles):
