@@ -115,3 +115,79 @@ mover-state ambiguity in this example.
 This disproves the direct muzzle-direction-to-pose fixed-point substitution.
 It does not disprove another query strategy that obtains additional
 information: a displaced query can distinguish these two single-point targets.
+
+## Rotation-Z request and the arrestor-dish root clock
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: build-pinned static trace. Solver type dispatch at `0x00E217E8`
+  (restriction type 4 → `0x00E21B66`, 5 → `0x00E219BA`, 6 → `0x00E2180C`);
+  the solved angle is stored at slot `[rsp+0x38+4·type]` (`0x00E21E20`), and
+  type 6 lands in the slot rebuilt through `0x01750210` as the Z rotation. The
+  reference comes from `0x0081C5BC` (`[turret+0x2F0]`) → `0x007569A0` →
+  `0x0074BE30`, and the pivot from caller `0x00E222D5`. IK chain membership
+  comes from builder `0x00889CB0`: `iklink` tag id `[0x0395CCA4]`, and the
+  unrestricted-connection skip at `0x0088B503`. A float32 emulation of the
+  solver's straight-line vector code (`0x00E211C0–0x00E21776`, not committed)
+  checked the frame. Analyst labels only; no native names.
+- Live test: no — static trace and offline emulation only
+- Finding: a `rotation_z` restriction is solved with the same shared code as
+  X and Y. Only the plane changes. Before dispatch, the target direction `u`
+  and the reference axis `a` are both expressed in the joint connection's
+  **rest** pre-joint frame, with the already-solved upstream rotations
+  composed. Then:
+
+```text
+β_z      = atan2(a.x, a.y)                        0x00E2180C, no guard
+target_z = β_z                     if |u.x| < 1e-4f and |u.y| < 1e-4f
+         = atan2(u.x, u.y)         otherwise       0x00E21822–0x00E2185B
+request  = fmod(target_z - β_z, 2π) (+2π if < 0)  0x00E21D1B–0x00E21D44
+```
+
+`atan2` here is the CRT `atan2f` at `0x01A1A398` (first argument `y`). With
+`J_C.R = Rz(-v_rz)`, a request `θ` maps the joint's local `+Y` to clock
+`(sin θ, cos θ)`. The joint therefore turns its local `+Y` toward the
+target's `xy` projection, measured from `+Y` toward `+X`. The reference side
+has no degenerate-projection guard, but the target side does.
+
+`a` is the launch connection's `+Z` row from `0x0074BE30` with a zero
+instance argument and a zero scene flag. That path never reaches the
+restriction-state composition `0x00E22B70` → `0x00E20370`, so `a` is the rest
+axis. The flag-gated `0x00757BC0` rotation on the same path is not decoded.
+It reads connection matrix data, not the `0x680` IK records.
+
+`u` is the caller's zeroed direction `normalize(P - C)`, with `|u_i| < 1e-3f`
+set to `+0`, renormalized by the solver. `C` is the origin of the **last
+connection in the IK chain**, taken at the current joint state. A connection
+joins a chain only if it has restrictions, so a trailing unrestricted
+`iklink` part (common in official and SWI turrets) is never the pivot.
+
+Arrestor dish (`turret_arrestor_dish_macro`, SWI 0.9.1 HF source geometry):
+every rotation on the path is identity. The chain is `[Connection02 Z,
+Connection03 X]`, and `Connection04` is excluded. Therefore:
+
+```text
+a      = (0, +0, 1)  →  β_z = 0        (a.y = +0; see below)
+C(z)   = (2.74807·sin z, 2.74807·cos z, 0.874849)   z = current root angle
+u      = zero_renorm(normalize(P - C(z)))           component frame
+Z(z)   = 0                         if |u.x| < 1e-4f and |u.y| < 1e-4f
+       = atan2(u.x, u.y) mod 2π    otherwise
+```
+
+`a.y` is a sum containing the term `a_rest.y · 1`. For identity rotations
+built from constants, zero Euler angles, or an identity quaternion,
+`a_rest.y = +0`. In round-to-nearest, a zero sum with one `+0` addend is `+0`.
+The emulation confirmed `β_z = 0` for all 128 signed-zero patterns of the
+root frame's off-diagonal entries and `a.x`. So the reference cannot introduce
+a `π` branch. The `1e-3f` zeroing can still produce the exact `0` or `π`
+requests of `atan2(±0, ·)` and `atan2(·, +0)`. The mover unwraps the request
+to within `π` of the current angle, as for yaw.
+
+Remaining unresolved, not chosen here:
+- `C` rotates with the current root angle, so the request is a map `Z(z)`,
+  not a function of `P` alone. Its structure matches the yaw map in the
+  [resting-point gate](turret-yaw-resting-point-gate.md), with the pivot offset
+  `f = 2.74807` along the clock direction and `κ = 0`. The settled clock and
+  its hidden-state dependence have not been analysed for this joint.
+- The `0x003DB8A0` caller transform is still undecoded, as recorded for yaw.
+- No live measurement confirms handedness or the settled pose.
