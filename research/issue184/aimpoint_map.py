@@ -1,12 +1,13 @@
 """Issue #184 A2 benchmark foundation: real firing ships and targets, grouped cases, hidden aimed-muzzle
-truth, the two A3 box inputs, and the scorer for A3 method results. No search method yet (A3).
+truth, the two A3 box inputs, and the scorer; plus the A3 minimal mappers for both methods.
 
-Reuses the accepted #176 pieces unchanged: the 288-turret A4x corpus and its ops
+A2 reuses the accepted #176 pieces unchanged: the 288-turret A4x corpus and its ops
 (`issue176-a4x/corpus.py`, `scorer.py`), the #167/#173 native query model, nearest-point selection,
 runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/`).
 
     python3 research/issue184/aimpoint_map.py            # A2 summary
     python3 research/issue184/aimpoint_map.py --selftest
+    python3 research/issue184/aimpoint_map.py --a3 [--every N] [--jobs 4]   # A3 benchmark, every Nth case
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -14,9 +15,11 @@ from __future__ import annotations
 
 import itertools
 import math
+import os
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
+from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
@@ -406,6 +409,204 @@ def score(case, result, muzzles):
     return out
 
 
+# ---------------------------------------------------------------- A3 mappers (production inputs only)
+
+sys.path.insert(0, str(ROOT / "research/issue176-a2"))
+from simulate import EPS, REL  # noqa: E402  #176 A2 angular allowance and poor-angle rule
+
+FORWARD = 1e-4  # #176 A4 same-ray tolerance (rad)
+SLACK = 2 * (EPS + 1e-6) / FORWARD  # #176 A5 along-ray resolution floor (~7%)
+MAX_DEPTH = 2  # octree levels below the outer corners: at most a 5x5x5 corner grid
+CAP = 128  # research query cap per mapper run; A6 chooses the production limit
+
+
+class _Capped(Exception):
+    pass
+
+
+def _rho(*ps):
+    return 2 * study.u * max(1.0, *(float(np.max(np.abs(p))) for p in ps))
+
+
+def crossing(u, d, v, e):
+    """(depth along ray (u, d), depth error bound) where ray (v, e) crosses it, or None: the #176 A2 miss
+    allowance, forward check and poor-angle rejection (sine below 2 EPS / REL, or error over REL of depth)."""
+    c, k = float(d @ e), float(np.linalg.norm(np.cross(d, e)))
+    if k < 2 * EPS / REL:
+        return None
+    w = u - v
+    s, t = (c * (e @ w) - d @ w) / k ** 2, ((e @ w) - c * (d @ w)) / k ** 2
+    x = u + s * d
+    miss = 2 * _rho(u, v, x) + EPS * (abs(s) + abs(t))
+    if s <= 0 or t <= 0 or np.linalg.norm(x - v - t * e) > miss or miss / k > REL * max(s, t):
+        return None
+    return float(s), float(miss / k)
+
+
+def _on_ray(u, d, centre, r):
+    t = float((centre - u) @ d)
+    return t > 0 and np.linalg.norm(centre - u - t * d) <= r + EPS * (t + r) + _rho(u, centre)
+
+
+def _corners(lo, hi):
+    return [np.asarray(c) for c in itertools.product(*zip(lo, hi))]
+
+
+def _search(view, lo, hi, R, O, clear, cube=None):
+    """Shared A3 search over the box [lo, hi] (world = p @ R + O): query its 8 outer corners, locate the
+    points their rays select, then query the corners of each octree leaf `clear` rejects, to MAX_DEPTH. With `cube`,
+    finally query a cube of that half-size around each located point (target frame).
+
+    Accepted #176 A5 location rule: two other rays cross an anchor ray at agreeing depths inside the padded
+    target box, AND the along-ray bracket on the anchor confirms it (forward just short, non-forward just
+    past). The bracket rejects the #176 A2 witness where rays selecting different points meet at a point
+    that does not exist; it only resolves ~SLACK of depth, so one crossing alone is not enough (a ray to
+    another point can cross just past the anchor's point). Radius = agreed depth span / 2 + angular cone
+    + binary32 rounding.
+    -> (points [(centre, r)], owner(ray) -> index | None, rays {corner: (world, dir)}, cleared, uncleared, queries)."""
+    oracle, (C, H, T) = view["oracle"], view["target_box"]
+    tlo, thi = target_box(C, H)
+    rays, points, hits, tried, n = {}, [], {}, set(), 0
+
+    def ask(p):
+        nonlocal n
+        if n >= CAP:
+            raise _Capped
+        n += 1
+        d = oracle(p)
+        return None if d is None else np.asarray(d)
+
+    def owner(u, d):
+        on = [] if d is None else [i for i, (c, r) in enumerate(points) if _on_ray(u, d, c, r)]
+        return on[0] if len(on) == 1 else None
+
+    def confirm(u, d, s, err):
+        near = s / (1 + 1.5 * SLACK) - 2 * err
+        if near <= 0:
+            return False
+        a, b = ask(u + near * d), ask(u + (s + 2 * err) * d)
+        return (a is not None and a @ d > 0 and np.linalg.norm(np.cross(a, d)) <= FORWARD
+                and (b is None or b @ d <= 0 or np.linalg.norm(np.cross(b, d)) > FORWARD))
+
+    def locate():
+        free = {k: (u, d) for k, (u, d) in rays.items() if d is not None and owner(u, d) is None}
+        for ka, kb in itertools.permutations(sorted(free), 2):
+            if kb not in hits.setdefault(ka, {}):
+                h = crossing(*free[ka], *free[kb])
+                hits[ka][kb] = h and (h[0] - h[1], h[0] + h[1])
+        found = []
+        for ka in free:
+            spans = [(h, kb) for kb, h in hits.get(ka, {}).items() if h and kb in free]
+            for (h1, kb), (h2, kc) in itertools.combinations(spans, 2):
+                lo_, hi_ = max(h1[0], h2[0]), min(h1[1], h2[1])
+                if lo_ <= hi_ and (ka, kb, kc) not in tried:
+                    found.append((hi_ - lo_, ka, kb, kc, (lo_ + hi_) / 2))
+        for width, ka, kb, kc, s in sorted(found):
+            (u, d), others = rays[ka], (rays[kb], rays[kc])
+            if owner(u, d) is not None or any(owner(*o) is not None for o in others):
+                continue
+            tried.add((ka, kb, kc))
+            x, r = u + s * d, width / 2 + EPS * s + _rho(u, u + s * d)
+            if (inside((tlo - r, thi + r), x @ T.T) and all(np.linalg.norm(c - x) > q + r for c, q in points)
+                    and confirm(u, d, s, width / 2)):
+                points.append((x, r))
+
+    leaves, cleared, uncleared = [(np.asarray(lo, float), np.asarray(hi, float), 0)], [], []
+    try:
+        while leaves:
+            a, b, depth = leaves.pop(0)
+            for c in _corners(a, b):
+                if tuple(c) not in rays:
+                    rays[tuple(c)] = (c @ R + O, ask(c @ R + O))
+            locate()
+            label = clear(a, b, [owner(*rays[tuple(c)]) for c in _corners(a, b)], points, rays, owner)
+            if label is not False:
+                cleared.append((a, b, label))
+            elif depth < MAX_DEPTH:
+                m = (a + b) / 2
+                leaves += [(np.minimum(c, m), np.maximum(c, m), depth + 1) for c in _corners(a, b)]
+            else:
+                uncleared.append((a, b))
+            if not leaves and cube is not None:
+                leaves, cube = [(c @ R.T - cube, c @ R.T + cube, MAX_DEPTH) for c, _r in points], None
+    except _Capped:
+        uncleared += [(a, b)] + [(x, y) for x, y, _ in leaves]
+    return points, owner, rays, cleared, uncleared, n
+
+
+def _pure(labels):
+    """A leaf whose 8 corners all select one located point lies inside that point's Voronoi cell (cells
+    are convex), so every position in it selects that point and no other aim point lies in it."""
+    return labels[0] if labels[0] is not None and len(set(labels)) == 1 else False
+
+
+def firing_box_map(view, margin):
+    """Firing-ship-box method: map selection over the class-expanded runtime ship box. A later muzzle is
+    answered only inside a pure leaf; outside the box or in an unproven leaf it is UNKNOWN."""
+    lo, hi = firing_box(*view["ship_box"], margin)
+    R, O = view["ship_rotation"], view["ship_position"]
+    points, _o, _r, cleared, _u, n = _search(view, lo, hi, R, O, lambda a, b, labels, *_: _pure(labels))
+
+    def answer(m):
+        local = (np.asarray(m) - O) @ R.T
+        return next((label for a, b, label in cleared if inside((a, b), local)), UNKNOWN)
+    return dict(located=[(i, c, r) for i, (c, r) in enumerate(points)], answer=answer, queries=n)
+
+
+GEO_DEPTH = 4  # query-free splits of an unproven leaf when testing it against the empty balls
+
+
+def _unproven(a, b, balls, proven):
+    """Sub-boxes of [a, b], split up to GEO_DEPTH times, each neither inside one empty ball (centre, radius)
+    nor inside one proven box."""
+    c, r = np.asarray([x for x, _ in balls]).reshape(-1, 3), np.asarray([y for _, y in balls])
+    plo, phi = np.asarray([x for x, _ in proven]).reshape(-1, 3), np.asarray([y for _, y in proven]).reshape(-1, 3)
+    boxes = np.asarray([(a, b)])
+    for level in range(GEO_DEPTH + 1):
+        far = np.linalg.norm(np.maximum(np.abs(c[None] - boxes[:, None, 0]), np.abs(c[None] - boxes[:, None, 1])), axis=2)
+        held = np.all((plo[None] <= boxes[:, None, 0]) & (boxes[:, None, 1] <= phi[None]), axis=2)
+        boxes = boxes[~np.any(far < r[None], axis=1) & ~np.any(held, axis=1)]
+        if level == GEO_DEPTH or not len(boxes):
+            return list(boxes)
+        m = boxes.mean(axis=1)
+        boxes = np.asarray([(np.minimum(x, mid), np.maximum(x, mid)) for (lo, hi), mid in zip(boxes, m)
+                            for x in _corners(lo, hi)])
+
+
+def target_box_map(view):
+    """Target-box method: locate the points inside the padded target box, then answer by `nearest` only
+    when no unproven region could hold a point nearer to the muzzle than the winner's far bound.
+
+    Proven regions: pure leaves and cubes, and the empty ball of every queried position c whose located point is known
+    (radius |c - centre| - r: no aim point is nearer to c than the one it selects)."""
+    C, H, T = view["target_box"]
+    lo, hi = target_box(C, H)
+
+    def balls(points, rays, owner):
+        return [(u @ T.T, np.linalg.norm(points[i][0] - u) - points[i][1])
+                for u, d in rays.values() if (i := owner(u, d)) is not None]
+
+    def clear(a, b, labels, points, rays, owner):
+        return _pure(labels) is not False or not _unproven(a, b, balls(points, rays, owner), [])
+
+    # Empty balls never cover a located point itself, so each gets a pure cube twice the finest split.
+    cube = 2 * (hi - lo) / 2 ** (MAX_DEPTH + GEO_DEPTH)
+    points, owner, rays, cleared, leaves, n = _search(view, lo, hi, T, np.zeros(3), clear, cube)
+    known, proven = balls(points, rays, owner), [(a, b) for a, b, _label in cleared]
+    unproven = [box for a, b in leaves for box in _unproven(a, b, known, proven)]
+    located = [(i, c, r) for i, (c, r) in enumerate(points)]
+
+    def answer(m):
+        label = nearest(located, m)
+        if label is UNKNOWN:
+            return UNKNOWN
+        far = np.linalg.norm(points[label][0] - m) + points[label][1]
+        local = np.asarray(m) @ T.T
+        return label if all(np.linalg.norm(np.maximum(0, np.maximum(a - local, local - b))) > far
+                            for a, b in unproven) else UNKNOWN
+    return dict(located=located, answer=answer, queries=n)
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -466,6 +667,66 @@ def summary():
         print(f"  {k:4}  {reason}")
 
 
+GROUPS = ("close", "ordinary", "boundary", "stress", "artificial")
+_LOADED = None
+
+
+def _evaluate(case):
+    records, margins = _LOADED
+    muzzles, v, margin = aimed_muzzles(case, records), view(case), margins[case["ship_class"]][0]
+    rows = []
+    for method, result in (("firing", firing_box_map(v, margin)), ("target", target_box_map(v))):
+        row = dict(score(case, result, muzzles), group=case["group"], method=method, capped=result["queries"] >= CAP)
+        if method == "firing":
+            box = firing_box(*case["ship_box"], margin)
+            row["outside"] = sum(not inside(box, ship_local(case, m)) for m in muzzles.values())
+        else:  # UNKNOWN only because an unproven region could hold a nearer point
+            row["incomplete"] = sum(result["answer"](m) is UNKNOWN and nearest(result["located"], m) is not UNKNOWN
+                                    for m in muzzles.values())
+            C, H, T = case["box"]
+            lo, hi = target_box(C, H)
+            row["premise"] = not all(inside((lo - 1e-6, hi + 1e-6), p @ T.T) for p in case["points"])
+        rows.append(row)
+    return rows
+
+
+def a3(every, jobs):
+    """Run both A3 mappers on every `every`-th case of each group; print per-group, per-method results."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    seen = Counter()
+    todo = []
+    for c in cases(targets(), mounts):
+        seen[c["group"]] += 1
+        if (seen[c["group"]] - 1) % every == 0:
+            todo.append(c)
+    os.nice(10)
+    with Pool(min(jobs, 4)) as pool:  # forked workers share the loaded corpus
+        rows = [r for rs in pool.imap(_evaluate, todo, chunksize=8) for r in rs]
+    print(f"A3: every {every} case(s) per group, CAP {CAP} queries, MAX_DEPTH {MAX_DEPTH}, GEO_DEPTH {GEO_DEPTH}")
+    for method in ("firing", "target"):
+        print(f"\n{method}-box method")
+        print("  group       cases  queries  q med/p90/max  capped  muzzles correct wrong unknown  "
+              "missed invented merged dup  error med/max (m)   radius med/max (m)  " +
+              ("outside-box" if method == "firing" else "incomplete muzzles/cases  premise-failed cases (wrong)"))
+        for g in GROUPS:
+            rs = [r for r in rows if r["method"] == method and r["group"] == g]
+            if not rs:
+                continue
+            q = np.asarray([r["queries"] for r in rs])
+            tot = {k: sum(r[k] for r in rs) for k in ("muzzles", "correct", "wrong", "unknown", "missed", "invented",
+                                                       "merged", "duplicate", "capped")}
+            err, rad = [e for r in rs for e in r["error"]] or [math.nan], [x for r in rs for x in r["radius"]] or [math.nan]
+            extra = (f"{sum(r['outside'] for r in rs)}" if method == "firing" else
+                     f"{sum(r['incomplete'] for r in rs)} / {sum(r['incomplete'] > 0 for r in rs)}  "
+                     f"{sum(r['premise'] for r in rs)} ({sum(r['wrong'] for r in rs if r['premise'])})")
+            print(f"  {g:10} {len(rs):6} {q.sum():8} {int(np.median(q)):4}/{int(np.percentile(q, 90)):3}/{q.max():3}"
+                  f"  {tot['capped']:6} {tot['muzzles']:8} {tot['correct']:7} {tot['wrong']:5} {tot['unknown']:7}  "
+                  f"{tot['missed']:6} {tot['invented']:8} {tot['merged']:6} {tot['duplicate']:3}  "
+                  f"{np.median(err):8.2g} / {max(err):8.2g}  {np.median(rad):8.2g} / {max(rad):8.2g}  {extra}")
+
+
 def selftest():
     a, b = np.zeros(3), np.array([10.0, 0, 0])
     assert nearest([("a", a, .1), ("b", b, .1)], np.array([1.0, 0, 0])) == "a"
@@ -481,6 +742,35 @@ def selftest():
                 {0: a + .1, 1: b - 4.5, 2: b + 1})
     assert {k: got[k] for k in ("missed", "invented", "merged", "duplicate", "correct", "wrong", "unknown")} == \
         dict(missed=1, invented=1, merged=1, duplicate=1, correct=1, wrong=1, unknown=1)
+
+    def synthetic(pts, C, H, ship=((-10, -10, -10), (10, 10, 10)), at=(0, 0, -2000)):
+        pts = [tuple(map(float, p)) for p in pts]
+        return dict(points=[np.asarray(p) for p in pts]), dict(
+            oracle=lambda u: study.Q(u, pts, []), target_box=(np.asarray(C, float), np.asarray(H, float), np.eye(3)),
+            ship_box=tuple(np.asarray(x, float) for x in ship), ship_position=np.asarray(at, float), ship_rotation=np.eye(3))
+
+    def check(case, result, muzzles, **want):
+        got = score(case, result, {i: np.asarray(m, float) for i, m in enumerate(muzzles)})
+        assert got["wrong"] == got["invented"] == 0 and all(got[k] == v for k, v in want.items()), got
+
+    z = np.array([0, 0, 1.0])
+    assert math.isclose(crossing(np.zeros(3), z, np.array([10.0, 0, 0]), np.array([-.6, 0, .8]))[0], 40 / 3, rel_tol=1e-6)
+    assert crossing(np.zeros(3), z, np.ones(3), z) is None  # parallel
+    far = [(0, 0, -2000), (3, 0, -2000), (0, 0, 2000)]
+    case, v = synthetic([(1, 2, 3)], (0, 0, 0), (20, 20, 20))
+    check(case, target_box_map(v), far, correct=3)
+    check(case, firing_box_map(v, 5), far, correct=2, unknown=1)  # (0, 0, 2000) is outside the firing box
+    # #176 A2 witness: every corner selects its own point halfway to the box centre, so all corner rays meet
+    # at the centre, which is no aim point. The along-ray bracket must reject it.
+    lo, hi = target_box((0, 0, 0), (20, 20, 20))
+    case, v = synthetic([(c + (lo + hi) / 2) / 2 for c in _corners(lo, hi)], (0, 0, 0), (20, 20, 20))
+    assert all(study.select(tuple(c), [tuple(p) for p in case["points"]]) == i for i, c in enumerate(_corners(lo, hi)))
+    check(case, target_box_map(v), far)
+    # #184 case 12352: a ray to the other point crosses the anchor ray just past its point, inside the
+    # bracket's ~SLACK resolution; one crossing plus the bracket invented two points 180 m from any real one.
+    case, v = synthetic([(0, 0, 59.2), (0, 0, -201.495)], (0, 0, -71), (150, 150, 150),
+                        ship=((-1093.02, 2304.84, -2871.78), (1149.38, 7698.96, 2522.34)), at=(0, 0, 0))
+    check(case, firing_box_map(v, 0), [])
 
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
@@ -509,6 +799,9 @@ def selftest():
 def main():
     if "--selftest" in sys.argv:
         return selftest()
+    if "--a3" in sys.argv:
+        arg = lambda k, d: int(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d  # noqa: E731
+        return a3(arg("--every", 1), arg("--jobs", 4))
     summary()
 
 
