@@ -1,19 +1,22 @@
-"""Issue #184 A1 foundation: shared cases, hidden aimed-muzzle truth, class margins, method rules.
+"""Issue #184 A2 benchmark foundation: real firing ships and targets, grouped cases, hidden aimed-muzzle
+truth, the two A3 box inputs, and the scorer for A3 method results. No search method yet (A3).
 
-Research only. Reuses the accepted #176 pieces unchanged: the 288-turret A4x corpus and its ops
-(`issue176-a4x/corpus.py`, `scorer.py`), the #167/#173 native query model and nearest-point
-selection, authored target aim points and target boxes (`issue167-p3c/study.py`).
+Reuses the accepted #176 pieces unchanged: the 288-turret A4x corpus and its ops
+(`issue176-a4x/corpus.py`, `scorer.py`), the #167/#173 native query model, nearest-point selection,
+runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/`).
 
-    python3 research/issue184/aimpoint_map.py            # print the class margins
+    python3 research/issue184/aimpoint_map.py            # A2 summary
     python3 research/issue184/aimpoint_map.py --selftest
 
-The mapper under test sees only `oracle(case)`, the target box, the ship class and the firing-ship
-box. `case["points"]` and `aimed_muzzles(case)` are hidden benchmark truth.
+A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
 from __future__ import annotations
 
+import itertools
 import math
 import sys
+import xml.etree.ElementTree as ET
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +33,6 @@ SIZES = ("small", "medium", "large", "extralarge")
 # smaller one. Conservative (a superset only widens the margin); replace with a ship-slot census if
 # a class margin turns out too wide to be useful.
 CLASS_SIZES = {"ship_s": SIZES[:1], "ship_m": SIZES[:2], "ship_l": SIZES[:3], "ship_xl": SIZES}
-RADII = (10, 100, 1000, 10000, 100000)  # A2's close-to-stress firing distances (m)
 UNKNOWN = None
 
 
@@ -97,12 +99,15 @@ def inside(box, muzzle):
     return bool(np.all(box[0] <= muzzle) and np.all(muzzle <= box[1]))
 
 
-def target_box(centre, half, scale):
-    """Target-box method: search box with the target box's proportions, half-extents x `scale`.
+TARGET_PAD_Y = 8.86  # m: the #184 A2 target-box pad, justified by `padding()` over the accepted targets
 
-    Authored aim points can sit outside the target box (#169): 68 of 88 in-scope turret surfaces, only
-    along Y, needing up to 3.57x or 8.85 m, so `scale` is chosen from the A2 benchmark, not assumed."""
-    return np.asarray(centre, float) - scale * np.asarray(half, float), np.asarray(centre, float) + scale * np.asarray(half, float)
+
+def target_box(centre, half):
+    """Target-box method search box (target frame): the runtime box plus TARGET_PAD_Y on +Y only.
+
+    Authored aim points can sit outside the target box (#169), only ever along +Y; see `padding()`."""
+    c, h = np.asarray(centre, float), np.asarray(half, float)
+    return c - h, c + h + (0, TARGET_PAD_Y, 0)
 
 
 def nearest(located, muzzle):
@@ -137,78 +142,234 @@ def _integrated(macro):
     return False
 
 
-def scope(record, host_tags):
-    """(kind, None) for a Gunnery Control target, else (kind, reason). #168/#169 generic rule."""
-    cls = sources.component(record["component"]).get("class")
+def _attach(child, mating, parent, conn):
+    """Child component frame -> parent component frame, the way `sources.macro_box` attaches a child."""
+    return sources.compose(sources._inverse(sources.conn_world(child, mating)), sources.conn_world(parent, conn))
+
+
+def scope(record, hosts):
+    """(kind, reason, R): R is the target's real orientation in its host frame (identity for whole ships),
+    reason None for a Gunnery Control target. #168/#169 generic rule; the host is the first compatible one."""
+    comp = sources.component(record["component"])
+    cls = comp.get("class")
     if cls.startswith("ship_"):
-        return "whole", None
-    mating = [c for c in sources.connections(sources.component(record["component"])).values()
-              if "component" in sources.tags(c)]
+        return "whole", None, np.eye(3)
+    mating = [c for c in sources.connections(comp).values() if "component" in sources.tags(c)]
     if len(mating) != 1:
-        return KIND[cls], "no unique mating connection"
+        return KIND[cls], "no unique mating connection", None
     required = sources.tags(mating[0]) - {"component"}
-    if not any(required <= t for t in host_tags):
-        return KIND[cls], "no L/XL/station host" + (" (requires unhittable)" if "unhittable" in required else "")
+    host = next(((h, c) for t, h, c in hosts if required <= t), None)
+    if host is None:
+        return KIND[cls], "no L/XL/station host" + (" (requires unhittable)" if "unhittable" in required else ""), None
     if _integrated(sources.macro(record["macro"])):
-        return KIND[cls], "hull integrated"
-    return KIND[cls], None
+        return KIND[cls], "hull integrated", None
+    return KIND[cls], None, np.asarray(_attach(comp, mating[0], *host)[1])
 
 
 def targets():
-    """Unique target components Gunnery Control can ask ENGAGEABLE about, with authored aim points and
-    runtime-box centre/half-extents. An in-scope zero box fails loudly (#168: none in X4 9.00)."""
+    """Unique official target components Gunnery Control can ask ENGAGEABLE about, with authored aim points,
+    runtime-box centre/half-extents, kind and real mounted orientation `R`. An in-scope zero box fails loudly
+    (#168: none in X4 9.00)."""
     study.init()
     referenced = {m.find("component").get("ref") for defs in sources.MACROS.values() for _r, m in defs
                   if m.find("component") is not None}
-    host_tags = [sources.tags(c) for name in referenced if name in sources.COMPONENTS
-                 for _r, comp in sources.COMPONENTS[name] if comp.get("class") in HOSTS
-                 for c in sources.connections(comp).values() if "component" not in sources.tags(c)]
+    hosts = [(sources.tags(c), comp, c) for name in sorted(referenced) if name in sources.COMPONENTS
+             for rel, comp in sources.COMPONENTS[name] if comp.get("class") in HOSTS and not rel.startswith(SWI)
+             for _n, c in sorted(sources.connections(comp).items()) if "component" not in sources.tags(c)]
     kept = {}
     for r in study.CORPUS["records"]:
-        if scope(r, host_tags)[1] is None:
+        kind, reason, R = scope(r, hosts)
+        if reason is None:
             if max(r["H"]) == 0:
                 raise sources.StudyError(f"in-scope zero box: {r['macro']}")
-            kept.setdefault(r["component"], r)
+            kept.setdefault(r["component"], {**r, "kind": kind, "R": R})
     return list(kept.values())
 
 
-def cases(records, sizes):
-    """Deterministic cases: every target x rotation-cycled bearing x RADII, turrets round-robin.
+def padding(targets):
+    """Smallest search-box growth that contains every authored aim point, per target (target frame):
+    proportional scale versus a +Y-only pad. `outside_other` counts points outside the box off +Y."""
+    rows = []
+    for t in targets:
+        C, H, P = np.asarray(t["C"]), np.asarray(t["H"]), np.asarray(t["points"])
+        excess = np.abs(P - C) - H
+        scale = max(1.0, float(np.max(np.where(H > 0, np.abs(P - C) / np.where(H > 0, H, 1), 1))))
+        pad = max(0.0, float(np.max(P[:, 1] - C[1] - H[1])))
+        other = int(np.sum(np.delete(excess, 1, axis=1) > 0) + np.sum(C[1] - H[1] - P[:, 1] > 0))
+        rows.append(dict(target=t["component"], scale=scale, pad=pad, outside_other=other,
+                         pad_volume=(2 * H[1] + TARGET_PAD_Y) / (2 * H[1])))
+    return rows
 
-    ponytail: the firing-ship runtime box is the mount point itself (a lower bound on a real hull);
-    real firing-ship hull boxes and mounts are A2 work."""
-    turrets = sorted(records)
-    dirs = study.fibonacci(24)
+
+# ---------------------------------------------------------------- real firing ships
+
+SWI_ASSETS = ROOT / ".x4-research-cache/issue184/swi_assets"  # extract_swi_assets.py
+SWI = "swi/"
+
+
+def _index_swi_ships():
+    """Index SWI 0.9.1 HF asset XML beside the official sources so SWI ships resolve. Official XML stays
+    vanilla: SWI `<diff>` patches and same-name replacements are skipped. -> Counter of skipped files/names."""
+    if any(rel.startswith(SWI) for defs in sources.MACROS.values() for rel, _m in defs):
+        raise RuntimeError("SWI already indexed")
+    official = set(sources.COMPONENTS) | set(sources.MACROS)
+    skipped = Counter()
+    for p in sorted(SWI_ASSETS.rglob("*.xml")):
+        try:
+            root = ET.parse(p).getroot()
+        except ET.ParseError:
+            skipped["SWI asset XML: unparseable file"] += 1
+            continue
+        skipped["SWI asset XML: <diff> patch of official XML (not applied)"] += root.tag == "diff"
+        index = {"components": sources.COMPONENTS, "macros": sources.MACROS}.get(root.tag)
+        for e in root if index is not None else ():
+            if e.get("name") in official:
+                skipped["SWI asset XML: replaces an official definition (kept official)"] += 1
+            else:
+                index.setdefault(e.get("name"), []).append((SWI + p.relative_to(SWI_ASSETS).as_posix(), e))
+    if not skipped:
+        raise RuntimeError(f"no SWI asset XML under {SWI_ASSETS}: run extract_swi_assets.py")
+    return skipped
+
+
+def _mating(comp):
+    """(connection, inferred): the unique `component`-tagged connection (accepted rule). Inference for the
+    SWI turrets that omit that token (swi-091-turret-geometry.md): their unique `turret`-tagged one."""
+    conns = sources.connections(comp).values()
+    for token, inferred in (("component", False), ("turret", True)):
+        found = [c for c in conns if token in sources.tags(c)]
+        if found:
+            return (found[0], inferred) if len(found) == 1 else (None, None)
+    return None, None
+
+
+def firing_mounts(records, components, sizes):
+    """Real turret mounts of real firing ships (official 9.00 + SWI 0.9.1 HF, first macro per component), each
+    with its ship's runtime box and the ordinary_xy corpus turrets whose mating tags it accepts and whose
+    size the A1 class margin covers. -> (mounts, Counter of exclusion reasons)."""
+    excluded, fit = Counter(), {}
+    for key, r in sorted(records.items()):
+        conn, inferred = _mating(components[r["component"].lower()][0])
+        if r["mechanical_class"] != "ordinary_xy":
+            excluded["turret: not ordinary_xy (no accepted aimed-muzzle truth)"] += 1
+        elif conn is None:
+            excluded["turret: no unique mating connection"] += 1
+        else:
+            fit[key] = (sources.tags(conn) - {"component"}, components[r["component"].lower()][0], conn, inferred)
+    ships = {}
+    for name, defs in sorted(sources.MACROS.items()):
+        m = defs[0][1]
+        if len(defs) == 1 and m.get("class") in CLASS_SIZES and m.find("component") is not None:
+            ships.setdefault(m.find("component").get("ref"), (name, m.get("class"), defs[0][0].startswith(SWI)))
+    mounts, used = [], set()
+    for cname, (macro, cls, swi) in sorted(ships.items()):
+        source = "swi" if swi else "official"
+        try:
+            comp, box = sources.component(cname), sources.macro_box(macro)
+            found = []
+            for conn_name, conn in sorted(sources.connections(comp).items()):
+                t = sources.tags(conn)
+                if "turret" not in t or "component" in t:
+                    continue
+                keys = [k for k, f in fit.items() if f[0] <= t]
+                bad = [k for k in keys if sizes[k] not in CLASS_SIZES[cls]]
+                excluded["pair: turret size outside the A1 class set"] += len(bad)
+                keys = [k for k in keys if k not in bad]
+                if keys:
+                    found.append(dict(ship=macro, cls=cls, source=source, box=tuple(map(np.asarray, box)),
+                                      name=conn_name, turrets=keys,
+                                      frames={k: tuple(map(np.asarray, _attach(fit[k][1], fit[k][2], comp, conn)))
+                                              for k in keys}))
+        except (sources.StudyError, KeyError):
+            excluded[f"ship: {source} {cls} runtime box or mount unresolved"] += 1
+            continue
+        if not found:
+            excluded[f"ship: {source} {cls} has no mount a corpus turret fits"] += 1
+        mounts += found
+        used.update(k for m in found for k in m["turrets"])
+    excluded["turret: fits no real ship mount"] += len(set(fit) - used)
+    inferred = sum(fit[k][3] for k in used)
+    return mounts, excluded, inferred
+
+
+# ---------------------------------------------------------------- benchmark cases
+
+GAPS = {"close": (10, 100), "ordinary": (1000, 2500, 5000), "stress": (20000, 100000)}  # min clearance (m)
+BOUNDARY_GAPS = (100, 1000)
+BEARINGS = 8
+
+
+def cases(targets, mounts):
+    """Deterministic A2 cases. Real groups use real targets in real orientations; mount, turret and ship
+    rotation cycle with the case id. The firing ship is placed so its whole box clears the target's bounding
+    sphere by at least the gap; nothing here looks at a muzzle position.
+
+    close/ordinary/stress: bearing from the target box centre. boundary: bearings in the perpendicular
+    bisector plane of the target's nearest pair of authored aim points. artificial: #167 synthetic
+    two-point targets (`study.SYN`) with the mount at the synthetic query position."""
     n = 0
-    for target in targets():
-        for i, direction in enumerate(dirs):
-            for radius in RADII:
-                key = turrets[n % len(turrets)]
-                classes = [c for c, allowed in CLASS_SIZES.items() if sizes[key] in allowed]
-                t_rot, f_rot = np.asarray(study.ROT[i % 24]), np.asarray(study.ROT[n % 24])
-                mount = radius * np.asarray(direction) + np.asarray(target["C"]) @ t_rot
-                yield dict(id=n, target=target["component"], turret=key, ship_class=classes[n % len(classes)],
-                           rotation=f_rot, mount=mount, ship_box=(mount, mount),
-                           box=(np.asarray(target["C"]), np.asarray(target["H"]), t_rot),
-                           points=[np.asarray(p) @ t_rot for p in target["points"]])
-                n += 1
+
+    def case(group, name, C, H, t_rot, points, O=None, anchor=None, direction=None, reach=0.0, gap=0.0):
+        nonlocal n
+        mount = mounts[n % len(mounts)]
+        turret = mount["turrets"][(n // len(mounts)) % len(mount["turrets"])]
+        f_rot = np.asarray(study.ROT[n % 24])
+        t_m, R_m = mount["frames"][turret]
+        lo, hi = mount["box"]
+        if O is None:
+            ship_reach = np.linalg.norm(hi - lo) / 2 + np.linalg.norm(t_m - (lo + hi) / 2)
+            O = anchor + np.asarray(direction) * (reach + ship_reach + gap)
+        out = dict(id=n, group=group, gap=gap, target=name, ship=mount["ship"], ship_class=mount["cls"],
+                   source=mount["source"], mount=mount["name"], turret=turret, ship_box=(lo, hi),
+                   rotation=f_rot, position=O - t_m @ f_rot, origin=O, frame=R_m @ f_rot,
+                   box=(np.asarray(C, float), np.asarray(H, float), t_rot), points=points)
+        n += 1
+        return out
+
+    dirs = study.fibonacci(BEARINGS)
+    for group, gaps in GAPS.items():
+        for t in targets:
+            for i, d in enumerate(dirs):
+                t_rot = t["R"] @ np.asarray(study.ROT[i % 24])
+                pts = [np.asarray(p) @ t_rot for p in t["points"]]
+                for gap in gaps:
+                    yield case(group, t["component"], t["C"], t["H"], t_rot, pts, anchor=np.asarray(t["C"]) @ t_rot,
+                               direction=d, reach=np.linalg.norm(t["H"]), gap=gap)
+    for t in targets:
+        if len(t["points"]) < 2:
+            continue
+        pairs = [(a, b) for a in range(len(t["points"])) for b in range(a + 1, len(t["points"]))]
+        a, b = min(pairs, key=lambda ab: study.norm(study.sub(t["points"][ab[0]], t["points"][ab[1]])))
+        M, _n, u, v = map(np.asarray, study.pair_frame(t, a, b))
+        for k in range(BEARINGS):
+            t_rot = t["R"] @ np.asarray(study.ROT[k % 24])
+            th = 2 * math.pi * k / BEARINGS
+            pts = [np.asarray(p) @ t_rot for p in t["points"]]
+            for gap in BOUNDARY_GAPS:
+                yield case("boundary", t["component"], t["C"], t["H"], t_rot, pts, anchor=M @ t_rot,
+                           direction=(u * math.cos(th) + v * math.sin(th)) @ t_rot,
+                           reach=np.linalg.norm(t["H"]) + np.linalg.norm(M - t["C"]), gap=gap)
+    for k in range(len(study.SYN)):
+        _meta, O, C, H, pts = study.trial(study.N_ORD + study.N_OFF + k)
+        yield case("artificial", f"synthetic:{k}", C, H, np.eye(3), [np.asarray(p) for p in pts], O=np.asarray(O))
 
 
 def oracle(case):
-    """The only view of the target a mapper gets: X4's quantised direction to the selected aim point."""
+    """X4's quantised direction to the selected aim point from a query position."""
     pts = [tuple(map(float, p)) for p in case["points"]]
     return lambda u: study.Q(u, pts, [])
 
 
-def aimed_muzzles(case, records):
-    """Hidden truth: {aim point index: world muzzle} after the turret aims at that point.
+def view(case):
+    """Everything a mapper under test may see. No aim points, turret, mount or muzzle."""
+    return dict(oracle=oracle(case), target_box=case["box"], ship_class=case["ship_class"],
+                ship_box=case["ship_box"], ship_position=case["position"], ship_rotation=case["rotation"])
 
-    ponytail: ordinary_xy only (278 of 288) via the accepted #173 geometry; the 10 others give {}.
-    IN_ARC only: an out-of-arc request is CANNOT BEAR territory and its unclamped pose is not real."""
-    record = records[case["turret"]]
-    if record["mechanical_class"] != "ordinary_xy":
-        return {}
-    turret, R, O = scorer.accepted_turret(record), case["rotation"], case["mount"]
+
+def aimed_muzzles(case, records):
+    """Hidden truth: {aim point index: world muzzle} after the turret aims at that point, via the accepted
+    #173 geometry. IN_ARC only: an out-of-arc request is CANNOT BEAR territory and its pose is not real."""
+    turret, R, O = scorer.accepted_turret(records[case["turret"]]), case["frame"], case["origin"]
     out = {}
     for i, p in enumerate(case["points"]):
         g = study.geometry(turret, tuple(tuple(map(float, r)) for r in R), tuple(map(float, O)), tuple(map(float, p)))
@@ -217,11 +378,86 @@ def aimed_muzzles(case, records):
     return out
 
 
+def ship_local(case, p):
+    return (np.asarray(p) - case["position"]) @ case["rotation"].T
+
+
+# ---------------------------------------------------------------- scoring (A3 method results)
+
+def score(case, result, muzzles):
+    """Score one A3 mapper result against hidden truth.
+
+    `result` = {"located": [(label, centre, radius)], "answer": muzzle -> label | UNKNOWN, "queries": int}.
+    A located point covers every true aim point within its radius. An answer is correct only when its
+    label covers exactly the aim point X4 selects from that muzzle."""
+    pts = case["points"]
+    cover = {label: [j for j, p in enumerate(pts) if np.linalg.norm(np.asarray(c) - p) <= r]
+             for label, c, r in result["located"]}
+    hits = Counter(j for js in cover.values() for j in js)
+    out = dict(queries=result["queries"], missed=sum(j not in hits for j in range(len(pts))),
+               invented=sum(not js for js in cover.values()), merged=sum(len(js) > 1 for js in cover.values()),
+               duplicate=sum(v > 1 for v in hits.values()), correct=0, wrong=0, unknown=0, muzzles=len(muzzles),
+               radius=[r for label, _c, r in result["located"] if len(cover[label]) == 1],
+               error=[float(np.linalg.norm(np.asarray(c) - pts[cover[label][0]]))
+                      for label, c, _r in result["located"] if len(cover[label]) == 1])
+    for m in muzzles.values():
+        truth = study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in pts])
+        a = result["answer"](m)
+        out["unknown" if a is UNKNOWN else "correct" if cover.get(a) == [truth] else "wrong"] += 1
+    return out
+
+
+# ---------------------------------------------------------------- run
+
 def load():
+    skipped = _index_swi_ships()
     records = scorer.load()
     components = corpus._index_xml([corpus.SWI_XML, corpus.OFFICIAL_SRC], "component")
     sizes = {k: mount_size(r, components) for k, r in records.items()}
-    return records, class_margins(records, sizes), sizes
+    mounts, excluded, inferred = firing_mounts(records, components, sizes)
+    excluded.update(skipped)
+    return records, class_margins(records, sizes), mounts, excluded, inferred
+
+
+def summary():
+    records, margins, mounts, excluded, inferred = load()
+    tgts = targets()
+    print("class margins (A1):", ", ".join(f"{c} {m[0]:.2f} m" for c, m in margins.items()))
+    groups, used, muzzle = Counter(), {}, Counter()
+    for c in cases(tgts, mounts):
+        g = c["group"]
+        groups[g] += 1
+        used.setdefault((c["source"], c["ship_class"]), set()).add((c["ship"], c["mount"], c["turret"]))
+        m = aimed_muzzles(c, records)
+        muzzle[g, "no IN_ARC muzzle"] += not m
+        lo, hi = firing_box(*c["ship_box"], margins[c["ship_class"]][0])
+        for p in m.values():
+            muzzle[g, "inside" if inside((lo, hi), ship_local(c, p)) else "OUTSIDE"] += 1
+    print("\nfiring ships / mounts / turrets used, by source and class:")
+    for (src, cls), s in sorted(used.items()):
+        print(f"  {src:8} {cls:7} {len({x[0] for x in s}):3} ships  {len({x[:2] for x in s}):4} mounts  "
+              f"{len({x[2] for x in s}):3} turrets")
+    print(f"  SWI turrets paired through the inferred `turret` mating connection: {inferred}")
+    print("  mounts outside their own runtime ship box:",
+          sum(not inside(m["box"], m["frames"][m["turrets"][0]][0]) for m in mounts), "of", len(mounts))
+    print("\ntargets:", len(tgts), dict(Counter(t["kind"] for t in tgts)),
+          "aim points:", sum(len(t["points"]) for t in tgts))
+    print("\ngroup        cases  no-IN_ARC  aimed muzzles inside / OUTSIDE class-expanded ship box")
+    for g in ("close", "ordinary", "boundary", "stress", "artificial"):
+        print(f"  {g:10} {groups[g]:6} {muzzle[g, 'no IN_ARC muzzle']:9}  {muzzle[g, 'inside']:6} / {muzzle[g, 'OUTSIDE']}")
+    rows = padding(tgts)
+    need = [r for r in rows if r["pad"] > 0]
+    worst = max(rows, key=lambda r: r["scale"])
+    print(f"\ntarget-box padding: {len(need)} of {len(rows)} targets have an aim point above the box, "
+          f"{sum(r['outside_other'] for r in rows)} outside it in any other direction")
+    print(f"  proportional: needs {worst['scale']:.2f}x ({worst['target']}), search volume x{worst['scale'] ** 3:.1f} for every target")
+    by_pad = max(rows, key=lambda r: r["pad"])
+    vol = sorted(r["pad_volume"] for r in rows)
+    print(f"  +Y pad: needs {by_pad['pad']:.2f} m ({by_pad['target']}); TARGET_PAD_Y {TARGET_PAD_Y} m grows volume "
+          f"median x{vol[len(vol) // 2]:.2f}, max x{vol[-1]:.2f}  -> chosen")
+    print("\nexcluded:")
+    for reason, k in sorted(excluded.items()):
+        print(f"  {k:4}  {reason}")
 
 
 def selftest():
@@ -230,31 +466,44 @@ def selftest():
     assert nearest([("a", a, 1), ("b", b, 1)], np.array([4.5, 0, 0])) is UNKNOWN  # uncertainty overlaps
     assert nearest([], a) is UNKNOWN
     box = firing_box((0, 0, 0), (1, 1, 1), 2)
-    assert np.allclose(target_box((1, 0, 0), (1, 2, 0), 1.2)[1], (2.2, 2.4, 0))
     assert inside(box, np.array([-2.0, 3, 0])) and not inside(box, np.array([3.1, 0, 0]))
+    assert np.allclose(target_box((1, 0, 0), (1, 2, 1))[1], (2, 2 + TARGET_PAD_Y, 1))
+
+    fake = dict(points=[a, b, np.array([0.0, 50, 0])])  # score(): missed, invented, merged, duplicate, wrong
+    got = score(fake, dict(located=[("A", a, 1), ("A2", a + .5, 1), ("B", (5, 0, 0), 6), ("X", (0, -99, 0), 1)],
+                           answer=lambda m: "A" if m[0] < 3 else "B" if m[0] < 7 else UNKNOWN, queries=8),
+                {0: a + .1, 1: b - 4.5, 2: b + 1})
+    assert {k: got[k] for k in ("missed", "invented", "merged", "duplicate", "correct", "wrong", "unknown")} == \
+        dict(missed=1, invented=1, merged=1, duplicate=1, correct=1, wrong=1, unknown=1)
 
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
-    records, margins, sizes = load()
-    assert len(records) == 288 and set(sizes.values()) == set(SIZES)
-    for case in cases(records, sizes):
-        if case["turret"].startswith("official") and len(case["points"]) > 1:
-            break
-    q = oracle(case)(case["mount"])
-    assert q is not None and abs(np.linalg.norm(q) - 1) < 1e-6
-    reach_m = margins[case["ship_class"]][0]
-    muzzles = aimed_muzzles(case, records)
-    assert muzzles and all(np.linalg.norm(m - case["mount"]) <= reach_m for m in muzzles.values())
+    records, margins, mounts, _excluded, _inferred = load()
+    tgts = targets()
+    assert max(r["pad"] for r in padding(tgts)) <= TARGET_PAD_Y and not any(r["outside_other"] for r in padding(tgts))
+    assert {m["source"] for m in mounts} == {"official", "swi"}
+    seen = set()
+    for case in cases(tgts, mounts):
+        if case["group"] in seen:
+            continue
+        seen.add(case["group"])
+        assert not {"points", "turret", "mount", "origin", "frame"} & set(view(case))
+        lo, hi = map(np.asarray, case["ship_box"])
+        ship = [c @ case["rotation"] + case["position"] for c in itertools.product(*zip(lo, hi))]
+        C, H, R = case["box"]
+        if case["group"] != "artificial":  # real groups keep the whole firing ship clear of the target
+            assert min(np.linalg.norm(p - C @ R) for p in ship) >= np.linalg.norm(H) + case["gap"] - 1e-6
+        for m in aimed_muzzles(case, records).values():
+            assert np.linalg.norm(m - case["origin"]) <= margins[case["ship_class"]][0]
+    assert seen == {"close", "ordinary", "stress", "boundary", "artificial"}
     print("selftest ok")
 
 
 def main():
     if "--selftest" in sys.argv:
         return selftest()
-    _records, margins, _sizes = load()
-    for cls in CLASS_SIZES:
-        print(f"{cls}: {margins[cls][0]:.2f} m  ({margins[cls][1]})")
+    summary()
 
 
 if __name__ == "__main__":
