@@ -28,25 +28,11 @@ import scorer  # noqa: E402
 import sources  # noqa: E402
 import study  # noqa: E402
 
-SIZES = ("small", "medium", "large", "extralarge")
-# ponytail: inference, not a slot census — each ship class may mount its own turret size and every
-# smaller one. Conservative (a superset only widens the margin); replace with a ship-slot census if
-# a class margin turns out too wide to be useful.
-CLASS_SIZES = {"ship_s": SIZES[:1], "ship_m": SIZES[:2], "ship_l": SIZES[:3], "ship_xl": SIZES}
+CLASSES = ("ship_s", "ship_m", "ship_l", "ship_xl")  # firing-ship classes Gunnery Control supports
 UNKNOWN = None
 
 
 # ---------------------------------------------------------------- offline class margins
-
-def mount_size(record, components):
-    """Authored size token on the turret component's `turret`-tagged mating connection."""
-    element = components[record["component"].lower()][0]
-    sizes = {z for c in element.iter("connection") for tags in [set((c.get("tags") or "").split())]
-             if "turret" in tags for z in SIZES if z in tags}
-    if len(sizes) != 1:
-        raise corpus.CorpusError(f"{record['macro']}: mount size {sorted(sizes)}")
-    return sizes.pop()
-
 
 STEP = math.radians(0.5)  # joint sweep grid
 
@@ -57,12 +43,12 @@ def _angles(limits):
     return [lo + (hi - lo) * k / n for k in range(n + 1)]
 
 
-def reach(record):
-    """Conservative max |aimed endpoint - mount| over every legal pose of the authored joints.
+def sweep(record):
+    """(muzzle positions in the turret frame over every legal pose on the STEP grid, between-grid allowance).
 
-    Sweeps each joint over its authored limits on a STEP grid. A joint turned by at most STEP/2
-    from a grid angle moves the endpoint at most |lever| * STEP/2, and the lever is bounded by the
-    sum of fixed translation lengths, so adding that per joint keeps the result an upper bound."""
+    A joint turned by at most STEP/2 from a grid angle moves the endpoint at most |lever| * STEP/2, and the
+    lever is bounded by the sum of fixed translation lengths, so any legal muzzle lies within the
+    allowance of a sampled one. Rigid mounting preserves that distance."""
     joints = [op for op in record["ops"] if op["kind"] == "joint"]
     bound = sum(math.hypot(*op["transform"]["t"]) for op in record["ops"] if op["kind"] == "fixed")
     grids = [_angles(j["limits"]) for j in joints]
@@ -75,17 +61,30 @@ def reach(record):
             mats = np.asarray([scorer.JOINT[op["axis"]](a) for a in grids[k]])
             p = np.einsum("ni,nij->nj", p, mats[index[:, k]])
             k += 1
-    best = float(np.max(np.linalg.norm(p, axis=1)))
-    return best + len(joints) * bound * STEP / 2
+    return p, len(joints) * bound * STEP / 2
 
 
-def class_margins(records, sizes):
-    """{ship class: (margin m, macro that sets it)}. Assumes the mount lies inside the runtime ship box."""
-    by_size = {z: (0.0, "") for z in SIZES}
-    for key, record in records.items():
-        z = sizes[key]
-        by_size[z] = max(by_size[z], (reach(record), key))
-    return {cls: max(by_size[z] for z in sizes) for cls, sizes in CLASS_SIZES.items()}
+def class_margins(mounts, records):
+    """{class: (margin, sampled overflow, (ship, mount, turret))}: the largest distance any legal muzzle of any
+    compatible turret on any real mount can lie outside its ship's runtime box (per-axis, as `firing_box`
+    grows it), plus that turret's between-grid allowance."""
+    by_turret, best = {}, {cls: (0.0, 0.0, None) for cls in CLASSES}
+    for m in mounts:
+        for k in m["turrets"]:
+            by_turret.setdefault(k, []).append(m)
+    for k, ms in sorted(by_turret.items()):
+        p, allowance = sweep(records[k])
+        extent = {}
+        for m in ms:
+            t, R = m["frames"][k]
+            if R.tobytes() not in extent:
+                q = p @ R
+                extent[R.tobytes()] = q.min(0), q.max(0)
+            q_lo, q_hi = extent[R.tobytes()]
+            over = max(0.0, float(np.max(np.concatenate([m["box"][0] - (q_lo + t), q_hi + t - m["box"][1]]))))
+            if over + allowance > best[m["cls"]][0]:
+                best[m["cls"]] = (over + allowance, over, (m["ship"], m["name"], k))
+    return best
 
 
 # ---------------------------------------------------------------- method rules (production inputs only)
@@ -243,10 +242,10 @@ def _mating(comp):
     return None, None
 
 
-def firing_mounts(records, components, sizes):
+def firing_mounts(records, components):
     """Real turret mounts of real firing ships (official 9.00 + SWI 0.9.1 HF, first macro per component), each
-    with its ship's runtime box and the ordinary_xy corpus turrets whose mating tags it accepts and whose
-    size the A1 class margin covers. -> (mounts, Counter of exclusion reasons)."""
+    with its ship's runtime box and the ordinary_xy corpus turrets whose mating tags it accepts. Official ships
+    take official turrets only. -> (mounts, Counter of exclusion reasons, inferred-mating turret count)."""
     excluded, fit = Counter(), {}
     for key, r in sorted(records.items()):
         conn, inferred = _mating(components[r["component"].lower()][0])
@@ -259,7 +258,7 @@ def firing_mounts(records, components, sizes):
     ships = {}
     for name, defs in sorted(sources.MACROS.items()):
         m = defs[0][1]
-        if len(defs) == 1 and m.get("class") in CLASS_SIZES and m.find("component") is not None:
+        if len(defs) == 1 and m.get("class") in CLASSES and m.find("component") is not None:
             ships.setdefault(m.find("component").get("ref"), (name, m.get("class"), defs[0][0].startswith(SWI)))
     mounts, used = [], set()
     for cname, (macro, cls, swi) in sorted(ships.items()):
@@ -275,9 +274,6 @@ def firing_mounts(records, components, sizes):
                 foreign = [k for k in keys if not swi and not k.startswith("official:")]
                 excluded["pair: SWI turret on an official ship"] += len(foreign)
                 keys = [k for k in keys if k not in foreign]
-                bad = [k for k in keys if sizes[k] not in CLASS_SIZES[cls]]
-                excluded["pair: turret size outside the A1 class set"] += len(bad)
-                keys = [k for k in keys if k not in bad]
                 if keys:
                     found.append(dict(ship=macro, cls=cls, source=source, box=tuple(map(np.asarray, box)),
                                       name=conn_name, turrets=keys,
@@ -416,16 +412,17 @@ def load():
     skipped = _index_swi_ships()
     records = scorer.load()
     components = corpus._index_xml([corpus.SWI_XML, corpus.OFFICIAL_SRC], "component")
-    sizes = {k: mount_size(r, components) for k, r in records.items()}
-    mounts, excluded, inferred = firing_mounts(records, components, sizes)
+    mounts, excluded, inferred = firing_mounts(records, components)
     excluded.update(skipped)
-    return records, class_margins(records, sizes), mounts, excluded, inferred
+    return records, class_margins(mounts, records), mounts, excluded, inferred
 
 
 def summary():
     records, margins, mounts, excluded, inferred = load()
     tgts = targets()
-    print("class margins (A1):", ", ".join(f"{c} {m[0]:.2f} m" for c, m in margins.items()))
+    print("class margins (full mounted-muzzle sweep):")
+    for cls, (margin, sampled, (ship, mount, turret)) in margins.items():
+        print(f"  {cls:7} {margin:8.2f} m  (sampled {sampled:.2f} m)  {ship} {mount} {turret}")
     groups, used, muzzle = Counter(), {}, Counter()
     for c in cases(tgts, mounts):
         g = c["group"]
@@ -504,7 +501,7 @@ def selftest():
         if case["group"] != "artificial":  # real groups keep the whole firing ship clear of the target
             assert min(np.linalg.norm(p - C @ R) for p in ship) >= np.linalg.norm(H) + case["gap"] - 1e-6
         for m in aimed_muzzles(case, records).values():
-            assert np.linalg.norm(m - case["origin"]) <= margins[case["ship_class"]][0]
+            assert inside(firing_box(lo, hi, margins[case["ship_class"]][0]), ship_local(case, m))
     assert seen == {"close", "ordinary", "stress", "boundary", "artificial"}
     print("selftest ok")
 

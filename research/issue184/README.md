@@ -8,8 +8,8 @@ will run against.
 
 ```sh
 python3 research/issue184/extract_swi_assets.py <SWI 0.9.1 HF mod dir>  # once
-python3 research/issue184/aimpoint_map.py             # A2 summary (~11 min)
-python3 research/issue184/aimpoint_map.py --selftest  # ~45 s
+python3 research/issue184/aimpoint_map.py             # A2 summary (~15 min)
+python3 research/issue184/aimpoint_map.py --selftest  # ~4 min
 ```
 
 Needs the ignored #176 caches (`python3 research/issue176-a4x/corpus.py`, the
@@ -37,8 +37,7 @@ The A2/A4/A5 #176 ray methods stay where they are. A3 imports them when needed.
 Real ships from official X4 9.00 and SWI 0.9.1 HF, one macro per component,
 classes `ship_s` to `ship_xl`. Each ship contributes its reconstructed runtime
 box and every turret mount a corpus turret fits. Only compatible turrets are
-paired, which also keeps size classes compatible: no pair falls outside the A1
-class size set. Source rule: an official ship takes official turrets only; an
+paired. Source rule: an official ship takes official turrets only; an
 SWI ship takes official or SWI turrets. That drops 2,087 SWI-turret pairs from
 official mounts. The turret frame on the ship is
 `inverse(turret mating) ∘ ship mount`, the same rule `macro_box` uses for
@@ -96,23 +95,44 @@ artificial 775.
 
 ## Box inputs for A3
 
-**Firing-ship box**, `firing_box(ship box, A1 class margin)`, tested in the
-ship frame:
+**Firing-ship box**, `firing_box(ship box, class margin)`: the runtime ship
+box grown by one scalar per class. Production still gets only the ship class
+and runtime box. The margins below are derived offline from real ships.
+
+For every real ship of a class, every turret mount on it, and every
+compatible turret on that mount, the turret is swept through its whole legal
+joint range on a 0.5° grid. Each sampled muzzle is placed on the ship through
+the real mount transform, and the code measures how far it lies outside the
+ship's runtime box along any axis. That is exactly the scalar `firing_box`
+must grow by. The class margin is the largest such overflow plus that
+turret's between-grid allowance, `joints × Σ|fixed t| × 0.25°`. No legal pose
+lies farther than the allowance from a sampled one, and mounting the turret
+rigidly doesn't change that distance. The margin therefore bounds the full
+sweep, not only the grid points.
+
+| class | old A1 margin | new margin | sampled overflow | set by (ship, mount, turret) |
+|---|---:|---:|---:|---|
+| ship_s | 17.10 m | 2.55 m | 2.53 m | SWI `scurrg_h6_macro` `con_weapon_08` `turret_vcx100_short` |
+| ship_m | 43.77 m | 26.40 m | 26.32 m | SWI `defender_corvette_macro` `con_m_turret_ltb_1` `turret_m_ltbdual_green` |
+| ship_l | 84.17 m | 261.49 m | 261.43 m | SWI `nebulonc_macro` `con_m_turret_pd-back_3` `turret_m_quadlaser_blue_02` |
+| ship_xl | 609.59 m | 547.06 m | 547.00 m | SWI `ship_providence_carrier_01_macro` `con_m_turret_left-pdls_5` `turret_m_quadlaser_blue_02` |
+
+The old A1 margin was the turret's reach from its own origin, and it assumed
+the mount lay inside the ship box. A2 showed that assumption is wrong. As
+supporting evidence only, 173 of the 5,442 turret origins lie outside their
+ship box: 159 SWI and 14 official. The worst is 540.48 m on the Providence
+carrier, and none lies beyond the new class margin. Every margin is set by an
+SWI mount of that kind.
+
+Hidden aimed muzzles against the new margins, tested in the ship frame:
 
 | group | inside | outside |
 |---|---:|---:|
-| close | 2,274 | 6 |
-| ordinary | 3,510 | 8 |
+| close | 2,280 | 0 |
+| ordinary | 3,518 | 0 |
 | boundary | 398 | 0 |
 | stress | 2,330 | 0 |
-| artificial | 7,057 | 26 |
-
-The misses break A1's assumption that every mount lies inside the runtime ship
-box. As currently measured (the attached turret-frame origin on the mount),
-173 of the 5,442 mounts do not: 159 SWI and 14 official (12 XL, 2 L). The worst
-is 540.48 m outside (SWI Providence carrier `con_m_turret_left-pdls_5`), then
-327 m (SWI ISD). 14 mounts lie farther outside than their whole class margin.
-See **Open**.
+| artificial | 7,083 | 0 |
 
 **Target box**, `target_box(C, H)`: the runtime box plus `TARGET_PAD_Y =
 8.86 m` on +Y only. 68 of 217 targets have an aim point above their box, and
@@ -155,13 +175,10 @@ and reports:
 
 ## Open
 
-- **SWI mounts outside the reconstructed ship box.** The #168 box
-  reconstruction was validated on official ships only. Up to 540 m of mount
-  excursion on SWI capital ships suggests it misses SWI hull geometry. It is
-  also possible those ships really mount turrets on outriggers. Until that is
-  resolved, the firing-ship method either needs a margin that also covers
-  mount-outside-box, or must return UNKNOWN for those ships. That choice is
-  A3/A4 work; A2 only measures it.
+- **SWI mounts outside the reconstructed ship box** set every class margin. The
+  #168 reconstruction was validated on official ships only. If it misses SWI
+  hull geometry, fixing it would shrink the ship_l and ship_xl margins. The
+  margins stay conservative either way.
 - **A3:** the discovery searches: 8 box corners first, then only the queries
   that add information, reusing the #176 ray-location and confirmation code.
   The target-box method also needs its rule for when a discovered set is
