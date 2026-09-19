@@ -272,6 +272,9 @@ def firing_mounts(records, components, sizes):
                 if "turret" not in t or "component" in t:
                     continue
                 keys = [k for k, f in fit.items() if f[0] <= t]
+                foreign = [k for k in keys if not swi and not k.startswith("official:")]
+                excluded["pair: SWI turret on an official ship"] += len(foreign)
+                keys = [k for k in keys if k not in foreign]
                 bad = [k for k in keys if sizes[k] not in CLASS_SIZES[cls]]
                 excluded["pair: turret size outside the A1 class set"] += len(bad)
                 keys = [k for k in keys if k not in bad]
@@ -438,8 +441,14 @@ def summary():
         print(f"  {src:8} {cls:7} {len({x[0] for x in s}):3} ships  {len({x[:2] for x in s}):4} mounts  "
               f"{len({x[2] for x in s}):3} turrets")
     print(f"  SWI turrets paired through the inferred `turret` mating connection: {inferred}")
-    print("  mounts outside their own runtime ship box:",
-          sum(not inside(m["box"], m["frames"][m["turrets"][0]][0]) for m in mounts), "of", len(mounts))
+    turrets = {x[2] for s in used.values() for x in s}
+    print("  distinct turrets used:", dict(Counter(k.split(":")[0] for k in turrets)))
+    out = [(float(np.max(np.maximum(m["box"][0] - t, 0) + np.maximum(t - m["box"][1], 0))), m)
+           for m in mounts for t in [m["frames"][m["turrets"][0]][0]] if not inside(m["box"], t)]
+    worst = max(out, key=lambda o: o[0])
+    print(f"  mounts outside their own runtime ship box: {len(out)} of {len(mounts)}, worst {worst[0]:.2f} m "
+          f"({worst[1]['ship']} {worst[1]['name']}), beyond the class margin: "
+          f"{sum(d > margins[m['cls']][0] for d, m in out)}")
     print("\ntargets:", len(tgts), dict(Counter(t["kind"] for t in tgts)),
           "aim points:", sum(len(t["points"]) for t in tgts))
     print("\ngroup        cases  no-IN_ARC  aimed muzzles inside / OUTSIDE class-expanded ship box")

@@ -38,7 +38,9 @@ Real ships from official X4 9.00 and SWI 0.9.1 HF, one macro per component,
 classes `ship_s` to `ship_xl`. Each ship contributes its reconstructed runtime
 box and every turret mount a corpus turret fits. Only compatible turrets are
 paired, which also keeps size classes compatible: no pair falls outside the A1
-class size set. The turret frame on the ship is
+class size set. Source rule: an official ship takes official turrets only; an
+SWI ship takes official or SWI turrets. That drops 2,087 SWI-turret pairs from
+official mounts. The turret frame on the ship is
 `inverse(turret mating) ∘ ship mount`, the same rule `macro_box` uses for
 children.
 
@@ -63,7 +65,8 @@ this.
 
 Mount, turret and ship rotation (`study.ROT`) cycle with the case id, so each
 of the 5,442 mounts appears about 3 times. Not every compatible turret appears
-on every mount.
+on every mount. The cases use 26 distinct official and 115 distinct SWI
+turrets.
 
 ## Targets
 
@@ -105,9 +108,11 @@ ship frame:
 | artificial | 7,057 | 26 |
 
 The misses break A1's assumption that every mount lies inside the runtime ship
-box. 173 of the 5,442 mounts do not: 159 SWI and 14 official (12 XL, 2 L). The worst are
-540 m outside (SWI Providence carrier) and 327 m (SWI ISD). 14 mounts lie
-farther outside than their whole class margin. See **Open**.
+box. As currently measured (the attached turret-frame origin on the mount),
+173 of the 5,442 mounts do not: 159 SWI and 14 official (12 XL, 2 L). The worst
+is 540.48 m outside (SWI Providence carrier `con_m_turret_left-pdls_5`), then
+327 m (SWI ISD). 14 mounts lie farther outside than their whole class margin.
+See **Open**.
 
 **Target box**, `target_box(C, H)`: the runtime box plus `TARGET_PAD_Y =
 8.86 m` on +Y only. 68 of 217 targets have an aim point above their box, and
@@ -146,7 +151,7 @@ and reports:
   macro, and unresolved dock connections.
 - 1 SWI asset XML (`deathstar_01.xml`) does not parse.
 - 10 turrets that are not ordinary_xy: no accepted aimed-muzzle truth.
-- 29 turrets that fit no real ship mount.
+- 33 turrets that fit no real ship mount under the source rule.
 
 ## Open
 
