@@ -33,15 +33,17 @@ The situations that matter for this mod. Each is checked against **your target**
 
 | Situation | What it means |
 |---|---|
-| **ENGAGEABLE** | Generic fire-control condition: adequate track, the turret can aim at the target, the target is in range, nothing blocks the shot, and a valid firing/intercept solution exists. |
+| **ENGAGEABLE** | Generic fire-control condition: the turret can aim at the target, the target is in range, nothing blocks the shot, a valid FIRING SOLUTION exists, and firing at that target is authorized. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
 | **LINE OF FIRE BLOCKED** | The turret can bear on the target, but an obstruction masks a required projectile path. The obstruction may be the firing ship, terrain, or another object; guided missile turrets do not use a direct muzzle-to-target path for the console's geometry check. |
 | **NO FIRING SOLUTION** | The turret can aim and the target is in range, but the target is moving in a way that leaves no shot that would connect. |
-| **WEAPON NOT READY** | Aiming is fine, but the turret itself cannot fire right now: reloading, overheated, out of ammunition, or destroyed. |
+| **WEAPON NOT READY** | The turret is destroyed. Destroyed turrets cannot be Direct-controlled by Gunnery Control, so they are excluded from ENGAGEABLE evaluation. |
 | **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
-*Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all) and NO WEAPONS-QUALITY TRACK (detected, but too little tracking data to shoot). X4 does not simulate these as separate situations, and the console will not let you select a target it cannot detect, so they are left out here.*
+*Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all). The console will not let you select a target it cannot detect, so this is left out here. Gunnery Control does not use a separate target-information condition: any target position or movement information needed to make a shot is part of whether a valid FIRING SOLUTION exists.*
+
+**Readiness and authorization in Gunnery Control.** Direct-control applies its attack mode and armed state before ENGAGEABLE is computed. Destroyed turrets are excluded from the selected/evaluated ENGAGEABLE population, so **WEAPON NOT READY** remains a documented firing situation but is not a retained predictor gate under the current mod design. **FIRE NOT AUTHORIZED** does remain part of prospective ENGAGEABLE. The current target-selection path normally limits Direct-control to enemy targets, so authorization should usually be a cheap PASS, but friendly, neutral, surrendered/captured, ownership-changed, or otherwise non-attackable targets must not be treated as ENGAGEABLE merely because the geometry works.
 
 **What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when its bearing and range gates pass and its weapon-specific direct-line policy passes:
 
@@ -56,7 +58,7 @@ When a required direct ray against a whole ship or station root is blocked — a
 
 The source-backed rationale and live-test boundaries are recorded in the knowledge base under [missile guidance](../.agents/skills/research-x4-modding/references/md-ai.md#missile-guidance-is-a-shipped-fire-control-discriminator-but-missile-turret-launch-los-is-engine-side), [guided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#guided-missiles-launch-through-an-own-hull-masked-direct-ray-and-reach-the-designated-surface), and [unguided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#unguided-missile-turrets-ignore-own-hull-but-retain-an-external-direct-line-check).
 
-The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio does **not** prove adequate fire-control track, a valid ballistic/intercept solution, weapon readiness, fire authorization, or actual firing — the bounding-box range gate and the per-module line-of-fire fallback are geometry evidence only. The generic fire-control concept `ENGAGEABLE` additionally assumes adequate track and a valid firing/intercept solution; weapon readiness and fire authorization remain separate states.
+The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio **today** does not prove a valid FIRING SOLUTION, fire authorization, or actual firing — the current range/arc/line-of-fire checks are geometry evidence only. The #79 prediction program extends this toward the full prospective ENGAGEABLE definition above, including FIRE NOT AUTHORIZED. WEAPON NOT READY remains outside that predictor while destroyed turrets are filtered from the evaluated population by design.
 
 ---
 
@@ -103,7 +105,7 @@ Changing the mode while engaged re-applies it to your ticked groups at once. Leg
 | **CANNOT BEAR** | **Attack all enemies:** switches to another target it can aim at. **Attack my current enemy:** no fallback, so it may sit idle. **LIVE** | Own mode | Own mode |
 | **LINE OF FIRE BLOCKED** | Stays aimed at your target and does **not** fire. Does **not** switch to another target. **LIVE** | Own mode | Own mode |
 | **NO FIRING SOLUTION** | Fires at your target and misses; keeps trying. Does not switch, because X4 does not detect this situation. **INFERRED** | Own mode | Own mode |
-| **WEAPON NOT READY** | Holds until the turret is ready. A destroyed turret is skipped, and re-included if it survives. **X4 CODE** | Own mode | Own mode |
+| **WEAPON NOT READY** | A destroyed turret is skipped because it cannot be Direct-controlled. **X4 CODE** | Own mode | Own mode |
 | **FIRE NOT AUTHORIZED** | Neither Direct-control turret mode holds fire on its own. If your target can no longer be attacked, see [Global rules](#global-rules). **UNTESTED** | Own mode | Own mode |
 
 **Why LINE OF FIRE BLOCKED behaves differently from CANNOT BEAR.** This applies to the **Attack all enemies** mode, where a fallback list is sent. X4 decides whether to switch to a fallback target by asking only whether the turret can *aim* at your target, not whether it can *hit* it. A turret with a blocked line of fire is aimed straight at your target, so the game counts it as fine and never switches. A turret that cannot bear cannot aim at your target at all, so the game switches it to a fallback target. Nothing the mod sends changes this, because the decision to switch is the game engine's, not the mod's. Under **Attack my current enemy** no fallback is sent, so nothing switches in either case.
@@ -152,7 +154,7 @@ What the game itself checks, per situation, for a ticked turret on **Attack all 
 | **CANNOT BEAR** | Can the turret aim that far | Switches to a fallback target it can aim at | LIVE |
 | **LINE OF FIRE BLOCKED** | Is the weapon's required projectile path obstructed | Stays aimed, holds fire, does not switch | LIVE |
 | **NO FIRING SOLUTION** | (the game runs no such check) | Fires and misses | INFERRED |
-| **WEAPON NOT READY** | Turret ready to fire | Waits until ready | X4 CODE |
+| **WEAPON NOT READY** | Is the turret destroyed | Destroyed turret is skipped | X4 CODE |
 
 ---
 
@@ -170,6 +172,6 @@ Plain-language meaning for the names used above and in the mod's code.
 | `set_turret_targets` | (none; internal) | The command that tells a ship's turrets what to shoot. Carries a list of targets, an optional "shoot this one first" target, and an optional limit to one mode. |
 | preferred target | (none; internal) | The "shoot this one first" mark. The game honors it only if the turret can aim at that target; if it cannot, the turret uses the rest of the list. |
 | Selected target (soft target) | your current selection | The target you pick out in the main Gunnery Console menu. The mod can set this, and Direct-control aims your turrets at it. |
-| Locked target (hard target) | your locked target | The primary target your ship's own systems track, set by locking a target in the normal HUD. The mod **cannot** set this. Under Direct-control, the mod drives turrets through the soft target instead — including the **Attack my current enemy** mode, which follows your selected soft target. |
+| Locked target (hard target) | your locked target | The primary target your ship's own systems hold as the locked target, set by locking a target in the normal HUD. The mod **cannot** set this. Under Direct-control, the mod drives turrets through the soft target instead — including the **Attack my current enemy** mode, which follows your selected soft target. |
 
 *Table 2 lists every mode the game's turret menu offers, plus Hold fire, which the menu does not offer and only a script can set.*

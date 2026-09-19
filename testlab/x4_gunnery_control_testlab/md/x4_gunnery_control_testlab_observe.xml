@@ -148,6 +148,29 @@
           </actions>
         </cue>
 
+        <!-- Temporary box-property discriminator; authored aim points are
+             compared offline, not presented as runtime point measurements. -->
+        <cue name="ObserveIssue171OriginInsideBox" checkinterval="1s">
+          <conditions>
+            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-171-origin-inside-box-r1'"/>
+          </conditions>
+          <delay exact="5s"/>
+          <actions>
+            <do_for_each name="$Macro" in="[macro.engine_tfm_xl_carrier_02_allround_01_mk1_macro, macro.ship_arg_xl_carrier_02_a_macro]">
+              <debug_text text="'[X4GC TEST ISSUE171 MACROBBOX] spec=issue-171-origin-inside-box-r1 t=' + player.age
+                + ' macro=' + $Macro.id
+                + ' exists=' + $Macro.boundingbox.exists
+                + ' center_x=' + $Macro.boundingbox.center.x
+                + ' center_y=' + $Macro.boundingbox.center.y
+                + ' center_z=' + $Macro.boundingbox.center.z
+                + ' max_x=' + $Macro.boundingbox.max.x
+                + ' max_y=' + $Macro.boundingbox.max.y
+                + ' max_z=' + $Macro.boundingbox.max.z"/>
+            </do_for_each>
+            <debug_text text="'[X4GC TEST ISSUE171 COMPLETE] spec=issue-171-origin-inside-box-r1 records=2 t=' + player.age"/>
+          </actions>
+        </cue>
+
         <!-- ObserveMark
              AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")
              Stamps the interesting instant so the window is greppable

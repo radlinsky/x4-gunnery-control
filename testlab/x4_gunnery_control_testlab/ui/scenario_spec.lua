@@ -51,32 +51,26 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-75-a3-par-l-beam-strict-geometry-r1",
+    -- The spawned ship only triggers the macro-property dump; no target,
+    -- weapon loadout, teleport, or firing measurement is required.
+    id      = "issue-171-origin-inside-box-r1",
     enabled = false,
 
-    location = {
-        sectorMacro = "Cluster_29_Sector001_macro",
-        x = 500000,
-        y = 0,
-        z = 0,
-    },
-
     setup = {
-        remote            = true,
-        shipMacro         = "ship_par_l_destroyer_01_a_macro",
-        shipLabel         = "ISSUE75 A3 SHOOTER 1",
-        singleTurretMacro = "turret_par_l_beam_01_mk1_macro",
-        turretLabel       = "Rear Lower Mid Beam",
-        expectedTurrets   = 1,
+        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
+        shipLabel       = "Ray",
+        turretGroup     = "group_front_up_left",
+        turretLabel     = "Front Upper Left",
+        expectedTurrets = 2,
     },
 
     groups = {
         {
-            label     = "ISSUE75 A3 SHOOTER",
-            macro     = "ship_par_l_destroyer_01_a_macro",
+            label     = "ISSUE171 BOX PROBE",
+            macro     = "ship_arg_s_fighter_01_a_macro",
             faction   = "player",
             count     = 1,
-            distance  = 0,
+            distance  = 2000,
             x         = 0,
             y         = 0,
             spread    = 0,
@@ -85,62 +79,7 @@ X4GunneryTestLabScenarioSpec = {
             pitch     = 0,
             roll      = 0,
             preserveOrientation = true,
-
-            role      = "shooter",
-            loadout   = "x4gc_testlab_par_l_destroyer_01_beam_plasma",
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE75 A3 TARGET A",
-            macro     = "ship_par_m_trans_container_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = -4000,
-            x         = 0,
-            y         = -4000,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
             stripDefenceUnits = true,
-            repairGuard       = true,
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
-
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
-        },
-
-        {
-            label     = "ISSUE75 A3 TARGET B",
-            macro     = "ship_par_m_trans_container_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = -2500,
-            x         = 3000,
-            y         = -5500,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
-
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
         },
     },
 }

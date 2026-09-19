@@ -37,6 +37,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 4.560871, -0.1317711, 23.71955 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -4.823473, -0.001207352, 23.71955 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -4.823477023314, 0.14368824070002517, 35.3404 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 2.980232e-08, -0.02269363, -5.565336 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_tel_l_laser_01_mk1_macro"] = {
         semantic_case = "depth4_p6_translation",
@@ -74,6 +80,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 4.560871, -0.1317711, 23.71955 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -4.823473, -0.001207352, 23.71955 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -4.823477023314, 0.14368824070002517, 35.3404 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 2.980232e-08, -0.02269363, -5.565336 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_par_l_beam_01_mk1_macro"] = {
         semantic_case = "depth4_dual_translation",
@@ -110,6 +122,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 0.3332827, 0.2692866, 10.70685 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -0.361773, 0.2692866, 10.70685 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.36177411439907486, -0.24039828394778012, 55.86982149279033 }, x = { 1.0, -1.5391513801199166e-16, 1.3095493428623948e-11 }, y = { -1.1317461273346799e-13, 0.999962553363136, 0.008654008651554 }, z = { -1.3095004378382448e-11, -0.008654008651554, 0.999962553363136 } },
+            G = { translation = { -1.730653e-06, 9.071168419433594, -16.11956 }, x = { 1.0, -1.5131893095528897e-09, 1.7214768012756105e-18 }, y = { 1.5131326427533504e-09, 0.9999625514072861, -0.0086542346494296 }, z = { 1.30954946226864e-11, 0.0086542346494296, 0.9999625514072861 } },
+            H = { translation = { 1.877547e-06, 2.018104, -1.043081e-05 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_par_m_laser_01_mk1_macro"] = {
@@ -154,6 +172,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 0.2562549, 0.2704595, 5.609009 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -0.3138258, 0.2704595, 5.609009 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.3138258, 0.2704595, 5.609009 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, -0.190359, -0.5231426 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 1.3692632115576053, -0.499697548607132 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
+        },
     },
     ["turret_par_l_laser_01_mk1_macro"] = {
         semantic_case = "depth4_dual_translation",
@@ -191,6 +215,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.039967, 0.2692852, 16.88073 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.063906, 0.3998489, 16.88074 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.0639071144799366, -0.1632697705405588, 62.04461018862494 }, x = { 1.0, -1.5391513801199166e-16, 1.3095493428623948e-11 }, y = { -1.1317461273346799e-13, 0.999962553363136, 0.008654008651554 }, z = { -1.3095004378382448e-11, -0.008654008651554, 0.999962553363136 } },
+            G = { translation = { -1.730653e-06, 9.071168419433594, -16.11956 }, x = { 1.0, -1.5131893095528897e-09, 1.7214768012756105e-18 }, y = { 1.5131326427533504e-09, 0.9999625514072861, -0.0086542346494296 }, z = { 1.30954946226864e-11, 0.0086542346494296, 0.9999625514072861 } },
+            H = { translation = { 1.877547e-06, 2.018104, -1.043081e-05 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_par_l_plasma_01_mk1_macro"] = {
         semantic_case = "depth4_dual_translation",
@@ -227,6 +257,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 0.5374919, 0.2692828, 28.04837 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -0.5369991, 0.2692828, 28.04837 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.5370002146261621, -0.3904757479165795, 73.2106920783007 }, x = { 1.0, -1.5391513801199166e-16, 1.3095493428623948e-11 }, y = { -1.1317461273346799e-13, 0.999962553363136, 0.008654008651554 }, z = { -1.3095004378382448e-11, -0.008654008651554, 0.999962553363136 } },
+            G = { translation = { -1.730653e-06, 9.071168419433594, -16.11956 }, x = { 1.0, -1.5131893095528897e-09, 1.7214768012756105e-18 }, y = { 1.5131326427533504e-09, 0.9999625514072861, -0.0086542346494296 }, z = { 1.30954946226864e-11, 0.0086542346494296, 0.9999625514072861 } },
+            H = { translation = { 1.877547e-06, 2.018104, -1.043081e-05 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_par_m_beam_01_mk1_macro"] = {
@@ -271,6 +307,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_beam_01", transform = { position = { 0.2306155, -0.1077832, 2.274507 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_beam_02", transform = { position = { -0.2306155, -0.1077832, 2.274507 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -0.2306155, -0.1077832, 2.274507 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -2.32e-08, 1.028346, -0.4325762 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 5.48e-08, 0.15055379833815108, -0.4277115224847554 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
+        },
     },
     ["turret_par_m_plasma_01_mk1_macro"] = {
         semantic_case = "depth5_additive_x_rotation",
@@ -313,6 +355,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_standard_01", transform = { position = { -0.413957, -0.05976738, 2.289655 }, quaternion = { -1.808e-07, 2.3e-09, 0, -1.0 } } },
             { connection = "con_standard_02", transform = { position = { 0.4139574, -0.05976691, 2.289655 }, quaternion = { -1.808e-07, 2.3e-09, 0, -1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -0.413957, -0.05976738, 2.289655 }, x = { 1.0, -8.3168e-16, 4.6e-09 }, y = { -8.3168e-16, 0.9999999999999346, 3.616e-07 }, z = { -4.6e-09, -3.616e-07, 0.9999999999999346 } },
+            G = { translation = { -8.42e-08, 0.05871224, -0.8014987 }, x = { 1.0, -8.3168e-16, -4.6e-09 }, y = { -8.3168e-16, 0.9999999999999346, -3.616e-07 }, z = { 4.6e-09, 3.616e-07, 0.9999999999999346 } },
+            H = { translation = { 0, 1.1505538268200293, -0.42771121302098924 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
         },
     },
     ["turret_tel_m_beam_01_mk1_macro"] = {
@@ -358,6 +406,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_beam_01", transform = { position = { 0.7378538, 0.05214825, 2.724045 }, quaternion = { -8.74e-08, 0, 0, -1.0 } } },
             { connection = "con_beam_02", transform = { position = { -0.7411804, 0.05214825, 2.724045 }, quaternion = { -8.74e-08, 0, 0, -1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -0.7411804, 0.05214825, 2.724045 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.748e-07 }, z = { 0, -1.748e-07, 0.9999999999999847 } },
+            G = { translation = { -9.537e-07, 0.3985944, -0.0718013 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 9.685359970092773e-07, 1.2643666989432754, -0.8354298131974984 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 3.717844657691858e-17 }, z = { 0, -3.717844657691858e-17, 1.0 } },
+        },
     },
     ["turret_tel_m_laser_01_mk1_macro"] = {
         semantic_case = "depth5_additive_x_rotation",
@@ -401,6 +455,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 0.8107684, 0.01269937, 5.323081 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -0.360766, 0.01269937, 5.323081 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.360766, 0.01269937, 5.323081 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.2250015, 0.9301549, -0.001182318 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 3.599700927737005e-11, 0.6549956989432759, -0.42771160319749874 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 3.717844657691858e-17 }, z = { 0, -3.717844657691858e-17, 1.0 } },
         },
     },
     ["turret_tel_m_plasma_01_mk1_macro"] = {
@@ -446,6 +506,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_standard_01", transform = { position = { -0.5150182, 0.314377, 2.313589 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_standard_02", transform = { position = { 0.5162557, 0.314377, 2.313589 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -0.5150182, 0.314377, 2.313589 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 0.6530152, -0.4986504 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 3.599700927737005e-11, 0.6593430989432758, -0.42771160319749874 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 3.717844657691858e-17 }, z = { 0, -3.717844657691858e-17, 1.0 } },
+        },
     },
     ["turret_ter_m_laser_01_mk1_macro"] = {
         semantic_case = "depth5_additive_x_rotation",
@@ -488,6 +554,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 0.7535628, 0.1360996, 6.793119 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -0.3611313, 0.1360996, 6.793119 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.3611313, 0.1360996, 6.793119 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.2250015, -0.1942234, -1.192e-07 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 1.3692632115576053, -0.49969844860713203 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
         },
     },
     ["turret_par_m_gatling_01_mk1_macro"] = {
@@ -534,6 +606,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_heavy_003", transform = { position = { -0.1540854, 0.08030784, 4.550117 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
             { connection = "con_heavy_004", transform = { position = { 0.1594501, 0.08164811, 4.550117 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
             { connection = "con_heavy_005", transform = { position = { 0.2515256, 0.3703463, 4.550117 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.1594501, 0.08164811, 4.550117 }, x = { 0.9999999999999925, -8.740000381938001e-08, -8.739999618062e-08 }, y = { 8.739999618062e-08, 0.9999999999999925, -8.740000381938001e-08 }, z = { 8.740000381938001e-08, 8.739999618062e-08, 0.9999999999999925 } },
+            G = { translation = { -2.18e-08, 0.5936304, -0.4489329 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 0.6505538255792418, -0.42945188578753823 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
         },
     },
     ["turret_tel_m_gatling_01_mk1_macro"] = {
@@ -582,6 +660,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_heavy_004", transform = { position = { -0.208616, -0.04201806, 3.886994 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
             { connection = "con_heavy_005", transform = { position = { 0.1851505, -0.03502584, 3.886994 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { -0.208616, -0.04201806, 3.886994 }, x = { 0.9999999999999925, -8.740000381938001e-08, -8.739999618062e-08 }, y = { 8.739999618062e-08, 0.9999999999999925, -8.740000381938001e-08 }, z = { 8.740000381938001e-08, 8.739999618062e-08, 0.9999999999999925 } },
+            G = { translation = { 7.45e-08, 0.1496232, -0.04602075 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 4.6193599700927734e-07, 1.402121698943276, -0.34987020319749956 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 3.717844657691858e-17 }, z = { 0, -3.717844657691858e-17, 1.0 } },
+        },
     },
     ["turret_ter_m_gatling_01_mk1_macro"] = {
         semantic_case = "depth5_additive_x_rotation",
@@ -628,6 +712,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_heavy_004", transform = { position = { 0.2006091, 0.02356088, 5.513709 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
             { connection = "con_heavy_005", transform = { position = { 0.3168075, 0.3878951, 5.513709 }, quaternion = { 4.37e-08, -4.37e-08, 4.37e-08, -1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2006091, 0.02356088, 5.513709 }, x = { 0.9999999999999925, -8.740000381938001e-08, -8.739999618062e-08 }, y = { 8.739999618062e-08, 0.9999999999999925, -8.740000381938001e-08 }, z = { 8.740000381938001e-08, 8.739999618062e-08, 0.9999999999999925 } },
+            G = { translation = { -2.18e-08, 1.040876, -0.4852661 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 0.15055377082665622, -0.42945276858976217 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
+        },
     },
     ["turret_par_m_shotgun_01_mk1_macro"] = {
         semantic_case = "depth5_additive_x_rotation",
@@ -669,6 +759,12 @@ X4GunneryTurretMuzzleGeometry = {
         },
         endpoints = {
             { connection = "con_standard_01", transform = { position = { -2.2e-09, 0.1009249, 1.630686 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -2.2e-09, 0.1009249, 1.630686 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -5.48e-08, 0.4187887, -0.5951285 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 5.48e-08, 0.7601156820990482, -0.42771154999742267 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
         },
     },
     ["turret_tel_m_shotgun_01_mk1_macro"] = {
@@ -713,6 +809,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_standard_01", transform = { position = { -1.3313e-06, -0.000507772, 3.322204 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -1.3313e-06, -0.000507772, 3.322204 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, -1.192e-07, -2.384e-07 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 1.3290359970092775e-06, 1.5095876989432762, -0.35928356319749905 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 3.717844657691858e-17 }, z = { 0, -3.717844657691858e-17, 1.0 } },
+        },
     },
     ["turret_spl_l_beam_01_mk1_macro"] = {
         semantic_case = "depth4_zero_translation",
@@ -749,6 +851,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 3.282419, -0.3634567, 16.04766 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -3.254139, -0.232893, 16.04765 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -3.25876432, -0.0715866, 57.15633 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 10.85334, -1.412697 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 4.173088, 1.412698 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_spl_l_laser_01_mk1_macro"] = {
@@ -787,6 +895,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 4.011329, 0.0617857, 18.04383 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -3.99012, 0.1923494, 18.04382 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -3.9947453200000003, 0.35365579999999996, 59.1525 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 10.85334, -1.412697 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 4.173088, 1.412698 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_spl_l_plasma_01_mk1_macro"] = {
         semantic_case = "depth4_zero_translation",
@@ -823,6 +937,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 3.282419, 0.0617857, 17.77147 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -3.254139, 0.1923494, 17.77146 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -3.25876432, 0.35365579999999996, 58.88014 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 10.85334, -1.412697 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 4.173088, 1.412698 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_ter_l_beam_01_mk1_macro"] = {
@@ -861,6 +981,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.003361, 0.00462532, 17.78848 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.000694, 0.135191, 17.78848 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.000694, 0.7531156999999999, 63.390303814599946 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 2.064657, -6.057116 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 8.5, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_arg_m_plasma_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
@@ -897,6 +1023,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_standard_01", transform = { position = { -2.450636, -4.768372e-07, 2.544146 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_standard_02", transform = { position = { 2.487201, -1.907349e-06, 2.544143 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -2.4454112209999996, -0.5929409344371869, 6.79679297111206 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -6.984919e-09, 3.227029292248535, -0.02317694 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008048e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_par_m_plasma_02_mk1_macro"] = {
@@ -935,6 +1067,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_standard_01", transform = { position = { -2.450636, 4.768372e-07, 2.544146 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_standard_02", transform = { position = { 2.487201, 0, 2.544145 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -2.4454112209999996, -0.5929408807627871, 6.79679297111206 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -6.984919e-09, 3.227029292248535, -0.02317694 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008048e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_tel_m_plasma_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
@@ -971,6 +1109,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_standard_01", transform = { position = { -2.450636, 4.768372e-07, 2.544146 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_standard_02", transform = { position = { 2.487201, 0, 2.544145 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -2.4454112209999996, -0.5929408807627871, 6.79679297111206 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -6.984919e-09, 3.227029292248535, -0.02317694 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008048e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_arg_m_laser_02_mk1_macro"] = {
@@ -1009,6 +1153,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283774804688 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_par_m_laser_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
@@ -1045,6 +1195,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283767590331 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_tel_m_laser_02_mk1_macro"] = {
@@ -1083,6 +1239,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283767590331 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_arg_m_beam_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
@@ -1119,6 +1281,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -2.3978674720409905, -0.7720035585828012, 6.131421258369631 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.7484556000744883e-07 }, z = { 0, -1.7484556000744883e-07, 0.9999999999999847 } },
+            G = { translation = { -1.754811e-06, 2.2738785791186524, -0.0005053287 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 3.464102, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_par_m_beam_02_mk1_macro"] = {
@@ -1157,6 +1325,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -2.3978674720409905, -0.7720035585828012, 6.131421258369631 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.7484556000744883e-07 }, z = { 0, -1.7484556000744883e-07, 0.9999999999999847 } },
+            G = { translation = { -1.754811e-06, 2.2738785791186524, -0.0005053287 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 3.464102, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_tel_m_beam_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
@@ -1193,6 +1367,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -2.3978674720409905, -0.7720035585828012, 6.131421258369631 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.7484556000744883e-07 }, z = { 0, -1.7484556000744883e-07, 0.9999999999999847 } },
+            G = { translation = { -1.754811e-06, 2.2738785791186524, -0.0005053287 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 3.464102, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_xen_m_beam_02_mk1_macro"] = {
@@ -1231,6 +1411,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283738623047 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_xen_m_laser_02_mk1_macro"] = {
         semantic_case = "depth4_one_key_barrel_translation",
@@ -1268,6 +1454,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283738623047 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_spl_m_beam_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
@@ -1299,6 +1491,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -2.3978674720409905, -0.7720035585828012, 6.131421258369631 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.7484556000744883e-07 }, z = { 0, -1.7484556000744883e-07, 0.9999999999999847 } },
+            G = { translation = { -1.754811e-06, 2.2738785791186524, -0.0005053287 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 3.464102, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_spl_m_laser_02_mk1_macro"] = {
@@ -1332,6 +1530,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283774804688 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_spl_m_plasma_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
@@ -1363,6 +1567,12 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_standard_01", transform = { position = { -2.450636, -4.768372e-07, 2.544146 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_standard_02", transform = { position = { 2.487201, -1.907349e-06, 2.544143 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -2.4454112209999996, -0.5929409344371869, 6.79679297111206 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -6.984919e-09, 3.227029292248535, -0.02317694 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008048e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
     ["turret_ter_m_beam_02_mk1_macro"] = {
@@ -1396,6 +1606,12 @@ X4GunneryTurretMuzzleGeometry = {
             { connection = "con_beam_01", transform = { position = { 2.413219, 0.0002198219, 1.274742 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_beam_02", transform = { position = { -2.397867, 0.0002193451, 1.274741 }, quaternion = { 0, 0, 0, 1.0 } } },
         },
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -2.3978674720409905, -0.7720035585828012, 6.131421258369631 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.7484556000744883e-07 }, z = { 0, -1.7484556000744883e-07, 0.9999999999999847 } },
+            G = { translation = { -1.754811e-06, 2.2738785791186524, -0.0005053287 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 3.464102, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
     },
     ["turret_ter_m_laser_02_mk1_macro"] = {
         semantic_case = "depth3_one_key_barrel_translation",
@@ -1427,6 +1643,452 @@ X4GunneryTurretMuzzleGeometry = {
         endpoints = {
             { connection = "con_laser_01", transform = { position = { 2.22173, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
             { connection = "con_laser_02", transform = { position = { -2.279301, 0.3119164, 4.094663 }, quaternion = { 0, 0, 0, 1.0 } } },
+        },
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.279301, -0.7132356000000001, 7.274283767590331 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 3.245396592248535, -1.238369e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.803713, -7.008049e-08 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_l_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -5.052104, 0.1122337299000245, 22.308030907299973 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.01497424, 0.2278442, -5.573472 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_l_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -4.823477023314, 0.14368824070002517, 35.34039952319999 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 2.980232e-08, -0.02269363, -5.565337 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_l_plasma_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -5.8710916442285965, 0.08826153032020884, 26.743024513500316 }, x = { 0.9999999999999925, -8.742277955963554e-08, -8.74227795596352e-08 }, y = { 8.742277191689248e-08, 0.9999999999999925, -8.74227872023776e-08 }, z = { 8.74227872023776e-08, 8.74227795596352e-08, 0.9999999999999925 } },
+            G = { translation = { 0.0244168, 0.01155472, -5.55248 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_m_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -0.6317801, 0.2911947, 0.6292604 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999847, 1.748e-07 }, z = { 0, -1.748e-07, 0.9999999999999847 } },
+            G = { translation = { 0, -0.1252995, 1.71454 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -1.9999999995978096e-10, 2.0422837621156287, -0.9536518364510285 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_m_flak_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_003",
+            L = { translation = { 0.18468664840000001, -0.1855947999911744, 5.2462219999944075 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0.006427032, 0.07224286, 0.3442827 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0009261812, 1.7604495693466609, -0.767404221940456 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_m_flak_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_003",
+            L = { translation = { 2.2764186525784575, 0.563071258699932, 7.254591616668701 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 9.691238268475958e-08, 3.863297441009521, -0.005388340000017027 }, x = { 0.9999999999999847, 0, -1.74845558231092e-07 }, y = { 0, 1.0, 0 }, z = { 1.74845558231092e-07, 0, 0.9999999999999847 } },
+            H = { translation = { -9.691238e-08, 0.6648523, 0.001033863 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_m_gatling_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.09503044, -0.1479541, 3.652092 }, x = { 0.9999999999964202, -1.4099988323360002e-07, 2.6720000061617e-06 }, y = { 1.410001167664e-07, 0.9999999999999862, -8.7399811624e-08 }, z = { -2.6719999938383e-06, 8.7400188376e-08, 0.9999999999964264 } },
+            G = { translation = { 0.000867961, 0.2597506, 0.9810999 }, x = { 0.9999999999999907, 5.34e-08, -1.256e-07 }, y = { -5.34e-08, 0.9999999999999986, 3.3535200000000005e-15 }, z = { 1.256e-07, 3.3535200000000005e-15, 0.9999999999999921 } },
+            H = { translation = { -0.0009265114999999999, 1.5369900211187617, -0.8136702922044379 }, x = { 0.9999999999965316, 2.117582368135751e-22, -2.6338e-06 }, y = { 0, 1.0, 0 }, z = { 2.6338e-06, -5.551115123125783e-17, 0.9999999999965316 } },
+        },
+    },
+    ["turret_arg_m_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2881038138263177, -0.37690113624753213, 7.7104741829059735 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { -1.296997e-06, 3.6163803117523194, -0.007654238 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.223131, 0.001034386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_m_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { 3.57e-08, -0.1912249, 3.874565 }, x = { 0.9999999999961928, 0, 2.7594e-06 }, y = { 0, 1.0, 0 }, z = { -2.7594e-06, 0, 0.9999999999961928 } },
+            G = { translation = { 0.0009271074, 0.2564654, 0.6620355 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0009263097, 1.6390197041637853, -0.7673578282438271 }, x = { 0.9999999999961928, 0, -2.7594000312027496e-06 }, y = { 0, 1.0000000113078023, 0 }, z = { 2.7594e-06, -5.551115123125783e-17, 1.000000011303995 } },
+        },
+    },
+    ["turret_arg_m_plasma_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -0.5819755, 0, 3.368845 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 1.5527e-06, 0.1476842, 0.100291 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 1.318000000000586e-07, 2.131032769346661, -0.7442146727404564 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_arg_m_shotgun_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { 0.00980127, 0.03057563, 2.853813 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.00980127, 1.009989, 0.3672177 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999782, -2.086e-07 }, z = { 0, 2.086e-07, 0.9999999999999782 } },
+            H = { translation = { -4.179233912063318e-11, 0.9744438280259802, -0.7522563655636418 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999393784358, 0 }, z = { 0, 0, 0.9999999393784358 } },
+        },
+    },
+    ["turret_arg_m_shotgun_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -1.165700000000075e-09, 1.6824224600000002, 7.801836509338379 }, x = { -1.0000000000003753, 1.6390799998248048e-19, 5.642600000001059e-07 }, y = { 4.887909639080001e-13, -1.0000000000001592, 8.662515999999311e-07 }, z = { 5.642599999998941e-07, 8.66251600000069e-07, 0.9999999999994656 } },
+            G = { translation = { 9.691238548228851e-08, 3.8633044410095208, -0.005388324000017027 }, x = { 0.9999999999999847, 0, -1.74845558231092e-07 }, y = { 0, 1.0, 0 }, z = { 1.74845558231092e-07, 0, 0.9999999999999847 } },
+            H = { translation = { -9.691238e-08, 0.6648523, 0.001033863 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_l_disruptor_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.336928, -0.203661, 20.8648 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 7.1e-09, 3.318392047683716, -2.187765 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.2576116, -2.7575404 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_l_flak_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { 5.89e-07, 0, 35.83528 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 7.1e-09, 3.567177952316284, -2.186793 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.2576116, -2.7575363999999998 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_l_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -1.582e-07, -0.9693632, 36.38381 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 7.1e-09, 0.9971395, -2.186795 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -7.100000000000004e-09, 4.890839, -3.9497293999999994 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_m_arc_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { -0.01300666, 0.1206044, 7.475627 }, x = { 1.0, 0, 1.2e-09 }, y = { 0, 1.0, 0 }, z = { -1.2e-09, 0, 1.0 } },
+            G = { translation = { 2.4225e-06, 0.7936012, -1.085613 }, x = { 1.0, 0, -1.2e-09 }, y = { 0, 1.0, 0 }, z = { 1.2e-09, 0, 1.0 } },
+            H = { translation = { -1.1956046494395337e-06, 1.2790611937204042, -0.7653985436144755 }, x = { 1.0, -6.969316849758078e-10, 6.298737004321859e-10 }, y = { 6.969316849758079e-10, 1.0, 0 }, z = { -6.298737004321859e-10, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_m_arc_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.6626067, -0.003675938, 5.10818 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, -4e-10 }, z = { 0, 4e-10, 1.0 } },
+            G = { translation = { 1.50968e-05, 1.2144748450279237, -0.162756 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 0.50177506, -1.3583316 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_m_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser",
+            L = { translation = { 0.0003705954, -0.008651018, 8.926121 }, x = { 1.0, 0, 1.2e-09 }, y = { 0, 1.0, 0 }, z = { -1.2e-09, 0, 1.0 } },
+            G = { translation = { 1.1949e-06, 0.7871776, -1.094119 }, x = { 1.0, 0, -1.2e-09 }, y = { 0, 1.0, 0 }, z = { 1.2e-09, 0, 1.0 } },
+            H = { translation = { -1.1956046494395337e-06, 1.2790622390138795, -0.7653976122920017 }, x = { 1.0, -6.969316849758078e-10, 6.298737004321859e-10 }, y = { 6.969316849758079e-10, 1.0, 0 }, z = { -6.298737004321859e-10, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_m_laser_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { 0.6772707558000001, 0.0006471892092895504, 11.223266115966798 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 1.7832e-06, 1.9814790238418578, 0.1015512 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 1.30506e-05, -0.05096059999999997, -1.0871386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_m_railgun_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { 5.36e-08, -1.28746e-05, 2.215593 }, x = { 1.0, 0, 1.2e-09 }, y = { 0, 1.0, 0 }, z = { -1.2e-09, 0, 1.0 } },
+            G = { translation = { 1.195e-06, 0.7861803, -1.083084 }, x = { 1.0, 0, -1.2e-09 }, y = { 0, 1.0, 0 }, z = { 1.2e-09, 0, 1.0 } },
+            H = { translation = { -1.1956046494395337e-06, 1.2790622390138795, -0.7653976122920017 }, x = { 1.0, -6.969316849758078e-10, 6.298737004321859e-10 }, y = { 6.969316849758079e-10, 1.0, 0 }, z = { -6.298737004321859e-10, 0, 1.0 } },
+        },
+    },
+    ["turret_bor_m_railgun_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { 9.2e-07, 0.3249429, 3.640043 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 1.49608e-05, 1.0459059761581422, -0.1627557 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0.0006046296, 0.8007839999999999, -1.0870606 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_gen_m_disabler_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser",
+            L = { translation = { -2.22e-08, 0.1305776, 6.461595 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.001306005, -0.04612440419879208, -0.4333652568274804 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999847691298, 0.00017453292005095776 }, z = { 0, -0.00017453292005095776, 0.9999999847691298 } },
+            H = { translation = { 0.0013060270328306436, 1.5660509999338754, 0.1398707028106747 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999847813665, -0.00017446279437244305 }, z = { 0, 0.00017446279437244305, 0.9999999847813665 } },
+        },
+    },
+    ["turret_gen_m_gatling_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser",
+            L = { translation = { -1e-10, 0.3549768, 4.385603 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -1e-10, 2.245461740805627, -1.523011845409825 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, -1.544173, 1.145956 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_gen_m_shieldpierce_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser",
+            L = { translation = { -0.001306027, 0.5166006880070968, 3.3313620018597625 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 3.6e-09 }, z = { 0, -3.6e-09, 1.0 } },
+            G = { translation = { 0.0013060272, 2.6183414068729123, -1.5658663552844156 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999773091521, 0.00021302979999993088 }, z = { 0, -0.00021302979999993088, 0.9999999773091521 } },
+            H = { translation = { 0, -1.298289, 2.697736 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_gen_m_yacht_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { 0.3711517, 0.1530719, 6.9009398807999975 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.1822205, -0.08642387, 1.171045 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 7.940934e-23, 3.792079, -0.3999978 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_kha_l_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { -5.71028e-05, 0.03799534, 28.61321 }, x = { 0.9999999999999716, 2.2999996678448e-07, 6.2400122429e-08 }, y = { -2.3000003321552e-07, 0.9999999999994069, 1.064599992824e-06 }, z = { -6.2399877571e-08, -1.064600007176e-06, 0.9999999999994313 } },
+            G = { translation = { -4.753e-07, 0.8523026, -2.033727 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 6.828055, -1.349026 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_kha_m_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "connection_laser01",
+            L = { translation = { 0, 8.686208163265194, 12.470500128992995 }, x = { 1.0, 0, 0 }, y = { 0, 0.8191520801225963, -0.5735763851753518 }, z = { 0, 0.5735763851753518, 0.8191520801225963 } },
+            G = { translation = { 3.036112e-07, 1.6020669934086913, 0.0188446 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 7.559426, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_par_m_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2881038138263177, -0.37690113624753213, 7.7104741829059735 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { -1.296997e-06, 3.6163803117523194, -0.007654238 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.223131, 0.001034386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_par_m_shotgun_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -1.165700000000075e-09, 1.6824224600000002, 7.801836509338379 }, x = { -1.0000000000003753, 1.6390799998248048e-19, 5.642600000001059e-07 }, y = { 4.887909639080001e-13, -1.0000000000001592, 8.662515999999311e-07 }, z = { 5.642599999998941e-07, 8.66251600000069e-07, 0.9999999999994656 } },
+            G = { translation = { 9.691238548228851e-08, 3.8633044410095208, -0.005388324000017027 }, x = { 0.9999999999999847, 0, -1.74845558231092e-07 }, y = { 0, 1.0, 0 }, z = { 1.74845558231092e-07, 0, 0.9999999999999847 } },
+            H = { translation = { -9.691238e-08, 0.6648523, 0.001033863 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_pir_m_battleship_01_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2881038138263177, -0.37690113624753213, 7.7104741829059735 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { -1.296997e-06, 3.6163803117523194, -0.007654238 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.223131, 0.001034386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_spl_m_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -0.1249146, 0.0009608275, 3.380104 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999848, 1.746e-07 }, z = { 0, -1.746e-07, 0.9999999999999848 } },
+            G = { translation = { 0, 0.6368918, 0.8550401 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 2e-10 }, z = { 0, -2e-10, 1.0 } },
+            H = { translation = { 0.00011421499999999, 0.8079316654591402, -0.9429582341202956 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999998629386968, -0.0005235671757867211 }, z = { 0, 0.0005235671757867211, 0.9999998629386968 } },
+        },
+    },
+    ["turret_spl_m_flak_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -0.1389791, -0.0317553, 4.683376 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 9.6e-09 }, z = { 0, -9.6e-09, 1.0 } },
+            G = { translation = { 0.1406236, 0.9713556, 0.07640839 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, -9.6e-09 }, z = { 0, 9.6e-09, 1.0 } },
+            H = { translation = { -0.0016616572000000098, 0.7600567633231399, -0.9290069664808138 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999998629386968, -0.0005235671757867211 }, z = { 0, 0.0005235671757867211, 0.9999998629386968 } },
+        },
+    },
+    ["turret_spl_m_flak_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -1.237881542424796e-06, 1.6824294686999322, 7.079787616668701 }, x = { -1.0000000000003753, 1.786248004609729e-20, 1.2795156000002402e-06 }, y = { 1.10838241786248e-12, -1.0000000000008185, 8.662515999996455e-07 }, z = { 1.27951559999976e-06, 8.662516000003546e-07, 0.9999999999988063 } },
+            G = { translation = { 9.691238268475958e-08, 3.863297441009521, -0.005388340000017027 }, x = { 0.9999999999999847, 0, -1.74845558231092e-07 }, y = { 0, 1.0, 0 }, z = { 1.74845558231092e-07, 0, 0.9999999999999847 } },
+            H = { translation = { -9.691238e-08, 0.6648523, 0.001033863 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_spl_m_gatling_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.1158355, -0.1587849, 2.880011 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 0.4026161, 0.6686366 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -9.974659986866641e-18, 1.1007757399120197, -0.957408499645874 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999998629386968, -0.0005235671757867211 }, z = { 0, 0.0005235671757867211, 0.9999998629386968 } },
+        },
+    },
+    ["turret_spl_m_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2881038138263177, -0.37690113624753213, 7.7104741829059735 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { -1.296997e-06, 3.6163803117523194, -0.007654238 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.223131, 0.001034386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_spl_m_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { 0.0001143485, -0.1316596, 4.975943 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0.002076006, 1.031196, 0.7087095 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0022422073999998765, 0.7601620871326382, -0.9442271606730945 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999970850699, -7.635358472574127e-05 }, z = { 0, 7.635358472574127e-05, 0.9999999970850699 } },
+        },
+    },
+    ["turret_spl_m_plasma_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -0.5314736, -6.06775e-05, 2.634521 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0.001837299, 0.09829378, -0.3420101 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0014538399000000098, 1.5976923467319506, -0.7439903996189461 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999998629386968, -0.0005235671757867211 }, z = { 0, 0.0005235671757867211, 0.9999998629386968 } },
+        },
+    },
+    ["turret_spl_m_shotgun_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -0.001907261, -0.1227436, 2.658915 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999999999999997, -2.56e-08 }, z = { 0, 2.56e-08, 0.9999999999999997 } },
+            G = { translation = { 0.001855407, 1.117167, 0.3841271 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, -9.6e-09 }, z = { 0, 9.6e-09, 1.0 } },
+            H = { translation = { -9.974659986866641e-18, 0.7641529078780036, -0.9474496936154346 }, x = { 1.0, 0, 0 }, y = { 0, 0.9999998629386968, -0.0005235671757867211 }, z = { 0, 0.0005235671757867211, 0.9999998629386968 } },
+        },
+    },
+    ["turret_spl_m_shotgun_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -1.165700000000075e-09, 1.6824224600000002, 7.801836509338379 }, x = { -1.0000000000003753, 1.6390799998248048e-19, 5.642600000001059e-07 }, y = { 4.887909639080001e-13, -1.0000000000001592, 8.662515999999311e-07 }, z = { 5.642599999998941e-07, 8.66251600000069e-07, 0.9999999999994656 } },
+            G = { translation = { 9.691238548228851e-08, 3.8633044410095208, -0.005388324000017027 }, x = { 0.9999999999999847, 0, -1.74845558231092e-07 }, y = { 0, 1.0, 0 }, z = { 1.74845558231092e-07, 0, 0.9999999999999847 } },
+            H = { translation = { -9.691238e-08, 0.6648523, 0.001033863 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_tel_l_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -5.052104, 0.1122337299000245, 22.30803095360002 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.01497424, 0.2278442, -5.573472 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_tel_l_plasma_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -5.871091644228755, 0.0882596223202203, 26.743024513500487 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { 0.0244168, 0.01155472, -5.55248 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_tel_m_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2881038138263177, -0.37690113624753213, 7.7104741829059735 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { -1.296997e-06, 3.6163803117523194, -0.007654238 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.223131, 0.001034386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_tel_m_shotgun_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_standard_01",
+            L = { translation = { -1.165700000000075e-09, 1.6824224600000002, 7.801836509338379 }, x = { -1.0000000000003753, 1.6390799998248048e-19, 5.642600000001059e-07 }, y = { 4.887909639080001e-13, -1.0000000000001592, 8.662515999999311e-07 }, z = { 5.642599999998941e-07, 8.66251600000069e-07, 0.9999999999994656 } },
+            G = { translation = { 9.691238548228851e-08, 3.8633044410095208, -0.005388324000017027 }, x = { 0.9999999999999847, 0, -1.74845558231092e-07 }, y = { 0, 1.0, 0 }, z = { 1.74845558231092e-07, 0, 0.9999999999999847 } },
+            H = { translation = { -9.691238e-08, 0.6648523, 0.001033863 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_ter_l_gatling_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { 0, 0, 58.59481 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 2.064657, -6.057116 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 8.5, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_ter_l_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -2.000695221736, 0.19013785639997793, 63.39028618540005 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 4.317571e-07, 2.064657, -6.057116 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 8.5, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_ter_m_beam_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_beam_02",
+            L = { translation = { -0.4663866, -0.003767133, 3.0141489999999997 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -5.48e-08, 0.1528882, -0.4718273 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 5.48e-08, 1.2295928002326169, -0.413304034667562 }, x = { 1.0, 0, 0 }, y = { 0, 1.0000000340871777, -5.551115123125783e-17 }, z = { 0, 5.551115123125783e-17, 1.0000000340871777 } },
+        },
+    },
+    ["turret_ter_m_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_heavy_004",
+            L = { translation = { 0.2881038138263177, -0.37690113624753213, 7.7104741829059735 }, x = { 0.9999999999999925, -8.742278000372475e-08, -8.742278000372441e-08 }, y = { 8.742277236098161e-08, 0.9999999999999925, -8.742278764646688e-08 }, z = { 8.742278764646688e-08, 8.742278000372441e-08, 0.9999999999999925 } },
+            G = { translation = { -1.296997e-06, 3.6163803117523194, -0.007654238 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 2.223131, 0.001034386 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_ter_m_laser_03_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser",
+            L = { translation = { -1.32701e-05, -0.006805539, 7.407044 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -2.18e-08, 0.5253662, -0.00604105 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 0.6508803289126053, -0.42771105720828195 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_ter_m_laser_04_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { 1.728413, -0.01177001, 8.77577 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -0.8642064, 0.9014213081581421, -1.504506 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 4.01e-08, 1.3635595999999999, -0.4592341 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_xen_l_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -4.823477023314, 0.14368824070002517, 35.34039904639998 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 2.980232e-08, -0.02269363, -5.565336 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { -0.0244168, 17.52643, -0.1001702 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_xen_l_plasma_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { -3.491584, -7.1764e-05, 22.06369 }, x = { 0.9999999999999716, 2.2999996678448e-07, 6.2400122429e-08 }, y = { -2.3000003321552e-07, 0.9999999999994069, 1.064599992824e-06 }, z = { -6.2399877571e-08, -1.064600007176e-06, 0.9999999999994313 } },
+            G = { translation = { -3.617e-07, 0.9854603, -0.287245 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 5.695000000575114e-07, 6.667076382835445, 3.3547031801288885 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_xen_m_gatling_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser",
+            L = { translation = { -1.32918e-05, -0.002191424, 7.674364 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 0.5207522, 1.1921e-06 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 0.6508803289126053, -0.42771105720828195 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_xen_m_gatling_02_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { -0.957276, 0.1427436, 7.565227 }, x = { -5.3212480199960055e-08, 1.0000000532124802, 0 }, y = { -1.0000000532124802, -5.3212480199960055e-08, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { -1.481e-07, 1.158916, -0.6161931 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 1.481e-07, 1.2977725999999998, -0.459234 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_xen_m_laser_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_02",
+            L = { translation = { 0, 0.2238532, 4.029633 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            G = { translation = { 0, 0.8342655, 0.1807291 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+            H = { translation = { 0, 0.9471021888146132, -0.1428521160737304 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
+        },
+    },
+    ["turret_xen_xl_battleship_01_mk1_macro"] = {
+        chain = {
+            barrelposition_connection = "con_laser_01",
+            L = { translation = { -2.802e-07, 5.43631781073437, 16.731261713011225 }, x = { 1.0, 0, 0 }, y = { 0, 0.9510565036282077, -0.3090170223912163 }, z = { 0, 0.3090170223912163, 0.9510565036282077 } },
+            G = { translation = { 0, -4.5058, 0 }, x = { 1.0, 0, 0 }, y = { 0, 0.95105655699328, -0.30901685319503996 }, z = { 0, 0.30901685319503996, 0.95105655699328 } },
+            H = { translation = { 0, 6.830174, 0 }, x = { 1.0, 0, 0 }, y = { 0, 1.0, 0 }, z = { 0, 0, 1.0 } },
         },
     },
 }

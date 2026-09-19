@@ -207,19 +207,56 @@ def _check_barrelposition_emission():
         assert explicit == (semantic_case == "depth3_one_key_barrel_translation"), macro
 
 
+def _check_chain_emission():
+    """`chain` is the #164 endpoint plus exactly joint_segments() L/G/H, every macro."""
+    import re
+    import tempfile
+
+    from barrelposition_evaluator import joint_segments
+    from test_barrelposition_evaluator import BarrelpositionEvaluatorTests
+
+    with tempfile.TemporaryDirectory() as tmp:
+        turret = BarrelpositionEvaluatorTests()._load(Path(tmp))
+        lines = _gen._chain(turret)
+        segments = joint_segments(turret)
+    assert lines[1].strip() == f'barrelposition_connection = "{turret["selected_connection"]}",'
+    assert turret["selected_connection"] == "con_b"  # smallest native hash, not lexical
+    for name, line in zip("LGH", lines[2:5]):
+        assert line.strip().startswith(f"{name} = "), line
+        values = [float(v) for v in re.findall(r"[-0-9.e]+(?=[ ,}])", line)]
+        translation, rows = segments[name]
+        assert values == [*translation, *(v for row in rows for v in row)], name
+
+    # A macro outside MACROS still gets a chain-only record; a missing chain fails closed.
+    report = _report(("con_a", "con_b"))
+    chains = {macro: ["        chain = {},"] for macro in (*_gen.MACROS, "turret_new_macro")}
+    text = _gen._render(report, X4_VERSION, chains)
+    assert '    ["turret_new_macro"] = {\n        chain = {},\n    },' in text
+    assert text.count("chain = {},") == len(chains)
+    chains.pop("turret_new_macro")
+    chains.pop(next(iter(_gen.MACROS)))
+    try:
+        _gen._render(report, X4_VERSION, chains)
+    except SystemExit:
+        return
+    raise AssertionError("a legacy macro without a chain must fail closed")
+
+
 def main():
     _check_settled_rotation_x()
     _check_shared_component()
     _check_resolution_cardinality()
     _check_barrelposition_selection()
     _check_barrelposition_emission()
+    _check_chain_emission()
     order = ("con_laser_01", "con_laser_02")
+    chains = {macro: [] for macro in _gen.MACROS}
 
-    first = _gen._render(_report(order), X4_VERSION)
-    second = _gen._render(_report(order), X4_VERSION)
+    first = _gen._render(_report(order), X4_VERSION, chains)
+    second = _gen._render(_report(order), X4_VERSION, chains)
     assert first == second, "repeat renders diverged"
 
-    reversed_render = _gen._render(_report(tuple(reversed(order))), X4_VERSION)
+    reversed_render = _gen._render(_report(tuple(reversed(order))), X4_VERSION, chains)
     assert first == reversed_render, "endpoint input ordering changed generated text"
 
     print("turret muzzle geometry generation determinism tests passed")
