@@ -137,7 +137,7 @@ def _observation(sample, factor):
     out.update(same_ray_points=None if lo is None else (o + lo * d0, o + hi * d0),
                same_ray_q=1 + len(historical.LADDER), same_ray_reason=reason,
                probes=probes, bracket=[lo, hi],
-               bracket_holds=lo is None or lo <= out["distance"] < hi,
+               bracket_holds=lo is None or lo <= float((truth - o) @ d0) < hi,
                probe_switch=any(p[2] != anchor for p in probes),
                hidden_switch=any(p[2] != anchor and p[1] == "forward" for p in probes))
     for key, result, queries in (("three_ray", initial, 3),

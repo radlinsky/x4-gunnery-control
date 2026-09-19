@@ -188,7 +188,7 @@ def angle_mid(turret, o, d0, lo, hi):
     return 0.5 * (a + b)
 
 
-def run(sample, factor, turret, pts, d0, mode="adaptive"):
+def run(sample, factor, turret, pts, d0, anchor, mode="adaptive"):
     """mode: adaptive (angular stop), locate (stop only at the depth-resolution floor), along (no sideways probes),
     tri2 (sideways only, two agreeing rays trusted without anchor-ray confirmation), strict (depth only from
     anchor-ray bounds; sideways crossings just place the next along-ray probes).
@@ -218,9 +218,9 @@ def run(sample, factor, turret, pts, d0, mode="adaptive"):
     while len(log) < BUDGET:
         answer, spread, _m = turret.certify(o, d0, lo, hi)
         if answer and (mode != "locate" or resolved()):
-            return answer, "certified", trace, len({e[2] for e in log}), len(misses)
+            return answer, "certified", trace, len({anchor, *(e[2] for e in log)}), len(misses)
         if resolved():
-            return "UNKNOWN", "floor", trace, len({e[2] for e in log}), len(misses)
+            return "UNKNOWN", "floor", trace, len({anchor, *(e[2] for e in log)}), len(misses)
         estimate = angle_mid(turret, o, d0, lo, hi) if hi < math.inf else max(rough, 2 * lo)
         if mode != "along" and len(log) + 3 <= BUDGET and alpha >= ALPHA_MIN:
             # Sideways probe: start at depth lo/2 on the anchor ray (P stays nearest there) and step sideways by
@@ -272,8 +272,8 @@ def run(sample, factor, turret, pts, d0, mode="adaptive"):
         record("along", log[-1][0], dict(result=kind))
     answer, _spread, _m = turret.certify(o, d0, lo, hi)
     if answer and (mode != "locate" or resolved()):
-        return answer, "certified", trace, len({e[2] for e in log}), len(misses)
-    return "UNKNOWN", "budget", trace, len({e[2] for e in log}), len(misses)
+        return answer, "certified", trace, len({anchor, *(e[2] for e in log)}), len(misses)
+    return "UNKNOWN", "budget", trace, len({anchor, *(e[2] for e in log)}), len(misses)
 
 
 # ---------------------------------------------------------------- benchmark
@@ -301,7 +301,7 @@ def evaluate(plan):
             d0v = np.asarray(d0, float)
             depth = float((truth_point - np.asarray(sample["O"], float)) @ d0v)
             for mode in ("adaptive", "locate", "strict", "along", "tri2"):
-                answer, stop, trace, selected, misses = run(sample, factor, turret, pts, d0v, mode)
+                answer, stop, trace, selected, misses = run(sample, factor, turret, pts, d0v, anchor, mode)
                 final = trace[-1] if trace else dict(lo=0.0, hi=None, spread=math.inf, margin=None)
                 row.update({mode: answer, mode + "_stop": stop, mode + "_q": 1 + len(trace)})
                 if mode == "adaptive":
