@@ -64,13 +64,30 @@ to `[(label, centre, radius)]` and returns a label only when the winner's
 farthest possible distance is strictly less than every rival's closest
 possible distance. Otherwise it returns UNKNOWN.
 
-Authored aim points do not always lie inside the target box. In the #167
-corpus, all ship, engine and shield targets fit inside it. 72 of the 226
-boxed targets, all turret surface elements, have an aim point outside even
-the box scaled by 1.2. The worst is `turret_xen_xl_battleship_01_mk1` at
-3.88×: 8.65 m outside a box only 3 m thick. The 22 zero-box turret targets,
-likely non-hittable, are left out of the cases. A2 chooses `scale`, or an
-absolute pad for thin axes, from the benchmark.
+**Target population.** `targets()` keeps only targets Gunnery Control can ask
+ENGAGEABLE about, using the generic #168/#169 rule on the #167 corpus:
+
+- Whole ships: all kept (50 components).
+- Turret, missile turret, shield and engine surfaces: kept when the tags on
+  their unique `component` mating connection, minus `component` itself, are a
+  subset of a connection on some macro-referenced L/XL ship or station module,
+  and their macro (following `ref`) is not `hull integrated`. That keeps 88
+  turret, 49 shield and 30 engine components.
+- Excluded: 28 records whose mating tags require `unhittable`, which only
+  M-ship sockets carry. That is 27 turret `_01` records (the 21 #168 zero-box
+  turrets plus 6 nonzero-box ones) and the shield video macro. Also excluded:
+  1 with no compatible host (`turret_bor_m_mining_02`) and 3 `hull integrated`
+  (the Kha'ak L beam, the Xenon XL battleship turret, and a Kha'ak destroyer
+  engine). The Kha'ak
+  scenario beam overrides `integrated="0"` and is kept.
+- A zero box on an in-scope target raises. None occurs in X4 9.00.
+
+Authored aim points do not always lie inside the target box (#169). Every
+whole ship, shield and engine fits. 68 of the 88 in-scope turret surfaces have
+their aim point above the box, always along +Y only, so no 1.2× box contains
+them. The worst is `turret_kha_m_beam_01_mk1`: 8.85 m above a box 3.44 m in
+half-height, which needs 3.57× proportional scale. A2 chooses `scale`, or a pad
+on the Y axis, from the benchmark.
 
 ## Remaining
 

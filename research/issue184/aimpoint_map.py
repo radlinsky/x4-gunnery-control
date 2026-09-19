@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "research/issue176-a4x"), str(ROOT / "research/issue167-p3c")]
 import corpus  # noqa: E402
 import scorer  # noqa: E402
+import sources  # noqa: E402
 import study  # noqa: E402
 
 SIZES = ("small", "medium", "large", "extralarge")
@@ -99,9 +100,8 @@ def inside(box, muzzle):
 def target_box(centre, half, scale):
     """Target-box method: search box with the target box's proportions, half-extents x `scale`.
 
-    Authored aim points can sit outside the target box (72 of 226 boxed corpus targets, all turret
-    surface elements, need up to 3.88x), so `scale` is chosen from
-    the A2 benchmark, not assumed."""
+    Authored aim points can sit outside the target box (#169): 68 of 88 in-scope turret surfaces, only
+    along Y, needing up to 3.57x or 8.85 m, so `scale` is chosen from the A2 benchmark, not assumed."""
     return np.asarray(centre, float) - scale * np.asarray(half, float), np.asarray(centre, float) + scale * np.asarray(half, float)
 
 
@@ -121,12 +121,55 @@ def nearest(located, muzzle):
 
 # ---------------------------------------------------------------- shared benchmark cases
 
-def targets():
-    """Unique real target components with authored aim points and runtime-box centre/half-extents.
+# #169 host classes: L/XL ships and station modules, the selectable destructible surface population.
+HOSTS = {"ship_l", "ship_xl", "defencemodule", "connectionmodule", "production", "storage", "habitation",
+         "dockarea", "pier", "buildmodule", "processingmodule", "welfaremodule"}
+KIND = {"turret": "turret", "missileturret": "turret", "shieldgenerator": "shield", "engine": "engine"}
 
-    Zero boxes (22 turret surface elements, likely non-hittable) are out of scope for this mod."""
+
+def _integrated(macro):
+    """Resolved `hull@integrated`, following macro `ref` inheritance (#169)."""
+    while macro is not None:
+        hull = macro.find("properties/hull")
+        if hull is not None and hull.get("integrated") is not None:
+            return hull.get("integrated").lower() in ("1", "true")
+        macro = sources.macro(macro.get("ref")) if macro.get("ref") else None
+    return False
+
+
+def scope(record, host_tags):
+    """(kind, None) for a Gunnery Control target, else (kind, reason). #168/#169 generic rule."""
+    cls = sources.component(record["component"]).get("class")
+    if cls.startswith("ship_"):
+        return "whole", None
+    mating = [c for c in sources.connections(sources.component(record["component"])).values()
+              if "component" in sources.tags(c)]
+    if len(mating) != 1:
+        return KIND[cls], "no unique mating connection"
+    required = sources.tags(mating[0]) - {"component"}
+    if not any(required <= t for t in host_tags):
+        return KIND[cls], "no L/XL/station host" + (" (requires unhittable)" if "unhittable" in required else "")
+    if _integrated(sources.macro(record["macro"])):
+        return KIND[cls], "hull integrated"
+    return KIND[cls], None
+
+
+def targets():
+    """Unique target components Gunnery Control can ask ENGAGEABLE about, with authored aim points and
+    runtime-box centre/half-extents. An in-scope zero box fails loudly (#168: none in X4 9.00)."""
     study.init()
-    return [r for r in {r["component"]: r for r in study.CORPUS["records"]}.values() if max(r["H"]) > 0]
+    referenced = {m.find("component").get("ref") for defs in sources.MACROS.values() for _r, m in defs
+                  if m.find("component") is not None}
+    host_tags = [sources.tags(c) for name in referenced if name in sources.COMPONENTS
+                 for _r, comp in sources.COMPONENTS[name] if comp.get("class") in HOSTS
+                 for c in sources.connections(comp).values() if "component" not in sources.tags(c)]
+    kept = {}
+    for r in study.CORPUS["records"]:
+        if scope(r, host_tags)[1] is None:
+            if max(r["H"]) == 0:
+                raise sources.StudyError(f"in-scope zero box: {r['macro']}")
+            kept.setdefault(r["component"], r)
+    return list(kept.values())
 
 
 def cases(records, sizes):
@@ -189,6 +232,9 @@ def selftest():
     box = firing_box((0, 0, 0), (1, 1, 1), 2)
     assert np.allclose(target_box((1, 0, 0), (1, 2, 0), 1.2)[1], (2.2, 2.4, 0))
     assert inside(box, np.array([-2.0, 3, 0])) and not inside(box, np.array([3.1, 0, 0]))
+
+    assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
+    assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
     records, margins, sizes = load()
     assert len(records) == 288 and set(sizes.values()) == set(SIZES)
