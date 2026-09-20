@@ -14,6 +14,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a43r [--jobs 4]             # A4.3 phase 2 adaptive rescue
     python3 research/issue184/aimpoint_map.py --a43f [--jobs 4]             # A4.3 phase 3 uncertainty fallback
     python3 research/issue184/aimpoint_map.py --a43h [--jobs 4]             # A4.3 phase 4 hull coverage map
+    python3 research/issue184/aimpoint_map.py --a43a [--jobs 4]             # A4.3 phase 5 angular-spread search
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -1153,6 +1154,47 @@ def _cell_resolved(a, b, R, O, T, points, residual):
                for rlo, rhi in residual)
 
 
+def _pursue(h, tlo, thi, T, anchors, spend, stats, tag, seen):
+    """Adaptive moved asks until every anchor ray is assigned or too narrow to observe further (#176 A5).
+
+    An unassigned ask is an observation, not a failure: it names a direction toward *some* aim point. Take
+    the anchors one at a time in fixed key order (never hidden truth) and ask again from sideways of that
+    ray, offset by the viewing-angle change alpha at the ray's own target-box depth scale. When the moved
+    ray does not support its anchor - it misses it, or crosses it outside the padded target box - X4
+    selected another point: keep the observation, halve alpha and turn 60 degrees. Every ask feeds the
+    shared `locate()`, and a newly confirmed point may explain other stored observations, so the anchor
+    list is rebuilt before each spend. `stats` counts under `tag`; `seen` is the shared new-point watch."""
+    points = h["points"]
+    state = {}
+    while anchors:
+        h["locate"]()
+        anchors = [k for k in anchors if h["owner"](*h["rays"][k]) is None]
+        if len(points) > seen[0]:  # a new point may already explain other stored observations
+            seen[0] = len(points)
+            continue
+        if not anchors:
+            break
+        if not spend(3):  # the spare 2 cover `locate`'s along-ray confirmation
+            stats[tag + "guard"] = True
+            break
+        k = anchors[0]
+        u, d = h["rays"][k]
+        alpha, turn = state.get(k, (RESCUE_ALPHA0, 0))
+        if alpha < RESCUE_ALPHA_MIN:  # nothing narrower left to observe about this direction
+            anchors.pop(0)
+            continue
+        a_ax, b_ax = basis(d)
+        side = math.cos(turn * math.pi / 3) * a_ax + math.sin(turn * math.pi / 3) * b_ax
+        v = u + _box_depth(u, d, tlo, thi, T) * math.tan(alpha) * side
+        h["rays"][tuple(map(float, v))] = (v, dv := h["ask"](v))
+        stats[tag + "moved"] += 1
+        hit = None if dv is None else crossing(u, d, v, dv)
+        supported = hit is not None and inside((tlo, thi), (u + hit[0] * d) @ T.T)
+        stats[tag + "switched"] += not supported
+        state[k] = (alpha / 2 if not supported else alpha, turn + 1)
+    h["locate"]()
+
+
 def rescue_probe(view, margin, guard=RESCUE_GUARD, fallback_guard=FALLBACK_GUARD, fallback=True):
     """A4.3 phase 2 and 3: adaptive rescue of the corner directions the audit could not assign, then an
     uncertainty-driven fallback search of the firing area for aim points nothing has pointed at yet.
@@ -1189,41 +1231,10 @@ def rescue_probe(view, margin, guard=RESCUE_GUARD, fallback_guard=FALLBACK_GUARD
         stats.update(before=len(points), before_points=list(points))
         seen = [len(points)]
 
-        def pursue(anchors, spend, tag):
-            """Adaptive moved asks until every anchor ray is assigned or too narrow to observe further."""
-            state = {}
-            while anchors:
-                h["locate"]()
-                anchors = [k for k in anchors if h["owner"](*h["rays"][k]) is None]
-                if len(points) > seen[0]:  # a new point may already explain other stored observations
-                    seen[0] = len(points)
-                    continue
-                if not anchors:
-                    break
-                if not spend(3):  # the spare 2 cover `locate`'s along-ray confirmation
-                    stats[tag + "guard"] = True
-                    break
-                k = anchors[0]
-                u, d = h["rays"][k]
-                alpha, turn = state.get(k, (RESCUE_ALPHA0, 0))
-                if alpha < RESCUE_ALPHA_MIN:  # nothing narrower left to observe about this direction
-                    anchors.pop(0)
-                    continue
-                a_ax, b_ax = basis(d)
-                side = math.cos(turn * math.pi / 3) * a_ax + math.sin(turn * math.pi / 3) * b_ax
-                v = u + _box_depth(u, d, tlo, thi, T) * math.tan(alpha) * side
-                h["rays"][tuple(map(float, v))] = (v, dv := h["ask"](v))
-                stats[tag + "moved"] += 1
-                hit = None if dv is None else crossing(u, d, v, dv)
-                supported = hit is not None and inside((tlo, thi), (u + hit[0] * d) @ T.T)
-                stats[tag + "switched"] += not supported
-                state[k] = (alpha / 2 if not supported else alpha, turn + 1)
-            h["locate"]()
-
         start = h["count"]()
         anchors = sorted(k for k, (u, d) in h["rays"].items() if d is not None and h["owner"](u, d) is None)
         stats["open_before"] = len(anchors)
-        pursue(anchors, lambda n: h["count"]() - start + n <= guard, "")
+        _pursue(h, tlo, thi, T, anchors, lambda n: h["count"]() - start + n <= guard, stats, "", seen)
         stats["extra"] = h["count"]() - start
         if not fallback:
             return
@@ -1256,7 +1267,7 @@ def rescue_probe(view, margin, guard=RESCUE_GUARD, fallback_guard=FALLBACK_GUARD
             cells += [(np.minimum(c, mid), np.maximum(c, mid)) for c in _corners(a, b)]
             h["locate"]()
             if dv is not None and h["owner"](u, dv) is None:
-                pursue([key], spend, "fb_")
+                _pursue(h, tlo, thi, T, [key], spend, stats, "fb_", seen)
         stats["fb_extra"] = h["count"]() - start2
         stats["fb_points"] = len(points) - stats["fb_before"]
     return probe, stats
@@ -1591,6 +1602,320 @@ def _a43h_report(rows):
     return "\n".join(L)
 
 
+# ---------------------------------------------------------------- A4.3 phase 5: angular-spread search
+
+A43A_GRID = 9        # samples per axis on each firing-box face, coarse pass; numerical resolution only
+A43A_REFINE = 3      # refinement rounds around the coarse winner
+A43A_SHRINK = 0.25   # each round searches this fraction of the previous window
+A43A_PRIMARY = 12    # experiment: fixed number of primary angular asks per case, no production stopping rule
+A43A_GUARD = 24      # loose research guard on the angular stage's total extra asks, moved asks included
+A43A_SNAPS = (1, 2, 3, 4, 6, 8, 12)
+
+
+def _definite(cent, rad, W):
+    """Vectorised `nearest`: for each world position in W, (index of the nearest confirmed point, whether
+    that is definite). Definite means the farthest the winner can be is strictly nearer than the closest
+    any rival can be, exactly the accepted rule in `nearest`."""
+    D = np.linalg.norm(W[:, None, :] - cent[None], axis=2)
+    b = D.argmin(1)
+    far = D[np.arange(len(W)), b] + rad[b]
+    ok = np.ones(len(W), bool)
+    for i in range(len(cent)):
+        ok &= (b == i) | (D[:, i] - rad[i] > far)
+    return b, ok
+
+
+def _angle_gaps(W, cent, rad, dirs):
+    """(predicted point, definite, angular gap) for each world position: how far, in viewing angle seen
+    from its predicted aim point, that position is from the nearest ask already assigned to that point.
+    Positions whose nearest known point is not definite get gap -1 and are never chosen."""
+    b, ok = _definite(cent, rad, W)
+    gap = np.full(len(W), -1.0)
+    for i in range(len(cent)):
+        m = ok & (b == i)
+        if not m.any():
+            continue
+        V = W[m] - cent[i]
+        n = np.linalg.norm(V, axis=1, keepdims=True)
+        V = V / np.where(n > 0, n, 1)
+        gap[m] = math.pi if not len(dirs[i]) else np.arccos(np.clip(V @ dirs[i].T, -1, 1)).min(1)
+    return b, ok, gap
+
+
+def _face_grid(lo, hi, k, side, win, n):
+    """n x n positions on the firing-box face normal to axis `k` at `side`, over the (s, t) window `win`."""
+    ax = [a for a in range(3) if a != k]
+    ss, ts = (np.linspace(*win[0], n), np.linspace(*win[1], n))
+    P = np.zeros((n * n, 3))
+    P[:, k] = side
+    P[:, ax[0]] = np.repeat(ss, n)
+    P[:, ax[1]] = np.tile(ts, n)
+    return P
+
+
+def angular_pick(points, asks, flo, fhi, R, O):
+    """The next ask position: the point on the expanded firing box seen from the largest missing viewing
+    direction of whichever confirmed aim point would definitely be selected there.
+
+    For every confirmed point, its assigned ask positions become viewing directions from that point. A
+    candidate is considered for point A only when the current point estimates say A is definitely the
+    nearest known point from it (`_definite`, the accepted `nearest` rule), so no candidate is judged
+    across an uncertain switch boundary. Its value is the angle to the nearest existing viewing direction
+    for A, and the best candidate over all points and all six faces wins.
+
+    Deterministic coarse-to-fine: a fixed A43A_GRID square on each of the six faces, then A43A_REFINE
+    rounds on the winning face over a window shrinking by A43A_SHRINK, clipped to the face. Those are
+    numerical resolution constants, fixed before the run, not a search budget.
+
+    -> (angular gap in radians, local position, predicted point index) or None when nothing is definite."""
+    cent = np.asarray([c for c, r in points], float)
+    rad = np.asarray([r for c, r in points], float)
+    dirs = []
+    for i in range(len(points)):
+        us = np.asarray(asks.get(i, []), float).reshape(-1, 3) - cent[i]
+        n = np.linalg.norm(us, axis=1, keepdims=True)
+        dirs.append(us[(n > 0).ravel()] / n[n > 0].reshape(-1, 1) if len(us) else us)
+    best = None  # (gap, face k, side, s, t, point)
+    for k in range(3):
+        ax = [a for a in range(3) if a != k]
+        win0 = ((flo[ax[0]], fhi[ax[0]]), (flo[ax[1]], fhi[ax[1]]))
+        for side in (float(flo[k]), float(fhi[k])):
+            P = _face_grid(flo, fhi, k, side, win0, A43A_GRID)
+            b, ok, gap = _angle_gaps(P @ R + O, cent, rad, dirs)
+            j = int(gap.argmax())
+            if gap[j] >= 0 and (best is None or gap[j] > best[0]):
+                best = (float(gap[j]), k, side, float(P[j, ax[0]]), float(P[j, ax[1]]), int(b[j]))
+    if best is None:
+        return None
+    k, side = best[1], best[2]
+    ax = [a for a in range(3) if a != k]
+    half = [(float(fhi[a]) - float(flo[a])) / 2 for a in ax]
+    for _ in range(A43A_REFINE):
+        half = [w * A43A_SHRINK for w in half]
+        win = tuple((max(float(flo[a]), best[3 + q] - half[q]), min(float(fhi[a]), best[3 + q] + half[q]))
+                    for q, a in enumerate(ax))
+        P = _face_grid(flo, fhi, k, side, win, A43A_GRID)
+        b, ok, gap = _angle_gaps(P @ R + O, cent, rad, dirs)
+        j = int(gap.argmax())
+        if gap[j] >= 0 and gap[j] > best[0]:
+            best = (float(gap[j]), k, side, float(P[j, ax[0]]), float(P[j, ax[1]]), int(b[j]))
+    pos = np.zeros(3)
+    pos[k] = side
+    pos[ax[0]], pos[ax[1]] = best[3], best[4]
+    return best[0], pos, best[5]
+
+
+def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_guard=RESCUE_GUARD):
+    """A4.3 phase 5: the 8 outer corners and the accepted cheap rescue, then asks chosen purely by the
+    largest missing viewing angle (`angular_pick`).
+
+    Each primary ask goes into the same shared `locate()`. If it can be assigned to a known point it is
+    simply another observation of that point, which shrinks that point's missing-angle map and moves the
+    next ask elsewhere. If it cannot be assigned it is a direction toward something unknown, and the same
+    accepted moved-ask rescue pursues it. After any new confirmed point the assignments and the whole
+    candidate choice are recomputed from scratch. Hidden aim points and later muzzles are never consulted.
+
+    Returns (probe, stats); `stats["snaps"]` holds the confirmed points after each primary ask."""
+    C, H, T = view["target_box"]
+    tlo, thi = target_box(C, H)
+    flo, fhi = firing_box(*view["ship_box"], margin)
+    R, O = view["ship_rotation"], view["ship_position"]
+    stats = dict(before=0, before_points=[], after_rescue_points=[], open_before=0,
+                 rescue_extra=0, rescue_moved=0, rescue_switched=0, rescue_guard=False,
+                 primary=0, extra=0, moved=0, switched=0, guard=False, stalled=False, picks=[], snaps={})
+
+    def probe(h):
+        points = h["points"]
+        stats.update(before=len(points), before_points=list(points))
+        seen = [len(points)]
+
+        start = h["count"]()
+        anchors = sorted(k for k, (u, d) in h["rays"].items() if d is not None and h["owner"](u, d) is None)
+        stats["open_before"] = len(anchors)
+        _pursue(h, tlo, thi, T, anchors, lambda n: h["count"]() - start + n <= rescue_guard,
+                stats, "rescue_", seen)
+        stats["rescue_extra"] = h["count"]() - start
+        stats["after_rescue_points"] = list(points)
+
+        start2 = h["count"]()
+        spend = lambda n: h["count"]() - start2 + n <= guard  # noqa: E731
+        while stats["primary"] < primary:
+            h["locate"]()
+            if not points:
+                stats["stalled"] = True
+                break
+            if not spend(3):  # the spare 2 cover `locate`'s along-ray confirmation
+                stats["guard"] = True
+                break
+            asks = {}
+            for u, d in h["rays"].values():
+                i = h["owner"](u, d)
+                if i is not None:
+                    asks.setdefault(i, []).append(u)
+            pick = angular_pick(points, asks, flo, fhi, R, O)
+            if pick is None:  # nothing on the box has a definite nearest known point
+                stats["stalled"] = True
+                break
+            gap, pos, want = pick
+            v = pos @ R + O
+            key = tuple(map(float, v))
+            if key in h["rays"]:  # the best candidate is an ask already spent: no new viewing angle left
+                stats["stalled"] = True
+                break
+            had = len(points)
+            h["rays"][key] = (v, dv := h["ask"](v))
+            stats["primary"] += 1
+            h["locate"]()
+            got = h["owner"](v, dv)
+            if got is None and dv is not None:
+                _pursue(h, tlo, thi, T, [key], spend, stats, "", seen)
+                got = h["owner"](v, dv)
+            stats["picks"].append(dict(angle=math.degrees(gap), predicted=want, got=got,
+                                       new_points=len(points) - had,
+                                       outcome="predicted" if got == want else "other" if got is not None
+                                       else "new_point" if len(points) > had else "unassigned"))
+            stats["snaps"][stats["primary"]] = dict(
+                primary=stats["primary"], extra=h["count"]() - start2, switched=stats["switched"],
+                guard=stats["guard"], points=[(c.tolist(), float(r)) for c, r in points])
+        stats["extra"] = h["count"]() - start2
+    return probe, stats
+
+
+def _represented(points, truth):
+    """Hidden truth, reporting only: which true aim points some estimate covers."""
+    return {j for c, r in points for j, p in enumerate(truth) if np.linalg.norm(np.asarray(c) - p) <= r}
+
+
+def _a43a_case(case):
+    records, margins = _LOADED
+    v = view(case)
+    margin = margins[case["ship_class"]][0]
+    probe, stats = angular_probe(v, margin)
+    corner_audit(v, margin, probe)
+    muzzles = aimed_muzzles(case, records)
+    truth = case["points"]
+    sel = [study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in truth]) for m in muzzles.values()]
+    before = _represented(stats["before_points"], truth)          # the 8 corners alone
+    after_rescue = _represented(stats["after_rescue_points"], truth)  # plus the accepted cheap rescue
+    affected = [x for x in sel if x not in before]                # of the original 58
+    remaining = [x for x in sel if x not in after_rescue]         # of the 5 the cheap rescue still misses
+
+    rows, last = [], dict(primary=0, extra=0, switched=stats["rescue_switched"], guard=False,
+                          points=[(c.tolist(), float(r)) for c, r in stats["after_rescue_points"]])
+    for k in A43A_SNAPS:
+        snap = stats["snaps"].get(k, last)  # carry the final state forward when the case stopped earlier
+        last = snap
+        pts = [(np.asarray(c), r) for c, r in snap["points"]]
+        got = score(case, dict(located=[(i, c, r) for i, (c, r) in enumerate(pts)],
+                               answer=lambda m: UNKNOWN, queries=0), {})
+        rep = _represented(pts, truth)
+        rows.append(dict(snap=k, primary=snap["primary"], extra=snap["extra"],
+                         total_extra=stats["rescue_extra"] + snap["extra"],
+                         points=len(pts), new_points=len(pts) - stats["before"],
+                         rescue_points=len(stats["after_rescue_points"]),
+                         switched=snap["switched"], guard=snap["guard"],
+                         **{q: got[q] for q in ("missed", "invented", "merged", "duplicate")},
+                         affected_represented=sum(x in rep for x in affected),
+                         all_affected=bool(affected) and all(x in rep for x in affected),
+                         remaining_represented=sum(x in rep for x in remaining)))
+    return dict(id=case["id"], before=stats["before"], open_before=stats["open_before"],
+                rescue_extra=stats["rescue_extra"], rescue_switched=stats["rescue_switched"],
+                primary=stats["primary"], extra=stats["extra"], moved=stats["moved"],
+                switched=stats["switched"], guard=stats["guard"], stalled=stats["stalled"],
+                muzzles=len(sel), affected=len(affected), remaining=len(remaining),
+                picks=stats["picks"], snaps=rows)
+
+
+def a43a(jobs):
+    """A4.3 phase 5: the angular-spread experiment on the same 19 cases. No phase-3 fallback."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["id"] in set(A43_CASES)]
+    assert len(todo) == len(A43_CASES), (len(todo), len(A43_CASES))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path, sum_path = CACHE / "a43a_rows.jsonl", CACHE / "a43a_summary.txt"
+    print(f"A4.3 phase 5: {len(todo)} cases, up to {A43A_PRIMARY} primary angular asks -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a43a_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            end = r["snaps"][-1]
+            print(f"  {len(rows)}/{len(todo)} case {r['id']}: {r['primary']} primary, +{r['extra']} extra "
+                  f"(rescue {r['rescue_extra']}), {r['before']}->{end['points']} pts, "
+                  f"{end['affected_represented']}/{r['affected']} affected represented"
+                  f"{', GUARD' if r['guard'] else ''}{', STALLED' if r['stalled'] else ''}", flush=True)
+    out = _a43a_report(rows)
+    sum_path.write_text(out)
+    print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
+
+
+def _rescue_points(row):
+    """Confirmed points a case had before its first angular ask: the 8 corners plus the cheap rescue. The
+    snapshot `points` column counts those too, so the angular stage's own gain is the difference."""
+    if "rescue_points" in row["snaps"][0]:
+        return row["snaps"][0]["rescue_points"]
+    return row["snaps"][0]["points"] - (row["picks"][0]["new_points"] if row["picks"] else 0)
+
+
+def _a43a_report(rows):
+    picks = [p for r in rows for p in r["picks"]]
+    L = [f"A4.3 phase 5: asks chosen by largest missing viewing angle, {len(rows)} cases, "
+         f"up to {A43A_PRIMARY} primary asks, {A43A_GUARD}-ask angular-stage guard", "",
+         f"start state: {sum(r['before'] for r in rows)} points from the 8 corners, "
+         f"{sum(r['open_before'] for r in rows)} unassigned corner directions, cheap rescue spent "
+         f"{sum(r['rescue_extra'] for r in rows)} asks ({sum(r['rescue_switched'] for r in rows)} switched)",
+         f"later aimed muzzles: {sum(r['muzzles'] for r in rows)}; originally affected "
+         f"{sum(r['affected'] for r in rows)}; still unrecovered after the cheap rescue "
+         f"{sum(r['remaining'] for r in rows)}", "",
+         f"points after the 8 corners plus the cheap rescue: {sum(_rescue_points(r) for r in rows)}; "
+         "the +angular column below is what the angular asks added on top of that", "",
+         "snapshot table (all 19 cases; a case that stopped early carries its final state forward)",
+         "  primary  asks(angular)  asks(total)  points  +angular  inv/mer/dup  affected repr  cases all  "
+         "last5  switch  guard",
+         ]
+    for k in A43A_SNAPS:
+        ss = [s for r in rows for s in r["snaps"] if s["snap"] == k]
+        pts = sum(s["points"] for s in ss)
+        L.append(f"  {k:>7}  {sum(s['extra'] for s in ss):>12}  {sum(s['total_extra'] for s in ss):>11}  "
+                 f"{pts:>6}  {pts - sum(_rescue_points(r) for r in rows):>8}  "
+                 f"{sum(s['invented'] for s in ss)}/{sum(s['merged'] for s in ss)}/"
+                 f"{sum(s['duplicate'] for s in ss)}".ljust(13)
+                 + f"  {sum(s['affected_represented'] for s in ss):>3} of {sum(r['affected'] for r in rows):<7}"
+                 f"  {sum(s['all_affected'] for s in ss):>9}  {sum(s['remaining_represented'] for s in ss):>5}  "
+                 f"{sum(s['switched'] for s in ss):>6}  {sum(s['guard'] for s in ss):>5}")
+    ang = [p["angle"] for p in picks]
+    out = Counter(p["outcome"] for p in picks)
+    L += ["",
+          f"primary asks made: {len(picks)} over {len(rows)} cases; "
+          f"{sum(r['primary'] for r in rows)} counted, {sum(r['guard'] for r in rows)} cases hit the guard, "
+          f"{sum(r['stalled'] for r in rows)} stalled (no new viewing angle left)",
+          f"chosen angular separation from the nearest prior ask of the predicted point: "
+          f"med/p90/max {_stats(ang)} degrees" if ang else "no primary asks made",
+          f"outcome of each primary ask: {out['predicted']} selected the predicted known point, "
+          f"{out['other']} selected another known point, {out['new_point']} were unassigned and led to a "
+          f"newly confirmed point, {out['unassigned']} stayed unassigned",
+          f"moved asks in the angular stage: {sum(r['moved'] for r in rows)}, "
+          f"{sum(r['switched'] for r in rows)} switched point", "",
+          "per case: " + ", ".join(
+              f"{r['id']} {r['primary']}p/+{r['extra']}a/{r['snaps'][-1]['points']}pts/"
+              f"{r['snaps'][-1]['affected_represented']}of{r['affected']}" for r in rows)]
+    first = {}
+    for r in rows:
+        if not r["remaining"]:
+            continue
+        hit = [s["snap"] for s in r["snaps"] if s["remaining_represented"] == r["remaining"]]
+        first[r["id"]] = hit[0] if hit else None
+    L += ["", "hidden truth, reporting only - snapshot at which the 5 muzzle selections the cheap rescue "
+          "still missed become represented:",
+          "  " + (", ".join(f"case {k}: {'never' if v is None else f'after {v} primary asks'}"
+                            for k, v in first.items()) or "none")]
+    return "\n".join(L)
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -1882,6 +2207,39 @@ def selftest():
     assert sum(cov["asks"].values()) == 8 and cov["points"] == 2, cov["asks"]  # every corner assigned
     assert cov["covered_cells"] == 0 and cov["inner_regions"] == [(n - 2) ** 3], cov["inner_regions"]
 
+    # A4.3 phase 5: the next ask must go where the aim point has never been seen from. One point, with
+    # every assigned ask on the -x face of the firing box: the largest missing viewing direction is the
+    # opposite face, and the chosen candidate must land on it.
+    flo_, fhi_ = np.array([-200.0, -200, -200]), np.array([200.0, 200, 200])
+    Rz, Oz = np.eye(3), np.array([0.0, 1500, 0])
+    one = [(np.zeros(3), 1.0)]
+    seen_asks = {0: [np.asarray(q, float) @ Rz + Oz for q in itertools.product([-200.0], [-200, 200], [-200, 200])]}
+    gap, pos, want = angular_pick(one, seen_asks, flo_, fhi_, Rz, Oz)
+    assert want == 0 and pos[0] == fhi_[0] and gap > 0, (pos, gap)
+
+    # Candidates are only ever judged where the confirmed estimates make the nearest point definite, which
+    # must be the accepted `nearest` rule and nothing looser - including between two points.
+    two_pts = [(np.array([-350.0, 0, 0]), 2.0), (np.array([350.0, 0, 0]), 2.0)]
+    loc = [(i, c, r) for i, (c, r) in enumerate(two_pts)]
+    W = rng.uniform(flo_, fhi_, (500, 3)) @ Rz + Oz
+    bi, okm = _definite(np.asarray([c for c, _r in two_pts]), np.asarray([r for _c, r in two_pts]), W)
+    assert all((int(b) if o else UNKNOWN) == nearest(loc, w) for w, b, o in zip(W, bi, okm))
+    gap, pos, want = angular_pick(two_pts, {0: [np.array([-200.0, -200, -200]) @ Rz + Oz],
+                                            1: [np.array([200.0, 200, 200]) @ Rz + Oz]}, flo_, fhi_, Rz, Oz)
+    assert nearest(loc, pos @ Rz + Oz) == want, (pos, want)  # never chosen across an uncertain boundary
+
+    # The phase-3 witness again: the corners confirm two points, the cheap rescue has nothing to pursue,
+    # and a third point hides inside the firing area. Spreading asks by viewing angle must reach it.
+    _c, v = synthetic(hidden3, (0, 0, 0), (400, 400, 400), ship=((-200, -200, -200), (200, 200, 200)),
+                      at=(0, 1500, 0))
+    ang, astats = angular_probe(v, 0)
+    a = corner_audit(v, 0, ang)
+    assert astats["before"] == 2 and astats["open_before"] == 0, astats
+    assert len(a["points"]) == 3, len(a["points"])  # the hidden point, found without being told where
+    assert all(p["angle"] > 0 for p in astats["picks"]) and astats["extra"] <= A43A_GUARD, astats
+    check(_c, dict(located=[(i, c, r) for i, (c, r) in enumerate(a["points"])],
+                   answer=lambda m: UNKNOWN, queries=0), [], missed=0, merged=0, duplicate=0)
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -1916,6 +2274,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a43a" in sys.argv:
+        return a43a(arg("--jobs", 4))
     if "--a43h" in sys.argv:
         return a43h(arg("--jobs", 4))
     if "--a43f" in sys.argv:
