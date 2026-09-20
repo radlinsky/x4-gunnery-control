@@ -10,7 +10,7 @@ Rule under test: `stop when largest remaining angular gap <= T`. 19 A4.3 boundar
 
 ## Per case
 
-| case | required | lowest gap while missing | lowest safe gap | first safe state (primary / angular asks / points) | stops at T |
+| case | required | lowest gap while missing | lowest safe gap | lowest-gap safe state (primary / angular asks / points) | stops at T |
 |---|---|---|---|---|---|
 | 12155 | 0 at start | never missing | 8.619 | 12 / 12 / 2 | - |
 | 12157 | 0 at start | never missing | 13.172 | 12 / 12 / 2 | - |
