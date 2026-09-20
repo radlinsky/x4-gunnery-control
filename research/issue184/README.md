@@ -12,6 +12,7 @@ python3 research/issue184/aimpoint_map.py             # A2 summary (~15 min)
 python3 research/issue184/aimpoint_map.py --selftest  # ~4 min
 python3 research/issue184/aimpoint_map.py --a3        # A3 benchmark (~3 h, 4 niced workers)
 python3 research/issue184/aimpoint_map.py --a3 --every 20   # deterministic pilot (~13 min)
+python3 research/issue184/aimpoint_map.py --a43       # A4.3 phase 1, 19 boundary cases
 ```
 
 Needs the ignored #176 caches (`python3 research/issue176-a4x/corpus.py`, the

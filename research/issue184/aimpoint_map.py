@@ -10,6 +10,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a3 [--every N] [--jobs 4]   # A3 benchmark, every Nth case
     python3 research/issue184/aimpoint_map.py --a41 [--every N] [--jobs 4]  # A4.1 corner audit (boundary cases)
     python3 research/issue184/aimpoint_map.py --a42 [--jobs 4]              # A4.2 switch-boundary comparison
+    python3 research/issue184/aimpoint_map.py --a43 [--jobs 4]              # A4.3 phase 1 (19 cases)
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -559,17 +560,17 @@ def firing_box_map(view, margin):
 GEO_DEPTH = 4  # query-free splits of an unproven leaf when testing it against the empty balls
 
 
-def _unproven(a, b, balls, proven):
-    """Sub-boxes of [a, b], split up to GEO_DEPTH times, each neither inside one empty ball (centre, radius)
+def _unproven(a, b, balls, proven, depth=GEO_DEPTH):
+    """Sub-boxes of [a, b], split up to `depth` times, each neither inside one empty ball (centre, radius)
     nor inside one proven box."""
     c, r = np.asarray([x for x, _ in balls]).reshape(-1, 3), np.asarray([y for _, y in balls])
     plo, phi = np.asarray([x for x, _ in proven]).reshape(-1, 3), np.asarray([y for _, y in proven]).reshape(-1, 3)
     boxes = np.asarray([(a, b)])
-    for level in range(GEO_DEPTH + 1):
+    for level in range(depth + 1):
         far = np.linalg.norm(np.maximum(np.abs(c[None] - boxes[:, None, 0]), np.abs(c[None] - boxes[:, None, 1])), axis=2)
         held = np.all((plo[None] <= boxes[:, None, 0]) & (boxes[:, None, 1] <= phi[None]), axis=2)
         boxes = boxes[~np.any(far < r[None], axis=1) & ~np.any(held, axis=1)]
-        if level == GEO_DEPTH or not len(boxes):
+        if level == depth or not len(boxes):
             return list(boxes)
         m = boxes.mean(axis=1)
         boxes = np.asarray([(np.minimum(x, mid), np.maximum(x, mid)) for (lo, hi), mid in zip(boxes, m)
@@ -947,6 +948,151 @@ def _a42_report(rows):
     return "\n".join(L)
 
 
+# ---------------------------------------------------------------- A4.3 phase 1: residual uncertainty
+
+# The 19 boundary cases where a later aimed muzzle selects a point the 8 outer corners never exposed
+# (A4.2). Hidden truth picked this list and scores the result; the method below never sees it.
+A43_CASES = (12155, 12157, 12160, 12163, 12169, 12177, 12196, 12197, 12360, 12362, 12365, 12366,
+             12368, 12369, 12388, 12390, 12199, 12234, 12376)
+
+
+HULL_EPS = 1e-9  # a near-degenerate separating plane counts as separating, so ties fall to UNKNOWN
+
+
+def spans(vs):
+    """True when the vectors `vs` positively span 3-space, i.e. no plane through the origin has all of them
+    on one closed side. Checks every candidate supporting normal: a supporting plane of a finite cone can
+    always be taken normal to one vector or to the cross product of two, so this is exact up to HULL_EPS."""
+    vs = [v / n for v in map(np.asarray, vs) if (n := float(np.linalg.norm(v))) > 0]
+    if len(vs) < 4:
+        return False
+    cands = [c for a, b in itertools.combinations(vs, 2) for c in (np.cross(a, b), -np.cross(a, b))] + \
+            [c for v in vs for c in (v, -v)]
+    for n in cands:
+        k = float(np.linalg.norm(n))
+        if k > 0 and min(float(n @ v) / k for v in vs) >= -HULL_EPS:
+            return False
+    return True
+
+
+def residual_map(view, margin):
+    """A4.3 phase 1: answer later positions from the existing corner asks alone, conservatively. No new asks.
+
+    Every confidently assigned corner ask is an empty ball: no aim point lies nearer to that ask position
+    than the point it selected (`target_box_map`'s rule). What those balls leave uncovered is residual
+    target space, where an undiscovered aim point may still sit, and a later position may only get a
+    definite answer when nothing in that space could beat the winner.
+
+    Where those balls leave nothing, in closed form: let x be an undiscovered point that beats the winner's
+    true point t from m. Then |x - u| >= |t - u| at every ask u assigned to the winner, while
+    |x - m| <= |t - m|. The set where |x - .| - |t - .| keeps one sign is a half-space, so such an x exists
+    only if some plane through m puts every one of those asks on one side. When m is strictly inside the
+    hull of the asks assigned to the winner, no such plane exists and no undiscovered point anywhere in the
+    residual space can beat it. Otherwise UNKNOWN. The bound needs the asks and their assignment only; it
+    never looks at where the residual space actually is, and never at the later muzzles.
+
+    ponytail: this proves the winner beats every *undiscovered* point. Which known point wins is still
+    `nearest`, and a second aim point hiding inside a confirmed estimate's own radius still needs a new
+    ask, which is A4.3 phase 2."""
+    C, H, T = view["target_box"]
+    tlo, thi = target_box(C, H)
+    a = corner_audit(view, margin)
+    points = a["points"]
+    asks = [(c @ a["R"] + a["O"], i) for c in _corners(*a["box"]) if (i := a["own"][tuple(c)]) is not None]
+    balls = [(u @ T.T, float(np.linalg.norm(points[i][0] - u)) - points[i][1]) for u, i in asks]
+    located = [(i, c, r) for i, (c, r) in enumerate(points)]
+    residual = _unproven(tlo, thi, balls, []) if balls else [(tlo, thi)]
+
+    def answer(m):
+        label = nearest(located, m)
+        if label is UNKNOWN:
+            return UNKNOWN
+        return label if spans([u - m for u, i in asks if i == label]) else UNKNOWN
+
+    return dict(located=located, answer=answer, queries=a["queries"], residual=residual,
+                target_volume=float(np.prod(thi - tlo)))
+
+
+def _a43_case(case):
+    records, margins = _LOADED
+    r = residual_map(view(case), margins[case["ship_class"]][0])
+    muzzles = aimed_muzzles(case, records)
+    row = dict(score(case, r, muzzles), id=case["id"], target=case["target"], ship=case["ship"], gap=case["gap"],
+               points=len(r["located"]), residual_boxes=len(r["residual"]),
+               residual_fraction=float(sum(np.prod(b - a) for a, b in r["residual"])) / r["target_volume"])
+    row.pop("radius"); row.pop("error")  # noqa: E702 not meaningful for this row
+    # hidden truth, reporting only: which later muzzles select a point no confirmed estimate covers.
+    truth = [tuple(map(float, p)) for p in case["points"]]
+    cover = {i: [j for j, p in enumerate(case["points"]) if np.linalg.norm(c - p) <= q] for i, c, q in r["located"]}
+    exposed = {j for js in cover.values() for j in js}
+    row.update(unexposed=0, unexposed_correct=0, unexposed_wrong=0, unexposed_unknown=0, wrong_muzzles=[])
+    for m in muzzles.values():
+        sel = study.select(tuple(map(float, m)), truth)
+        ans = r["answer"](m)
+        verdict = "unknown" if ans is UNKNOWN else "correct" if cover.get(ans) == [sel] else "wrong"
+        if verdict == "wrong":
+            row["wrong_muzzles"].append(sel)
+        if sel not in exposed:
+            row["unexposed"] += 1
+            row[f"unexposed_{verdict}"] += 1
+    return row
+
+
+def a43(jobs):
+    """A4.3 phase 1: the 19 unexposed-point boundary cases, existing corner asks only, no new oracle asks."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["id"] in set(A43_CASES)]
+    assert len(todo) == len(A43_CASES), (len(todo), len(A43_CASES))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path, sum_path = CACHE / "a43_rows.jsonl", CACHE / "a43_summary.txt"
+    print(f"A4.3 phase 1: {len(todo)} cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a43_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            print(f"  {len(rows)}/{len(todo)} case {r['id']}: {r['points']} pts, {r['queries']} asks, "
+                  f"{r['correct']}/{r['wrong']}/{r['unknown']} correct/wrong/UNKNOWN", flush=True)
+    out = _a43_report(rows)
+    sum_path.write_text(out)
+    print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
+
+
+def _a43_report(rows):
+    def block(name, rs):
+        if not rs:
+            return [f"{name}: none"]
+        tot = {k: sum(r[k] for r in rs) for k in ("queries", "points", "muzzles", "correct", "wrong", "unknown",
+                                                  "unexposed", "unexposed_correct", "unexposed_wrong",
+                                                  "unexposed_unknown", "missed", "merged")}
+        return [f"{name}: {len(rs)} cases",
+                f"  existing asks:                 {tot['queries']} total, med/p90/max "
+                f"{_stats([r['queries'] for r in rs])}",
+                f"  confirmed points:              {tot['points']} total, "
+                f"{sum(r['points'] >= 2 for r in rs)} cases with >=2; {tot['missed']} true points missed, "
+                f"{tot['merged']} merged estimates",
+                f"  residual target uncertainty:   {_stats([100 * r['residual_fraction'] for r in rs])} "
+                "% of the padded target box (med/p90/max)",
+                f"  later aimed muzzles:           {tot['muzzles']} -> {tot['correct']} correct, "
+                f"{tot['wrong']} wrong, {tot['unknown']} UNKNOWN",
+                f"  of those, unexposed-point ones: {tot['unexposed']} -> {tot['unexposed_correct']} correct, "
+                f"{tot['unexposed_wrong']} wrong, {tot['unexposed_unknown']} UNKNOWN"]
+
+    one = [r for r in rows if r["points"] < 2]
+    two = [r for r in rows if r["points"] >= 2]
+    wrong = [r for r in rows if r["wrong"]]
+    L = ["A4.3 phase 1: residual-uncertainty answers from the existing corner asks only (no new asks)", ""]
+    L += block("one-confirmed-point cases", one) + [""]
+    L += block("two-confirmed-point cases", two) + [""]
+    L += block("all A4.3 cases", rows) + ["",
+          "wrong answers: " + (", ".join(f"case {r['id']} ({r['wrong']})" for r in wrong) if wrong else "none")]
+    return "\n".join(L)
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -1152,6 +1298,33 @@ def selftest():
     # each halfway ask halves the bracket, so the measured plane closes on the true one (z = 0 here)
     assert errs[-1] < errs[0] / 8 and errs[-1] < 5.0, errs
 
+    # A4.3: the residual model's promise is that every definite answer is right even when a third point
+    # it never saw exists. Hide one: build the map from two points, then score against three.
+    cube = _corners(-np.ones(3), np.ones(3))
+    assert spans(cube) and not spans(cube[:3])
+    assert not spans([c for c in cube if c[2] > 0])  # one side only: a separating plane exists
+    assert not spans([c - (0, 0, 1.001) for c in cube])  # viewpoint just outside a face
+    two = [(0, 0, -300), (0, 0, 300)]
+    hidden = two + [(0, 380, 0)]
+    _c, v = synthetic(two, (0, 0, 0), (400, 400, 400), ship=((-200, -200, -200), (200, 200, 200)), at=(0, 1500, 0))
+    r = residual_map(v, 0)
+    assert len(r["located"]) == 2 and r["queries"] >= 8  # the 8 outer corners plus confirmation brackets
+    assert 0 < sum(float(np.prod(b - a)) for a, b in r["residual"]) < r["target_volume"]
+    rng = np.random.default_rng(1)
+    probe = np.concatenate([rng.uniform((-200, 1300, -200), (200, 1700, 200), (200, 3)),
+                            rng.uniform((-3000, -3000, -3000), (3000, 3000, 3000), (200, 3))])
+    for x in probe:  # a definite answer must name the point X4 really picks, hidden third point and all
+        ans = r["answer"](x)
+        assert ans is UNKNOWN or np.linalg.norm(r["located"][ans][1] - hidden[study.select(tuple(x), hidden)]) \
+            <= r["located"][ans][2], x
+    # each confirmed point owns only its own four corners here, so no muzzle is inside either hull
+    assert all(r["answer"](x) is UNKNOWN for x in probe)
+    # one point owning all eight corners does resolve every position inside the firing box
+    _c, v = synthetic([(1, 2, 3)], (0, 0, 0), (20, 20, 20), ship=((-10, -10, -10), (10, 10, 10)), at=(0, 0, -2000))
+    r = residual_map(v, 5)
+    assert len(r["located"]) == 1 and all(r["answer"](x) == 0 for x in rng.uniform(-10, 10, (50, 3)) + (0, 0, -2000))
+    assert r["answer"](np.array([0.0, 0, 2000])) is UNKNOWN  # the far side is outside that hull
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -1186,6 +1359,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a43" in sys.argv:
+        return a43(arg("--jobs", 4))
     summary()
 
 
