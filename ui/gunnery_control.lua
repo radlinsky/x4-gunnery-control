@@ -1497,8 +1497,10 @@ local engageabilityBatchSize = 20
 local function logCandidateAimOffset(target)
     if not session or session.phase ~= "target_select" then return end
     local targetID = id(target)
+    local getter = C.GetRelativeAimOffset
+    if type(getter) ~= "cdata" then return end
     local softtarget = C.GetSofttarget2()
-    local ok, aim = pcall(C.GetRelativeAimOffset, targetID)
+    local ok, aim = pcall(getter, targetID)
     if not ok then
         log("event=aim_offset_probe action=error candidate=" .. tostring(targetID)
             .. " phase=" .. tostring(session.phase)
