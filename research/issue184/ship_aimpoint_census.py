@@ -24,6 +24,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
+from multiprocessing import get_context
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +37,7 @@ from census_common import REQUIRED_SOURCE_SETS  # noqa: E402
 
 SWI_ASSETS = ROOT / ".x4-research-cache/issue184/swi_assets"
 NAME_INDEX = {}  # (root tag, name) -> the file X4's index/ resolves that name to
-OUT = ROOT / ".x4-research-cache/issue184/a44_census.jsonl"
+OUT = ROOT / ".x4-research-cache/issue184/a44_census_%s.jsonl"
 CLASSES = ("ship_s", "ship_m", "ship_l", "ship_xl")
 TOL = 1e-4  # m; authored positions are float32 text
 
@@ -208,10 +209,11 @@ def aim_points(comp):
     return [c.get("name") for c in conns], pts, parented
 
 
-def census():
-    """One row per unique ship component in official 9.00 + effective SWI 0.9.1 HF.
+def census(with_swi):
+    """One row per unique ship component of one game: pristine official 9.00, or 9.00 with SWI 0.9.1 HF
+    applied. Run each in its own process (see `main`) so building SWI cannot touch the vanilla index.
     -> (rows, unresolved, overlay stats)."""
-    stats, unresolved = overlay_swi()
+    stats, unresolved = overlay_swi() if with_swi else (Counter(), [])
     ships = defaultdict(lambda: {"macros": [], "source": None, "cls": set()})
     for name, defs in sorted(sources.MACROS.items()):
         for rel, m in defs:
@@ -265,34 +267,40 @@ def _q(a):
     return f"med {np.median(a):.4g} / p90 {np.percentile(a, 90):.4g} / max {np.max(a):.4g}" if len(a) else "n/a"
 
 
-def report(rows, unresolved, stats):
+TITLE = {"vanilla": "pristine X4 9.00", "swi": "X4 9.00 with SWI 0.9.1 HF applied"}
+
+
+def report(population, rows, unresolved, stats):
     L = []
     P = L.append
     boxed = [r for r in rows if r["C"] is not None]
-    by_src = Counter(r["source"] for r in rows)
-    P(f"# A4.4 ship aim-point census: {len(rows)} unique ship components "
-      f"({by_src['official']} official, {by_src['swi']} SWI), "
-      f"{sum(len(r['macros']) for r in rows)} macros, {sum(r['n_points'] for r in rows)} authored aim points")
+    P(f"# A4.4 ship aim-point census — {population.upper()}: {TITLE[population]}")
+    P(f"{len(rows)} unique ship components, {sum(len(r['macros']) for r in rows)} macros, "
+      f"{sum(r['n_points'] for r in rows)} authored aim points")
     P(f"  runtime box reconstructed for {len(boxed)}; {len(rows) - len(boxed)} box-unresolved "
       f"(aim points still recorded): {[r['component'] for r in rows if r['C'] is None]}")
+    P("  This is one game. SWI 0.9.1 HF is an overhaul, so the two populations never coexist and are "
+      "censused in separate processes from separate source indexes; no figure here mixes them.")
+    if stats:
+        P("")
+        P("## SWI overlay")
+        for k, v in sorted(stats.items()):
+            P(f"  {v:6d}  {k}")
+        P("  A SWI-game ship is any component behind a ship_s/m/l/xl macro in the effective SWI index: "
+          "SWI's own ships plus the official ships as SWI patches them.")
     P("")
-    P("## SWI overlay")
-    for k, v in sorted(stats.items()):
-        P(f"  {v:6d}  {k}")
-    P("  SWI 0.9.1 HF is an overhaul: a vanilla game holds only the official components; a SWI game holds "
-      "the SWI ones plus the official ones as SWI patches them. Any reconstruction rule has to hold within "
-      "each population on its own, so every section below splits official from SWI.")
-    P("")
-    P("## Population by source and class")
-    per = Counter((r["source"], "/".join(r["ship_class"])) for r in rows)
-    for (src, cls), n in sorted(per.items()):
+    P("## Population by class" + (" and definition origin" if population == "swi" else ""))
+    key = (lambda r: (r["source"], "/".join(r["ship_class"]))) if population == "swi" else \
+        (lambda r: ("", "/".join(r["ship_class"])))
+    for (src, cls), n in sorted(Counter(map(key, rows)).items()):
         P(f"  {src:9s} {cls:20s} {n:4d}")
     P("")
     P("## Aim-point count distribution")
     dist = Counter(r["n_points"] for r in rows)
     for n in sorted(dist):
         sub = Counter(r["source"] for r in rows if r["n_points"] == n)
-        P(f"  {n:2d} point(s): {dist[n]:4d} components  (official {sub['official']:3d}, SWI {sub['swi']:3d})")
+        tail = f"  (from official files {sub['official']:3d}, SWI files {sub['swi']:3d})" if population == "swi" else ""
+        P(f"  {n:2d} point(s): {dist[n]:4d} components{tail}")
     P(f"  aim connections carrying a `parent` attribute: {sum(len(r['parented']) for r in rows)} "
       "(an unparented offset is already in the component frame)")
     spread = [r["box_spread_across_macros"] for r in rows if len(r["macros"]) > 1 and r["C"] is not None]
@@ -303,21 +311,22 @@ def report(rows, unresolved, stats):
 
     zero = [r for r in rows if r["n_points"] == 0]
     P("")
-    P(f"## Zero-point components ({len(zero)}: {Counter(r['source'] for r in zero)['official']} official, "
-      f"{Counter(r['source'] for r in zero)['swi']} SWI)")
+    P(f"## Zero-point components ({len(zero)})")
     P(f"  by class: {dict(Counter('/'.join(r['ship_class']) for r in zero))}")
     P("  These author no `aimtarget` connection at all, so the native nearest-point selector's "
       "empty-collection branch decides their aim point. That branch is not characterized by the existing "
       "native analysis, and nothing in the authored data fixes a point for them.")
-    P(f"  official ships that DO author points: {sorted(r['component'] for r in rows if r['source'] == 'official' and r['n_points'])}")
+    P(f"  ships that DO author points ({sum(r['n_points'] > 0 for r in rows)}): "
+      f"{sorted(r['component'] for r in rows if r['n_points'])}" if population == "vanilla" else
+      f"  ships that author points: {sum(r['n_points'] > 0 for r in rows)}")
 
     one = [r for r in rows if r["n_points"] == 1]
     P("")
     P(f"## One-point components ({len(one)})")
-    for src in ("official", "swi"):
+    for src in ("official", "swi") if population == "swi" else ():
         sub = [r for r in one if r["source"] == src]
         d = np.array([np.linalg.norm(r["points"][0]) for r in sub])
-        P(f"  {src}: {len(sub)}; exactly the origin {int((d < TOL).sum())}; "
+        P(f"  defined in {src} files: {len(sub)}; exactly the origin {int((d < TOL).sum())}; "
           f"|point - origin| {_q(d)} m")
     d_origin = np.array([np.linalg.norm(r["points"][0]) for r in one])
     P(f"  |point - component origin|: {_q(d_origin)} m; exactly the origin: {int((d_origin < TOL).sum())} of {len(one)}")
@@ -340,13 +349,14 @@ def report(rows, unresolved, stats):
     P(f"## Multi-point components ({len(multi)}) — structure")
     planar = [r for r in multi if np.ptp(np.array(r["points"])[:, 1]) < TOL]
     onx = [r for r in multi if np.all(np.abs(np.array(r["points"])[:, 0]) < TOL)]
-    mirrored = [r for r in multi if _mirror(np.array(r["points"])) * 2 + sum(
-        abs(p[0]) < TOL for p in r["points"]) == r["n_points"]]
-    P(f"  by source: {dict(Counter(r['source'] for r in multi))}")
+    mirrored = [r for r in multi if _symmetric(r)]
+    near = [r for r in multi if _symmetric(r, 1e-3)]
+    if population == "swi":
+        P(f"  by definition origin: {dict(Counter(r['source'] for r in multi))}")
     P(f"  all points at one y (flat layout): {len(planar)} of {len(multi)}")
     P(f"  all points on the x=0 centreline: {len(onx)} of {len(multi)}")
     P(f"  fully left/right symmetric (every off-centre point has a +-x twin at the same y,z): "
-      f"{len(mirrored)} of {len(multi)}")
+      f"{len(mirrored)} of {len(multi)} exactly, {len(near)} within 1 mm")
     ptp = np.array([np.ptp(np.array(r["points"]), axis=0) for r in multi])
     P(f"  dominant spread axis: {dict(Counter('xyz'[i] for i in np.argmax(ptp, axis=1)))}")
     P(f"  spread per axis (m): x {_q(ptp[:, 0])}; y {_q(ptp[:, 1])}; z {_q(ptp[:, 2])}")
@@ -362,17 +372,19 @@ def report(rows, unresolved, stats):
     grid = [r for r in multi if _even_z(r)]
     P(f"  z coordinates on an exact even grid (>=3 distinct z): {len(grid)} of "
       f"{sum(len(set(np.round(np.array(r['points'])[:, 2], 3))) >= 3 for r in multi)} eligible")
-    P(f"  not left/right symmetric: {[r['component'] for r in multi if r not in mirrored]}")
+    P(f"  not left/right symmetric even within 1 mm: {[r['component'] for r in multi if r not in near]}")
+    P(f"  mirrored only within 1 mm, not exactly: {[r['component'] for r in near if r not in mirrored]}")
     out = [(r['component'], i) for r in mb for i, n in enumerate(r['norm']) if np.any(np.abs(n) > 1 + 1e-6)]
     P(f"  points outside their own runtime box: {out}")
 
     P("")
     P("## Direct reconstruction")
     allpts = [(r, i) for r in rows for i in range(r["n_points"])]
-    P(f"  every one of the {len(allpts)} authored points lies on x=0 or in a +-x twin pair: "
-      f"{sum(abs(r['points'][i][0]) < TOL for r, i in allpts)} on the centreline, "
-      f"{sum(_mirror(np.array(r['points'])) for r in rows) * 2} in twin pairs, "
-      f"{len(allpts) - sum(abs(r['points'][i][0]) < TOL for r, i in allpts) - 2 * sum(_mirror(np.array(r['points'])) for r in rows)} neither")
+    online = sum(abs(r["points"][i][0]) < TOL for r, i in allpts)
+    for tol, label in ((TOL, "exactly"), (1e-3, "within 1 mm")):
+        twin = 2 * sum(_mirror(np.array(r["points"]), tol) for r in rows)
+        P(f"  of {len(allpts)} authored points, {label}: {online} on the x=0 centreline, "
+          f"{twin} in +-x twin pairs, {len(allpts) - online - twin} neither")
     lg = np.array([[2 * r["H"][2], r["n_points"]] for r in boxed if r["n_points"]])
     P(f"  box length (2*Hz) vs point count over the {len(lg)} components that author any point: "
       f"Pearson r = {np.corrcoef(lg[:, 0], lg[:, 1])[0, 1]:.3f}")
@@ -417,24 +429,38 @@ def _even_z(r):
     return len(z) >= 3 and bool(np.all(np.abs(d - d[0]) < 1e-3))
 
 
-def _mirror(A):
-    """Count of +-x mirror pairs (same y/z, opposite non-zero x)."""
+def _mirror(A, tol=TOL):
+    """Count of +-x mirror pairs (same y/z, opposite non-zero x) within `tol` metres."""
     used, n = set(), 0
     for i in range(len(A)):
         for j in range(i + 1, len(A)):
             if i in used or j in used:
                 continue
-            if abs(A[i][0] + A[j][0]) < TOL and abs(A[i][0]) > TOL and np.allclose(A[i][1:], A[j][1:], atol=TOL):
+            if abs(A[i][0] + A[j][0]) < tol and abs(A[i][0]) > TOL and np.allclose(A[i][1:], A[j][1:], atol=tol):
                 used |= {i, j}
                 n += 1
     return n
 
 
-if __name__ == "__main__":
-    rows, unresolved, stats = census()
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT, "w") as f:
+def _symmetric(r, tol=TOL):
+    A = np.array(r["points"])
+    return _mirror(A, tol) * 2 + sum(abs(p[0]) < TOL for p in r["points"]) == r["n_points"]
+
+
+def run(population):
+    """Census one game and write its rows. Runs in a forked child, so its index edits die with it."""
+    rows, unresolved, stats = census(population == "swi")
+    out = Path(str(OUT) % population)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(out, "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
-    print(report(rows, unresolved, stats))
-    print(f"\n[{len(rows)} rows -> {OUT}]")
+    return report(population, rows, unresolved, stats) + f"\n\n[{len(rows)} rows -> {out}]"
+
+
+if __name__ == "__main__":
+    # Fork from an unmutated parent: the SWI child's overlay cannot reach the vanilla child's index.
+    with get_context("fork").Pool(2) as pool:
+        for text in pool.map(run, ["vanilla", "swi"]):
+            print(text)
+            print()
