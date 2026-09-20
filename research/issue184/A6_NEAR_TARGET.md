@@ -1,7 +1,10 @@
 # A6: near-target angular probing
 
 Offline research, status **inference**. No X4 launch, no production change.
-One experiment, one question:
+Two experiments over the same run: probe placement, then post-hoc refinement of
+the points those probes found.
+
+First question:
 
 > Does the existing A4.3 angular-spread search work substantially better when
 > its adaptive probes are placed near the target instead of around the firing
@@ -104,7 +107,8 @@ answer definiteness.** These are boundary geometries, so the muzzle sits on
 the switching plane of the target's closest aim-point pair, and `nearest`
 stays indefinite there no matter how many *other* points the search found. The
 range dependence of the answer rate is a `nearest` definiteness effect, not a
-discovery effect, and this experiment does not address it.
+discovery effect, and the probe-placement experiment does not address it. The
+refinement experiment below does.
 
 **6. The 24-ask hard limit** was hit once in 114 runs: case 12234 at 8 km,
 near-target. It still exposed every needed point and every authored point. The
@@ -149,10 +153,108 @@ Two limits this experiment does **not** establish:
   not settled by 19 cases.
 - Answer definiteness is untouched. Every UNKNOWN in the firing-box run is
   still UNKNOWN in the near-target run. Discovery was the question asked here;
-  the `nearest` boundary problem is separate.
+  the `nearest` boundary problem is taken up by the refinement experiment below.
 
 No stopping rule is chosen here. [A6_ANGULAR_STOP.md](A6_ANGULAR_STOP.md)
 shows only that one threshold could not both avoid premature stopping and make
 every case stop inside the fixed 12-primary trace. It does not reject a smaller
 threshold combined with the 24-ask hard limit. This experiment changes what the
 gap measures by moving the adaptive probes near the target.
+
+## Post-hoc point refinement from the same observations
+
+Second experiment, same run, one question:
+
+> Can the near-target probe lines already collected locate the discovered aim
+> points more precisely, with no additional X4 asks, so later turret positions
+> produce fewer UNKNOWN answers without introducing wrong answers?
+
+### Method
+
+The A6 near-target search is unchanged: same corner asks, same cheap rescue,
+same near-target probe positions, same 50 m target-box pad, same 12 primary
+asks, same 24-ask angular-stage limit, same 19 geometries at 100 m, 1 km and
+8 km, same probe order and same total ask count. Refinement runs **after** the
+search has finished and never feeds back into probe placement, so the baseline
+and refined estimates are computed from byte-identical observations.
+
+`refine_points` assigns each collected ray to a point when the ray passes
+through exactly one current estimate's ball — the ownership rule `_search`
+already uses. For a point with two or more assigned rays, the tightest pairwise
+crossing under the unchanged `crossing` rule (with its miss allowance, forward
+check and poor-angle rejection) becomes a candidate, given the same radius
+formula `_search.locate` uses. It replaces the estimate only when all three
+hold:
+
+1. it is strictly tighter;
+2. its whole ball lies inside the original ball;
+3. every assigned ray still passes through it.
+
+Condition 2 is what preserves identity. A refined estimate is a subset of the
+one it replaces, so it cannot drift onto a neighbouring aim point or grow to
+swallow two, and no estimate is ever added or dropped. Point *confirmation* is
+untouched: refinement only tightens points the current conservative rules had
+already confirmed, never promotes weaker evidence into a new point. This is the
+reason the old `mapper.py` `shrink()` idea is safe here and was not safe there —
+`shrink()` re-centred a point on whatever pair crossed most tightly, with only
+an "all assigned rays still hit" check and no containment, so a refined ball
+could move off its own point.
+
+Hidden authored aim points and hidden aimed muzzle positions are used for
+scoring and for the error column only.
+
+### Result
+
+Near-target runs, 64 authored points and 64 later aimed muzzles per distance,
+b = baseline, a = refined.
+
+| gap | pts | refined | correct b/a | wrong b/a | UNKNOWN b/a | radius med/max b → a (m) | error med/max b → a (m) |
+|---|---:|---:|---|---|---|---|---|
+| 100 m | 64 | 60 | 33 / 58 | 0 / 0 | 31 / 6 | 0.0576 / 0.531 → 0.00245 / 0.117 | 0.00797 / 0.236 → 0.000349 / 0.0409 |
+| 1 km | 64 | 59 | 22 / 58 | 0 / 0 | 42 / 6 | 0.0841 / 0.700 → 0.00234 / 0.113 | 0.0120 / 0.225 → 0.000402 / 0.0522 |
+| 8 km | 62 | 60 | 3 / 51 | 0 / 0 | 61 / 13 | 0.326 / 3.39 → 0.00244 / 0.246 | 0.0406 / 0.879 → 0.000360 / 0.0156 |
+
+- **Total X4 asks are identical**, case by case: 29 / 33 / 33 at 100 m, 29 /
+  33 / 35 at 1 km, 29 / 34 / 34 at 8 km (med / p90 / max), the same numbers as
+  the baseline table above. Refinement spends no asks.
+- **No wrong answer appeared at any distance.** No case lost a correct answer
+  either: refined `correct` is never below baseline `correct` in any of the 57
+  cases.
+- **UNKNOWN falls by 81 %, 86 % and 79 %** at 100 m, 1 km and 8 km. These are
+  boundary geometries, where the muzzle sits on the switching plane of the
+  target's closest aim-point pair, so `nearest` was indefinite purely because
+  the two estimates' radii overlapped the decision. Tighter radii separate
+  them.
+- **Point identity is unchanged in all 57 cases.** 0 estimates changed which
+  authored point they cover, 0 invented, 0 merged, 0 duplicate. `missed` is 2
+  at 8 km before and after — the same two points the search never discovered
+  (12163 point 3, 12366 point 2); refinement neither recovers nor loses a
+  point.
+- **179 of 190 points were refined** (60 / 59 / 60). The 11 that were not all
+  failed the same check: the tightest available crossing was not strictly
+  inside the current ball, so the candidate was discarded and the original
+  conservative estimate kept. Every case refined at least one point.
+
+**The range dependence of answer definiteness largely disappears.** Baseline
+correct answers collapse with range, 33 → 22 → 3, because the conditioning
+limit scales point radius with distance. After refinement they are 58 / 58 /
+51. The remaining 8 km shortfall is the two undiscovered points plus their
+cases' boundary muzzles, not the precision of what was found.
+
+### Answer
+
+Yes. Refinement from already-collected probe lines is the cheapest improvement
+found in A6 so far: zero extra asks, a 20–110× reduction in point-position
+error, a 25–130× reduction in reported uncertainty, 79–86 % fewer UNKNOWN
+answers, and no wrong answer, no identity change, no invented, merged or
+duplicate point at any distance.
+
+Two limits this does **not** establish:
+
+- It is scored on 19 boundary geometries only. Boundary cases are exactly where
+  overlapping radii dominate UNKNOWN, so this is the group refinement should
+  help most; the gain on ordinary geometries is untested here.
+- Containment is a sufficient safety condition, not a proven-optimal one. The
+  11 unrefined points show it does reject usable-looking candidates; whether a
+  weaker condition is still sound was not tested, and weakening point
+  confirmation to chase smaller radii remains rejected.

@@ -1806,6 +1806,8 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
         final = angular_pick(points, assigned(), plo, phi, M, off) if points else None  # #184 A6 end state
         note(None if final is None else final[0])
         stats["extra"] = h["count"]() - start2
+        stats["rays"] = [(u.tolist(), None if d is None else d.tolist())  # #184 A6 post-hoc refinement input
+                         for u, d in h["rays"].values()]
     return probe, stats
 
 
@@ -2090,6 +2092,56 @@ def a6_near_variants(ts, mounts):
             yield dict(c, gap=gap, origin=c["origin"] + shift, position=c["position"] + shift)
 
 
+def refine_points(points, rays):
+    """#184 A6: tighten the confirmed point estimates from the probe lines already collected, after the
+    search has finished. No new asks, and the refined positions never feed back into probe placement, so
+    both versions see exactly the same observations.
+
+    A ray is assigned to a point when it passes through exactly one estimate's ball, the ownership rule
+    `_search.owner` already uses. For each point with two or more assigned rays the tightest pairwise
+    crossing under the unchanged `crossing` rule becomes a candidate, with the same radius formula
+    `_search.locate` uses. It is taken only when it is strictly tighter, its whole ball lies inside the
+    original ball, and every assigned ray still passes through it. Containment is what keeps the estimate
+    about the same aim point: it can neither drift onto a neighbour nor grow to merge two, and no estimate
+    is added or removed, so the refined set cannot invent or duplicate a point either.
+
+    -> (refined points, count refined, [reason each unrefined point was left alone])"""
+    R = [(np.asarray(u, float), None if d is None else np.asarray(d, float)) for u, d in rays]
+    out, refined, skipped = list(points), 0, []
+    for i, (c, r) in enumerate(points):
+        # ponytail: O(assigned^2) pairwise crossings; assigned rays are tens, not thousands
+        own = [(u, d) for u, d in R if d is not None and _on_ray(u, d, c, r)
+               and sum(_on_ray(u, d, cc, rr) for cc, rr in points) == 1]
+        if len(own) < 2:
+            skipped.append("under 2 assigned rays")
+            continue
+        best = None
+        for (ua, da), (ub, db) in itertools.permutations(own, 2):  # either ray of a pair may be the anchor
+            h = crossing(ua, da, ub, db)
+            if h is None:
+                continue
+            s, err = h
+            x = ua + s * da
+            rr = err + EPS * s + _rho(ua, x)
+            if best is None or rr < best[1]:
+                best = (x, float(rr))
+        if best is None:
+            skipped.append("no accepted crossing")
+        elif not (best[1] < r and float(np.linalg.norm(best[0] - c)) + best[1] <= r):
+            skipped.append("not strictly inside the current ball")
+        elif not all(_on_ray(u, d, *best) for u, d in own):
+            skipped.append("an assigned ray misses the tighter ball")
+        else:
+            out[i] = best
+            refined += 1
+    return out, refined, skipped
+
+
+def _cover(points, truth):
+    """Hidden truth, reporting only: which authored aim points each estimate covers."""
+    return [sorted(j for j, p in enumerate(truth) if np.linalg.norm(np.asarray(c) - p) <= r) for c, r in points]
+
+
 def _a6_near_run(case, v, margin, muzzles, near_target):
     """One angular-search run, near-target or firing-ship-box, with the A6 near-target reporting fields."""
     probe, stats = angular_probe(v, margin, near_target=near_target)
@@ -2117,7 +2169,16 @@ def _a6_near_run(case, v, margin, muzzles, near_target):
         [(c.tolist(), float(r)) for c, r in pre]
     located = [(i, np.asarray(c), r) for i, (c, r) in enumerate(points)]
     got = score(case, dict(located=located, answer=lambda m: nearest(located, m), queries=a["queries"]), muzzles)
-    return dict(needed=needed, authored=len(truth), corners=corners, rescue_extra=stats["rescue_extra"],
+    pts = [(np.asarray(c), r) for c, r in points]
+    rpts, n_ref, skipped = refine_points(pts, stats.get("rays", []))
+    rloc = [(i, c, r) for i, (c, r) in enumerate(rpts)]
+    rgot = score(case, dict(located=rloc, answer=lambda m: nearest(rloc, m), queries=a["queries"]), muzzles)
+    keys = ("correct", "wrong", "unknown", "invented", "merged", "duplicate", "missed", "radius", "error")
+    refined = dict({q: rgot[q] for q in keys}, count=n_ref, skipped=skipped,
+                   identity_changed=sum(x != y for x, y in zip(_cover(pts, truth), _cover(rpts, truth))))
+    return dict(needed=needed, refined=refined,
+                radius=got["radius"], error=got["error"], missed=got["missed"],
+                authored=len(truth), corners=corners, rescue_extra=stats["rescue_extra"],
                 primary=stats["primary"], angular_extra=stats["extra"], asks=a["queries"],
                 guard=stats["guard"], stalled=stats["stalled"],
                 gaps=[t["gap"] for t in stats["trace"]], steps=steps,
@@ -2166,6 +2227,11 @@ def a6_near(jobs):
     print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
 
 
+def _stats2(xs):
+    xs = sorted(xs)
+    return f"{np.median(xs):.3g}/{max(xs):.3g}" if xs else "n/a"
+
+
 def _a6_near_report(rows):
     L = [f"A6 near-target: angular probes on the target runtime box + {A6_NEAR_PAD:g} m, versus the A4.3 firing-ship box",
          f"{len(rows)} cases: {len(A43_CASES)} boundary geometries at {', '.join(map(str, A6_NEAR_GAPS))} m", "",
@@ -2204,6 +2270,27 @@ def _a6_near_report(rows):
         for g in A6_NEAR_GAPS:
             gs = [x for r in rows if r["gap"] == g for x in r[meth]["gaps"] if x is not None]
             L.append(f"  {meth:<6} {g:>6} m: {len(gs)} recorded, med/p90/max {_stats(gs) if gs else 'n/a'}")
+    L += ["", f"post-hoc point refinement from the same observations, near-target runs ({len(rows)} cases, "
+          "asks unchanged by construction):",
+          "  gap(m)  pts  refined  correct b/a  wrong b/a  UNKNOWN b/a  radius med/max b -> a  "
+          "error med/max b -> a  identity changed"]
+    for g in A6_NEAR_GAPS:
+        rs = [r["near"] for r in rows if r["gap"] == g]
+        f = lambda k, base: sum((r if base else r["refined"])[k] for r in rs)  # noqa: E731
+        w = lambda k, base: [x for r in rs for x in (r if base else r["refined"])[k]]  # noqa: E731
+        L.append(f"  {g:>6}  {sum(r['final_points'] for r in rs):>3}  "
+                 f"{sum(r['refined']['count'] for r in rs):>7}  "
+                 f"{f('correct', 1):>5} / {f('correct', 0):<3}  {f('wrong', 1):>4} / {f('wrong', 0):<3}  "
+                 f"{f('unknown', 1):>6} / {f('unknown', 0):<3}  "
+                 f"{_stats2(w('radius', 1))} -> {_stats2(w('radius', 0)):<12}  "
+                 f"{_stats2(w('error', 1))} -> {_stats2(w('error', 0)):<12}  "
+                 f"{sum(r['refined']['identity_changed'] for r in rs):>6}")
+    L += ["  invented/merged/duplicate/missed after refinement: " + ", ".join(
+        f"{k} {sum(r['near']['refined'][k] for r in rows)}"
+        for k in ("invented", "merged", "duplicate", "missed")),
+        "  points left unrefined, by reason: " + ", ".join(
+            f"{k} {v}" for k, v in sorted(Counter(
+                x for r in rows for x in r["near"]["refined"]["skipped"]).items()))]
     L += ["", "hardest cases by near-target ask count:"]
     for r in sorted(rows, key=lambda r: -r["near"]["asks"])[:8]:
         n = r["near"]
