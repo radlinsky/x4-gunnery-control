@@ -15,6 +15,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a43f [--jobs 4]             # A4.3 phase 3 uncertainty fallback
     python3 research/issue184/aimpoint_map.py --a43h [--jobs 4]             # A4.3 phase 4 hull coverage map
     python3 research/issue184/aimpoint_map.py --a43a [--jobs 4]             # A4.3 phase 5 angular-spread search
+    python3 research/issue184/aimpoint_map.py --a6   [--jobs 4]             # A6 gap-only stopping-rule trace
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -1722,7 +1723,8 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
     R, O = view["ship_rotation"], view["ship_position"]
     stats = dict(before=0, before_points=[], after_rescue_points=[], open_before=0,
                  rescue_extra=0, rescue_moved=0, rescue_switched=0, rescue_guard=False,
-                 primary=0, extra=0, moved=0, switched=0, guard=False, stalled=False, picks=[], snaps={})
+                 primary=0, extra=0, moved=0, switched=0, guard=False, stalled=False, picks=[], snaps={},
+                 trace=[])
 
     def probe(h):
         points = h["points"]
@@ -1739,6 +1741,22 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
 
         start2 = h["count"]()
         spend = lambda n: h["count"]() - start2 + n <= guard  # noqa: E731
+
+        def assigned():
+            out = {}
+            for u, d in h["rays"].values():
+                i = h["owner"](u, d)
+                if i is not None:
+                    out.setdefault(i, []).append(u)
+            return out
+
+        def note(gap):
+            """#184 A6: the state a `largest remaining angular gap <= T` rule would test, recorded before
+            the ask it precedes. `gap` is None when no candidate is definite (nothing left to choose)."""
+            stats["trace"].append(dict(
+                gap=None if gap is None else math.degrees(gap), primary=stats["primary"],
+                extra=h["count"]() - start2, points=[(c.tolist(), float(r)) for c, r in points]))
+
         while stats["primary"] < primary:
             h["locate"]()
             if not points:
@@ -1747,16 +1765,13 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
             if not spend(3):  # the spare 2 cover `locate`'s along-ray confirmation
                 stats["guard"] = True
                 break
-            asks = {}
-            for u, d in h["rays"].values():
-                i = h["owner"](u, d)
-                if i is not None:
-                    asks.setdefault(i, []).append(u)
-            pick = angular_pick(points, asks, flo, fhi, R, O)
+            pick = angular_pick(points, assigned(), flo, fhi, R, O)
             if pick is None:  # nothing on the box has a definite nearest known point
+                note(None)
                 stats["stalled"] = True
                 break
             gap, pos, want = pick
+            note(gap)
             v = pos @ R + O
             key = tuple(map(float, v))
             if key in h["rays"]:  # the best candidate is an ask already spent: no new viewing angle left
@@ -1777,6 +1792,8 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
             stats["snaps"][stats["primary"]] = dict(
                 primary=stats["primary"], extra=h["count"]() - start2, switched=stats["switched"],
                 guard=stats["guard"], points=[(c.tolist(), float(r)) for c, r in points])
+        final = angular_pick(points, assigned(), flo, fhi, R, O) if points else None  # #184 A6 end state
+        note(None if final is None else final[0])
         stats["extra"] = h["count"]() - start2
     return probe, stats
 
@@ -1818,7 +1835,16 @@ def _a43a_case(case):
                          affected_represented=sum(x in rep for x in affected),
                          all_affected=bool(affected) and all(x in rep for x in affected),
                          remaining_represented=sum(x in rep for x in remaining)))
-    return dict(id=case["id"], before=stats["before"], open_before=stats["open_before"],
+    # #184 A6: the angular-gap trace. `missing` uses hidden truth for reporting only; it never influenced
+    # which position was asked or when the search advanced.
+    trace = []
+    for t in stats["trace"]:
+        rep = _represented([(np.asarray(c), r) for c, r in t["points"]], truth)
+        trace.append(dict(gap=t["gap"], primary=t["primary"], extra=t["extra"],
+                          total_extra=stats["rescue_extra"] + t["extra"], points=len(t["points"]),
+                          missing=sorted({x for x in sel if x not in rep}),
+                          missing_remaining=sorted({x for x in remaining if x not in rep})))
+    return dict(id=case["id"], trace=trace, before=stats["before"], open_before=stats["open_before"],
                 rescue_extra=stats["rescue_extra"], rescue_switched=stats["rescue_switched"],
                 primary=stats["primary"], extra=stats["extra"], moved=stats["moved"],
                 switched=stats["switched"], guard=stats["guard"], stalled=stats["stalled"],
@@ -1914,6 +1940,114 @@ def _a43a_report(rows):
           "  " + (", ".join(f"case {k}: {'never' if v is None else f'after {v} primary asks'}"
                             for k, v in first.items()) or "none")]
     return "\n".join(L)
+
+
+# ---------------------------------------------------------------- A6: largest-angular-gap stopping rule
+
+A6_EVIDENCE = Path(__file__).with_name("A6_ANGULAR_STOP.md")
+
+
+def _a6_rule(trace):
+    """Gap values the rule `stop when largest remaining angular gap <= T` would test, in order. A state with
+    no definite candidate left has nothing to choose and counts as gap 0, which stops at any threshold."""
+    return [(0.0 if t["gap"] is None else t["gap"], t) for t in trace]
+
+
+def _a6_report(rows):
+    unsafe = [(g, r["id"], t) for r in rows for g, t in _a6_rule(r["trace"]) if t["missing"]]
+    g_miss = min((g for g, _i, _t in unsafe), default=None)
+    low, nostop = {}, []
+    for r in rows:
+        safe = [(g, t) for g, t in _a6_rule(r["trace"]) if not t["missing"]]
+        if safe:
+            low[r["id"]] = min(safe)[0]
+        else:
+            nostop.append(r["id"])
+    T = max(low.values()) if low else None
+    ok = bool(low) and not nostop and g_miss is not None and T < g_miss
+    L = ["# Issue #184 A6: is the largest remaining angular gap alone a usable stopping rule?", "",
+         f"Rule under test: `stop when largest remaining angular gap <= T`. {len(rows)} A4.3 boundary cases, "
+         f"the existing phase-5 angular-spread search, {A43A_PRIMARY} primary asks, {A43A_GUARD}-ask "
+         "angular-stage limit. Hidden truth is used for reporting only and never steered the search.", "",
+         f"- smallest gap observed while a required point was still missing: "
+         f"{'none - no state was ever missing a required point' if g_miss is None else f'{g_miss:.3f} deg'}",
+         f"- cases that never reach a state with all required points represented: "
+         f"{', '.join(map(str, nostop)) or 'none'}",
+         f"- highest per-case lowest safe gap (the smallest T that still stops every case): "
+         f"{'n/a' if T is None else f'{T:.3f} deg'}", ""]
+    if ok:
+        stops = {}
+        for r in rows:
+            g, t = next((g, t) for g, t in _a6_rule(r["trace"]) if g <= T)
+            stops[r["id"]] = t
+        L += [f"**Verdict: a safe threshold range exists: {T:.3f} deg <= T < {g_miss:.3f} deg.**",
+              f"At T = {T:.3f} deg the worst case spends {max(t['primary'] for t in stops.values())} primary "
+              f"asks and {max(t['extra'] for t in stops.values())} actual angular-stage asks "
+              f"({max(t['total_extra'] for t in stops.values())} including the cheap rescue).", ""]
+    else:
+        L += ["**Verdict: the largest angular gap alone is REJECTED as a stopping rule.** "
+              + ("Some case never represents its required points at all, so no threshold stops it safely."
+                 if nostop else
+                 f"A state still missing a required point reaches {g_miss:.3f} deg, at or below the "
+                 f"{T:.3f} deg every case needs in order to stop, so every threshold that stops all cases "
+                 "also stops at least one case early." if T is not None else ""), ""]
+        stops = {}
+    L += ["## Per case", "",
+          "| case | required | lowest gap while missing | lowest safe gap | first safe state (primary / "
+          "angular asks / points) | stops at T |", "|---|---|---|---|---|---|"]
+    for r in rows:
+        miss = [g for g, t in _a6_rule(r["trace"]) if t["missing"]]
+        safe = [(g, t) for g, t in _a6_rule(r["trace"]) if not t["missing"]]
+        f = min(safe)[1] if safe else None
+        s = stops.get(r["id"])
+        start = len(r["trace"][0]["missing"]) if r["trace"] else 0
+        c_miss = f"{min(miss):.3f}" if miss else "never missing"
+        c_low = f"{low[r['id']]:.3f}" if r["id"] in low else "never safe"
+        c_first = f"{f['primary']} / {f['extra']} / {f['points']}" if f else "-"
+        c_stop = f"{s['primary']} / {s['extra']}" if s else "-"
+        L.append(f"| {r['id']} | {start} at start | {c_miss} | {c_low} | {c_first} | {c_stop} |")
+    L += ["", "## Full gap trace", "",
+          "Each row is a state the rule would have tested: before the first angular ask, before every later "
+          "angular ask, and after the final primary ask.", "",
+          "| case | primary spent | angular asks spent | points | largest gap (deg) | required still missing |",
+          "|---|---|---|---|---|---|"]
+    for r in rows:
+        for g, t in _a6_rule(r["trace"]):
+            L.append(f"| {r['id']} | {t['primary']} | {t['extra']} | {t['points']} | "
+                     f"{'none left (0)' if t['gap'] is None else f'{g:.3f}'} | "
+                     f"{len(t['missing'])}{' ' + str(t['missing']) if t['missing'] else ''} |")
+    L += ["", "## Notes", "",
+          "- Cases 12234 and 12376 carry the five muzzle selections the pre-angular cheap rescue still "
+          "missed (3 and 2 muzzles). Several muzzles of one case select the same aim point, so the "
+          "`required still missing` column counts distinct unrepresented points, not muzzles.",
+          "- The gap is not monotone as asks accumulate: confirming a new point re-partitions the box and "
+          "can raise the largest gap again (12234 goes 46.8 -> 68.8 deg across its first angular ask). A "
+          "threshold rule therefore cannot assume the sequence only descends toward it.", ""]
+    return "\n".join(L)
+
+
+def a6(jobs):
+    """#184 A6: run the existing phase-5 angular search and test a gap-only stopping rule on its trace."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["id"] in set(A43_CASES)]
+    assert len(todo) == len(A43_CASES), (len(todo), len(A43_CASES))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path = CACHE / "a6_rows.jsonl"
+    print(f"#184 A6: {len(todo)} cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a43a_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            print(f"  {len(rows)}/{len(todo)} case {r['id']}: {len(r['trace'])} traced states", flush=True)
+    rows.sort(key=lambda r: r["id"])
+    out = _a6_report(rows)
+    A6_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {rows_path}, evidence: {A6_EVIDENCE})")
 
 
 # ---------------------------------------------------------------- run
@@ -2274,6 +2408,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a6" in sys.argv:
+        return a6(arg("--jobs", 4))
     if "--a43a" in sys.argv:
         return a43a(arg("--jobs", 4))
     if "--a43h" in sys.argv:
