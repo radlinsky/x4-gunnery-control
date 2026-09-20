@@ -11,6 +11,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a41 [--every N] [--jobs 4]  # A4.1 corner audit (boundary cases)
     python3 research/issue184/aimpoint_map.py --a42 [--jobs 4]              # A4.2 switch-boundary comparison
     python3 research/issue184/aimpoint_map.py --a43 [--jobs 4]              # A4.3 phase 1 (19 cases)
+    python3 research/issue184/aimpoint_map.py --a43r [--jobs 4]             # A4.3 phase 2 adaptive rescue
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -416,7 +417,7 @@ def score(case, result, muzzles):
 # ---------------------------------------------------------------- A3 mappers (production inputs only)
 
 sys.path.insert(0, str(ROOT / "research/issue176-a2"))
-from simulate import EPS, REL  # noqa: E402  #176 A2 angular allowance and poor-angle rule
+from simulate import EPS, REL, basis  # noqa: E402  #176 A2 angular allowance and poor-angle rule
 
 FORWARD = 1e-4  # #176 A4 same-ray tolerance (rad)
 SLACK = 2 * (EPS + 1e-6) / FORWARD  # #176 A5 along-ray resolution floor (~7%)
@@ -456,7 +457,7 @@ def _corners(lo, hi):
     return [np.asarray(c) for c in itertools.product(*zip(lo, hi))]
 
 
-def _search(view, lo, hi, R, O, clear, cube=None):
+def _search(view, lo, hi, R, O, clear, cube=None, probe=None):
     """Shared A3 search over the box [lo, hi] (world = p @ R + O): query its 8 outer corners, locate the
     points their rays select, then query the corners of each octree leaf `clear` rejects, to MAX_DEPTH. With `cube`,
     finally query a cube of that half-size around each located point (target frame).
@@ -467,7 +468,11 @@ def _search(view, lo, hi, R, O, clear, cube=None):
     that does not exist; it only resolves ~SLACK of depth, so one crossing alone is not enough (a ray to
     another point can cross just past the anchor's point). Radius = agreed depth span / 2 + angular cone
     + binary32 rounding.
-    -> (points [(centre, r)], owner(ray) -> index | None, rays {corner: (world, dir)}, cleared, uncleared, queries)."""
+    -> (points [(centre, r)], owner(ray) -> index | None, rays {corner: (world, dir)}, cleared, uncleared, queries).
+
+    `probe`, when given, runs once the box work is finished and may spend further asks. It receives the live
+    handles (`ask`, `locate`, `rays`, `points`, `owner`, `count`), so its observations feed this same location
+    process instead of a private one."""
     oracle, (C, H, T) = view["oracle"], view["target_box"]
     tlo, thi = target_box(C, H)
     rays, points, hits, tried, n = {}, [], {}, set(), 0
@@ -533,6 +538,8 @@ def _search(view, lo, hi, R, O, clear, cube=None):
                 uncleared.append((a, b))
             if not leaves and cube is not None:
                 leaves, cube = [(c @ R.T - cube, c @ R.T + cube, MAX_DEPTH) for c, _r in points], None
+        if probe is not None:
+            probe(dict(ask=ask, locate=locate, rays=rays, points=points, owner=owner, count=lambda: n))
     except _Capped:
         uncleared += [(a, b)] + [(x, y) for x, y, _ in leaves]
     return points, owner, rays, cleared, uncleared, n
@@ -619,16 +626,19 @@ def _edges(lo, hi):
     return [(a, b) for a, b in itertools.combinations(cs, 2) if np.count_nonzero(a != b) == 1]
 
 
-def corner_audit(view, margin):
+def corner_audit(view, margin, probe=None):
     """A4.1: ask ONLY the 8 outer corners of the class-expanded firing-ship box, reusing the A3 location and
-    point-confirmation rules, with no subdivision. Returns what the corners expose, nothing more."""
+    point-confirmation rules, with no subdivision. Returns what the corners expose, nothing more.
+
+    `probe` (A4.3 phase 2) may then spend further asks on the same location process; without it nothing else
+    is asked and `rays` holds the 8 corner asks only."""
     lo, hi = firing_box(*view["ship_box"], margin)
     R, O = view["ship_rotation"], view["ship_position"]
-    points, owner, rays, _c, _u, n = _search(view, lo, hi, R, O, lambda *_: True)  # every leaf cleared: no split
+    points, owner, rays, _c, _u, n = _search(view, lo, hi, R, O, lambda *_: True, probe=probe)  # no split
     own = {tuple(c): owner(*rays[tuple(c)]) for c in _corners(lo, hi)}
     mixed = [(a, b) for a, b in _edges(lo, hi)
              if own[tuple(a)] is not None and own[tuple(b)] is not None and own[tuple(a)] != own[tuple(b)]]
-    return dict(points=points, own=own, mixed=mixed, queries=n, box=(lo, hi), R=R, O=O)
+    return dict(points=points, own=own, mixed=mixed, queries=n, box=(lo, hi), R=R, O=O, rays=rays, owner=owner)
 
 
 def _bisector(p, q):
@@ -975,8 +985,9 @@ def spans(vs):
     return True
 
 
-def residual_map(view, margin):
+def residual_map(view, margin, probe=None):
     """A4.3 phase 1: answer later positions from the existing corner asks alone, conservatively. No new asks.
+    With a `probe` (phase 2) the same rule also uses whatever extra asks the probe spent.
 
     Every confidently assigned corner ask is an empty ball: no aim point lies nearer to that ask position
     than the point it selected (`target_box_map`'s rule). What those balls leave uncovered is residual
@@ -996,9 +1007,9 @@ def residual_map(view, margin):
     ask, which is A4.3 phase 2."""
     C, H, T = view["target_box"]
     tlo, thi = target_box(C, H)
-    a = corner_audit(view, margin)
+    a = corner_audit(view, margin, probe)
     points = a["points"]
-    asks = [(c @ a["R"] + a["O"], i) for c in _corners(*a["box"]) if (i := a["own"][tuple(c)]) is not None]
+    asks = [(u, i) for u, d in a["rays"].values() if (i := a["owner"](u, d)) is not None]
     balls = [(u @ T.T, float(np.linalg.norm(points[i][0] - u)) - points[i][1]) for u, i in asks]
     located = [(i, c, r) for i, (c, r) in enumerate(points)]
     residual = _unproven(tlo, thi, balls, []) if balls else [(tlo, thi)]
@@ -1013,10 +1024,8 @@ def residual_map(view, margin):
                 target_volume=float(np.prod(thi - tlo)))
 
 
-def _a43_case(case):
-    records, margins = _LOADED
-    r = residual_map(view(case), margins[case["ship_class"]][0])
-    muzzles = aimed_muzzles(case, records)
+def _a43_row(case, r, muzzles):
+    """Score one A4.3 mapper result and add the hidden-truth reporting fields."""
     row = dict(score(case, r, muzzles), id=case["id"], target=case["target"], ship=case["ship"], gap=case["gap"],
                points=len(r["located"]), residual_boxes=len(r["residual"]),
                residual_fraction=float(sum(np.prod(b - a) for a, b in r["residual"])) / r["target_volume"])
@@ -1025,7 +1034,8 @@ def _a43_case(case):
     truth = [tuple(map(float, p)) for p in case["points"]]
     cover = {i: [j for j, p in enumerate(case["points"]) if np.linalg.norm(c - p) <= q] for i, c, q in r["located"]}
     exposed = {j for js in cover.values() for j in js}
-    row.update(unexposed=0, unexposed_correct=0, unexposed_wrong=0, unexposed_unknown=0, wrong_muzzles=[])
+    row.update(unexposed=0, unexposed_correct=0, unexposed_wrong=0, unexposed_unknown=0, wrong_muzzles=[],
+               exposed_points=sorted(exposed))
     for m in muzzles.values():
         sel = study.select(tuple(map(float, m)), truth)
         ans = r["answer"](m)
@@ -1036,6 +1046,12 @@ def _a43_case(case):
             row["unexposed"] += 1
             row[f"unexposed_{verdict}"] += 1
     return row
+
+
+def _a43_case(case):
+    records, margins = _LOADED
+    r = residual_map(view(case), margins[case["ship_class"]][0])
+    return _a43_row(case, r, aimed_muzzles(case, records))
 
 
 def a43(jobs):
@@ -1089,6 +1105,164 @@ def _a43_report(rows):
     L += block("one-confirmed-point cases", one) + [""]
     L += block("two-confirmed-point cases", two) + [""]
     L += block("all A4.3 cases", rows) + ["",
+          "wrong answers: " + (", ".join(f"case {r['id']} ({r['wrong']})" for r in wrong) if wrong else "none")]
+    return "\n".join(L)
+
+
+# ---------------------------------------------------------------- A4.3 phase 2: adaptive corner rescue
+
+RESCUE_GUARD = 24  # research-loose runaway guard on the extra asks per case; A6 sets any production limit
+RESCUE_ALPHA0 = math.radians(2.0)  # #176 A5 first sideways viewing-angle change
+RESCUE_ALPHA_MIN = math.radians(1 / 64)  # #176 A5 floor: below this a sideways move buys nothing
+
+
+def _box_depth(u, d, tlo, thi, T):
+    """Runtime-only depth scale along the ask ray (u, d): the middle of the segment it spends inside the padded
+    target box, or its closest approach to the box centre when it misses it. Production target box only."""
+    o, e = np.asarray(u, float) @ T.T, np.asarray(d, float) @ T.T
+    near, far = 0.0, math.inf
+    for k in range(3):
+        if abs(e[k]) < 1e-12:
+            continue
+        a, b = sorted(((tlo[k] - o[k]) / e[k], (thi[k] - o[k]) / e[k]))
+        near, far = max(near, a), min(far, b)
+    if near <= far < math.inf:
+        return 0.5 * (near + far)
+    return max(float(((tlo + thi) / 2 - o) @ e), 1.0)
+
+
+def rescue_probe(view, guard=RESCUE_GUARD):
+    """#176 A5 adaptive probing applied to the corner asks the audit could not assign to a confirmed point.
+
+    Such an ask is an observation, not a failure: it names a direction toward *some* aim point. Taking one at
+    a time in fixed key order (never hidden truth), make a sideways moved ask, offset by the viewing-angle
+    change alpha at that ray's own target-box depth scale. When the moved ask's ray does not support the
+    anchor ray - it misses it, or crosses it outside the padded target box - X4 selected another point: keep
+    the observation, halve alpha and turn 60 degrees, exactly as #176 A5 does. Every ask, supporting or
+    switched, enters the shared `locate()`, whose existing conservative multi-ray-plus-bracket rule is the
+    only thing that confirms a point; after each new point the loop reconsiders every stored observation
+    before spending another ask.
+
+    Returns (probe, stats). -> `residual_map(view, margin, probe)`."""
+    C, H, T = view["target_box"]
+    tlo, thi = target_box(C, H)
+    stats = dict(before=0, before_points=[], open_before=0, extra=0, moved=0, switched=0, guard=False)
+
+    def probe(h):
+        start, points = h["count"](), h["points"]
+        stats.update(before=len(points), before_points=list(points))
+        anchors = sorted(k for k, (u, d) in h["rays"].items() if d is not None and h["owner"](u, d) is None)
+        stats["open_before"], state, seen = len(anchors), {}, len(points)
+        while anchors:
+            h["locate"]()
+            anchors = [k for k in anchors if h["owner"](*h["rays"][k]) is None]
+            if len(points) > seen:  # a new point may already explain other stored observations
+                seen = len(points)
+                continue
+            if not anchors:
+                break
+            if h["count"]() - start + 3 > guard:  # the spare 2 cover `locate`'s along-ray confirmation
+                stats["guard"] = True
+                break
+            k = anchors[0]
+            u, d = h["rays"][k]
+            alpha, turn = state.get(k, (RESCUE_ALPHA0, 0))
+            if alpha < RESCUE_ALPHA_MIN:  # nothing narrower left to observe about this direction
+                anchors.pop(0)
+                continue
+            a_ax, b_ax = basis(d)
+            side = math.cos(turn * math.pi / 3) * a_ax + math.sin(turn * math.pi / 3) * b_ax
+            v = u + _box_depth(u, d, tlo, thi, T) * math.tan(alpha) * side
+            h["rays"][tuple(map(float, v))] = (v, dv := h["ask"](v))
+            stats["moved"] += 1
+            hit = None if dv is None else crossing(u, d, v, dv)
+            supported = hit is not None and inside((tlo, thi), (u + hit[0] * d) @ T.T)
+            stats["switched"] += not supported
+            state[k] = (alpha / 2 if not supported else alpha, turn + 1)
+        h["locate"]()
+        stats["extra"] = h["count"]() - start
+    return probe, stats
+
+
+def _a43r_case(case):
+    records, margins = _LOADED
+    v = view(case)
+    probe, stats = rescue_probe(v)
+    r = residual_map(v, margins[case["ship_class"]][0], probe)
+    muzzles = aimed_muzzles(case, records)
+    row = _a43_row(case, r, muzzles)
+    before = {j for i, (c, q) in enumerate(stats["before_points"])
+              for j, p in enumerate(case["points"]) if np.linalg.norm(c - p) <= q}
+    after = set(row["exposed_points"])
+    sel = [study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in case["points"]])
+           for m in muzzles.values()]
+    row.update(points_before=stats["before"], points_new=len(r["located"]) - stats["before"],
+               open_before=stats["open_before"], extra=stats["extra"], moved=stats["moved"],
+               switched=stats["switched"], guard=stats["guard"], newly_exposed=len(after - before),
+               unexposed_before=sum(s not in before for s in sel),
+               rescued_muzzles=sum(s not in before and s in after for s in sel))
+    return row
+
+
+def a43r(jobs):
+    """A4.3 phase 2: adaptive rescue of the unassigned corner directions, on the same 19 cases."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["id"] in set(A43_CASES)]
+    assert len(todo) == len(A43_CASES), (len(todo), len(A43_CASES))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path, sum_path = CACHE / "a43r_rows.jsonl", CACHE / "a43r_summary.txt"
+    print(f"A4.3 phase 2: {len(todo)} cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a43r_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            print(f"  {len(rows)}/{len(todo)} case {r['id']}: {r['points_before']}(+{r['points_new']}) pts, "
+                  f"+{r['extra']} asks, {r['switched']} switched, "
+                  f"{r['correct']}/{r['wrong']}/{r['unknown']} correct/wrong/UNKNOWN", flush=True)
+    out = _a43r_report(rows)
+    sum_path.write_text(out)
+    print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
+
+
+def _a43r_report(rows):
+    def block(name, rs):
+        if not rs:
+            return [f"{name}: none"]
+        tot = {k: sum(r[k] for r in rs) for k in ("points_before", "points_new", "open_before", "extra", "moved",
+                                                  "switched", "newly_exposed", "unexposed_before",
+                                                  "rescued_muzzles", "muzzles", "correct", "wrong", "unknown",
+                                                  "unexposed", "unexposed_correct", "unexposed_unknown",
+                                                  "unexposed_wrong", "missed", "merged", "invented", "duplicate")}
+        return [f"{name}: {len(rs)} cases",
+                f"  unassigned corner directions:  {tot['open_before']} in {sum(r['open_before'] > 0 for r in rs)} cases",
+                f"  extra asks:                    {tot['extra']} total, med/p90/max {_stats([r['extra'] for r in rs])}"
+                f"; {tot['moved']} moved asks, {sum(r['guard'] for r in rs)} cases hit the {RESCUE_GUARD}-ask guard",
+                f"  moved asks that switched point: {tot['switched']} in {sum(r['switched'] > 0 for r in rs)} cases",
+                f"  confirmed points:              {tot['points_before']} before, +{tot['points_new']} new "
+                f"({sum(r['points_new'] > 0 for r in rs)} cases gained one); {tot['missed']} true points still missed",
+                f"  bad estimates:                 {tot['invented']} invented, {tot['merged']} merged, "
+                f"{tot['duplicate']} duplicate",
+                f"  true points newly represented: {tot['newly_exposed']}",
+                f"  later muzzles on a before-unexposed point: {tot['unexposed_before']} -> "
+                f"{tot['rescued_muzzles']} now select a represented point",
+                f"  later aimed muzzles:           {tot['muzzles']} -> {tot['correct']} correct, "
+                f"{tot['wrong']} wrong, {tot['unknown']} UNKNOWN",
+                f"  of those, still-unexposed ones: {tot['unexposed']} -> {tot['unexposed_correct']} correct, "
+                f"{tot['unexposed_wrong']} wrong, {tot['unexposed_unknown']} UNKNOWN"]
+
+    one = [r for r in rows if r["points_before"] < 2]
+    two = [r for r in rows if r["points_before"] >= 2]
+    wrong = [r for r in rows if r["wrong"]]
+    L = ["A4.3 phase 2: adaptive rescue of unassigned corner directions (corner audit + moved asks)", ""]
+    L += block("cases the corners gave one point", one) + [""]
+    L += block("cases the corners gave two points", two) + [""]
+    L += block("all A4.3 cases", rows) + ["",
+          "guard cases: " + (", ".join(str(r["id"]) for r in rows if r["guard"]) or "none"),
           "wrong answers: " + (", ".join(f"case {r['id']} ({r['wrong']})" for r in wrong) if wrong else "none")]
     return "\n".join(L)
 
@@ -1325,6 +1499,19 @@ def selftest():
     assert len(r["located"]) == 1 and all(r["answer"](x) == 0 for x in rng.uniform(-10, 10, (50, 3)) + (0, 0, -2000))
     assert r["answer"](np.array([0.0, 0, 2000])) is UNKNOWN  # the far side is outside that hull
 
+    # A4.3 phase 2: four points, one per firing-box quadrant, so every corner ask selects a point only one
+    # other corner shares. Three rays are needed to confirm one, so the corners alone confirm nothing and all
+    # eight directions are left unassigned. The rescue must turn those observations into all four points, and
+    # must spend fewer moved asks than there are unassigned directions, because one new point explains others.
+    quad = [(x, 0, z) for x in (-350, 350) for z in (-350, 350)]
+    case, v = synthetic(quad, (0, 0, 0), (400, 400, 400), ship=((-200, -200, -200), (200, 200, 200)), at=(0, 1500, 0))
+    assert not corner_audit(v, 0)["points"]
+    rescue, stats = rescue_probe(v)
+    r = residual_map(v, 0, rescue)
+    assert stats["open_before"] == 8 and not stats["guard"] and stats["extra"] <= RESCUE_GUARD, stats
+    assert 0 < stats["moved"] < stats["open_before"], stats
+    check(case, r, [], missed=0, merged=0, duplicate=0)  # four estimates, one true point each, none invented
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -1359,6 +1546,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a43r" in sys.argv:
+        return a43r(arg("--jobs", 4))
     if "--a43" in sys.argv:
         return a43(arg("--jobs", 4))
     summary()
