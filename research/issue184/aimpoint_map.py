@@ -1993,7 +1993,7 @@ def _a6_report(rows):
                  "also stops at least one case early." if T is not None else ""), ""]
         stops = {}
     L += ["## Per case", "",
-          "| case | required | lowest gap while missing | lowest safe gap | first safe state (primary / "
+          "| case | required | lowest gap while missing | lowest safe gap | lowest-gap safe state (primary / "
           "angular asks / points) | stops at T |", "|---|---|---|---|---|---|"]
     for r in rows:
         miss = [g for g, t in _a6_rule(r["trace"]) if t["missing"]]
