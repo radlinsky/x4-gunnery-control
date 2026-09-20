@@ -4,7 +4,7 @@ Offline source research, status **inference** (from `shipped-source` and
 `third-party-technique` XML). No X4 launch, no production change.
 
 ```sh
-python3 research/issue184/extract_swi_assets.py <SWI 0.9.1 HF mod dir>  # once
+python3 research/issue184/extract_swi_assets.py <SWI 0.9.1 HF mod dir>  # once: assets/ and index/
 python3 research/issue184/ship_aimpoint_census.py                       # ~3 min
 ```
 
@@ -54,7 +54,8 @@ Measured while doing so, and relevant to any future SWI work:
 - SWI refers to four official assets with different capitalisation
   (`bridge_arg_Xl_01_macro`). X4 resolves those; an exact-name index does not.
 - SWI defines 41 names in two files each. Six are census ships, all with a
-  differing aim-point set; see *Ambiguity and unresolved entries*.
+  differing aim-point set; X4's own name index decides which one is real, see
+  *Duplicate definitions and unresolved entries*.
 
 ## Aim-point count distribution
 
@@ -349,17 +350,28 @@ complete table answers nothing for the 184 vanilla ships that author no points.
 
 Probing is not ruled out by this census — it is made more likely.
 
-## Ambiguity and unresolved entries
+## Duplicate definitions and unresolved entries
 
 Nothing in the intended population was silently dropped.
 
-**Ambiguous (6 census ships).** SWI defines these components in two files with
-a differing aim-point set; game load order decides which wins. The census keeps
-the file X4's asset convention names after the component (`.../<name>.xml`),
-which in every case is the primary ship file rather than a `backup/` copy or a
-`*_data/` folder: `mc80crain`, `mc80liner`, `mc80r` (5 points kept, 0 in the
-`backup/` copy); `t65b_xwing`, `t65b_xwing_01`, `t65xj3_xwing` (1 point kept,
-0 in the `*_data/` copy).
+**Duplicate component definitions, resolved (6 census ships).** SWI defines
+these components in two files each, with a differing aim-point set. X4 does not
+discover a component by scanning files: it resolves a name to exactly one file
+through `index/components.xml`, and SWI adds its own entries there. The census
+reads that index and keeps the file it names.
+
+| component | file X4's index resolves it to | points | other definition, unused |
+|---|---|---:|---|
+| `mc80crain` | `assets/units/size_xl/mc80crain.xml` | 5 | `assets/units/size_xl/backup/mc80crain - Copy.xml` (0) |
+| `mc80liner` | `assets/units/size_xl/mc80liner.xml` | 5 | `assets/units/size_xl/backup/mc80liner - Copy.xml` (0) |
+| `mc80r` | `assets/units/size_xl/mc80r.xml` | 5 | `assets/units/size_xl/backup/mc80r - Copy.xml` (0) |
+| `t65b_xwing` | `assets/units/size_s/t65b_xwing.xml` | 1 | `assets/units/size_s/t65xj3_xwing_data/t65b_xwing.xml` (0) |
+| `t65b_xwing_01` | `assets/units/size_s/t65b_xwing_01.xml` | 1 | `assets/units/size_s/t65xj3_xwing_data/t65b_xwing_01.xml` (0) |
+| `t65xj3_xwing` | `assets/units/size_s/t65xj3_xwing.xml` | 1 | `assets/units/size_s/t65xj3_xwing_data/t65xj3_xwing.xml` (0) |
+
+In every case the unused copy is a `backup/` duplicate or a `*_data/` folder
+copy, and the index names the primary ship file. No census total or finding
+depends on this any more: it is established, not assumed.
 
 **Unresolved (8).**
 

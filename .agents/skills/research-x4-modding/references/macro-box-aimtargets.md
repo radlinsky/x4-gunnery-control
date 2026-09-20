@@ -130,3 +130,15 @@ box, because those operations delete and retag connections that feed it, but
 point is authored in a full component definition. SWI also refers to some
 official assets with different capitalisation than the official file uses, and
 defines 41 names in two files each.
+
+**Name-to-file resolution is the `index/` lookup, not a file scan.** X4 resolves
+a component or macro name through `index/components.xml` and `index/macros.xml`
+(base: catalog `08.cat`; an extension adds its own entries with
+`<add sel="/index">`). When two files define the same name, the index entry
+decides which one the engine uses; filesystem order, alphabetical order and
+filename convention establish nothing. SWI 0.9.1 HF has 41 such duplicate
+names, six of them ships whose aim-point sets differ between the two files, and
+its index resolves every one of them to the primary asset file rather than to
+the `backup/` or `*_data/` copy. Any tool that indexes X4 XML by scanning
+directories must consult these index files before claiming which definition is
+effective.

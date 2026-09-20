@@ -35,6 +35,7 @@ from barrelposition_evaluator import _native_connection_name_hash as name_hash  
 from census_common import REQUIRED_SOURCE_SETS  # noqa: E402
 
 SWI_ASSETS = ROOT / ".x4-research-cache/issue184/swi_assets"
+NAME_INDEX = {}  # (root tag, name) -> the file X4's index/ resolves that name to
 OUT = ROOT / ".x4-research-cache/issue184/a44_census.jsonl"
 CLASSES = ("ship_s", "ship_m", "ship_l", "ship_xl")
 TOL = 1e-4  # m; authored positions are float32 text
@@ -100,13 +101,14 @@ def overlay_swi():
     SWI definitions. -> (Counter, list of unresolved (path, reason))."""
     if any(rel.startswith("swi/") for defs in sources.MACROS.values() for rel, _m in defs):
         raise RuntimeError("SWI already indexed")
+    NAME_INDEX.update(swi_name_index())
     stats, unresolved = Counter(), []
     official_files = {}
     for s in REQUIRED_SOURCE_SETS:
         for p in (ROOT / ".x4-research-cache/official-source-sets" / s).rglob("*.xml"):
             official_files.setdefault(p.relative_to(ROOT / ".x4-research-cache/official-source-sets" / s).as_posix(),
                                       []).append((s, p))
-    for p in sorted(SWI_ASSETS.rglob("*.xml")):
+    for p in sorted(SWI_ASSETS.glob("assets/**/*.xml")):
         rel = p.relative_to(SWI_ASSETS).as_posix()
         try:
             root = ET.parse(p).getroot()
@@ -151,18 +153,31 @@ def _alias_case():
 DUPES = defaultdict(list)  # component name -> the SWI definitions not kept
 
 
+def swi_name_index():
+    """X4 resolves a component/macro name to one file through `index/components.xml` and
+    `index/macros.xml`; SWI adds its own entries there. -> {(root tag, name): cache-relative file}."""
+    out = {}
+    for kind in ("components", "macros"):
+        for e in ET.parse(SWI_ASSETS / "index" / f"{kind}.xml").getroot().iter("entry"):
+            # e.g. `extensions\starwarsmod_m1\assets\units\size_xl\mc80crain` -> the cached relative path
+            value = e.get("value", "").replace("\\", "/")
+            head, sep, tail = value.partition("assets/")
+            out[(kind, e.get("name"))] = (sep + tail if sep else value) + ".xml"
+    return out
+
+
 def _reindex(root, rel, stats, patched=False, seen=set()):
     """A SWI definition replaces the official one of the same name. A second SWI definition of a name SWI
-    already defines is a duplicate SWI authors (e.g. `t65b_xwing`, which differs between its two files);
-    load order decides in game. Keep the one in the file X4's asset convention names after it
-    (`.../<name>.xml`), else the first, and count the ambiguity."""
+    already defines is a duplicate SWI authors (e.g. `t65b_xwing`, defined differently in two files).
+    X4 resolves the name through its `index/` entry, so keep that file's definition."""
     index = {"components": sources.COMPONENTS, "macros": sources.MACROS}.get(root.tag)
     for e in root if index is not None else ():
         name = e.get("name")
         if (root.tag, name) in seen:
             stats["SWI defines the same name in two files (load order decides in game)"] += 1
             kept = index[name][0]
-            if rel.rsplit("/", 1)[-1] == f"{name}.xml" and kept[0].rsplit("/", 1)[-1] != f"{name}.xml":
+            want = NAME_INDEX.get((root.tag, name))
+            if want is not None and rel == "swi/" + want and kept[0] != "swi/" + want:
                 index[name], kept = [(rel, e)], kept
                 e, rel = kept[1], kept[0]
             if root.tag == "components":
@@ -380,7 +395,7 @@ def report(rows, unresolved, stats):
     amb = [(r, DUPES[r["component"]]) for r in rows if r["component"] in DUPES]
     P("")
     P(f"## Ambiguous: SWI defines the component in two files ({len(amb)} census ships)")
-    P("  Load order decides in game; the census keeps the file named after the component. Only a differing aim-point set matters here.")
+    P("  X4 resolves the name through its `index/components.xml` entry; the census keeps that file. Only a differing aim-point set matters here.")
     for r, alts in amb:
         other = [len(aim_points(e)[1]) for _rel, e in alts]
         flag = "" if all(o == r["n_points"] for o in other) else "  <-- DIFFERS"

@@ -1,5 +1,5 @@
 """Extract SWI 0.9.1 HF asset XML (`assets/**.xml`: ships plus the docks, interiors and props they attach)
-from the owner's ext_01 catalog into the ignored cache.
+and its `index/**.xml` name lookup from the owner's ext_01 catalog into the ignored cache.
 
     python3 research/issue184/extract_swi_units.py /path/to/starwarsmod_m1
 """
@@ -20,7 +20,7 @@ def main(mod):
                 continue
             path, size, start = m.group(1), int(m.group(2)), offset
             offset += size
-            if re.match(r"assets/.*\.xml$", path, re.I):
+            if re.match(r"(assets|index)/.*\.xml$", path, re.I):
                 dat.seek(start)
                 data = dat.read(size)
                 if hashlib.md5(data).hexdigest() != m.group(4):
