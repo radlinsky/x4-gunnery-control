@@ -81,6 +81,58 @@ connection `+0x60`; parent-composed transforms use separate storage. For an
 unparented aim connection, the raw translation and the macro/component box
 are in the same component frame. Do not invent a parent transform for it.
 
+## Two Lua getters reach the same selector
+
+- X4: 9.00 build 611726
+- Status: inference — native trace, same executable and SHA-256 as above,
+  traced 2026-09-20.
+- Live test: no — what the getter returns has not been measured in game.
+- Finding: the exported UI FFI functions `GetRelativeAimOffset`
+  (RVA `0x00AFE510`) and `GetRelativeAimScreenPosition` (`0x00AFE7F0`) both
+  call virtual slot `+0x2210` (`0x00AFE692`, `0x00AFE9E5`); those two call
+  sites are the only ones in the image. The slot's implementation for this
+  family, `0x004DE590`, resolves a weapon from the caller's active
+  weapon-group vector (`+0x638`, index `+0x668`) through `0x004DFFD0` and then
+  calls `0x00815330 → 0x007E7460`, which calls both nearest-aim-point
+  selectors: `0x00520FC0` at `0x007E76AA` and `0x005210E0` at `0x007E7B46`.
+  A UI-Lua mod can therefore obtain the engine's selected aim point for a
+  target, for the player ship's own origin, without an MD `useaimtarget`
+  probe. Two limits are structural: when no weapon resolves, `0x004DE590`
+  takes a branch (`0x003DDE10`) that never consults the aim-point collection,
+  so a returned value is not always a selected point; and static evidence does
+  not settle whether `0x00815330` returns the selected point itself or a
+  lead-corrected firing position derived from it. `targetsystem.lua` uses the
+  result for the aim-at indicator and passes it through `0x00979EF0`, so it is
+  relative to the player object rather than target-local.
+  The engine's own weapon aiming uses the same selector: `0x00520FC0` is called
+  from vtable slot `+0x30` of six classes with RTTI names
+  `BasicShootController`, `MindlessShootController`, `MultipleShootController`,
+  `LargeTargetShootController`, `PlayerShootController` and
+  `PlayerBombLauncherShootController`.
+
+## No script surface exposes an aim connection
+
+- X4: 9.00
+- Status: shipped-source (property, action and FFI census)
+- Source: `scriptproperties.xml`; `md/md.xsd` with `libraries/common.xsd`;
+  the full shipped `ui/` Lua tree.
+- Live test: no — not needed; this is an absence in the declared surface.
+- Finding: no MD property, MD action or Lua FFI function reports the count,
+  positions or existence of a component's `aimtarget` connections. The full
+  `component` (147), `macro` (82), `object` (98), `destructible` (26),
+  `defensible` (225), `controllable` (122) and `ship` (71) property sets carry
+  no connection list and no component-definition name. `componentslot` does
+  expose a connection's `name`, `tags`, `group` and `offset`, but every action
+  that produces one is bound to a single slot family — npc, prop, crate,
+  airlock, hack, transporter, workbench, console, station editor, map console,
+  tradeoffer parking — and none enumerates a ship's connections by tag.
+  `find_object_component` returns child objects, which an aim connection has
+  none of. `create_target_points` is the only MD action that selects
+  connections on a destructible by tag, but nothing reads its points back and
+  it removes other missions' target points. Tag-filtered enumeration in the
+  FFI exists only for wares, icons, sounds and cargo. Consequently a mod
+  cannot tell a zero-, one- or multi-aim-point target apart from metadata.
+
 ## Bounded source structure check
 
 - X4: 9.00
