@@ -38,6 +38,42 @@ A vanilla game holds the 203 official components. A SWI game holds the 226 SWI
 ones plus the official ones as SWI patches them. A reconstruction rule has to
 hold inside one population on its own; a union statistic describes no real game.
 
+### Which SWI catalogs the census reads
+
+SWI 0.9.1 HF ships five catalogs. Only `ext_01` holds census input, audited by
+entry rather than by name:
+
+| catalog | entries | contents | relevant? |
+|---|--:|---|---|
+| `ext_01` | 26,630 | `assets/**` (25,526), `index/**` (2), plus voice, sfx, music, cutscenes, maps, legacy textures and 93 `extensions/<dlc>/**` files | **yes** — `assets/**.xml` and `index/**.xml` are read |
+| `ext_02` | 345 | `md/`, `aiscripts/`, `libraries/`, `t/` | no — no `assets/`, no `index/`; all 64 library files are `<diff>` and none defines a component or macro |
+| `subst_01` | 513 | 500 voice, 13 loading-screen textures | no — contains no XML at all |
+| `subst_02` | 20 | `ui/addons/**.xpl` | no — contains no XML at all |
+| `subst_03` | 20 | Timelines loading-screen `.jpg`/`.dds` | no — contains no XML at all |
+
+`subst_*` catalogs can replace base-game files outright, so "no SWI `<diff>`
+touches an `aimtarget`" would not on its own have settled them. It is settled by
+their actual entries: none of the three carries a single XML file.
+
+Within `ext_01`, the entries outside `assets/` and `index/` were checked too.
+`maps/**` defines 2,278 macros, all `cluster`, `sector`, `zone` or `galaxy`
+class. The 61 `extensions/<dlc>/assets/**.xml` files are station habitat,
+defence, storage, production, dock-pier and cluster-background definitions and
+diffs. **No ship-class definition exists anywhere outside the extracted
+`assets/**`.**
+
+The decisive check is reachability, not classification: instrumenting
+`sources.component`/`sources.macro` over a full census run records 1,664
+distinct names touched while resolving every census ship and reconstructing
+every runtime box. The additional catalogs and the non-`assets` part of `ext_01`
+define or patch 2,483 names. **The two sets do not intersect** — 0 shared names
+— so nothing in the ignored catalogs can change a census ship, aim point, name
+lookup or runtime box.
+
+`extract_swi_assets.py` re-runs the catalog half of this audit on every
+extraction and fails if a future SWI release moves ship or index XML out of
+`ext_01`.
+
 ### SWI is applied properly here, unlike in the benchmark
 
 `aimpoint_map._index_swi_ships` skips SWI `<diff>` patches and same-name

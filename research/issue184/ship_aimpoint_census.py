@@ -174,7 +174,7 @@ def _reindex(root, rel, stats, patched=False, seen=set()):
     for e in root if index is not None else ():
         name = e.get("name")
         if (root.tag, name) in seen:
-            stats["SWI defines the same name in two files (load order decides in game)"] += 1
+            stats["SWI defines the same name in two files (X4's name index decides which is effective)"] += 1
             kept = index[name][0]
             want = NAME_INDEX.get((root.tag, name))
             if want is not None and rel == "swi/" + want and kept[0] != "swi/" + want:

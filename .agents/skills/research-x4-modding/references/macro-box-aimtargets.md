@@ -139,6 +139,9 @@ decides which one the engine uses; filesystem order, alphabetical order and
 filename convention establish nothing. SWI 0.9.1 HF has 41 such duplicate
 names, six of them ships whose aim-point sets differ between the two files, and
 its index resolves every one of them to the primary asset file rather than to
-the `backup/` or `*_data/` copy. Any tool that indexes X4 XML by scanning
+the `backup/` or `*_data/` copy. Its ship and index XML is confined to `ext_01`:
+`ext_02` carries only `md/`, `aiscripts/`, `libraries/` and `t/`, and its three
+`subst_*` catalogs — which could otherwise replace base-game files outright —
+contain no XML at all, only voice, UI `.xpl` and images. Any tool that indexes X4 XML by scanning
 directories must consult these index files before claiming which definition is
 effective.
