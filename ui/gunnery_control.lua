@@ -158,6 +158,7 @@ end
 ffi.cdef[[
 typedef uint64_t UniverseID;
 typedef struct { UniverseID softtargetID; const char* softtargetConnectionName; uint32_t messageID; } SofttargetDetails2;
+typedef struct { float x; float y; float z; float yaw; float pitch; float roll; } PosRot;
 typedef struct { UniverseID contextid; const char* path; const char* group; } UpgradeGroup2;
 typedef struct { const char* path; const char* group; } UpgradeGroup;
 typedef struct { UniverseID currentcomponent; const char* currentmacro; const char* slotsize; uint32_t count; uint32_t operational; uint32_t total; } UpgradeGroupInfo;
@@ -178,6 +179,7 @@ void SetTurretGroupArmed(UniverseID defensibleid, UniverseID contextid, const ch
 const char* GetWeaponMode(UniverseID weaponid); void SetWeaponMode(UniverseID weaponid, const char* mode);
 bool IsWeaponArmed(UniverseID weaponid); void SetWeaponArmed(UniverseID weaponid, bool arm);
 const char* GetComponentName(UniverseID componentid); SofttargetDetails2 GetSofttarget2(void);
+PosRot GetRelativeAimOffset(UniverseID componentid);
 bool IsPlayerCameraTargetViewPossible(UniverseID targetid, bool force); void SetPlayerCameraTargetView(UniverseID targetid, bool force);
 UniverseID GetExternalTargetViewComponent(void); void SetPlayerCameraCockpitView(bool force); bool GetUp(void);
 bool IsHUDActive(void); bool IsFullscreenCutsceneActive(void);
@@ -1492,6 +1494,31 @@ end
 -- events avoid relying on unproven nested-table transport: selected turret ids
 -- are streamed once, followed by at most 20 target ids for the batch.
 local engageabilityBatchSize = 20
+local function logCandidateAimOffset(target)
+    if not session or session.phase ~= "target_select" then return end
+    local targetID = id(target)
+    local softtarget = C.GetSofttarget2()
+    local ok, aim = pcall(C.GetRelativeAimOffset, targetID)
+    if not ok then
+        log("event=aim_offset_probe action=error candidate=" .. tostring(targetID)
+            .. " phase=" .. tostring(session.phase)
+            .. " aim_target=" .. tostring(session.aimTargetID or "none")
+            .. " soft_target=" .. tostring(softtarget.softtargetID)
+            .. " error=" .. tostring(aim))
+        return
+    end
+    log("event=aim_offset_probe action=result candidate=" .. tostring(targetID)
+        .. " phase=" .. tostring(session.phase)
+        .. " aim_target=" .. tostring(session.aimTargetID or "none")
+        .. " soft_target=" .. tostring(softtarget.softtargetID)
+        .. " x=" .. tostring(aim.x)
+        .. " y=" .. tostring(aim.y)
+        .. " z=" .. tostring(aim.z)
+        .. " yaw=" .. tostring(aim.yaw)
+        .. " pitch=" .. tostring(aim.pitch)
+        .. " roll=" .. tostring(aim.roll))
+end
+
 local function requestEngageabilities(targets, purpose)
     local results = {}
     if not session then return results end
@@ -1589,6 +1616,9 @@ local function requestEngageabilities(targets, purpose)
             local entry = pending[index]
             entry.cached.pendingNonce = nonce
             request.targets[entry.targetKey] = entry.key
+            if purpose == nil and session.phase == "target_select" then
+                logCandidateAimOffset(entry.target)
+            end
             AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
                 nonce = nonce, target = id(entry.target),
             })
