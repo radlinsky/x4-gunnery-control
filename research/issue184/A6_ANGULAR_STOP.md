@@ -4,13 +4,15 @@ Rule under test: `stop when largest remaining angular gap <= T`. 19 A4.3 boundar
 
 - smallest gap observed while a required point was still missing: 30.382 deg
 - cases that never reach a state with all required points represented: none
-- highest per-case lowest safe gap (the smallest T that still stops every case): 40.116 deg
+- highest per-case lowest benchmark-complete gap (the smallest T that still stops every case within this 12-primary trace): 40.116 deg
 
-**Verdict: the largest angular gap alone is REJECTED as a stopping rule.** A state still missing a required point reaches 30.382 deg, at or below the 40.116 deg every case needs in order to stop, so every threshold that stops all cases also stops at least one case early.
+**Result:** in this fixed 12-primary observation trace, no single threshold both avoids premature stopping and makes every case stop. A state still missing a required point reaches 30.382 deg, while case 12160 does not reach a benchmark-complete state below 40.116 deg within the trace.
+
+This does **not** reject a smaller angular-gap threshold combined with the 24-ask hard limit. The experiment stopped after 12 primary asks; for example, case 12160 had spent only 15 angular-stage asks at that point, so smaller thresholds were not tested all the way to the hard limit.
 
 ## Per case
 
-| case | required | lowest gap while missing | lowest safe gap | lowest-gap safe state (primary / angular asks / points) | stops at T |
+| case | required | lowest gap while missing | lowest benchmark-complete gap | lowest-gap benchmark-complete state (primary / angular asks / points) | stops at T |
 |---|---|---|---|---|---|
 | 12155 | 0 at start | never missing | 8.619 | 12 / 12 / 2 | - |
 | 12157 | 0 at start | never missing | 13.172 | 12 / 12 / 2 | - |
@@ -289,4 +291,4 @@ Each row is a state the rule would have tested: before the first angular ask, be
 ## Notes
 
 - Cases 12234 and 12376 carry the five muzzle selections the pre-angular cheap rescue still missed (3 and 2 muzzles). Several muzzles of one case select the same aim point, so the `required still missing` column counts distinct unrepresented points, not muzzles.
-- The gap is not monotone as asks accumulate: confirming a new point re-partitions the box and can raise the largest gap again (12234 goes 46.8 -> 68.8 deg across its first angular ask). A threshold rule therefore cannot assume the sequence only descends toward it.
+- The gap does not always decrease as asks accumulate: confirming a new point can create new viewing directions that still need exploration, so the largest gap can rise again (12234 goes 46.8 -> 68.8 deg across its first angular ask). That increase is useful discovery, not a failure; it only means a stopping rule cannot assume the gap moves steadily downward.
