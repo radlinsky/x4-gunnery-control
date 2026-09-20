@@ -8,6 +8,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py            # A2 summary
     python3 research/issue184/aimpoint_map.py --selftest
     python3 research/issue184/aimpoint_map.py --a3 [--every N] [--jobs 4]   # A3 benchmark, every Nth case
+    python3 research/issue184/aimpoint_map.py --a41 [--every N] [--jobs 4]  # A4.1 corner audit (boundary cases)
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -607,6 +608,101 @@ def target_box_map(view):
     return dict(located=located, answer=answer, queries=n)
 
 
+# ---------------------------------------------------------------- A4.1 corner audit (offline)
+
+def _edges(lo, hi):
+    """The 12 (corner, corner) pairs of the box that differ in exactly one coordinate."""
+    cs = _corners(lo, hi)
+    return [(a, b) for a, b in itertools.combinations(cs, 2) if np.count_nonzero(a != b) == 1]
+
+
+def corner_audit(view, margin):
+    """A4.1: ask ONLY the 8 outer corners of the class-expanded firing-ship box, reusing the A3 location and
+    point-confirmation rules, with no subdivision. Returns what the corners expose, nothing more."""
+    lo, hi = firing_box(*view["ship_box"], margin)
+    R, O = view["ship_rotation"], view["ship_position"]
+    points, owner, rays, _c, _u, n = _search(view, lo, hi, R, O, lambda *_: True)  # every leaf cleared: no split
+    own = {tuple(c): owner(*rays[tuple(c)]) for c in _corners(lo, hi)}
+    mixed = [(a, b) for a, b in _edges(lo, hi)
+             if own[tuple(a)] is not None and own[tuple(b)] is not None and own[tuple(a)] != own[tuple(b)]]
+    return dict(points=points, own=own, mixed=mixed, queries=n, box=(lo, hi), R=R, O=O)
+
+
+def _plane_error(a, b, pa, pb, corners):
+    """Worst disagreement (m), over the box corners, between the nearest-point switch plane of the estimated
+    pair (a, b) and that of the true pair (pa, pb). Each plane: perpendicular bisector of its two points."""
+    def signed(p, q):
+        d = q - p
+        k = np.linalg.norm(d)
+        return (corners - (p + q) / 2) @ (d / k) if k > 0 else np.full(len(corners), math.nan)
+    return float(np.max(np.abs(signed(a, b) - signed(pa, pb))))
+
+
+def _audit_case(case):
+    records, margins = _LOADED
+    a = corner_audit(view(case), margins[case["ship_class"]][0])
+    pts, own, mixed = a["points"], a["own"], a["mixed"]
+    owners = {i for i in own.values() if i is not None}
+    row = dict(group=case["group"], queries=a["queries"], points=len(pts),
+               assigned=sum(i is not None for i in own.values()), multi=len(owners) >= 2,
+               mixed=len(mixed), plane_ready=False, plane_error=None, measurable=False,
+               muzzles=0, muzzles_exposed=0)
+
+    # hidden truth, reporting only: later aimed muzzles whose selected aim point a confirmed point exposes.
+    cover = {i: [j for j, p in enumerate(case["points"]) if np.linalg.norm(c - p) <= r] for i, (c, r) in enumerate(pts)}
+    exposed = {j for js in cover.values() for j in js}
+    for m in aimed_muzzles(case, records).values():
+        row["muzzles"] += 1
+        row["muzzles_exposed"] += study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in case["points"]]) in exposed
+
+    if len(owners) < 2:
+        return row
+    # the dominant mixed-edge pair defines the boundary the method would have to place.
+    pairs = Counter(tuple(sorted((own[tuple(x)], own[tuple(y)]))) for x, y in mixed)
+    if not pairs:
+        return row
+    (i, j), count = pairs.most_common(1)[0]
+    row["plane_ready"] = len(cover[i]) == 1 and len(cover[j]) == 1  # each estimate names one real aim point
+    if row["plane_ready"]:
+        row["plane_error"] = _plane_error(pts[i][0], pts[j][0], case["points"][cover[i][0]], case["points"][cover[j][0]],
+                                          np.asarray(_corners(*a["box"])) @ a["R"] + a["O"])
+    # measurable directly: three switch crossings on that pair's edges, not all on one line.
+    xs = [(x @ a["R"] + a["O"] + y @ a["R"] + a["O"]) / 2 for x, y in mixed
+          if tuple(sorted((own[tuple(x)], own[tuple(y)]))) == (i, j)]
+    row["measurable"] = count >= 3 and np.linalg.matrix_rank(np.asarray(xs[1:]) - xs[0], tol=1e-6) >= 2
+    return row
+
+
+def a41(every, jobs):
+    """Run the A4.1 corner audit over the boundary cases and report what the 8 corners alone expose."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["group"] == "boundary"][::every]
+    os.nice(10)
+    with Pool(min(jobs, 4)) as pool:
+        rows = list(pool.imap(_audit_case, todo, chunksize=8))
+    q = np.asarray([r["queries"] for r in rows])
+    multi = [r for r in rows if r["multi"]]
+    ready = [r for r in multi if r["plane_error"] is not None]
+    err = sorted(r["plane_error"] for r in ready) or [math.nan]
+    print(f"A4.1 corner audit: {len(rows)} boundary cases, 8 outer corners only, no subdivision, CAP {CAP}")
+    print(f"  confirmed target points:            {sum(r['points'] for r in rows)} total, "
+          f"{sum(r['points'] > 0 for r in rows)} cases with >=1, {sum(r['points'] >= 2 for r in rows)} cases with >=2")
+    print(f"  corner rays confidently assigned:   {sum(r['assigned'] for r in rows)} of {8 * len(rows)}")
+    print(f"  cases with >=2 confirmed owners:    {len(multi)}")
+    print(f"  mixed box edges (different owners): {sum(r['mixed'] for r in rows)}, "
+          f"cases with >=3 useful mixed edges:  {sum(r['mixed'] >= 3 for r in rows)}")
+    print(f"  queries med/p90/max:                {int(np.median(q))} / {int(np.percentile(q, 90))} / {q.max()}")
+    print("\n  for the >=2-confirmed-point cases:")
+    print(f"    calculated boundary: {len(ready)} of {len(multi)} give a plane from two single-aim-point estimates; "
+          f"error vs true plane med/p90/max {np.median(err):.3g} / {np.percentile(err, 90):.3g} / {max(err):.3g} m")
+    print(f"    measured boundary:   {sum(r['measurable'] for r in multi)} of {len(multi)} have >=3 non-collinear "
+          "switch crossings on one pair's edges")
+    print(f"\n  hidden-truth check (reporting only): {sum(r['muzzles_exposed'] for r in rows)} of "
+          f"{sum(r['muzzles'] for r in rows)} later aimed muzzles select a point the corner audit already exposed")
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -772,6 +868,15 @@ def selftest():
                         ship=((-1093.02, 2304.84, -2871.78), (1149.38, 7698.96, 2522.34)), at=(0, 0, 0))
     check(case, firing_box_map(v, 0), [])
 
+    # A4.1: two well-separated points either side of a big ship box -> corners split between them.
+    case, v = synthetic([(0, 0, -300), (0, 0, 300)], (0, 0, 0), (400, 400, 400),
+                        ship=((-200, -200, -200), (200, 200, 200)), at=(0, 1500, 0))
+    a = corner_audit(v, 0)
+    assert len(a["points"]) == 2 and len(a["mixed"]) == 4, (len(a["points"]), len(a["mixed"]))
+    assert len(_edges(np.zeros(3), np.ones(3))) == 12
+    assert _plane_error(np.array([0., 0, -1]), np.array([0., 0, 1]), np.array([0., 0, -1]), np.array([0., 0, 1]),
+                        np.asarray(_corners(np.zeros(3), np.ones(3)))) == 0.0
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -799,9 +904,11 @@ def selftest():
 def main():
     if "--selftest" in sys.argv:
         return selftest()
+    arg = lambda k, d: int(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d  # noqa: E731
     if "--a3" in sys.argv:
-        arg = lambda k, d: int(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d  # noqa: E731
         return a3(arg("--every", 1), arg("--jobs", 4))
+    if "--a41" in sys.argv:
+        return a41(arg("--every", 1), arg("--jobs", 4))
     summary()
 
 
