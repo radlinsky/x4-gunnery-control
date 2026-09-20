@@ -18,6 +18,7 @@ python3 research/issue184/aimpoint_map.py --a43f      # A4.3 phase 3 fallback, s
 python3 research/issue184/aimpoint_map.py --a43h      # A4.3 phase 4 coverage map, same 19 cases
 python3 research/issue184/aimpoint_map.py --a43a      # A4.3 phase 5 angular search, same 19 cases
 python3 research/issue184/aimpoint_map.py --a6-near   # A6 near-target probing + point refinement, 19 cases x 3 gaps
+python3 research/issue184/aimpoint_map.py --a7        # A7.1 focused validation + full 24-ask stopping traces
 python3 research/issue184/ship_aimpoint_census.py     # A4.4 ship aim-point census, both games (~6 min)
 ```
 
@@ -26,6 +27,12 @@ the firing-ship box to the target runtime box plus 50 m and reruns the same 19
 boundary geometries at 100 m, 1 km and 8 km. The same run also tests post-hoc
 point refinement: tightening the confirmed estimates from the probe lines
 already collected, with no extra asks and no effect on probe placement.
+
+A7 research, [A7_FOCUSED.md](A7_FOCUSED.md), keeps that accepted method unchanged and runs it on
+ordinary, non-boundary geometries alongside the same 19 hard ones, all the way
+to the existing 24-ask angular-stage limit. Every state the search could have
+stopped in is rescored from its own observations only, so candidate stopping
+rules can be tested retrospectively. A7 implements no stopping rule.
 
 A4.4 is written up separately in [A44_CENSUS.md](A44_CENSUS.md). It censuses
 pristine vanilla 9.00 and SWI 0.9.1 HF as two independent games — SWI is an

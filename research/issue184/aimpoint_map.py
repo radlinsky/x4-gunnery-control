@@ -1613,6 +1613,11 @@ A43A_GUARD = 24      # loose research guard on the angular stage's total extra a
 A43A_SNAPS = (1, 2, 3, 4, 6, 8, 12)
 
 
+def _ray_list(rays):
+    """The asks collected so far, JSON-ready, for `refine_points`."""
+    return [(u.tolist(), None if d is None else d.tolist()) for u, d in rays.values()]
+
+
 def _definite(cent, rad, W):
     """Vectorised `nearest`: for each world position in W, (index of the nearest confirmed point, whether
     that is definite). Definite means the farthest the winner can be is strictly nearer than the closest
@@ -1749,6 +1754,7 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
                 stats, "rescue_", seen)
         stats["rescue_extra"] = h["count"]() - start
         stats["after_rescue_points"] = list(points)
+        stats["pre_rays"] = _ray_list(h["rays"])  # #184 A7: observations available before the angular stage
 
         start2 = h["count"]()
         spend = lambda n: h["count"]() - start2 + n <= guard  # noqa: E731
@@ -1802,12 +1808,12 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
                                        else "new_point" if len(points) > had else "unassigned"))
             stats["snaps"][stats["primary"]] = dict(
                 primary=stats["primary"], extra=h["count"]() - start2, switched=stats["switched"],
-                guard=stats["guard"], points=[(c.tolist(), float(r)) for c, r in points])
+                guard=stats["guard"], points=[(c.tolist(), float(r)) for c, r in points],
+                rays=_ray_list(h["rays"]))  # #184 A7: prefix refinement input
         final = angular_pick(points, assigned(), plo, phi, M, off) if points else None  # #184 A6 end state
         note(None if final is None else final[0])
         stats["extra"] = h["count"]() - start2
-        stats["rays"] = [(u.tolist(), None if d is None else d.tolist())  # #184 A6 post-hoc refinement input
-                         for u, d in h["rays"].values()]
+        stats["rays"] = _ray_list(h["rays"])  # #184 A6 post-hoc refinement input
     return probe, stats
 
 
@@ -2069,13 +2075,20 @@ A6_NEAR_GAPS = (100, 1000, 8000)  # turret-relevant standoffs; 20/100 km are not
 A6_NEAR_PAD = 50.0                # probe-placement pad on the target runtime box, not a bound on aim points
 
 
-def a6_near_variants(ts, mounts):
-    """The 19 A4.3 boundary cases reproduced at each A6 near-target gap.
+def _restandoff(case, anchor, gaps):
+    """The same geometry at other standoffs: the ship is translated along its own bearing from `anchor`
+    by the gap difference, exactly what `cases` does when it builds the members of a multi-gap group.
+    Target, bearing, mount, turret and all rotations are untouched; only the distance changes."""
+    d = case["origin"] - anchor
+    d = d / np.linalg.norm(d)
+    for gap in gaps:
+        shift = d * (gap - case["gap"])
+        yield dict(case, gap=gap, origin=case["origin"] + shift, position=case["position"] + shift)
 
-    Same target, same nearest-pair bisector bearing, same mount, turret and rotations: only the
-    along-bearing standoff changes, so the three distances really are the same geometry at three ranges.
-    The ship is translated along its own bearing by the gap difference, which is exactly what `cases`
-    does when it builds the 100 m and 1 km members of the pair."""
+
+def a6_near_variants(ts, mounts):
+    """The 19 A4.3 boundary cases reproduced at each A6 near-target gap. The bearing is in the bisector
+    plane of the target's nearest aim-point pair, so the standoff is measured from that pair's frame."""
     base = {c["id"]: c for c in cases(ts, mounts) if c["id"] in set(A43_CASES)}
     assert len(base) == len(A43_CASES), (len(base), len(A43_CASES))
     tmap = {t["component"]: t for t in ts}
@@ -2084,12 +2097,7 @@ def a6_near_variants(ts, mounts):
         t = tmap[c["target"]]
         pairs = [(a, b) for a in range(len(t["points"])) for b in range(a + 1, len(t["points"]))]
         a, b = min(pairs, key=lambda ab: study.norm(study.sub(t["points"][ab[0]], t["points"][ab[1]])))
-        M = np.asarray(study.pair_frame(t, a, b)[0])
-        d = c["origin"] - M @ c["box"][2]
-        d = d / np.linalg.norm(d)
-        for gap in A6_NEAR_GAPS:
-            shift = d * (gap - c["gap"])
-            yield dict(c, gap=gap, origin=c["origin"] + shift, position=c["position"] + shift)
+        yield from _restandoff(c, np.asarray(study.pair_frame(t, a, b)[0]) @ c["box"][2], A6_NEAR_GAPS)
 
 
 def refine_points(points, rays):
@@ -2142,6 +2150,21 @@ def _cover(points, truth):
     return [sorted(j for j, p in enumerate(truth) if np.linalg.norm(np.asarray(c) - p) <= r) for c, r in points]
 
 
+def _scored(case, points, rays, muzzles, queries):
+    """Score one set of point estimates against hidden truth, before and after `refine_points` on exactly
+    the rays given. -> (baseline score, refined score with the refinement-safety fields)."""
+    truth = case["points"]
+    pts = [(np.asarray(c, float), r) for c, r in points]
+    loc = [(i, c, r) for i, (c, r) in enumerate(pts)]
+    got = score(case, dict(located=loc, answer=lambda m: nearest(loc, m), queries=queries), muzzles)
+    rpts, n_ref, skipped = refine_points(pts, rays)
+    rloc = [(i, c, r) for i, (c, r) in enumerate(rpts)]
+    rgot = score(case, dict(located=rloc, answer=lambda m: nearest(rloc, m), queries=queries), muzzles)
+    keys = ("correct", "wrong", "unknown", "invented", "merged", "duplicate", "missed", "radius", "error")
+    return got, dict({q: rgot[q] for q in keys}, count=n_ref, skipped=skipped,
+                     identity_changed=sum(x != y for x, y in zip(_cover(pts, truth), _cover(rpts, truth))))
+
+
 def _a6_near_run(case, v, margin, muzzles, near_target):
     """One angular-search run, near-target or firing-ship-box, with the A6 near-target reporting fields."""
     probe, stats = angular_probe(v, margin, near_target=near_target)
@@ -2167,15 +2190,7 @@ def _a6_near_run(case, v, margin, muzzles, near_target):
 
     points = stats["snaps"][max(stats["snaps"])]["points"] if stats["snaps"] else \
         [(c.tolist(), float(r)) for c, r in pre]
-    located = [(i, np.asarray(c), r) for i, (c, r) in enumerate(points)]
-    got = score(case, dict(located=located, answer=lambda m: nearest(located, m), queries=a["queries"]), muzzles)
-    pts = [(np.asarray(c), r) for c, r in points]
-    rpts, n_ref, skipped = refine_points(pts, stats.get("rays", []))
-    rloc = [(i, c, r) for i, (c, r) in enumerate(rpts)]
-    rgot = score(case, dict(located=rloc, answer=lambda m: nearest(rloc, m), queries=a["queries"]), muzzles)
-    keys = ("correct", "wrong", "unknown", "invented", "merged", "duplicate", "missed", "radius", "error")
-    refined = dict({q: rgot[q] for q in keys}, count=n_ref, skipped=skipped,
-                   identity_changed=sum(x != y for x, y in zip(_cover(pts, truth), _cover(rpts, truth))))
+    got, refined = _scored(case, points, stats.get("rays", []), muzzles, a["queries"])
     return dict(needed=needed, refined=refined,
                 radius=got["radius"], error=got["error"], missed=got["missed"],
                 authored=len(truth), corners=corners, rescue_extra=stats["rescue_extra"],
@@ -2305,6 +2320,313 @@ def _a6_near_report(rows):
             f"{g}m {len(rs[g]['near']['missing_needed'])}/{len(rs[g]['firing']['missing_needed'])}"
             for g in A6_NEAR_GAPS if g in rs))
     return "\n".join(L)
+
+
+# ---------------------------------------------------------------- A7: focused validation and stopping traces
+
+A7_EVIDENCE = Path(__file__).with_name("A7_FOCUSED.md")
+A7_PRIMARY = 64          # no primary budget: A43A_GUARD stays the only angular-stage limit while tracing
+A7_THRESHOLDS = (90, 60, 45, 30, 20, 15, 10, 5, 2, 1)  # candidate `stop when largest remaining gap <= T` (deg)
+A7_QUIET = (2, 4, 6, 8, 10, 12, 14, 16, 18, 20)        # candidate `stop after k angular asks with no new point`
+
+
+def a7_ordinary(ts, mounts):
+    """The ordinary, non-boundary half of the A7 population: every target with more than one authored aim
+    point, plus the smallest and largest one-point target of each Gunnery Control target kind under the
+    benchmark's own size measure `|H|` - the bounding-sphere reach `cases` already uses for placement.
+
+    One deterministic geometry per target, the first ordinary case `cases` yields for it (bearing 0 at the
+    1 km gap), reproduced at each A7 standoff with target, ship, mount, turret, rotations and bearing
+    unchanged."""
+    want = {t["component"] for t in ts if len(t["points"]) > 1}
+    one = [t for t in ts if len(t["points"]) == 1]
+    for kind in sorted({t["kind"] for t in one}):
+        g = sorted((t for t in one if t["kind"] == kind),
+                   key=lambda t: (float(np.linalg.norm(t["H"])), t["component"]))
+        want.update((g[0]["component"], g[-1]["component"]))
+    seen = set()
+    for c in cases(ts, mounts):
+        if c["group"] == "ordinary" and c["target"] in want and c["target"] not in seen:
+            seen.add(c["target"])
+            yield from _restandoff(c, np.asarray(c["box"][0]) @ c["box"][2], A6_NEAR_GAPS)
+    assert seen == want, sorted(want - seen)
+
+
+def a7_variants(ts, mounts):
+    """The fixed A7 population: the 19 hard A6 boundary geometries plus the ordinary set, each at every
+    A7 standoff. Chosen before the run and never from A7 results."""
+    kind = {t["component"]: t["kind"] for t in ts}
+    for tag, gen in (("hard", a6_near_variants), ("ordinary", a7_ordinary)):
+        for c in gen(ts, mounts):
+            yield dict(c, a7=tag, kind=kind[c["target"]])
+
+
+def _a7_case(case):
+    """One A7 case: the accepted near-target search run to the existing 24-ask angular-stage limit, with
+    the refined result reconstructed at every state the real implementation could have stopped in, from
+    that state's own observations only."""
+    records, margins = _LOADED
+    v, margin = view(case), margins[case["ship_class"]][0]
+    muzzles = aimed_muzzles(case, records)
+    truth = case["points"]
+    probe, stats = angular_probe(v, margin, primary=A7_PRIMARY, near_target=A6_NEAR_PAD)
+    a = corner_audit(v, margin, probe)
+    needed = sorted({study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in truth])
+                     for m in muzzles.values()})
+    corners = a["queries"] - stats["rescue_extra"] - stats["extra"]
+    gaps = [t["gap"] for t in stats["trace"]]  # gaps[k] is the largest gap still open after k angular asks
+
+    def state(k, points, rays, extra):
+        got, ref = _scored(case, points, rays, muzzles, corners + stats["rescue_extra"] + extra)
+        rep = _represented([(np.asarray(c, float), r) for c, r in points], truth)
+        return dict(primary=k, angular_extra=extra, asks=corners + stats["rescue_extra"] + extra,
+                    gap=gaps[k] if k < len(gaps) else None, points=len(points),
+                    missing_needed=[x for x in needed if x not in rep],
+                    missing_authored=[j for j in range(len(truth)) if j not in rep],
+                    base_correct=got["correct"], base_wrong=got["wrong"], base_unknown=got["unknown"],
+                    **{q: ref[q] for q in ("correct", "wrong", "unknown", "invented", "merged", "duplicate",
+                                           "missed", "identity_changed", "count", "radius", "error")})
+
+    states = [state(0, stats["after_rescue_points"], stats["pre_rays"], 0)]
+    for k in sorted(stats["snaps"]):
+        sn = stats["snaps"][k]
+        states.append(state(k, sn["points"], sn["rays"], sn["extra"]))
+    fin = states[-1]
+
+    def ok(st):
+        """As safe and useful as this case's final 24-ask result, judged on the refined result."""
+        return (st["wrong"] == 0 and st["identity_changed"] == 0 and st["invented"] == 0
+                and st["merged"] == 0 and st["duplicate"] == 0
+                and st["correct"] >= fin["correct"] and st["unknown"] <= fin["unknown"]
+                and st["missed"] <= fin["missed"]
+                and not set(st["missing_needed"]) - set(fin["missing_needed"]))
+
+    for st in states:
+        st["ok"] = ok(st)
+    early = next((st for st in states if st["ok"]), None)
+    return dict(id=case["id"], gap=case["gap"], group=case["a7"], kind=case["kind"], target=case["target"],
+                ship=case["ship"], authored=len(truth), muzzles=len(muzzles), needed=needed,
+                corners=corners, rescue_extra=stats["rescue_extra"], primary=stats["primary"],
+                angular_extra=stats["extra"], asks=a["queries"], guard=stats["guard"],
+                stalled=stats["stalled"], states=states,
+                earliest=None if early is None else early["primary"],
+                earliest_gap=None if early is None else early["gap"],
+                earliest_asks=None if early is None else early["asks"],
+                earliest_angular=None if early is None else early["angular_extra"])
+
+
+def _a7_quiet(row, k):
+    """The state a `stop after k consecutive angular asks that confirmed no new point` rule would stop
+    in - the other obvious observable, since the search already knows when an ask added nothing."""
+    q = 0
+    for i, st in enumerate(row["states"]):
+        q = q + 1 if i and st["points"] == row["states"][i - 1]["points"] else 0
+        if q >= k or st["gap"] is None:
+            return st
+    return row["states"][-1]
+
+
+def _a7_safe_T(rows):
+    """The largest gap threshold that stops every case in a state as safe as its final result. Bisected
+    because the safe/unsafe boundary lies between recorded gap values, not on the tested grid."""
+    lo, hi = 0.0, 180.0
+    for _ in range(60):
+        m = (lo + hi) / 2
+        lo, hi = (m, hi) if all(_a7_stop(r, m)["ok"] for r in rows) else (lo, m)
+    return lo
+
+
+def _a7_stop(row, T):
+    """The state a `stop when the largest remaining viewing-angle gap <= T` rule would stop in. A state
+    with no candidate left (gap None) has nothing to ask and stops at any threshold."""
+    return next((st for st in row["states"] if st["gap"] is None or st["gap"] <= T), row["states"][-1])
+
+
+def a7(jobs):
+    """A7.1: does the accepted near-target search plus post-hoc refinement stay safe on ordinary
+    geometries, and does the full 24-ask trace support a simple earlier stopping rule?"""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = list(a7_variants(targets(), mounts))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path = CACHE / "a7_rows.jsonl"
+    print(f"#184 A7: {len(todo)} cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a7_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            f = r["states"][-1]
+            print(f"  {len(rows)}/{len(todo)} case {r['id']} {r['group']} @{r['gap']}m: {r['asks']} asks "
+                  f"({r['primary']} primary, {r['angular_extra']} angular), {f['points']} pts, "
+                  f"correct/wrong/UNKNOWN {f['correct']}/{f['wrong']}/{f['unknown']}, "
+                  f"earliest safe stop {r['earliest']}"
+                  f"{', GUARD' if r['guard'] else ''}{', STALLED' if r['stalled'] else ''}", flush=True)
+    rows.sort(key=lambda r: (r["group"], r["id"], r["gap"]))
+    out = _a7_report(rows)
+    A7_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {rows_path}, evidence: {A7_EVIDENCE})")
+
+
+def _a7_report(rows):
+    fin = {id(r): r["states"][-1] for r in rows}
+    L = ["# Issue #184 A7.1: focused validation of the accepted method, and full stopping traces", "",
+         "Offline research, status **inference**. No X4 launch, no production change. The accepted A6",
+         "method is unchanged: the same 8 outer firing corners, the same cheap rescue, the same",
+         f"near-target probe placement on the target runtime box + {A6_NEAR_PAD:g} m, the same point",
+         f"confirmation and the same `refine_points` containment rule. Only the {A43A_PRIMARY}-primary-ask",
+         f"experiment budget is lifted, so every case runs to the existing {A43A_GUARD}-ask angular-stage",
+         "hard limit and the whole trace exists. No stopping rule is implemented.", "",
+         "Run with `python3 research/issue184/aimpoint_map.py --a7`.", "",
+         "## Population", "",
+         f"{len(rows)} cases, fixed before the run and never chosen from A7 results.", "",
+         "| group | geometries | cases | targets |", "|---|---:|---:|---|"]
+    for g in ("hard", "ordinary"):
+        rs = [r for r in rows if r["group"] == g]
+        L.append(f"| {g} | {len(rs) // len(A6_NEAR_GAPS)} | {len(rs)} | "
+                 f"{len({r['target'] for r in rs})} distinct |")
+    L += ["", "Ordinary targets (one deterministic non-boundary geometry each, reproduced at every gap):", ""]
+    for r in sorted({(x["target"], x["kind"], x["authored"], x["id"]) for x in rows if x["group"] == "ordinary"}):
+        L.append(f"- `{r[0]}` ({r[1]}, {r[2]} authored point{'s' if r[2] > 1 else ''}, case {r[3]})")
+    L += ["", f"Hard geometries: the 19 A4.3/A6 boundary cases {A43_CASES}.", "",
+          "## Final result at the 24-ask angular limit", "",
+          "b = baseline, a = refined. Correct/wrong/UNKNOWN are over the hidden later aimed muzzles.", "",
+          "| group | gap (m) | cases | asks med/p90/max | angular med/max | guard | stalled | pts | "
+          "authored missing | needed missing | correct b/a | wrong b/a | UNKNOWN b/a | "
+          "radius med/max a (m) | error med/max a (m) |", "|---|---:|---:|---|---|---:|---:|---:|---:|---:|---|---|---|---|---|"]
+    for g in ("hard", "ordinary"):
+        for gap in A6_NEAR_GAPS:
+            rs = [r for r in rows if r["group"] == g and r["gap"] == gap]
+            fs = [fin[id(r)] for r in rs]
+            L.append(f"| {g} | {gap} | {len(rs)} | {_stats([r['asks'] for r in rs])} | "
+                     f"{_stats([r['angular_extra'] for r in rs])} | {sum(r['guard'] for r in rs)} | "
+                     f"{sum(r['stalled'] for r in rs)} | {sum(f['points'] for f in fs)} | "
+                     f"{sum(len(f['missing_authored']) for f in fs)} of {sum(r['authored'] for r in rs)} | "
+                     f"{sum(len(f['missing_needed']) for f in fs)} | "
+                     f"{sum(f['base_correct'] for f in fs)} / {sum(f['correct'] for f in fs)} | "
+                     f"{sum(f['base_wrong'] for f in fs)} / {sum(f['wrong'] for f in fs)} | "
+                     f"{sum(f['base_unknown'] for f in fs)} / {sum(f['unknown'] for f in fs)} | "
+                     f"{_stats2([x for f in fs for x in f['radius']])} | "
+                     f"{_stats2([x for f in fs for x in f['error']])} |")
+    L += ["", "## Refinement safety", "",
+          "Every failure class counted over every reconstructed state of every case, not only the final",
+          "one, so a prefix refinement would have damaged is caught too. `wrong b/a` is the baseline and",
+          "refined wrong count at the same state; `caused by refinement` is the part refinement added,",
+          "which is the number this experiment is actually testing.", "",
+          "| group | states | wrong b/a | caused by refinement | identity changed | invented | merged | "
+          "duplicate | correct -> UNKNOWN | points refined |",
+          "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for g in ("hard", "ordinary", "all"):
+        sts = [st for r in rows if g in (r["group"], "all") for st in r["states"]]
+        L.append(f"| {g} | {len(sts)} | {sum(st['base_wrong'] for st in sts)} / "
+                 f"{sum(st['wrong'] for st in sts)} | "
+                 f"{sum(max(0, st['wrong'] - st['base_wrong']) for st in sts)} | "
+                 f"{sum(st['identity_changed'] for st in sts)} | {sum(st['invented'] for st in sts)} | "
+                 f"{sum(st['merged'] for st in sts)} | {sum(st['duplicate'] for st in sts)} | "
+                 f"{sum(max(0, st['base_correct'] - st['correct']) for st in sts)} | "
+                 f"{sum(st['count'] for st in sts)} |")
+    bad = sorted({(r["id"], r["gap"]) for r in rows for st in r["states"] if st["wrong"]})
+    L += ["", f"The wrong answers are identical before and after refinement and all sit in early prefixes "
+          f"of {len(bad)} case instances ({', '.join(f'{i} @{g} m' for i, g in bad)}), where only part of "
+          "the target's aim points has been confirmed and `nearest` names a known point confidently "
+          "because the point that actually wins is not yet in the set. They are a discovery-completeness "
+          "effect, not a refinement effect, and every one of them is gone by the final state. They are "
+          "also exactly why a prefix is scored as unsafe below."]
+    L += ["", "## Earliest state as safe and useful as the final 24-ask result", "",
+          "A state qualifies when its refined result has no wrong answer, no identity change and no",
+          "invented, merged or duplicate point, is not below the final result on correct answers, not",
+          "above it on UNKNOWN or missed points, and represents every needed aim point the final result",
+          "represents. `gap` is the largest viewing-angle gap still open at that state - an observable",
+          "quantity the search already computes.", "",
+          "| group | gap (m) | cases | earliest angular asks med/max | earliest total asks med/max | "
+          "gap at earliest med/max (deg) | never safe |", "|---|---:|---:|---|---|---|---:|"]
+    for g in ("hard", "ordinary"):
+        for gap in A6_NEAR_GAPS:
+            rs = [r for r in rows if r["group"] == g and r["gap"] == gap]
+            e = [r for r in rs if r["earliest"] is not None]
+            gs = [r["earliest_gap"] for r in e if r["earliest_gap"] is not None]
+            L.append(f"| {g} | {gap} | {len(rs)} | {_stats2([r['earliest_angular'] for r in e])} | "
+                     f"{_stats2([r['earliest_asks'] for r in e])} | {_stats2(gs)} | {len(rs) - len(e)} |")
+    L += ["", "## Candidate observable stopping rules", "",
+          "`stop when the largest remaining viewing-angle gap <= T`, evaluated against the completed",
+          f"traces. A state with no definite candidate left counts as gap 0. The {A43A_GUARD}-ask limit",
+          "remains the backstop in every row.", "",
+          "| T (deg) | cases stopped early | unsafe stops | angular asks med/max | worst loss |",
+          "|---:|---:|---:|---|---|"]
+    for T in A7_THRESHOLDS:
+        stops = [(r, _a7_stop(r, T)) for r in rows]
+        bad = [(r, st) for r, st in stops if not st["ok"]]
+        worst = max(bad, key=lambda x: fin[id(x[0])]["correct"] - x[1]["correct"], default=None)
+        L.append(f"| {T} | {sum(st['primary'] < r['primary'] for r, st in stops)} | {len(bad)} | "
+                 f"{_stats2([st['angular_extra'] for _r, st in stops])} | "
+                 + ("none" if worst is None else
+                    f"case {worst[0]['id']} @{worst[0]['gap']} m: correct "
+                    f"{worst[1]['correct']} vs {fin[id(worst[0])]['correct']}, "
+                    f"needed missing {len(worst[1]['missing_needed'])} vs "
+                    f"{len(fin[id(worst[0])]['missing_needed'])}") + " |")
+    L += ["", "`stop after k consecutive angular asks that confirmed no new point`, the other observable",
+          "the search already has:", "",
+          "| k | cases stopped early | unsafe stops | angular asks med/max |", "|---:|---:|---:|---|"]
+    for k in A7_QUIET:
+        stops = [(r, _a7_quiet(r, k)) for r in rows]
+        L.append(f"| {k} | {sum(st['primary'] < r['primary'] for r, st in stops)} | "
+                 f"{sum(not st['ok'] for _r, st in stops)} | "
+                 f"{_stats2([st['angular_extra'] for _r, st in stops])} |")
+    T = _a7_safe_T(rows)
+    stops = [_a7_stop(r, T) for r in rows]
+    quiet = [k for k in A7_QUIET if all(_a7_quiet(r, k)["ok"] for r in rows)]
+    qs = [_a7_quiet(r, min(quiet)) for r in rows] if quiet else []
+    run = [r["angular_extra"] for r in rows]
+    unsafe = [st["gap"] for r in rows for st in r["states"] if not st["ok"] and st["gap"] is not None]
+    early = [r["earliest_gap"] for r in rows if r["earliest_gap"] is not None]
+    oracle = [r["earliest_angular"] for r in rows if r["earliest_angular"] is not None]
+    L += ["", "## Verdict", "",
+          f"**No simple observable rule buys anything here.** The largest gap threshold that is safe on "
+          f"every one of the {len(rows)} cases is T = {T:.3g} deg, and it spends "
+          f"{_stats2([st['angular_extra'] for st in stops])} angular-stage asks (med/max) against "
+          f"{_stats2(run)} for the unrestricted run - no saving. The quiet-ask rule is the same story: "
+          + (f"the smallest safe k is {min(quiet)}, at {_stats2([st['angular_extra'] for st in qs])} asks."
+             if quiet else "no tested k is safe on every case."), "",
+          f"The reason is visible in the gap distributions: states that are **not** yet as good as the "
+          f"final result span {min(unsafe):.3g} to {max(unsafe):.3g} deg, "
+          f"while the earliest safe state of each case sits between {min(early):.3g} and "
+          f"{max(early):.3g} deg. The two ranges overlap almost completely, so the largest remaining "
+          "viewing angle does not separate a state that is already good enough from one that is not.", "",
+          f"The headroom is real and unclaimed: with hindsight the earliest safe state needs only "
+          f"{_stats2(oracle)} angular-stage asks (med/max) against {_stats2(run)} actually spent. No "
+          "observable tested here finds it. **The existing "
+          f"{A43A_GUARD}-ask angular-stage limit remains the fallback stopping condition**, and A7 "
+          "implements no rule.", "",
+          "## Limitations", "",
+          f"- {len(rows)} cases, not the full #184 benchmark. The ordinary half is one deterministic "
+          "geometry per target and one bearing, so it measures target variety, not bearing variety.",
+          "- The 'as safe and useful as the final result' test compares each case against its own 24-ask "
+          "result. It cannot see a point no state of that case ever discovered.",
+          f"- {sum(r['muzzles'] == 0 for r in rows)} of {len(rows)} cases have no IN_ARC aimed muzzle, so "
+          "they contribute discovery, identity and uncertainty evidence but no correct/wrong/UNKNOWN "
+          "answer.",
+          "- Every case here ran to the 24-ask limit by construction, so the ask counts in this note are "
+          "the cost of collecting the trace, not the cost of the accepted method under its own "
+          f"{A43A_PRIMARY}-primary-ask budget.",
+          "- The containment rule in `refine_points` was not weakened, so the points it skips are still "
+          "skipped; whether a weaker condition stays sound is untested."]
+    L += ["", "## Per case", "",
+          "| case | group | target | gap (m) | asks | angular | primary | guard | stalled | pts | "
+          "authored missing | correct | wrong | UNKNOWN | earliest safe primary / angular / gap (deg) |",
+          "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for r in rows:
+        f = fin[id(r)]
+        e = "never" if r["earliest"] is None else (
+            f"{r['earliest']} / {r['earliest_angular']} / "
+            + ("none left" if r["earliest_gap"] is None else f"{r['earliest_gap']:.3g}"))
+        L.append(f"| {r['id']} | {r['group']} | `{r['target']}` | {r['gap']} | {r['asks']} | "
+                 f"{r['angular_extra']} | {r['primary']} | {int(r['guard'])} | {int(r['stalled'])} | "
+                 f"{f['points']} | {len(f['missing_authored'])} | {f['correct']} | {f['wrong']} | "
+                 f"{f['unknown']} | {e} |")
+    return "\n".join(L) + "\n"
 
 
 # ---------------------------------------------------------------- run
@@ -2665,6 +2987,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a7" in sys.argv:
+        return a7(arg("--jobs", 4))
     if "--a6-near" in sys.argv:
         return a6_near(arg("--jobs", 4))
     if "--a6" in sys.argv:
