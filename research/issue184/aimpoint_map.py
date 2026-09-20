@@ -1717,7 +1717,7 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
     accepted moved-ask rescue pursues it. After any new confirmed point the assignments and the whole
     candidate choice are recomputed from scratch. Hidden aim points and later muzzles are never consulted.
 
-    With `near_target` (A7, metres) the adaptive asks are instead chosen on the six faces of the target's
+    With `near_target` (A6, metres) the adaptive asks are instead chosen on the six faces of the target's
     runtime box grown by that pad, in the target frame. Nothing else changes: the same candidate rule, the
     same point confirmation and the same guard. The pad is a probe-placement choice only and is not a claim
     that every aim point lies inside that box.
@@ -2061,14 +2061,14 @@ def a6(jobs):
     print(out + f"\n(rows: {rows_path}, evidence: {A6_EVIDENCE})")
 
 
-# ---------------------------------------------------------------- A7: near-target angular probing
+# ---------------------------------------------------------------- A6: near-target angular probing
 
-A7_GAPS = (100, 1000, 8000)  # turret-relevant standoffs; 20/100 km are not meaningful firing ranges here
-A7_PAD = 50.0                # probe-placement pad on the target runtime box, not a bound on aim points
+A6_NEAR_GAPS = (100, 1000, 8000)  # turret-relevant standoffs; 20/100 km are not meaningful firing ranges here
+A6_NEAR_PAD = 50.0                # probe-placement pad on the target runtime box, not a bound on aim points
 
 
-def a7_variants(ts, mounts):
-    """The 19 A4.3 boundary cases reproduced at each A7 gap.
+def a6_near_variants(ts, mounts):
+    """The 19 A4.3 boundary cases reproduced at each A6 near-target gap.
 
     Same target, same nearest-pair bisector bearing, same mount, turret and rotations: only the
     along-bearing standoff changes, so the three distances really are the same geometry at three ranges.
@@ -2085,13 +2085,13 @@ def a7_variants(ts, mounts):
         M = np.asarray(study.pair_frame(t, a, b)[0])
         d = c["origin"] - M @ c["box"][2]
         d = d / np.linalg.norm(d)
-        for gap in A7_GAPS:
+        for gap in A6_NEAR_GAPS:
             shift = d * (gap - c["gap"])
             yield dict(c, gap=gap, origin=c["origin"] + shift, position=c["position"] + shift)
 
 
-def _a7_run(case, v, margin, muzzles, near_target):
-    """One angular-search run, near-target or firing-ship-box, with the A7 reporting fields."""
+def _a6_near_run(case, v, margin, muzzles, near_target):
+    """One angular-search run, near-target or firing-ship-box, with the A6 near-target reporting fields."""
     probe, stats = angular_probe(v, margin, near_target=near_target)
     a = corner_audit(v, margin, probe)
     truth = case["points"]
@@ -2128,31 +2128,31 @@ def _a7_run(case, v, margin, muzzles, near_target):
                 **{q: got[q] for q in ("correct", "wrong", "unknown", "invented", "merged", "duplicate")})
 
 
-def _a7_case(case):
+def _a6_near_case(case):
     records, margins = _LOADED
     v, margin = view(case), margins[case["ship_class"]][0]
     muzzles = aimed_muzzles(case, records)
     return dict(id=case["id"], gap=case["gap"], target=case["target"], ship=case["ship"],
                 muzzles=len(muzzles),
-                near=_a7_run(case, v, margin, muzzles, A7_PAD),
-                firing=_a7_run(case, v, margin, muzzles, None))
+                near=_a6_near_run(case, v, margin, muzzles, A6_NEAR_PAD),
+                firing=_a6_near_run(case, v, margin, muzzles, None))
 
 
-def a7(jobs):
-    """A7: does placing the A4.3 angular probes near the target instead of around the firing ship make
+def a6_near(jobs):
+    """A6: does placing the A4.3 angular probes near the target instead of around the firing ship make
     aim-point discovery independent of firing range? Same 19 boundary geometries at 100 m, 1 km and 8 km,
     each run both ways. No stopping rule is chosen here."""
     global _LOADED
     records, margins, mounts, _excluded, _inferred = load()
     _LOADED = records, margins
-    todo = list(a7_variants(targets(), mounts))
+    todo = list(a6_near_variants(targets(), mounts))
     CACHE.mkdir(parents=True, exist_ok=True)
-    rows_path, sum_path = CACHE / "a7_rows.jsonl", CACHE / "a7_summary.txt"
-    print(f"A7: {len(todo)} cases ({len(A43_CASES)} geometries x {len(A7_GAPS)} gaps) -> {rows_path}", flush=True)
+    rows_path, sum_path = CACHE / "a6_near_rows.jsonl", CACHE / "a6_near_summary.txt"
+    print(f"A6 near-target: {len(todo)} cases ({len(A43_CASES)} geometries x {len(A6_NEAR_GAPS)} gaps) -> {rows_path}", flush=True)
     os.nice(10)
     rows = []
     with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
-        for r in pool.imap(_a7_case, todo, chunksize=1):
+        for r in pool.imap(_a6_near_case, todo, chunksize=1):
             rows.append(r)
             fh.write(json.dumps(r, default=float) + "\n")
             fh.flush()
@@ -2161,18 +2161,18 @@ def a7(jobs):
                   f"{n['final_points']} pts, needed missing {len(n['missing_needed'])}, "
                   f"authored missing {len(n['missing_authored'])}{', GUARD' if n['guard'] else ''} | "
                   f"firing {f['asks']} asks, needed missing {len(f['missing_needed'])}", flush=True)
-    out = _a7_report(rows)
+    out = _a6_near_report(rows)
     sum_path.write_text(out)
     print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
 
 
-def _a7_report(rows):
-    L = [f"A7: angular probes on the target runtime box + {A7_PAD:g} m, versus the A4.3 firing-ship box",
-         f"{len(rows)} cases: {len(A43_CASES)} boundary geometries at {', '.join(map(str, A7_GAPS))} m", "",
+def _a6_near_report(rows):
+    L = [f"A6 near-target: angular probes on the target runtime box + {A6_NEAR_PAD:g} m, versus the A4.3 firing-ship box",
+         f"{len(rows)} cases: {len(A43_CASES)} boundary geometries at {', '.join(map(str, A6_NEAR_GAPS))} m", "",
          "  method  gap(m)  cases  asks med/p90/max  angular-stage extra med/max  final pts  "
          "cases exposing all needed  all authored  guard  wrong  unknown"]
     for meth in ("near", "firing"):
-        for g in A7_GAPS:
+        for g in A6_NEAR_GAPS:
             rs = [r[meth] for r in rows if r["gap"] == g]
             L.append(f"  {meth:<6}  {g:>6}  {len(rs):>5}  {_stats([r['asks'] for r in rs]):<16}  "
                      f"{_stats([r['angular_extra'] for r in rs]):<27}  "
@@ -2183,25 +2183,25 @@ def _a7_report(rows):
                      f"{sum(r['unknown'] for r in rs):>7}")
     L += ["", "asks needed before the last needed aim point was exposed (cases that exposed them all):"]
     for meth in ("near", "firing"):
-        for g in A7_GAPS:
+        for g in A6_NEAR_GAPS:
             e = [r[meth]["expose_asks"] for r in rows if r["gap"] == g and r[meth]["expose_asks"] is not None]
             L.append(f"  {meth:<6} {g:>6} m: {len(e)} cases, asks med/p90/max {_stats(e) if e else 'n/a'}")
     L += ["", "hidden truth, reporting only - authored aim points never exposed (never steers the search):"]
     for meth in ("near", "firing"):
-        for g in A7_GAPS:
+        for g in A6_NEAR_GAPS:
             rs = [r for r in rows if r["gap"] == g]
             L.append(f"  {meth:<6} {g:>6} m: {sum(len(r[meth]['missing_authored']) for r in rs)} of "
                      f"{sum(r[meth]['authored'] for r in rs)} authored points left undiscovered in "
                      f"{sum(bool(r[meth]['missing_authored']) for r in rs)} cases")
     L += ["", "missing needed points before the angular stage (8 corners + cheap rescue), by gap:"]
-    for g in A7_GAPS:
+    for g in A6_NEAR_GAPS:
         rs = [r for r in rows if r["gap"] == g]
         L.append(f"  {g:>6} m: near {sum(len(r['near']['steps'][0]['missing_needed']) for r in rs)}, "
                  f"firing {sum(len(r['firing']['steps'][0]['missing_needed']) for r in rs)} "
                  "(identical by construction: the same corners and rescue precede both)")
     L += ["", "largest remaining angular gap (deg) recorded before each primary ask:"]
     for meth in ("near", "firing"):
-        for g in A7_GAPS:
+        for g in A6_NEAR_GAPS:
             gs = [x for r in rows if r["gap"] == g for x in r[meth]["gaps"] if x is not None]
             L.append(f"  {meth:<6} {g:>6} m: {len(gs)} recorded, med/p90/max {_stats(gs) if gs else 'n/a'}")
     L += ["", "hardest cases by near-target ask count:"]
@@ -2216,7 +2216,7 @@ def _a7_report(rows):
         rs = {r["gap"]: r for r in rows if r["id"] == cid}
         L.append(f"  {cid}: " + ", ".join(
             f"{g}m {len(rs[g]['near']['missing_needed'])}/{len(rs[g]['firing']['missing_needed'])}"
-            for g in A7_GAPS if g in rs))
+            for g in A6_NEAR_GAPS if g in rs))
     return "\n".join(L)
 
 
@@ -2578,8 +2578,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
-    if "--a7" in sys.argv:
-        return a7(arg("--jobs", 4))
+    if "--a6-near" in sys.argv:
+        return a6_near(arg("--jobs", 4))
     if "--a6" in sys.argv:
         return a6(arg("--jobs", 4))
     if "--a43a" in sys.argv:
