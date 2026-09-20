@@ -17,11 +17,11 @@ python3 research/issue184/aimpoint_map.py --a43r      # A4.3 phase 2 rescue, sam
 python3 research/issue184/aimpoint_map.py --a43f      # A4.3 phase 3 fallback, same 19 cases
 python3 research/issue184/aimpoint_map.py --a43h      # A4.3 phase 4 coverage map, same 19 cases
 python3 research/issue184/aimpoint_map.py --a43a      # A4.3 phase 5 angular search, same 19 cases
-python3 research/issue184/aimpoint_map.py --a7        # A7 near-target angular probing, 19 cases x 3 gaps
+python3 research/issue184/aimpoint_map.py --a6-near   # A6 near-target angular probing, 19 cases x 3 gaps
 python3 research/issue184/ship_aimpoint_census.py     # A4.4 ship aim-point census, both games (~6 min)
 ```
 
-A7, [A7_NEAR_TARGET.md](A7_NEAR_TARGET.md), moves the A4.3 angular probes from
+A6 near-target research, [A6_NEAR_TARGET.md](A6_NEAR_TARGET.md), moves the A4.3 angular probes from
 the firing-ship box to the target runtime box plus 50 m and reruns the same 19
 boundary geometries at 100 m, 1 km and 8 km.
 
