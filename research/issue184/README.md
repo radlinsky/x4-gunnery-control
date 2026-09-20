@@ -24,7 +24,8 @@ A4.4 is written up separately in [A44_CENSUS.md](A44_CENSUS.md). It censuses
 pristine vanilla 9.00 and SWI 0.9.1 HF as two independent games — SWI is an
 overhaul, so a pooled statistic describes neither — and applies the SWI
 `<diff>` patches, name index and same-name replacements this benchmark
-deliberately skips.
+deliberately skips. A4.5, the native empty-aim-point trace and the direct-path
+decision table, is in [A45_DIRECT_PATH.md](A45_DIRECT_PATH.md).
 
 Needs the ignored #176 caches (`python3 research/issue176-a4x/corpus.py`, the
 #167 study corpus) and the SWI asset XML extracted from the owner's

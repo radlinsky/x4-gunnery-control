@@ -14,8 +14,16 @@ assume containment or replace the box with an all-parts union to obtain it.
 - Live test: no — native interpretation, with bounded earlier LIVE
   corroboration described below.
 - Finding: the script property path at RVA `0x00CE7BC4` reads the macro box
-  at `+0x140`; `0x00CE7C38` reads its half-extents at `+0x150`. The initializer
-  copies template `+0x250` to macro `+0x140` at `0x00A27AB8–0x00A27ADA`.
+  at `+0x140`; `0x00CE7C38` reads `+0x150`. The box struct is
+  `{ half-extents +0x00, centre +0x10, radius +0x20 }`, so macro `+0x140` is
+  the half-extents and macro `+0x150` is the centre — the union helper
+  `0x014E1BD0` reconstructs `min = box[0x10] - box[0x00]` and
+  `max = box[0x10] + box[0x00]` at `0x014E1BDE–0x014E1BF0` and writes
+  `(max-min)*0.5`, `(max+min)*0.5` and `|half-extents|` back to `+0x00`,
+  `+0x10` and `+0x20` at `0x014E1E6B–0x014E1EBD`. An earlier revision of this
+  record labelled `+0x150` the half-extents; that was wrong, and the box slot
+  itself is unchanged. The initializer copies template `+0x250` to macro
+  `+0x140` at `0x00A27AB8–0x00A27ADA`.
   Do not substitute the neighboring alternate/all-parts box slots.
 
 Template assembly starts from its authored size/zero accumulator (copy at
@@ -31,12 +39,43 @@ The independent nearest-authored-point selector at `0x005210E0` reads the
 defaults collection at `+0x760`. Its loop at `0x00521140–0x0052117A` computes
 binary32 squared distance to connection `+0x60` and keeps the nearer entry;
 `0x00521181` returns that translation's address. There is no box read,
-containment check, or clamp in this authored-point branch. The absent/empty
-collection fallback is a different branch and is not characterized here.
+containment check, or clamp in this authored-point branch.
+
+## The empty-collection fallback is the runtime box centre
+
+- X4: 9.00 build 611726
+- Status: inference — native trace, same executable and SHA-256 as above,
+  rechecked 2026-09-20.
+- Live test: no — which box implementation a *ship* object uses is untested.
+- Finding: the selector's fallback at `0x00521187` is reached when the
+  defaults collection pointer at `+0x760` is null (`0x00521103`) or the
+  collection is empty (`0x0052112E`). It cannot be reached by an exhausted
+  loop: the best-distance register is seeded with `-1.0f` (`0x00521113`) and
+  the `comiss` at `0x00521140` always accepts the first entry. The fallback
+  calls the target's virtual bounding-box getter, vtable slot `+0x14b0`, and
+  returns that box `+0x10` — **the box centre**, in the same target-local
+  frame as an authored point, transformed by the same `0x003DB8A0` on the way
+  out. There is no containment test, clamp or target-type special case on
+  this path.
+  The default slot `+0x14b0` implementation (`0x0034EE10`, 72 vtables)
+  forwards to slot `+0x14a8`, whose default (`0x0034EE00`) returns
+  `macro + 0x140` — the macro box slot above, which MD exposes as
+  `$target.macro.boundingbox`. Override families exist and are not proved
+  absent for ships: `0x006DF940` (39 vtables) delegates to a child object's
+  box when a macro-data flag at `+0x8F2` and a list at `this+0xA8` are
+  present; `0x00773D40` and `0x0053C5C0` substitute a `this+0x70` box when the
+  own box radius is ~0; `0x00354470` returns an instance box at `this+0x390`.
+  X4 ships no RTTI for these classes, so naming them statically is not
+  possible.
 
 The accepted caller trace is `create_orientation useaimtarget` through
 `0x00BE1970 → 0x00C707A0 → 0x003EC190`; the call at `0x003EC313` reaches
-the selector. Target-local origin and selected point are transformed by
+the selector. `check_line_of_sight useaimtarget` reaches the same logic and
+the same fallback through a sibling selector: RTTI
+`.?AVCheckLineOfSightAction@Scripts@@`, vtable `0x02C0D738`, run method
+`0x00BCB4D0`, calling `0x00520FC0` at `0x00BCBAFF`. `0x00520FC0` differs from
+`0x005210E0` only by transforming the caller-supplied origin into the target
+frame first (`0x003DDE10`); its fallback at `0x005210B8` is identical. Target-local origin and selected point are transformed by
 `0x003DB8A0` on either side. The loader writes raw authored translation at
 connection `+0x60`; parent-composed transforms use separate storage. For an
 unparented aim connection, the raw translation and the macro/component box
@@ -127,7 +166,7 @@ this reference's technical index entry.
 **Most ships author no aim point at all.** 184 of the 203 `ship_s`–`ship_xl`
 components in pristine 9.00 carry no `aimtarget` connection; only 19 do. For
 those 184 the nearest-authored-point selector's absent/empty collection branch
-decides, and that branch is not characterized above. Any work that treats
+decides, which returns the runtime box centre. Any work that treats
 authored aim points as the general answer for vanilla ships is addressing 9% of
 them. SWI is the mirror image: it authors points on 225 of its 226 ships, the
 lone exception being `mandator`. Pooling the two games therefore misstates both,
