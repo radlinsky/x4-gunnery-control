@@ -13,6 +13,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a43 [--jobs 4]              # A4.3 phase 1 (19 cases)
     python3 research/issue184/aimpoint_map.py --a43r [--jobs 4]             # A4.3 phase 2 adaptive rescue
     python3 research/issue184/aimpoint_map.py --a43f [--jobs 4]             # A4.3 phase 3 uncertainty fallback
+    python3 research/issue184/aimpoint_map.py --a43h [--jobs 4]             # A4.3 phase 4 hull coverage map
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -1368,6 +1369,228 @@ def _a43r_report(rows):
     return "\n".join(L)
 
 
+# ---------------------------------------------------------------- A4.3 phase 4: observation-hull coverage map
+
+A43H_DEPTH = 4  # fixed measurement resolution, chosen before seeing any result: 16^3 cells per firing box
+HULL_TOL = 1e-6  # relative tolerance for "all asks on one side of this candidate facet"
+
+
+def hull_faces(asks):
+    """Outward supporting planes (n, d) of the convex hull of `asks`, as arrays (F, 3) and (F,).
+
+    Brute force over point triples: a plane through three of the points whose remaining points all lie on
+    one side supports the hull. With at most a few dozen asks that is a couple of thousand cheap tests, and
+    it avoids a scipy dependency this repository does not have. A point is strictly inside the hull exactly
+    when `P @ n - d < 0` for every face, which is the same statement `spans()` makes about the directions
+    from that point to the asks: no plane through it puts every ask on one closed side."""
+    P = np.asarray(asks, float)
+    if len(P) < 4:
+        return None
+    scale = float(np.max(np.abs(P - P.mean(0)))) or 1.0
+    faces = {}
+    for a, b, c in itertools.combinations(range(len(P)), 3):
+        n = np.cross(P[b] - P[a], P[c] - P[a])
+        k = float(np.linalg.norm(n))
+        if k < HULL_TOL * scale * scale:
+            continue
+        n = n / k
+        s = P @ n - float(n @ P[a])
+        if s.max() <= HULL_TOL * scale:
+            pass
+        elif s.min() >= -HULL_TOL * scale:
+            n, s = -n, -s
+        else:
+            continue
+        d = float(n @ P[a])
+        faces[tuple(np.round(np.append(n, d / scale), 6))] = (n, d)
+    if not faces:
+        return None
+    n = np.asarray([f[0] for f in faces.values()])
+    return n, np.asarray([f[1] for f in faces.values()]), scale
+
+
+def hull_interior(faces, pts):
+    """Boolean mask: which of `pts` lie strictly inside the hull described by `faces`."""
+    if faces is None:
+        return np.zeros(len(pts), bool)
+    n, d, scale = faces
+    return (np.asarray(pts, float) @ n.T - d < -HULL_TOL * scale).all(1)
+
+
+def _components(mask):
+    """Sizes of the 6-connected components of a boolean 3-D cell mask, largest first."""
+    seen = np.zeros_like(mask)
+    sizes = []
+    idx = list(zip(*np.nonzero(mask)))
+    for start in idx:
+        if seen[start]:
+            continue
+        seen[start] = True
+        stack, size = [start], 0
+        while stack:
+            x, y, z = stack.pop()
+            size += 1
+            for q in ((x-1, y, z), (x+1, y, z), (x, y-1, z), (x, y+1, z), (x, y, z-1), (x, y, z+1)):
+                if all(0 <= q[k] < mask.shape[k] for k in range(3)) and mask[q] and not seen[q]:
+                    seen[q] = True
+                    stack.append(q)
+        sizes.append(size)
+    return sorted(sizes, reverse=True)
+
+
+def hull_cover(view, margin, probe=None, depth=A43H_DEPTH):
+    """A4.3 phase 4 diagnostic: how much of the expanded firing-ship area the asks already gathered can
+    safely answer, using no new asks at all.
+
+    Every ask position confidently assigned to a confirmed point proves that point beats anything
+    undiscovered there. `residual_map` already extends that to a later position inside the convex hull of
+    one point's assigned asks: no plane through that position puts all of them on one side, so no hidden
+    point can win there either. This measures the volume of that guarantee.
+
+    The measurement is query-free recursive subdivision of the expanded firing box by cell corners: a cell
+    is safely covered when all 8 of its corners lie inside one point's ask hull, which by convexity proves
+    the whole cell is. A covered cell's children are covered too, so subdividing only the uncovered cells
+    to a fixed depth gives the same answer as evaluating the uniform 2^depth grid, which is what this does.
+    `depth` is measurement resolution only, never a proposed production search limit.
+
+    Hidden aim points and later aimed muzzles are not used here: the hulls, the grid and the classification
+    all come from the asks and their assignment alone."""
+    a = corner_audit(view, margin, probe)
+    lo, hi = a["box"]
+    R, O = a["R"], a["O"]
+    asks = {}
+    for u, d in a["rays"].values():
+        i = a["owner"](u, d)
+        if i is not None:
+            asks.setdefault(i, []).append(np.asarray(u, float))
+    n = 2 ** depth
+    axes = [np.linspace(lo[k], hi[k], n + 1) for k in range(3)]
+    grid = np.stack(np.meshgrid(*axes, indexing="ij"), -1).reshape(-1, 3) @ R + O
+    faces = {i: hull_faces(us) for i, us in asks.items()}
+    covered = np.zeros((n, n, n), bool)
+    for i, f in faces.items():
+        ok = hull_interior(f, grid).reshape(n + 1, n + 1, n + 1)
+        cell = np.ones((n, n, n), bool)
+        for sx, sy, sz in itertools.product((0, 1), repeat=3):
+            cell &= ok[sx:sx + n, sy:sy + n, sz:sz + n]
+        covered |= cell
+    cell_volume = float(np.prod((hi - lo) / n))
+    open_mask = ~covered
+    edge = np.zeros((n, n, n), bool)  # cells touching the firing-box surface, where an ask hull can never reach
+    edge[0], edge[-1], edge[:, 0], edge[:, -1], edge[:, :, 0], edge[:, :, -1] = (True,) * 6
+    return dict(queries=a["queries"], asks={i: len(us) for i, us in asks.items()}, points=len(a["points"]),
+                faces=faces, cells=n ** 3, cell_volume=cell_volume,
+                covered_cells=int(covered.sum()), open_cells=int(open_mask.sum()),
+                regions=_components(open_mask), inner_regions=_components(open_mask & ~edge),
+                inside=lambda m: any(hull_interior(f, [m])[0] for f in faces.values()))
+
+
+def _a43h_case(case):
+    records, margins = _LOADED
+    v = view(case)
+    margin = margins[case["ship_class"]][0]
+    probe, stats = rescue_probe(v, margin, fallback=False)  # cheap adaptive corner rescue only, no phase 3
+    c = hull_cover(v, margin, probe)
+    row = dict(id=case["id"], group=case["group"], points_before=stats["before"], points=c["points"],
+               queries=c["queries"], asks=sorted(c["asks"].values(), reverse=True),
+               assigned=sum(c["asks"].values()), cells=c["cells"], covered_cells=c["covered_cells"],
+               open_cells=c["open_cells"], cell_volume=c["cell_volume"],
+               covered_volume=c["covered_cells"] * c["cell_volume"],
+               open_volume=c["open_cells"] * c["cell_volume"],
+               open_pct=100.0 * c["open_cells"] / c["cells"],
+               regions=len(c["regions"]), largest_region=c["regions"][0] if c["regions"] else 0,
+               inner_regions=len(c["inner_regions"]),
+               largest_inner_region=c["inner_regions"][0] if c["inner_regions"] else 0)
+    # hidden truth below this line: scoring the finished coverage map only. It never touched the map.
+    before = {j for i, (ctr, q) in enumerate(stats["before_points"])
+              for j, p in enumerate(case["points"]) if np.linalg.norm(ctr - p) <= q}
+    truth = [tuple(map(float, p)) for p in case["points"]]
+    row.update(muzzles=0, muzzles_covered=0, affected=0, affected_covered=0, still_unexposed=0,
+               still_unexposed_covered=0)
+    a = corner_audit(v, margin, probe)
+    after = {j for i, (ctr, q) in enumerate(a["points"]) for j, p in enumerate(case["points"])
+             if np.linalg.norm(ctr - p) <= q}
+    for m in aimed_muzzles(case, records).values():
+        sel = study.select(tuple(map(float, m)), truth)
+        covered = bool(c["inside"](np.asarray(m, float)))
+        row["muzzles"] += 1
+        row["muzzles_covered"] += covered
+        if sel not in before:  # one of the 58 originally affected later muzzles
+            row["affected"] += 1
+            row["affected_covered"] += covered
+        if sel not in after:  # one of the 5 the cheap rescue still leaves unrepresented
+            row["still_unexposed"] += 1
+            row["still_unexposed_covered"] += covered
+    return row
+
+
+def a43h(jobs):
+    """A4.3 phase 4: measure the firing-area coverage of the asks the corner audit and cheap rescue already
+    spent, on the same 19 cases. Diagnostic only; no new oracle asks, no phase-3 fallback."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["id"] in set(A43_CASES)]
+    assert len(todo) == len(A43_CASES), (len(todo), len(A43_CASES))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path, sum_path = CACHE / "a43h_rows.jsonl", CACHE / "a43h_summary.txt"
+    print(f"A4.3 phase 4: {len(todo)} cases, depth {A43H_DEPTH} -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a43h_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            print(f"  {len(rows)}/{len(todo)} case {r['id']}: {r['points']} pts, {r['assigned']} assigned asks, "
+                  f"{r['open_pct']:.1f}% uncovered, {r['regions']} regions "
+                  f"({r['inner_regions']} interior), muzzles {r['muzzles_covered']}/{r['muzzles']} covered",
+                  flush=True)
+    out = _a43h_report(rows)
+    sum_path.write_text(out)
+    print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
+
+
+def _a43h_report(rows):
+    def block(name, rs):
+        if not rs:
+            return [f"{name}: none"]
+        tot = {k: sum(r[k] for r in rs) for k in ("assigned", "covered_volume", "open_volume", "muzzles",
+                                                  "muzzles_covered", "affected", "affected_covered",
+                                                  "still_unexposed", "still_unexposed_covered", "open_cells")}
+        per = [n for r in rs for n in r["asks"]]
+        return [f"{name}: {len(rs)} cases",
+                f"  assigned ask positions:        {tot['assigned']} total over "
+                f"{sum(len(r['asks']) for r in rs)} confirmed points; per point med/p90/max {_stats(per)}",
+                f"  safely covered firing volume:  {tot['covered_volume']:.4g} m^3",
+                f"  uncovered firing volume:       {tot['open_volume']:.4g} m^3",
+                f"  uncovered share of the box:    {_stats([r['open_pct'] for r in rs])} % (med/p90/max)",
+                f"  uncovered cells at the limit:  {tot['open_cells']} of {sum(r['cells'] for r in rs)}; "
+                f"cell size med/p90/max {_stats([r['cell_volume'] for r in rs])} m^3",
+                f"  uncovered regions per case:    {_stats([r['regions'] for r in rs])} (med/p90/max), "
+                f"largest {_stats([r['largest_region'] for r in rs])} cells",
+                f"  of those, not touching the box surface: {_stats([r['inner_regions'] for r in rs])} regions, "
+                f"largest {_stats([r['largest_inner_region'] for r in rs])} cells",
+                "  --- hidden truth, scoring the finished map only ---",
+                f"  later aimed muzzles:           {tot['muzzles']} -> {tot['muzzles_covered']} in safely "
+                f"covered space, {tot['muzzles'] - tot['muzzles_covered']} in uncovered space",
+                f"  originally affected muzzles:   {tot['affected']} -> {tot['affected_covered']} covered, "
+                f"{tot['affected'] - tot['affected_covered']} uncovered",
+                f"  still-unexposed muzzles:       {tot['still_unexposed']} -> "
+                f"{tot['still_unexposed_covered']} covered, "
+                f"{tot['still_unexposed'] - tot['still_unexposed_covered']} uncovered"]
+
+    one = [r for r in rows if r["points_before"] < 2]
+    two = [r for r in rows if r["points_before"] >= 2]
+    L = [f"A4.3 phase 4: firing-area coverage of the existing corner + cheap-rescue asks, depth {A43H_DEPTH} "
+         f"({2 ** A43H_DEPTH}^3 cells), no new asks", ""]
+    L += block("cases the corners gave one point", one) + [""]
+    L += block("cases the corners gave two points", two) + [""]
+    L += block("all A4.3 cases", rows) + ["",
+          "per case: " + ", ".join(f"{r['id']} {r['open_pct']:.1f}%/{r['regions']}r" for r in rows)]
+    return "\n".join(L)
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -1627,6 +1850,38 @@ def selftest():
     assert stats["fb_used"] and stats["fb_asks"] > 0 and stats["fb_points"] == 1, stats
     check(case, r, [], missed=0, merged=0, duplicate=0)  # the third point is now represented, nothing invented
 
+    # A4.3 phase 4: the coverage map must mean exactly what `spans()` means, cell by cell.
+    rng2 = np.random.default_rng(7)
+    P = rng2.normal(size=(12, 3))
+    fs = hull_faces(P)
+    assert all(hull_interior(fs, [x])[0] == spans([u - x for u in P]) for x in rng2.normal(size=(300, 3)) * 0.6)
+    assert hull_faces(np.zeros((4, 3))) is None and not hull_interior(None, [np.zeros(3)])[0]  # degenerate
+    m = np.zeros((4, 4, 4), bool)
+    m[0, 0, 0] = m[0, 0, 1] = m[3, 3, 3] = True
+    assert _components(m) == [2, 1]
+
+    # one point owning all 8 corners: its ask hull is the whole firing box, so every cell that does not
+    # touch the box surface is safely covered and no interior hole is left. The surface shell can never be
+    # covered - the asks lie on it - so that shell is the measurement floor, not a hole.
+    _c, v = synthetic([(1, 2, 3)], (0, 0, 0), (20, 20, 20), ship=((-10, -10, -10), (10, 10, 10)), at=(0, 0, -2000))
+    cov = hull_cover(v, 5)
+    n = 2 ** A43H_DEPTH
+    assert cov["open_cells"] == n ** 3 - (n - 2) ** 3 and not cov["inner_regions"], cov["open_cells"]
+    assert cov["inside"](np.array([0.0, 0, -2000])) and not cov["inside"](np.array([0.0, 0, 2000]))
+
+    # all 8 corners assigned to confirmed points, nothing for the cheap rescue to pursue - and yet a third
+    # point hides inside the firing area. Each confirmed point owns one flat face of corners, whose hull has
+    # no interior, so the observations prove nothing anywhere: a genuine uncovered hole covering the whole
+    # firing box, deep interior cells included.
+    hidden3 = [(-350, 0, 0), (350, 0, 0), (0, -20, 0)]
+    _c, v = synthetic(hidden3, (0, 0, 0), (400, 400, 400), ship=((-200, -200, -200), (200, 200, 200)),
+                      at=(0, 1500, 0))
+    rescue, stats = rescue_probe(v, 0, fallback=False)
+    assert stats["open_before"] == 0 and stats["extra"] == 0, stats
+    cov = hull_cover(v, 0, rescue)
+    assert sum(cov["asks"].values()) == 8 and cov["points"] == 2, cov["asks"]  # every corner assigned
+    assert cov["covered_cells"] == 0 and cov["inner_regions"] == [(n - 2) ** 3], cov["inner_regions"]
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -1661,6 +1916,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a43h" in sys.argv:
+        return a43h(arg("--jobs", 4))
     if "--a43f" in sys.argv:
         return a43r(arg("--jobs", 4), fallback=True)
     if "--a43r" in sys.argv:

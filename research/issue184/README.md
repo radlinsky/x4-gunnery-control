@@ -15,6 +15,7 @@ python3 research/issue184/aimpoint_map.py --a3 --every 20   # deterministic pilo
 python3 research/issue184/aimpoint_map.py --a43       # A4.3 phase 1, 19 boundary cases
 python3 research/issue184/aimpoint_map.py --a43r      # A4.3 phase 2 rescue, same 19 cases
 python3 research/issue184/aimpoint_map.py --a43f      # A4.3 phase 3 fallback, same 19 cases
+python3 research/issue184/aimpoint_map.py --a43h      # A4.3 phase 4 coverage map, same 19 cases
 ```
 
 Needs the ignored #176 caches (`python3 research/issue176-a4x/corpus.py`, the
