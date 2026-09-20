@@ -1706,7 +1706,8 @@ def angular_pick(points, asks, flo, fhi, R, O):
     return best[0], pos, best[5]
 
 
-def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_guard=RESCUE_GUARD):
+def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_guard=RESCUE_GUARD,
+                  near_target=None):
     """A4.3 phase 5: the 8 outer corners and the accepted cheap rescue, then asks chosen purely by the
     largest missing viewing angle (`angular_pick`).
 
@@ -1716,11 +1717,21 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
     accepted moved-ask rescue pursues it. After any new confirmed point the assignments and the whole
     candidate choice are recomputed from scratch. Hidden aim points and later muzzles are never consulted.
 
+    With `near_target` (A7, metres) the adaptive asks are instead chosen on the six faces of the target's
+    runtime box grown by that pad, in the target frame. Nothing else changes: the same candidate rule, the
+    same point confirmation and the same guard. The pad is a probe-placement choice only and is not a claim
+    that every aim point lies inside that box.
+
     Returns (probe, stats); `stats["snaps"]` holds the confirmed points after each primary ask."""
     C, H, T = view["target_box"]
     tlo, thi = target_box(C, H)
     flo, fhi = firing_box(*view["ship_box"], margin)
     R, O = view["ship_rotation"], view["ship_position"]
+    if near_target is None:
+        plo, phi, M, off = flo, fhi, R, O
+    else:
+        C, H = np.asarray(C, float), np.asarray(H, float)
+        plo, phi, M, off = C - H - near_target, C + H + near_target, T, np.zeros(3)
     stats = dict(before=0, before_points=[], after_rescue_points=[], open_before=0,
                  rescue_extra=0, rescue_moved=0, rescue_switched=0, rescue_guard=False,
                  primary=0, extra=0, moved=0, switched=0, guard=False, stalled=False, picks=[], snaps={},
@@ -1765,14 +1776,14 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
             if not spend(3):  # the spare 2 cover `locate`'s along-ray confirmation
                 stats["guard"] = True
                 break
-            pick = angular_pick(points, assigned(), flo, fhi, R, O)
+            pick = angular_pick(points, assigned(), plo, phi, M, off)
             if pick is None:  # nothing on the box has a definite nearest known point
                 note(None)
                 stats["stalled"] = True
                 break
             gap, pos, want = pick
             note(gap)
-            v = pos @ R + O
+            v = pos @ M + off
             key = tuple(map(float, v))
             if key in h["rays"]:  # the best candidate is an ask already spent: no new viewing angle left
                 stats["stalled"] = True
@@ -1792,7 +1803,7 @@ def angular_probe(view, margin, primary=A43A_PRIMARY, guard=A43A_GUARD, rescue_g
             stats["snaps"][stats["primary"]] = dict(
                 primary=stats["primary"], extra=h["count"]() - start2, switched=stats["switched"],
                 guard=stats["guard"], points=[(c.tolist(), float(r)) for c, r in points])
-        final = angular_pick(points, assigned(), flo, fhi, R, O) if points else None  # #184 A6 end state
+        final = angular_pick(points, assigned(), plo, phi, M, off) if points else None  # #184 A6 end state
         note(None if final is None else final[0])
         stats["extra"] = h["count"]() - start2
     return probe, stats
@@ -2048,6 +2059,165 @@ def a6(jobs):
     out = _a6_report(rows)
     A6_EVIDENCE.write_text(out)
     print(out + f"\n(rows: {rows_path}, evidence: {A6_EVIDENCE})")
+
+
+# ---------------------------------------------------------------- A7: near-target angular probing
+
+A7_GAPS = (100, 1000, 8000)  # turret-relevant standoffs; 20/100 km are not meaningful firing ranges here
+A7_PAD = 50.0                # probe-placement pad on the target runtime box, not a bound on aim points
+
+
+def a7_variants(ts, mounts):
+    """The 19 A4.3 boundary cases reproduced at each A7 gap.
+
+    Same target, same nearest-pair bisector bearing, same mount, turret and rotations: only the
+    along-bearing standoff changes, so the three distances really are the same geometry at three ranges.
+    The ship is translated along its own bearing by the gap difference, which is exactly what `cases`
+    does when it builds the 100 m and 1 km members of the pair."""
+    base = {c["id"]: c for c in cases(ts, mounts) if c["id"] in set(A43_CASES)}
+    assert len(base) == len(A43_CASES), (len(base), len(A43_CASES))
+    tmap = {t["component"]: t for t in ts}
+    for cid in A43_CASES:
+        c = base[cid]
+        t = tmap[c["target"]]
+        pairs = [(a, b) for a in range(len(t["points"])) for b in range(a + 1, len(t["points"]))]
+        a, b = min(pairs, key=lambda ab: study.norm(study.sub(t["points"][ab[0]], t["points"][ab[1]])))
+        M = np.asarray(study.pair_frame(t, a, b)[0])
+        d = c["origin"] - M @ c["box"][2]
+        d = d / np.linalg.norm(d)
+        for gap in A7_GAPS:
+            shift = d * (gap - c["gap"])
+            yield dict(c, gap=gap, origin=c["origin"] + shift, position=c["position"] + shift)
+
+
+def _a7_run(case, v, margin, muzzles, near_target):
+    """One angular-search run, near-target or firing-ship-box, with the A7 reporting fields."""
+    probe, stats = angular_probe(v, margin, near_target=near_target)
+    a = corner_audit(v, margin, probe)
+    truth = case["points"]
+    needed = sorted({study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in truth])
+                     for m in muzzles.values()})
+    pre = stats["after_rescue_points"]                       # 8 corners plus the accepted cheap rescue
+    corners = a["queries"] - stats["rescue_extra"] - stats["extra"]
+
+    def state(points, extra):
+        rep = _represented([(np.asarray(c), r) for c, r in points], truth)
+        return dict(points=len(points), exposed=sorted(rep), missing_needed=[x for x in needed if x not in rep],
+                    missing_authored=[j for j in range(len(truth)) if j not in rep],
+                    angular_extra=extra, asks=corners + stats["rescue_extra"] + extra)
+
+    steps = [state([(np.asarray(c), r) for c, r in pre], 0)]
+    for k in sorted(stats["snaps"]):
+        sn = stats["snaps"][k]
+        steps.append(dict(state([(np.asarray(c), r) for c, r in sn["points"]], sn["extra"]), primary=k))
+    expose = next((st for st in steps if not st["missing_needed"]), None)
+    all_authored = next((st for st in steps if not st["missing_authored"]), None)
+
+    points = stats["snaps"][max(stats["snaps"])]["points"] if stats["snaps"] else \
+        [(c.tolist(), float(r)) for c, r in pre]
+    located = [(i, np.asarray(c), r) for i, (c, r) in enumerate(points)]
+    got = score(case, dict(located=located, answer=lambda m: nearest(located, m), queries=a["queries"]), muzzles)
+    return dict(needed=needed, authored=len(truth), corners=corners, rescue_extra=stats["rescue_extra"],
+                primary=stats["primary"], angular_extra=stats["extra"], asks=a["queries"],
+                guard=stats["guard"], stalled=stats["stalled"],
+                gaps=[t["gap"] for t in stats["trace"]], steps=steps,
+                expose_asks=expose and expose["asks"], expose_primary=expose and expose.get("primary", 0),
+                missing_needed=steps[-1]["missing_needed"], missing_authored=steps[-1]["missing_authored"],
+                authored_asks=all_authored and all_authored["asks"],
+                final_points=steps[-1]["points"],
+                **{q: got[q] for q in ("correct", "wrong", "unknown", "invented", "merged", "duplicate")})
+
+
+def _a7_case(case):
+    records, margins = _LOADED
+    v, margin = view(case), margins[case["ship_class"]][0]
+    muzzles = aimed_muzzles(case, records)
+    return dict(id=case["id"], gap=case["gap"], target=case["target"], ship=case["ship"],
+                muzzles=len(muzzles),
+                near=_a7_run(case, v, margin, muzzles, A7_PAD),
+                firing=_a7_run(case, v, margin, muzzles, None))
+
+
+def a7(jobs):
+    """A7: does placing the A4.3 angular probes near the target instead of around the firing ship make
+    aim-point discovery independent of firing range? Same 19 boundary geometries at 100 m, 1 km and 8 km,
+    each run both ways. No stopping rule is chosen here."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = list(a7_variants(targets(), mounts))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path, sum_path = CACHE / "a7_rows.jsonl", CACHE / "a7_summary.txt"
+    print(f"A7: {len(todo)} cases ({len(A43_CASES)} geometries x {len(A7_GAPS)} gaps) -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a7_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            n, f = r["near"], r["firing"]
+            print(f"  {len(rows)}/{len(todo)} case {r['id']} @{r['gap']}m: near {n['asks']} asks, "
+                  f"{n['final_points']} pts, needed missing {len(n['missing_needed'])}, "
+                  f"authored missing {len(n['missing_authored'])}{', GUARD' if n['guard'] else ''} | "
+                  f"firing {f['asks']} asks, needed missing {len(f['missing_needed'])}", flush=True)
+    out = _a7_report(rows)
+    sum_path.write_text(out)
+    print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
+
+
+def _a7_report(rows):
+    L = [f"A7: angular probes on the target runtime box + {A7_PAD:g} m, versus the A4.3 firing-ship box",
+         f"{len(rows)} cases: {len(A43_CASES)} boundary geometries at {', '.join(map(str, A7_GAPS))} m", "",
+         "  method  gap(m)  cases  asks med/p90/max  angular-stage extra med/max  final pts  "
+         "cases exposing all needed  all authored  guard  wrong  unknown"]
+    for meth in ("near", "firing"):
+        for g in A7_GAPS:
+            rs = [r[meth] for r in rows if r["gap"] == g]
+            L.append(f"  {meth:<6}  {g:>6}  {len(rs):>5}  {_stats([r['asks'] for r in rs]):<16}  "
+                     f"{_stats([r['angular_extra'] for r in rs]):<27}  "
+                     f"{sum(r['final_points'] for r in rs):>9}  "
+                     f"{sum(not r['missing_needed'] for r in rs):>25}  "
+                     f"{sum(not r['missing_authored'] for r in rs):>12}  "
+                     f"{sum(r['guard'] for r in rs):>5}  {sum(r['wrong'] for r in rs):>5}  "
+                     f"{sum(r['unknown'] for r in rs):>7}")
+    L += ["", "asks needed before the last needed aim point was exposed (cases that exposed them all):"]
+    for meth in ("near", "firing"):
+        for g in A7_GAPS:
+            e = [r[meth]["expose_asks"] for r in rows if r["gap"] == g and r[meth]["expose_asks"] is not None]
+            L.append(f"  {meth:<6} {g:>6} m: {len(e)} cases, asks med/p90/max {_stats(e) if e else 'n/a'}")
+    L += ["", "hidden truth, reporting only - authored aim points never exposed (never steers the search):"]
+    for meth in ("near", "firing"):
+        for g in A7_GAPS:
+            rs = [r for r in rows if r["gap"] == g]
+            L.append(f"  {meth:<6} {g:>6} m: {sum(len(r[meth]['missing_authored']) for r in rs)} of "
+                     f"{sum(r[meth]['authored'] for r in rs)} authored points left undiscovered in "
+                     f"{sum(bool(r[meth]['missing_authored']) for r in rs)} cases")
+    L += ["", "missing needed points before the angular stage (8 corners + cheap rescue), by gap:"]
+    for g in A7_GAPS:
+        rs = [r for r in rows if r["gap"] == g]
+        L.append(f"  {g:>6} m: near {sum(len(r['near']['steps'][0]['missing_needed']) for r in rs)}, "
+                 f"firing {sum(len(r['firing']['steps'][0]['missing_needed']) for r in rs)} "
+                 "(identical by construction: the same corners and rescue precede both)")
+    L += ["", "largest remaining angular gap (deg) recorded before each primary ask:"]
+    for meth in ("near", "firing"):
+        for g in A7_GAPS:
+            gs = [x for r in rows if r["gap"] == g for x in r[meth]["gaps"] if x is not None]
+            L.append(f"  {meth:<6} {g:>6} m: {len(gs)} recorded, med/p90/max {_stats(gs) if gs else 'n/a'}")
+    L += ["", "hardest cases by near-target ask count:"]
+    for r in sorted(rows, key=lambda r: -r["near"]["asks"])[:8]:
+        n = r["near"]
+        L.append(f"  case {r['id']} @{r['gap']} m {r['target']}: {n['asks']} asks "
+                 f"({n['corners']} corners + {n['rescue_extra']} rescue + {n['angular_extra']} angular), "
+                 f"{n['primary']} primary, needed missing {len(n['missing_needed'])}, "
+                 f"authored missing {len(n['missing_authored'])}{', GUARD' if n['guard'] else ''}")
+    L += ["", "per geometry, needed points still missing at the end (near / firing), by gap:"]
+    for cid in A43_CASES:
+        rs = {r["gap"]: r for r in rows if r["id"] == cid}
+        L.append(f"  {cid}: " + ", ".join(
+            f"{g}m {len(rs[g]['near']['missing_needed'])}/{len(rs[g]['firing']['missing_needed'])}"
+            for g in A7_GAPS if g in rs))
+    return "\n".join(L)
 
 
 # ---------------------------------------------------------------- run
@@ -2408,6 +2578,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a7" in sys.argv:
+        return a7(arg("--jobs", 4))
     if "--a6" in sys.argv:
         return a6(arg("--jobs", 4))
     if "--a43a" in sys.argv:
