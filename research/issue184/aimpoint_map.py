@@ -9,12 +9,14 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --selftest
     python3 research/issue184/aimpoint_map.py --a3 [--every N] [--jobs 4]   # A3 benchmark, every Nth case
     python3 research/issue184/aimpoint_map.py --a41 [--every N] [--jobs 4]  # A4.1 corner audit (boundary cases)
+    python3 research/issue184/aimpoint_map.py --a42 [--jobs 4]              # A4.2 switch-boundary comparison
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
 from __future__ import annotations
 
 import itertools
+import json
 import math
 import os
 import sys
@@ -628,14 +630,22 @@ def corner_audit(view, margin):
     return dict(points=points, own=own, mixed=mixed, queries=n, box=(lo, hi), R=R, O=O)
 
 
+def _bisector(p, q):
+    """(unit normal, point on plane) of the nearest-point switch plane between p and q."""
+    d = np.asarray(q, float) - np.asarray(p, float)
+    k = float(np.linalg.norm(d))
+    return (d / k if k > 0 else np.full(3, math.nan)), (np.asarray(p, float) + q) / 2
+
+
+def _gap(n1, o1, n2, o2, corners):
+    """Worst disagreement (m), over `corners`, between two planes' signed distances."""
+    return float(np.max(np.abs((corners - o1) @ n1 - (corners - o2) @ n2)))
+
+
 def _plane_error(a, b, pa, pb, corners):
     """Worst disagreement (m), over the box corners, between the nearest-point switch plane of the estimated
     pair (a, b) and that of the true pair (pa, pb). Each plane: perpendicular bisector of its two points."""
-    def signed(p, q):
-        d = q - p
-        k = np.linalg.norm(d)
-        return (corners - (p + q) / 2) @ (d / k) if k > 0 else np.full(len(corners), math.nan)
-    return float(np.max(np.abs(signed(a, b) - signed(pa, pb))))
+    return _gap(*_bisector(a, b), *_bisector(pa, pb), corners)
 
 
 def _audit_case(case):
@@ -701,6 +711,240 @@ def a41(every, jobs):
           "switch crossings on one pair's edges")
     print(f"\n  hidden-truth check (reporting only): {sum(r['muzzles_exposed'] for r in rows)} of "
           f"{sum(r['muzzles'] for r in rows)} later aimed muzzles select a point the corner audit already exposed")
+
+
+# ---------------------------------------------------------------- A4.2 switch-boundary comparison
+
+CACHE = ROOT / ".x4-research-cache/issue184"
+SNAPSHOTS = (2, 4, 6)  # halfway asks per chosen edge, recorded as a cost/accuracy curve
+
+
+def safety_band(a, ra, b, rb, corners):
+    """Half-width (m) of a flat conservative band around the estimated switch plane of (a, b).
+
+    A position x provably selects the point near `a` when |x - b| - |x - a| > ra + rb (the estimate balls
+    can only move each distance by its radius). With s the signed distance from the estimated plane,
+    |x - b|^2 - |x - a|^2 = 2 s |a - b|, so |x - b| - |x - a| >= 2 s |a - b| / (|x - a| + |x - b|).
+    Taking the largest |x - a| + |x - b| over the region makes one flat half-width safe everywhere."""
+    sep = float(np.linalg.norm(np.asarray(b, float) - a))
+    if sep <= 0:
+        return math.inf
+    reach = float(np.max(np.linalg.norm(corners - a, axis=1) + np.linalg.norm(corners - b, axis=1)))
+    return (ra + rb) * reach / (2 * sep)
+
+
+def _spread(items, key, want=3):
+    """`want` of `items` whose `key` positions are spread out: the farthest-apart pair, then greedily the
+    item farthest from those already chosen. A flat boundary through near-coincident points is unstable."""
+    if len(items) <= want:
+        return list(items)
+    ps = [np.asarray(key(x), float) for x in items]
+    i, j = max(itertools.combinations(range(len(items)), 2), key=lambda ab: np.linalg.norm(ps[ab[0]] - ps[ab[1]]))
+    out = [i, j]
+    while len(out) < want:
+        out.append(max((k for k in range(len(items)) if k not in out),
+                       key=lambda k: min(np.linalg.norm(ps[k] - ps[o]) for o in out)))
+    return [items[k] for k in out]
+
+
+def _fit_plane(locs, orient):
+    """(unit normal, point) of the plane through three switch locations, oriented like `orient`, plus the
+    triangle's shortest altitude as a stability scale; None when the three are effectively collinear."""
+    p0, p1, p2 = (np.asarray(x, float) for x in locs)
+    n = np.cross(p1 - p0, p2 - p0)
+    area2 = float(np.linalg.norm(n))
+    longest = max(np.linalg.norm(p1 - p0), np.linalg.norm(p2 - p0), np.linalg.norm(p2 - p1))
+    if area2 <= 0 or longest <= 0 or area2 / longest < 1e-6 * longest:
+        return None
+    n = n / area2
+    return (n if n @ orient >= 0 else -n), p0, area2 / longest
+
+
+def measure_boundary(view, points, edges, pair, R, O):
+    """Bisect each chosen mixed edge toward the switch, assigning every new ask the way the method can:
+    the observed direction must lie on exactly one confirmed point's ray. Yields (asks so far per edge,
+    switch locations, stalls) after each halfway ask, up to max(SNAPSHOTS)."""
+    oracle = view["oracle"]
+    i, j = pair
+    n = 0
+
+    def assign(x):
+        nonlocal n
+        n += 1
+        d = oracle(x)
+        if d is None:
+            return None
+        d = np.asarray(d)
+        on = [k for k, (c, r) in enumerate(points) if _on_ray(x, d, c, r)]
+        return on[0] if len(on) == 1 else None
+
+    brackets = [[x @ R + O, y @ R + O, True] for x, y in edges]  # [end owned by i, end owned by j, live]
+    for _step in range(max(SNAPSHOTS)):
+        for br in brackets:
+            if not br[2]:
+                continue
+            w = (br[0] + br[1]) / 2
+            a = assign(w)
+            if a == i:
+                br[0] = w
+            elif a == j:
+                br[1] = w
+            else:  # unassignable, or a third confirmed point: refining further would be a guess
+                br[2] = False
+        yield n, [(br[0] + br[1]) / 2 for br in brackets], sum(not br[2] for br in brackets)
+
+
+def _a42_case(case):
+    """One A4.2 row: the A4.1 audit, then the calculated and measured boundaries, scored after the fact."""
+    records, margins = _LOADED
+    v = view(case)
+    a = corner_audit(v, margins[case["ship_class"]][0])
+    pts, own, mixed = a["points"], a["own"], a["mixed"]
+    corners = np.asarray(_corners(*a["box"])) @ a["R"] + a["O"]
+    box = firing_box(*case["ship_box"], margins[case["ship_class"]][0])
+    muzzles = list(aimed_muzzles(case, records).values())
+    truth = [tuple(map(float, p)) for p in case["points"]]
+    cover = {k: [q for q, p in enumerate(case["points"]) if np.linalg.norm(c - p) <= r] for k, (c, r) in enumerate(pts)}
+    exposed = {q for qs in cover.values() for q in qs}
+    row = dict(id=case["id"], target=case["target"], ship=case["ship"], gap=case["gap"], audit=a["queries"],
+               points=len(pts), muzzles=len(muzzles),
+               muzzles_exposed=sum(study.select(tuple(map(float, m)), truth) in exposed for m in muzzles))
+
+    owners = sorted({k for k in own.values() if k is not None})
+    pairs = Counter(tuple(sorted((own[tuple(x)], own[tuple(y)]))) for x, y in mixed)
+    if len(owners) < 2 or not pairs:
+        row["kind"] = "one_point"
+        # C: hidden truth, reporting only. Where do muzzles selecting an unexposed point sit?
+        bad = [m for m in muzzles if study.select(tuple(map(float, m)), truth) not in exposed]
+        row["unexposed_muzzles"] = len(bad)
+        row["unexposed_outside_box"] = sum(not inside(box, ship_local(case, m)) for m in bad)
+        if bad and exposed:
+            q = min(exposed)
+            row["unexposed_to_boundary"] = [  # distance to the true switch plane between the exposed and chosen point
+                abs(float((m - o) @ nrm)) for m in bad
+                for s in [study.select(tuple(map(float, m)), truth)]
+                for nrm, o in [_bisector(case["points"][q], case["points"][s])] if s != q]
+        return row
+
+    row["kind"] = "two_point"
+    (i, j), _count = pairs.most_common(1)[0]
+    (ci, ri), (cj, rj) = pts[i], pts[j]
+    n_est, o_est = _bisector(ci, cj)
+    w = safety_band(ci, ri, cj, rj, corners)
+    row.update(pair_sep=float(np.linalg.norm(cj - ci)), band=2 * w, radii=[ri, rj])
+
+    # A scoring, hidden truth only from here.
+    single = len(cover[i]) == 1 and len(cover[j]) == 1
+    row["calc_ok"] = single
+    if single:
+        n_true, o_true = _bisector(case["points"][cover[i][0]], case["points"][cover[j][0]])
+        row["calc_error"] = _gap(n_est, o_est, n_true, o_true, corners)
+        row["calc_contained"] = row["calc_error"] <= w
+        # n_est runs from the point near ci to the one near cj, so s > 0 claims j and s < 0 claims i.
+        row.update(calc_outside_band=0, calc_in_band=0, calc_correct=0, calc_unsafe=0)
+        for m in muzzles:
+            s = float((m - o_est) @ n_est)
+            if abs(s) <= w:
+                row["calc_in_band"] += 1
+                continue
+            row["calc_outside_band"] += 1
+            claim = cover[j][0] if s > 0 else cover[i][0]
+            row["calc_correct" if study.select(tuple(map(float, m)), truth) == claim else "calc_unsafe"] += 1
+
+    # B: the same three spread mixed edges, refined, snapshotted.
+    chosen = _spread([(x, y) if own[tuple(x)] == i else (y, x) for x, y in mixed
+                      if tuple(sorted((own[tuple(x)], own[tuple(y)]))) == (i, j)],
+                     key=lambda e: (e[0] + e[1]) / 2)
+    row["edges"] = len(chosen)
+    row["meas"] = {}
+    if len(chosen) == 3:
+        for step, (asks, locs, stalls) in enumerate(measure_boundary(v, pts, chosen, (i, j), a["R"], a["O"]), 1):
+            if step not in SNAPSHOTS:
+                continue
+            fit = _fit_plane(locs, cj - ci)
+            e = dict(asks=a["queries"] + asks, stalls=stalls, stable=fit is not None)
+            if fit is not None and single:
+                e["error"] = _gap(fit[0], fit[1], n_true, o_true, corners)
+            row["meas"][str(step)] = e
+    return row
+
+
+def a42(jobs):
+    """A4.2: calculated vs directly measured switch boundary over the 240 boundary cases."""
+    global _LOADED
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    todo = [c for c in cases(targets(), mounts) if c["group"] == "boundary"]
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path, sum_path = CACHE / "a42_rows.jsonl", CACHE / "a42_summary.txt"
+    print(f"A4.2: {len(todo)} boundary cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a42_case, todo, chunksize=4):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            if len(rows) % 10 == 0:
+                print(f"  {len(rows)}/{len(todo)} -> {rows_path}", flush=True)
+    out = _a42_report(rows)
+    sum_path.write_text(out)
+    print(out + f"\n(rows: {rows_path}, summary: {sum_path})")
+
+
+def _stats(xs):
+    xs = sorted(xs)
+    return (f"{np.median(xs):.3g} / {np.percentile(xs, 90):.3g} / {max(xs):.3g}") if xs else "n/a"
+
+
+def _a42_report(rows):
+    two = [r for r in rows if r["kind"] == "two_point"]
+    one = [r for r in rows if r["kind"] == "one_point"]
+    calc = [r for r in two if r.get("calc_ok")]
+    fails = [r for r in calc if not r["calc_contained"]]
+    unsafe = [r for r in calc if r.get("calc_unsafe")]
+    L = [f"A4.2 switch boundary: {len(rows)} boundary cases, {len(two)} with two confirmed points, "
+         f"{len(one)} with one", "",
+         "A. calculated boundary (confirmed point estimates + their uncertainty only)",
+         f"  usable:              {len(calc)} of {len(two)}",
+         f"  error med/p90/max:   {_stats([r['calc_error'] for r in calc])} m",
+         f"  band width (2w):     {_stats([r['band'] for r in calc])} m",
+         f"  band contains truth: {sum(r['calc_contained'] for r in calc)} of {len(calc)}"
+         + (f"   FAILURES: {[r['id'] for r in fails]}" if fails else ""),
+         f"  later muzzles:       {sum(r['calc_outside_band'] for r in calc)} resolved outside the band "
+         f"({sum(r['calc_correct'] for r in calc)} correct), "
+         f"{sum(r['calc_in_band'] for r in calc)} unresolved inside it",
+         f"  unsafe answers:      {sum(r.get('calc_unsafe', 0) for r in calc)}"
+         + (f"   CASES: {[r['id'] for r in unsafe]}" if unsafe else ""), "",
+         "B. measured boundary (bisecting three spread mixed edges)",
+         "  asks/edge   cases  stable  total asks med/p90/max   error med/p90/max (m)   stalled edges"]
+    for k in SNAPSHOTS:
+        got = [r["meas"][str(k)] for r in two if str(k) in r["meas"]]
+        rs = got
+        err = [g["error"] for g in got if "error" in g]
+        L.append(f"  {k:9} {len(rs):6} {sum(g['stable'] for g in got):7}  {_stats([g['asks'] for g in got]):22}  "
+                 f"{_stats(err):22}  {sum(g['stalls'] for g in got)}")
+    short = [r for r in two if r["edges"] < 3]
+    last = str(max(SNAPSHOTS))
+    stalled = [r for r in two if r["meas"].get(last, {}).get("stalls")]
+    L += [f"  cases without three usable mixed edges: {len(short)}" + (f" {[r['id'] for r in short]}" if short else ""),
+          f"  cases where an edge could not be refined safely: {len(stalled)}"
+          + (f" {[r['id'] for r in stalled]}" if stalled else ""), "",
+          "C. one-confirmed-point cases (hidden truth, reporting only; no asks changed)",
+          f"  cases:                                     {len(one)}",
+          f"  all later muzzles select the exposed point: {sum(r['unexposed_muzzles'] == 0 for r in one)}",
+          f"  at least one selects an unexposed point:    {sum(r['unexposed_muzzles'] > 0 for r in one)}"
+          + (f"   CASES: {[r['id'] for r in one if r['unexposed_muzzles']]}"
+             if any(r["unexposed_muzzles"] for r in one) else ""),
+          f"  affected later muzzles:                     {sum(r['unexposed_muzzles'] for r in one)}"
+          f" ({sum(r['unexposed_outside_box'] for r in one)} outside the expanded firing box)",
+          f"  their distance to the true switch plane:    "
+          f"{_stats([d for r in one for d in r.get('unexposed_to_boundary', [])])} m", "",
+          f"total later aimed muzzles: {sum(r['muzzles'] for r in rows)}; "
+          f"not covered by a confirmed point: {sum(r['muzzles'] - r['muzzles_exposed'] for r in rows)} "
+          f"({sum(r['muzzles'] - r['muzzles_exposed'] for r in two)} in two-point cases, "
+          f"{sum(r['muzzles'] - r['muzzles_exposed'] for r in one)} in one-point cases)"]
+    return "\n".join(L)
 
 
 # ---------------------------------------------------------------- run
@@ -877,6 +1121,37 @@ def selftest():
     assert _plane_error(np.array([0., 0, -1]), np.array([0., 0, 1]), np.array([0., 0, -1]), np.array([0., 0, 1]),
                         np.asarray(_corners(np.zeros(3), np.ones(3)))) == 0.0
 
+    # A4.2: the conservative band must cover the estimate error, and bisecting the mixed edges must
+    # converge on the true switch plane (here z = 0) without ever seeing the true points.
+    corners = np.asarray(_corners(*firing_box((-200, -200, -200), (200, 200, 200), 0))) + (0, 1500, 0)
+    w = safety_band(np.array([0., 0, -302]), 3.0, np.array([0., 0, 301]), 2.0, corners)
+    assert w >= _plane_error(np.array([0., 0, -302]), np.array([0., 0, 301]),
+                             np.array([0., 0, -300]), np.array([0., 0, 300]), corners), w
+    # the band's promise: every position it calls resolved really does select the point on that side.
+    ca, cb = np.array([0., 0, -302]), np.array([0., 0, 301])
+    n_est, o_est = _bisector(ca, cb)
+    rng = np.random.default_rng(0)
+    probe = rng.uniform((-200, 1300, -200), (200, 1700, 200), (2000, 3))
+    for x in probe:
+        d = float((x - o_est) @ n_est)
+        if abs(d) > w:
+            assert study.select(tuple(x), [(0, 0, -300), (0, 0, 300)]) == (1 if d > 0 else 0), (x, d)
+    assert _fit_plane([(0, 0, 0), (1, 0, 0), (2, 0, 0)], np.array([0., 0, 1])) is None  # collinear
+    n_fit, o_fit, _scale = _fit_plane([(0, 0, 0), (100, 0, 0), (0, 100, 0)], np.array([0., 0, 1]))
+    assert np.allclose(n_fit, (0, 0, 1)) and np.allclose(o_fit, 0)
+    own = {tuple(c): a["own"][tuple(c)] for c in _corners(*a["box"])}
+    i, j = sorted({k for k in own.values() if k is not None})
+    edges = _spread([(x, y) if own[tuple(x)] == i else (y, x) for x, y in a["mixed"]], key=lambda e: (e[0] + e[1]) / 2)
+    assert len(edges) == 3 and len({tuple((x + y) / 2) for x, y in edges}) == 3
+    errs = []
+    for step, (asks, locs, stalls) in enumerate(measure_boundary(v, a["points"], edges, (i, j), a["R"], a["O"]), 1):
+        assert asks == 3 * step and not stalls
+        fit = _fit_plane(locs, a["points"][j][0] - a["points"][i][0])
+        assert fit is not None
+        errs.append(_gap(fit[0], fit[1], *_bisector((0, 0, -300), (0, 0, 300)), corners))
+    # each halfway ask halves the bracket, so the measured plane closes on the true one (z = 0 here)
+    assert errs[-1] < errs[0] / 8 and errs[-1] < 5.0, errs
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -909,6 +1184,8 @@ def main():
         return a3(arg("--every", 1), arg("--jobs", 4))
     if "--a41" in sys.argv:
         return a41(arg("--every", 1), arg("--jobs", 4))
+    if "--a42" in sys.argv:
+        return a42(arg("--jobs", 4))
     summary()
 
 
