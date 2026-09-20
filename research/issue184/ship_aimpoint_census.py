@@ -37,6 +37,7 @@ from census_common import REQUIRED_SOURCE_SETS  # noqa: E402
 
 SWI_ASSETS = ROOT / ".x4-research-cache/issue184/swi_assets"
 NAME_INDEX = {}  # (root tag, name) -> the file X4's index/ resolves that name to
+SWI_REL = "swi/"  # index path prefix marking a definition that comes from a SWI file
 OUT = ROOT / ".x4-research-cache/issue184/a44_census_%s.jsonl"
 CLASSES = ("ship_s", "ship_m", "ship_l", "ship_xl")
 TOL = 1e-4  # m; authored positions are float32 text
@@ -214,7 +215,11 @@ def census(with_swi):
     applied. Run each in its own process (see `main`) so building SWI cannot touch the vanilla index.
     -> (rows, unresolved, overlay stats)."""
     stats, unresolved = overlay_swi() if with_swi else (Counter(), [])
-    ships = defaultdict(lambda: {"macros": [], "source": None, "cls": set()})
+    # The source environment and the census population are different things. Under SWI the environment
+    # still holds every vanilla definition, because SWI ships depend on vanilla docks, bridges and
+    # shields to reconstruct; but a vanilla ship is not a SWI-game ship just because its macro survived.
+    # Membership is the definition's own origin, which the index already records per file.
+    ships = defaultdict(lambda: {"macros": [], "source": "official", "cls": set()})
     for name, defs in sorted(sources.MACROS.items()):
         for rel, m in defs:
             ref = m.find("component")
@@ -222,7 +227,10 @@ def census(with_swi):
                 s = ships[ref.get("ref")]
                 s["macros"].append(name)
                 s["cls"].add(m.get("class"))
-                s["source"] = "swi" if rel.startswith("swi/") else s["source"] or "official"
+                if rel.startswith(SWI_REL):
+                    s["source"] = "swi"
+    if with_swi:
+        ships = {c: s for c, s in ships.items() if s["source"] == "swi"}
     rows = []
     for cname, s in sorted(ships.items()):
         try:
@@ -286,21 +294,18 @@ def report(population, rows, unresolved, stats):
         P("## SWI overlay")
         for k, v in sorted(stats.items()):
             P(f"  {v:6d}  {k}")
-        P("  A SWI-game ship is any component behind a ship_s/m/l/xl macro in the effective SWI index: "
-          "SWI's own ships plus the official ships as SWI patches them.")
+        P("  A SWI-game ship is a component behind a ship_s/m/l/xl macro defined in a SWI file. The source "
+          "environment above also holds every vanilla definition, because SWI ships need vanilla docks, "
+          "bridges and shields to reconstruct, but a surviving vanilla ship is not a SWI-game ship.")
     P("")
-    P("## Population by class" + (" and definition origin" if population == "swi" else ""))
-    key = (lambda r: (r["source"], "/".join(r["ship_class"]))) if population == "swi" else \
-        (lambda r: ("", "/".join(r["ship_class"])))
-    for (src, cls), n in sorted(Counter(map(key, rows)).items()):
-        P(f"  {src:9s} {cls:20s} {n:4d}")
+    P("## Population by class")
+    for cls, n in sorted(Counter("/".join(r["ship_class"]) for r in rows).items()):
+        P(f"  {cls:20s} {n:4d}")
     P("")
     P("## Aim-point count distribution")
     dist = Counter(r["n_points"] for r in rows)
     for n in sorted(dist):
-        sub = Counter(r["source"] for r in rows if r["n_points"] == n)
-        tail = f"  (from official files {sub['official']:3d}, SWI files {sub['swi']:3d})" if population == "swi" else ""
-        P(f"  {n:2d} point(s): {dist[n]:4d} components{tail}")
+        P(f"  {n:2d} point(s): {dist[n]:4d} components")
     P(f"  aim connections carrying a `parent` attribute: {sum(len(r['parented']) for r in rows)} "
       "(an unparented offset is already in the component frame)")
     spread = [r["box_spread_across_macros"] for r in rows if len(r["macros"]) > 1 and r["C"] is not None]
@@ -323,11 +328,6 @@ def report(population, rows, unresolved, stats):
     one = [r for r in rows if r["n_points"] == 1]
     P("")
     P(f"## One-point components ({len(one)})")
-    for src in ("official", "swi") if population == "swi" else ():
-        sub = [r for r in one if r["source"] == src]
-        d = np.array([np.linalg.norm(r["points"][0]) for r in sub])
-        P(f"  defined in {src} files: {len(sub)}; exactly the origin {int((d < TOL).sum())}; "
-          f"|point - origin| {_q(d)} m")
     d_origin = np.array([np.linalg.norm(r["points"][0]) for r in one])
     P(f"  |point - component origin|: {_q(d_origin)} m; exactly the origin: {int((d_origin < TOL).sum())} of {len(one)}")
     ob = [r for r in one if r["C"] is not None]
@@ -351,8 +351,6 @@ def report(population, rows, unresolved, stats):
     onx = [r for r in multi if np.all(np.abs(np.array(r["points"])[:, 0]) < TOL)]
     mirrored = [r for r in multi if _symmetric(r)]
     near = [r for r in multi if _symmetric(r, 1e-3)]
-    if population == "swi":
-        P(f"  by definition origin: {dict(Counter(r['source'] for r in multi))}")
     P(f"  all points at one y (flat layout): {len(planar)} of {len(multi)}")
     P(f"  all points on the x=0 centreline: {len(onx)} of {len(multi)}")
     P(f"  fully left/right symmetric (every off-centre point has a +-x twin at the same y,z): "

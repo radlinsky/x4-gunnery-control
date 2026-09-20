@@ -95,8 +95,11 @@ this reference's technical index entry.
 - Source: every component behind a `ship_s`/`ship_m`/`ship_l`/`ship_xl` macro,
   censused as two independent games because SWI is an overhaul whose ships never
   share a game with vanilla's: pristine X4 9.00 (203 components, 285 macros, 39
-  authored `aimtarget` connections, every runtime box resolving) and X4 9.00
-  with SWI 0.9.1 HF applied (429 components, 542 macros, 834 connections).
+  authored `aimtarget` connections, every runtime box resolving) and SWI
+  0.9.1 HF's own ships (226 components, 257 macros, 795 connections, 223 boxes).
+  A SWI census member is a component behind a ship-class macro defined in a SWI
+  file; the vanilla definitions stay loaded as dependencies, since SWI ships
+  attach vanilla docks, bridges and shields, but are not SWI-game ships.
   Parser and full analysis: `research/issue184/ship_aimpoint_census.py`.
 - Live test: no — source census only; no runtime measurement.
 - Finding: authored aim points are hand-placed constants with no derivation
@@ -105,15 +108,16 @@ this reference's technical index entry.
   uses it, while the reconstructed box varies by up to 25.2 m between a
   component's macros; no aim connection carries a `parent` attribute, so the
   authored offset is already the component-frame position; selection order is
-  the native connection-name hash and differs from document order for 112 of
-  the 142 SWI multi-point components; and every single-point ship places its
-  point on `x = 0` (5 of 5 vanilla, 102 of 102 SWI).
+  the native connection-name hash and differs from document order for most
+  multi-point components; and every single-point ship places its point on
+  `x = 0` (5 of 5 vanilla, 97 of 97 SWI).
   Nothing else generalizes, and the two games disagree about how close the
   near-rules come. A single point is neither the component origin (0 of 5
-  vanilla, 47 of 102 SWI) nor the reconstructed box centre (0 of 5 vanilla, 18
-  of 102 SWI). Lateral symmetry covers 136 of 142 SWI multi-point components but
-  only 9 of 14 vanilla ones exactly, 11 within 1 mm: two vanilla ships are
-  mirrored to 0.3 mm in the authored text, and three are genuinely asymmetric.
+  vanilla, 47 of 97 SWI) nor the reconstructed box centre (0 of 5 vanilla, 18
+  of 97 SWI). Lateral symmetry is authored exactly on 127 of 128 SWI multi-point
+  components but on only 9 of 14 vanilla ones, 11 within 1 mm: two vanilla ships
+  are mirrored to 0.3 mm in the authored text, and three are genuinely
+  asymmetric.
   Eight points lie outside their own reconstructed runtime box, reaching a
   normalized |n| of 3.17 on x — corroborating at corpus scale that aim-point
   containment must not be assumed — though all eight are SWI-authored and
@@ -125,7 +129,10 @@ components in pristine 9.00 carry no `aimtarget` connection; only 19 do. For
 those 184 the nearest-authored-point selector's absent/empty collection branch
 decides, and that branch is not characterized above. Any work that treats
 authored aim points as the general answer for vanilla ships is addressing 9% of
-them; under SWI the same figure is 185 of 429, or 43%.
+them. SWI is the mirror image: it authors points on 225 of its 226 ships, the
+lone exception being `mandator`. Pooling the two games therefore misstates both,
+and a count taken over the union of their source data is not a population at
+all.
 
 A narrower earlier count of 50 vanilla whole-ship aim-point components is the
 same data under a different scope: it selects by the component's own `class`
