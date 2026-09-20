@@ -12,6 +12,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a42 [--jobs 4]              # A4.2 switch-boundary comparison
     python3 research/issue184/aimpoint_map.py --a43 [--jobs 4]              # A4.3 phase 1 (19 cases)
     python3 research/issue184/aimpoint_map.py --a43r [--jobs 4]             # A4.3 phase 2 adaptive rescue
+    python3 research/issue184/aimpoint_map.py --a43f [--jobs 4]             # A4.3 phase 3 uncertainty fallback
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -1114,6 +1115,7 @@ def _a43_report(rows):
 RESCUE_GUARD = 24  # research-loose runaway guard on the extra asks per case; A6 sets any production limit
 RESCUE_ALPHA0 = math.radians(2.0)  # #176 A5 first sideways viewing-angle change
 RESCUE_ALPHA_MIN = math.radians(1 / 64)  # #176 A5 floor: below this a sideways move buys nothing
+FALLBACK_GUARD = 24  # separate research-loose guard for the uncertainty-driven firing-area search
 
 
 def _box_depth(u, d, tlo, thi, T):
@@ -1131,64 +1133,143 @@ def _box_depth(u, d, tlo, thi, T):
     return max(float(((tlo + thi) / 2 - o) @ e), 1.0)
 
 
-def rescue_probe(view, guard=RESCUE_GUARD):
-    """#176 A5 adaptive probing applied to the corner asks the audit could not assign to a confirmed point.
+def _cell_resolved(a, b, R, O, T, points, residual):
+    """Can an undiscovered aim point still beat every confirmed point somewhere in the firing cell [a, b]?
 
-    Such an ask is an observation, not a failure: it names a direction toward *some* aim point. Taking one at
-    a time in fixed key order (never hidden truth), make a sideways moved ask, offset by the viewing-angle
-    change alpha at that ray's own target-box depth scale. When the moved ask's ray does not support the
-    anchor ray - it misses it, or crosses it outside the padded target box - X4 selected another point: keep
-    the observation, halve alpha and turn 60 degrees, exactly as #176 A5 does. Every ask, supporting or
-    switched, enters the shared `locate()`, whose existing conservative multi-ray-plus-bracket rule is the
-    only thing that confirms a point; after each new point the loop reconsiders every stored observation
-    before spending another ask.
+    `known_far` is a safe upper bound on the distance from any position in the cell to the nearest confirmed
+    point: the best (centre distance + radius) at the cell centre, plus the centre-to-corner half-diagonal.
+    The cell is resolved when every remaining target-space box is provably farther than that, so no point
+    hiding there could win anywhere in the cell. The cell's 8 corners are taken to the target frame and
+    enclosed in an axis-aligned box, which contains the cell, so the box-to-box distance can only
+    underestimate the true one: conservative in the safe direction."""
+    if not points:
+        return False
+    m = (a + b) / 2 @ R + O
+    known_far = min(float(np.linalg.norm(c - m)) + r for c, r in points) + float(np.linalg.norm(b - a)) / 2
+    corners = np.asarray([c @ R + O for c in _corners(a, b)]) @ T.T
+    lo, hi = corners.min(0), corners.max(0)
+    return all(float(np.linalg.norm(np.maximum(0, np.maximum(rlo - hi, lo - rhi)))) > known_far
+               for rlo, rhi in residual)
+
+
+def rescue_probe(view, margin, guard=RESCUE_GUARD, fallback_guard=FALLBACK_GUARD, fallback=True):
+    """A4.3 phase 2 and 3: adaptive rescue of the corner directions the audit could not assign, then an
+    uncertainty-driven fallback search of the firing area for aim points nothing has pointed at yet.
+
+    **Phase 2, the cheap rescue.** An unassigned corner ask is an observation, not a failure: it names a
+    direction toward *some* aim point. Taking one at a time in fixed key order (never hidden truth), make a
+    sideways moved ask, offset by the viewing-angle change alpha at that ray's own target-box depth scale.
+    When the moved ray does not support its anchor - it misses it, or crosses it outside the padded target
+    box - X4 selected another point: keep the observation, halve alpha and turn 60 degrees (#176 A5).
+
+    **Phase 3, the fallback.** What the phase-1 empty balls leave uncovered is the target space an unknown
+    point could still occupy. Cells of the expanded firing box are asked one question only - could an
+    undiscovered point beat every confirmed point anywhere in this cell (`_cell_resolved`) - so ordinary
+    competition between points already known is left to the calculated switch boundary and never splits a
+    cell. Best-first by cell size: ask at the largest unresolved cell's centre, pursue the answer with the
+    same phase-2 moved asks when it is not already assigned, split that cell into 8, rebuild the evidence
+    and re-evaluate. Each stage has its own loose research guard.
+
+    Every ask, supporting or switched, enters the shared `locate()`, whose existing conservative
+    multi-ray-plus-bracket rule is the only thing that confirms a point; after each new point both stages
+    reconsider every stored observation before spending another ask.
 
     Returns (probe, stats). -> `residual_map(view, margin, probe)`."""
     C, H, T = view["target_box"]
     tlo, thi = target_box(C, H)
-    stats = dict(before=0, before_points=[], open_before=0, extra=0, moved=0, switched=0, guard=False)
+    flo, fhi = firing_box(*view["ship_box"], margin)
+    R, O = view["ship_rotation"], view["ship_position"]
+    stats = dict(before=0, before_points=[], open_before=0, extra=0, moved=0, switched=0, guard=False,
+                 fb_used=False, fb_before=0, fb_points=0, fb_extra=0, fb_asks=0, fb_moved=0, fb_switched=0, fb_guard=False,
+                 fb_cells=0, fb_unresolved=0, fb_fraction=1.0)
 
     def probe(h):
-        start, points = h["count"](), h["points"]
+        points = h["points"]
         stats.update(before=len(points), before_points=list(points))
-        anchors = sorted(k for k, (u, d) in h["rays"].items() if d is not None and h["owner"](u, d) is None)
-        stats["open_before"], state, seen = len(anchors), {}, len(points)
-        while anchors:
+        seen = [len(points)]
+
+        def pursue(anchors, spend, tag):
+            """Adaptive moved asks until every anchor ray is assigned or too narrow to observe further."""
+            state = {}
+            while anchors:
+                h["locate"]()
+                anchors = [k for k in anchors if h["owner"](*h["rays"][k]) is None]
+                if len(points) > seen[0]:  # a new point may already explain other stored observations
+                    seen[0] = len(points)
+                    continue
+                if not anchors:
+                    break
+                if not spend(3):  # the spare 2 cover `locate`'s along-ray confirmation
+                    stats[tag + "guard"] = True
+                    break
+                k = anchors[0]
+                u, d = h["rays"][k]
+                alpha, turn = state.get(k, (RESCUE_ALPHA0, 0))
+                if alpha < RESCUE_ALPHA_MIN:  # nothing narrower left to observe about this direction
+                    anchors.pop(0)
+                    continue
+                a_ax, b_ax = basis(d)
+                side = math.cos(turn * math.pi / 3) * a_ax + math.sin(turn * math.pi / 3) * b_ax
+                v = u + _box_depth(u, d, tlo, thi, T) * math.tan(alpha) * side
+                h["rays"][tuple(map(float, v))] = (v, dv := h["ask"](v))
+                stats[tag + "moved"] += 1
+                hit = None if dv is None else crossing(u, d, v, dv)
+                supported = hit is not None and inside((tlo, thi), (u + hit[0] * d) @ T.T)
+                stats[tag + "switched"] += not supported
+                state[k] = (alpha / 2 if not supported else alpha, turn + 1)
             h["locate"]()
-            anchors = [k for k in anchors if h["owner"](*h["rays"][k]) is None]
-            if len(points) > seen:  # a new point may already explain other stored observations
-                seen = len(points)
-                continue
-            if not anchors:
-                break
-            if h["count"]() - start + 3 > guard:  # the spare 2 cover `locate`'s along-ray confirmation
-                stats["guard"] = True
-                break
-            k = anchors[0]
-            u, d = h["rays"][k]
-            alpha, turn = state.get(k, (RESCUE_ALPHA0, 0))
-            if alpha < RESCUE_ALPHA_MIN:  # nothing narrower left to observe about this direction
-                anchors.pop(0)
-                continue
-            a_ax, b_ax = basis(d)
-            side = math.cos(turn * math.pi / 3) * a_ax + math.sin(turn * math.pi / 3) * b_ax
-            v = u + _box_depth(u, d, tlo, thi, T) * math.tan(alpha) * side
-            h["rays"][tuple(map(float, v))] = (v, dv := h["ask"](v))
-            stats["moved"] += 1
-            hit = None if dv is None else crossing(u, d, v, dv)
-            supported = hit is not None and inside((tlo, thi), (u + hit[0] * d) @ T.T)
-            stats["switched"] += not supported
-            state[k] = (alpha / 2 if not supported else alpha, turn + 1)
-        h["locate"]()
+
+        start = h["count"]()
+        anchors = sorted(k for k, (u, d) in h["rays"].items() if d is not None and h["owner"](u, d) is None)
+        stats["open_before"] = len(anchors)
+        pursue(anchors, lambda n: h["count"]() - start + n <= guard, "")
         stats["extra"] = h["count"]() - start
+        if not fallback:
+            return
+
+        start2 = h["count"]()
+        spend = lambda n: h["count"]() - start2 + n <= fallback_guard  # noqa: E731
+        stats["fb_before"] = len(points)
+        cells = [(np.asarray(flo, float), np.asarray(fhi, float))]
+        whole = float(np.prod(fhi - flo))
+        while True:
+            h["locate"]()
+            balls = [(u @ T.T, float(np.linalg.norm(points[i][0] - u)) - points[i][1])
+                     for u, d in h["rays"].values() if (i := h["owner"](u, d)) is not None]
+            residual = _unproven(tlo, thi, balls, []) if balls else [(tlo, thi)]
+            open_cells = [c for c in cells if not _cell_resolved(*c, R, O, T, points, residual)]
+            if not open_cells or not spend(1):
+                stats["fb_guard"] = bool(open_cells)
+                stats.update(fb_cells=len(cells), fb_unresolved=len(open_cells),
+                             fb_fraction=float(sum(np.prod(b - a) for a, b in open_cells)) / whole)
+                break
+            stats["fb_used"] = True
+            cell = max(open_cells, key=lambda c: float(np.linalg.norm(c[1] - c[0])))
+            a, b = cell
+            u = (a + b) / 2 @ R + O
+            key = tuple(map(float, u))
+            h["rays"][key] = (u, dv := h["ask"](u))
+            stats["fb_asks"] += 1
+            mid = (a + b) / 2
+            cells = [c for c in cells if c is not cell]
+            cells += [(np.minimum(c, mid), np.maximum(c, mid)) for c in _corners(a, b)]
+            h["locate"]()
+            if dv is not None and h["owner"](u, dv) is None:
+                pursue([key], spend, "fb_")
+        stats["fb_extra"] = h["count"]() - start2
+        stats["fb_points"] = len(points) - stats["fb_before"]
     return probe, stats
+
+
+_FALLBACK = True  # set by `a43r` before the pool forks: whether phase 3 runs after the cheap rescue
 
 
 def _a43r_case(case):
     records, margins = _LOADED
     v = view(case)
-    probe, stats = rescue_probe(v)
-    r = residual_map(v, margins[case["ship_class"]][0], probe)
+    margin = margins[case["ship_class"]][0]
+    probe, stats = rescue_probe(v, margin, fallback=_FALLBACK)
+    r = residual_map(v, margin, probe)
     muzzles = aimed_muzzles(case, records)
     row = _a43_row(case, r, muzzles)
     before = {j for i, (c, q) in enumerate(stats["before_points"])
@@ -1200,20 +1281,26 @@ def _a43r_case(case):
                open_before=stats["open_before"], extra=stats["extra"], moved=stats["moved"],
                switched=stats["switched"], guard=stats["guard"], newly_exposed=len(after - before),
                unexposed_before=sum(s not in before for s in sel),
-               rescued_muzzles=sum(s not in before and s in after for s in sel))
+               rescued_muzzles=sum(s not in before and s in after for s in sel),
+               **{k: stats[k] for k in ("fb_used", "fb_points", "fb_extra", "fb_asks", "fb_moved",
+                                       "fb_switched", "fb_guard", "fb_cells", "fb_unresolved", "fb_fraction")},
+               extra_total=stats["extra"] + stats["fb_extra"],
+               still_unexposed=sum(s not in after for s in sel))
     return row
 
 
-def a43r(jobs):
-    """A4.3 phase 2: adaptive rescue of the unassigned corner directions, on the same 19 cases."""
-    global _LOADED
+def a43r(jobs, fallback=False):
+    """A4.3 phase 2 (and, with `fallback`, phase 3) on the same 19 cases."""
+    global _LOADED, _FALLBACK
+    _FALLBACK = fallback
     records, margins, mounts, _excluded, _inferred = load()
     _LOADED = records, margins
     todo = [c for c in cases(targets(), mounts) if c["id"] in set(A43_CASES)]
     assert len(todo) == len(A43_CASES), (len(todo), len(A43_CASES))
     CACHE.mkdir(parents=True, exist_ok=True)
-    rows_path, sum_path = CACHE / "a43r_rows.jsonl", CACHE / "a43r_summary.txt"
-    print(f"A4.3 phase 2: {len(todo)} cases -> {rows_path}", flush=True)
+    tag = "a43f" if fallback else "a43r"
+    rows_path, sum_path = CACHE / f"{tag}_rows.jsonl", CACHE / f"{tag}_summary.txt"
+    print(f"A4.3 phase {'2+3' if fallback else '2'}: {len(todo)} cases -> {rows_path}", flush=True)
     os.nice(10)
     rows = []
     with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
@@ -1222,7 +1309,8 @@ def a43r(jobs):
             fh.write(json.dumps(r, default=float) + "\n")
             fh.flush()
             print(f"  {len(rows)}/{len(todo)} case {r['id']}: {r['points_before']}(+{r['points_new']}) pts, "
-                  f"+{r['extra']} asks, {r['switched']} switched, "
+                  f"+{r['extra']} rescue asks, +{r['fb_extra']} fallback asks (+{r['fb_points']} pts"
+                  f"{', GUARD' if r['fb_guard'] else ''}), {r['switched'] + r['fb_switched']} switched, "
                   f"{r['correct']}/{r['wrong']}/{r['unknown']} correct/wrong/UNKNOWN", flush=True)
     out = _a43r_report(rows)
     sum_path.write_text(out)
@@ -1237,7 +1325,9 @@ def _a43r_report(rows):
                                                   "switched", "newly_exposed", "unexposed_before",
                                                   "rescued_muzzles", "muzzles", "correct", "wrong", "unknown",
                                                   "unexposed", "unexposed_correct", "unexposed_unknown",
-                                                  "unexposed_wrong", "missed", "merged", "invented", "duplicate")}
+                                                  "unexposed_wrong", "missed", "merged", "invented", "duplicate",
+                                                  "fb_extra", "fb_asks", "fb_moved", "fb_switched", "fb_points",
+                                                  "fb_unresolved", "fb_cells", "extra_total")}
         return [f"{name}: {len(rs)} cases",
                 f"  unassigned corner directions:  {tot['open_before']} in {sum(r['open_before'] > 0 for r in rs)} cases",
                 f"  extra asks:                    {tot['extra']} total, med/p90/max {_stats([r['extra'] for r in rs])}"
@@ -1253,16 +1343,27 @@ def _a43r_report(rows):
                 f"  later aimed muzzles:           {tot['muzzles']} -> {tot['correct']} correct, "
                 f"{tot['wrong']} wrong, {tot['unknown']} UNKNOWN",
                 f"  of those, still-unexposed ones: {tot['unexposed']} -> {tot['unexposed_correct']} correct, "
-                f"{tot['unexposed_wrong']} wrong, {tot['unexposed_unknown']} UNKNOWN"]
+                f"{tot['unexposed_wrong']} wrong, {tot['unexposed_unknown']} UNKNOWN",
+                f"  fallback search:               used in {sum(r['fb_used'] for r in rs)} cases; "
+                f"{tot['fb_extra']} asks ({tot['fb_asks']} cell centres, {tot['fb_moved']} moved, "
+                f"{tot['fb_switched']} switched), med/p90/max {_stats([r['fb_extra'] for r in rs])}; "
+                f"+{tot['fb_points']} points; {sum(r['fb_guard'] for r in rs)} hit the {FALLBACK_GUARD}-ask guard",
+                f"  all additional asks:           {tot['extra_total']} total, med/p90/max "
+                f"{_stats([r['extra_total'] for r in rs])}",
+                f"  firing area left unresolved:   {_stats([100 * r['fb_fraction'] for r in rs])} % of the "
+                f"expanded firing box (med/p90/max), {tot['fb_unresolved']} cells of {tot['fb_cells']}"]
 
     one = [r for r in rows if r["points_before"] < 2]
     two = [r for r in rows if r["points_before"] >= 2]
     wrong = [r for r in rows if r["wrong"]]
-    L = ["A4.3 phase 2: adaptive rescue of unassigned corner directions (corner audit + moved asks)", ""]
+    L = ["A4.3 phase 2/3: adaptive corner rescue, then the uncertainty-driven firing-area fallback", ""]
     L += block("cases the corners gave one point", one) + [""]
     L += block("cases the corners gave two points", two) + [""]
     L += block("all A4.3 cases", rows) + ["",
-          "guard cases: " + (", ".join(str(r["id"]) for r in rows if r["guard"]) or "none"),
+          "rescue-guard cases: " + (", ".join(str(r["id"]) for r in rows if r["guard"]) or "none"),
+          "fallback-guard cases: " + (", ".join(str(r["id"]) for r in rows if r["fb_guard"]) or "none"),
+          "cases with an affected muzzle still not represented: "
+          + (", ".join(f"{r['id']} ({r['still_unexposed']})" for r in rows if r["still_unexposed"]) or "none"),
           "wrong answers: " + (", ".join(f"case {r['id']} ({r['wrong']})" for r in wrong) if wrong else "none")]
     return "\n".join(L)
 
@@ -1506,11 +1607,25 @@ def selftest():
     quad = [(x, 0, z) for x in (-350, 350) for z in (-350, 350)]
     case, v = synthetic(quad, (0, 0, 0), (400, 400, 400), ship=((-200, -200, -200), (200, 200, 200)), at=(0, 1500, 0))
     assert not corner_audit(v, 0)["points"]
-    rescue, stats = rescue_probe(v)
+    rescue, stats = rescue_probe(v, 0, fallback=False)
     r = residual_map(v, 0, rescue)
     assert stats["open_before"] == 8 and not stats["guard"] and stats["extra"] <= RESCUE_GUARD, stats
     assert 0 < stats["moved"] < stats["open_before"], stats
     check(case, r, [], missed=0, merged=0, duplicate=0)  # four estimates, one true point each, none invented
+
+    # A4.3 phase 3: two points split the eight corners four/four, so the corners confirm both and the cheap
+    # rescue has no unassigned direction to follow - yet a third point wins inside the firing area, and the
+    # only evidence of it is that the empty balls cannot rule out the target space it sits in. The
+    # uncertainty-driven cell search must find it without being told where it is.
+    hidden3 = [(-350, 0, 0), (350, 0, 0), (0, -20, 0)]
+    case, v = synthetic(hidden3, (0, 0, 0), (400, 400, 400), ship=((-200, -200, -200), (200, 200, 200)),
+                        at=(0, 1500, 0))
+    assert len(corner_audit(v, 0)["points"]) == 2
+    rescue, stats = rescue_probe(v, 0)
+    r = residual_map(v, 0, rescue)
+    assert stats["open_before"] == 0 and stats["extra"] == 0, stats  # nothing for the cheap rescue to pursue
+    assert stats["fb_used"] and stats["fb_asks"] > 0 and stats["fb_points"] == 1, stats
+    check(case, r, [], missed=0, merged=0, duplicate=0)  # the third point is now represented, nothing invented
 
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
@@ -1546,6 +1661,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a43f" in sys.argv:
+        return a43r(arg("--jobs", 4), fallback=True)
     if "--a43r" in sys.argv:
         return a43r(arg("--jobs", 4))
     if "--a43" in sys.argv:
