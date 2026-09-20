@@ -7,7 +7,7 @@ One experiment, one question:
 > its adaptive probes are placed near the target instead of around the firing
 > ship?
 
-Run with `python3 research/issue184/aimpoint_map.py --a7`.
+Run with `python3 research/issue184/aimpoint_map.py --a6-near`.
 
 ## What changed
 
