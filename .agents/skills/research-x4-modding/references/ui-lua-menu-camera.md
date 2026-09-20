@@ -131,6 +131,28 @@
 
 ## Targets and surface elements
 
+### GetRelativeAimOffset is unusable from Gunnery Control's pre-selection target browser
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: live session 2026-09-20, extension `x4_gunnery_control` tested at
+  `6e54e58bd3f33b1c057af052e82e9a7e4ad6517d`, Test Lab scenario
+  `issue-184-relative-aim-preselect-r1`; game `debug.log`
+- Live test: yes — two unselected hostile Osaka candidates
+- Finding: calling `GetRelativeAimOffset(candidateID)` from Gunnery Control
+  while the Direct-control target browser is evaluating candidates does not
+  produce an aim point. In both calls Gunnery Control was still in
+  `phase=target_select`, `session.aimTargetID` was unset, and X4's soft target
+  was `0ULL`. X4 logged:
+  `Invalid case. GetRelativeAimOffset() was called without the player controlling anything atm. Aborting function call.`
+  and returned a zero `PosRot` (`x/y/z/yaw/pitch/roll = 0`).
+- Consequence: this getter cannot be used as Issue #184's pre-selection
+  aim-point source. A successful Lua/FFI return is not proof of a valid aim
+  result; the all-zero value in this state is an engine abort result.
+- Scope: this does not establish what the getter returns while the player is
+  actively controlling a weapon/object. That path has no current Issue #184
+  consumer because Gunnery Control needs the answer before target selection.
+
+
 ### Soft targets preserve component IDs and connection names
 - X4: 9.00
 - Status: shipped-source
