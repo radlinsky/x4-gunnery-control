@@ -86,3 +86,47 @@ For the bounded pending discriminator, predictions and source population see
 [the research audit](../../../../research/issue167-p3c/outside-box-audit.md).
 Keep experiment counts and task status there or in the owning issue, not in
 this reference's technical index entry.
+
+## Authored aim points across the whole ship corpus
+
+- X4: 9.00; SWI 0.9.1 HF
+- Status: inference, from `shipped-source` official XML and
+  `third-party-technique` mod XML
+- Source: every component behind a `ship_s`/`ship_m`/`ship_l`/`ship_xl` macro
+  in the official source sets plus the SWI `assets/**` XML with its `<diff>`
+  patches and same-name replacements applied — 430 components, 834 authored
+  `aimtarget` connections. Parser and full analysis:
+  `research/issue184/ship_aimpoint_census.py`.
+- Live test: no — source census only; no runtime measurement.
+- Finding: authored aim points are hand-placed constants with no derivation
+  rule. Four properties hold with no counterexample in the corpus:
+  the ordered point list is a property of the *component*, identical in every
+  macro that uses it, while the reconstructed box varies by up to 25.2 m
+  between a component's macros; no aim connection carries a `parent`
+  attribute (0 of 834), so the authored offset is already the component-frame
+  position; selection order is the native connection-name hash and differs
+  from document order for 112 of the 142 multi-point components; and every
+  single-point ship places its point on `x = 0` (102 of 102).
+  Nothing else generalizes. A single point is neither the component origin
+  (47 of 102, and 0 of the 5 official ones) nor the reconstructed box centre
+  (18 of 102). Eight points lie outside their own reconstructed runtime box,
+  reaching a normalized |n| of 3.17 on x — independent corpus-scale
+  corroboration that aim-point containment must not be assumed. Lateral
+  symmetry covers 822 of 834 points but six components are asymmetric,
+  four of them official.
+
+**Most ships author no aim point at all.** 184 of the 203 official
+`ship_s`–`ship_xl` components in 9.00 carry no `aimtarget` connection; only 19
+do. For those 184 the nearest-authored-point selector's absent/empty
+collection branch decides, and that branch is not characterized above. Any
+work that treats authored aim points as the general answer for vanilla ships
+is addressing 9% of them.
+
+SWI 0.9.1 HF is an overhaul, so its ships and vanilla ships never share a game
+and corpus statistics must be read per population. Applying its 214 `<diff>`
+files (443 `<remove>`, 932 `<replace>`, 5 `<add>`) changes the reconstructed
+box, because those operations delete and retag connections that feed it, but
+**no SWI diff anywhere modifies an `aimtarget` connection**: every SWI aim
+point is authored in a full component definition. SWI also refers to some
+official assets with different capitalisation than the official file uses, and
+defines 41 names in two files each.

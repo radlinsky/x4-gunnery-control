@@ -17,7 +17,12 @@ python3 research/issue184/aimpoint_map.py --a43r      # A4.3 phase 2 rescue, sam
 python3 research/issue184/aimpoint_map.py --a43f      # A4.3 phase 3 fallback, same 19 cases
 python3 research/issue184/aimpoint_map.py --a43h      # A4.3 phase 4 coverage map, same 19 cases
 python3 research/issue184/aimpoint_map.py --a43a      # A4.3 phase 5 angular search, same 19 cases
+python3 research/issue184/ship_aimpoint_census.py     # A4.4 ship aim-point census (~3 min)
 ```
+
+A4.4 is written up separately in [A44_CENSUS.md](A44_CENSUS.md): the complete
+vanilla 9.00 + SWI 0.9.1 HF ship aim-point census, which applies the SWI
+`<diff>` patches and same-name replacements this benchmark deliberately skips.
 
 Needs the ignored #176 caches (`python3 research/issue176-a4x/corpus.py`, the
 #167 study corpus) and the SWI asset XML extracted from the owner's
