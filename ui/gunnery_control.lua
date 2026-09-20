@@ -1494,33 +1494,6 @@ end
 -- events avoid relying on unproven nested-table transport: selected turret ids
 -- are streamed once, followed by at most 20 target ids for the batch.
 local engageabilityBatchSize = 20
-local function logCandidateAimOffset(target)
-    if not session or session.phase ~= "target_select" then return end
-    local targetID = id(target)
-    local getter = C.GetRelativeAimOffset
-    if type(getter) ~= "cdata" then return end
-    local softtarget = C.GetSofttarget2()
-    local ok, aim = pcall(getter, targetID)
-    if not ok then
-        log("event=aim_offset_probe action=error candidate=" .. tostring(targetID)
-            .. " phase=" .. tostring(session.phase)
-            .. " aim_target=" .. tostring(session.aimTargetID or "none")
-            .. " soft_target=" .. tostring(softtarget.softtargetID)
-            .. " error=" .. tostring(aim))
-        return
-    end
-    log("event=aim_offset_probe action=result candidate=" .. tostring(targetID)
-        .. " phase=" .. tostring(session.phase)
-        .. " aim_target=" .. tostring(session.aimTargetID or "none")
-        .. " soft_target=" .. tostring(softtarget.softtargetID)
-        .. " x=" .. tostring(aim.x)
-        .. " y=" .. tostring(aim.y)
-        .. " z=" .. tostring(aim.z)
-        .. " yaw=" .. tostring(aim.yaw)
-        .. " pitch=" .. tostring(aim.pitch)
-        .. " roll=" .. tostring(aim.roll))
-end
-
 local function requestEngageabilities(targets, purpose)
     local results = {}
     if not session then return results end
@@ -1618,9 +1591,7 @@ local function requestEngageabilities(targets, purpose)
             local entry = pending[index]
             entry.cached.pendingNonce = nonce
             request.targets[entry.targetKey] = entry.key
-            if purpose == nil and session.phase == "target_select" then
-                logCandidateAimOffset(entry.target)
-            end
+            if purpose == nil and session.phase == "target_select" and type(C.GetRelativeAimOffset) == "cdata" then local targetID = id(entry.target); local softtarget = C.GetSofttarget2(); local ok, aim = pcall(C.GetRelativeAimOffset, targetID); if ok then log("event=aim_offset_probe action=result candidate=" .. tostring(targetID) .. " phase=" .. tostring(session.phase) .. " aim_target=" .. tostring(session.aimTargetID or "none") .. " soft_target=" .. tostring(softtarget.softtargetID) .. " x=" .. tostring(aim.x) .. " y=" .. tostring(aim.y) .. " z=" .. tostring(aim.z) .. " yaw=" .. tostring(aim.yaw) .. " pitch=" .. tostring(aim.pitch) .. " roll=" .. tostring(aim.roll)) else log("event=aim_offset_probe action=error candidate=" .. tostring(targetID) .. " phase=" .. tostring(session.phase) .. " aim_target=" .. tostring(session.aimTargetID or "none") .. " soft_target=" .. tostring(softtarget.softtargetID) .. " error=" .. tostring(aim)) end end
             AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
                 nonce = nonce, target = id(entry.target),
             })
