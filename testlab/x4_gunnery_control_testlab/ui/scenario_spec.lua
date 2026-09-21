@@ -51,48 +51,35 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-184-relative-aim-preselect-r1",
+    -- The spawned ship only triggers the macro-property dump; no target,
+    -- weapon loadout, teleport, or firing measurement is required.
+    id      = "issue-171-origin-inside-box-r1",
     enabled = false,
 
     setup = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
         shipLabel       = "Ray",
         turretGroup     = "group_front_up_left",
-        turretLabel     = "All Turrets",
-        expectedTurrets = 14,
-        selectAll       = true,
+        turretLabel     = "Front Upper Left",
+        expectedTurrets = 2,
     },
 
     groups = {
         {
-            label     = "ISSUE184 PRIMARY LEFT OSAKA",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
+            label     = "ISSUE171 BOX PROBE",
+            macro     = "ship_arg_s_fighter_01_a_macro",
+            faction   = "player",
             count     = 1,
-            distance  = 3500,
-            x         = -900,
+            distance  = 2000,
+            x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
+            yaw       = 0,
+            pitch     = 0,
+            roll      = 0,
+            preserveOrientation = true,
             stripDefenceUnits = true,
-            repairGuard = true,
-        },
-        {
-            label     = "ISSUE184 DISTRACTOR RIGHT OSAKA",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 3500,
-            x         = 900,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard = true,
         },
     },
 }
