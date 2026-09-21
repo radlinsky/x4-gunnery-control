@@ -20,6 +20,7 @@ python3 research/issue184/aimpoint_map.py --a43a      # A4.3 phase 5 angular sea
 python3 research/issue184/aimpoint_map.py --a6-near   # A6 near-target probing + point refinement, 19 cases x 3 gaps
 python3 research/issue184/aimpoint_map.py --a7        # A7.1 focused validation + full 24-ask stopping traces
 python3 research/issue184/aimpoint_map.py --a72       # A7.2 stopping rule, cost bound, definite/UNKNOWN rule
+python3 research/issue184/aimpoint_map.py --a73       # A7.3 frozen 40-sample search, representative population
 python3 research/issue184/ship_aimpoint_census.py     # A4.4 ship aim-point census, both games (~6 min)
 ```
 
@@ -50,6 +51,20 @@ the cost bound blocks the next one), the four-part X4-question bound, and the
 rule that decides a definite aim point versus UNKNOWN. It rescores every state of
 the same 126 focused cases under both the plain `nearest` answer and `nearest`
 plus the completeness guard `target_box_map` already uses.
+
+A7.3 research, [A73_BROAD.md](A73_BROAD.md), runs the frozen near-target-only
+search - all 8 corners of the padded target runtime box, the existing location,
+confirmation, moved-probe, adaptive and refinement rules, one hard total of 40
+samples - on a small representative population rather than an exhaustive
+ship/turret matrix: 7 firing ships picked by a fixed geometric rule, one or two
+representative compatible turrets per mount instead of the whole equipment
+catalogue, 9 target components spanning 1 to 4 authored aim points and 4 m to
+1.3 km of reach, ordinary and selection-boundary bearings, and 100 m / 1 km /
+8 km standoffs. The search reads only the target box and X4's answers, so each
+view is searched once and the finished map is reused for every scenario that
+shares it. The same run measures where the benchmark spends its time; its
+loading path skips the `class_margins()` sweep, which nothing in the frozen
+search or its scoring uses.
 
 A4.4 is written up separately in [A44_CENSUS.md](A44_CENSUS.md). It censuses
 pristine vanilla 9.00 and SWI 0.9.1 HF as two independent games — SWI is an

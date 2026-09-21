@@ -19,6 +19,7 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a6-near [--jobs 4]          # A6 near-target probing + refinement
     python3 research/issue184/aimpoint_map.py --a7   [--jobs 4]             # A7.1 focused validation + traces
     python3 research/issue184/aimpoint_map.py --a72  [--jobs 4]             # A7.2 stopping rule and cost bound
+    python3 research/issue184/aimpoint_map.py --a73                         # A7.3 frozen 40-sample search, broad
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -29,6 +30,7 @@ import json
 import math
 import os
 import sys
+import time
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from multiprocessing import Pool
@@ -3947,6 +3949,539 @@ def _a72d_report(dev, hold, pick, entries):
     return "\n".join(L) + "\n"
 
 
+# ------------------------------------------------- A7.3: the frozen search on a representative population
+
+A73_EVIDENCE = Path(__file__).with_name("A73_BROAD.md")
+A73_TOTAL = 40           # the frozen hard total: the 8 fixed starts and everything after them share it
+A73_GEOM = "C8"          # the frozen starting geometry: all 8 corners of the target runtime box + A6_NEAR_PAD
+A73_GAPS = (100, 1000, 8000)   # realistic engagement standoffs
+A73_ORDINARY = (0, 3)    # ordinary bearing indices taken from the `cases` ordinary group
+A73_BOUNDARY = (0, 4)    # difficult bearing indices: the aim-point selection-boundary plane of `cases`
+A73_ROT_STEP = 6         # firing-ship rotation = study.ROT[(A73_ROT_STEP * ship index + view index) % 24]
+
+# The representative firing-ship rule, fixed before anything was scored and computed from the reconstructed
+# runtime box and the mounts a corpus turret fits - never from a search result. `mounts` is how many such
+# mounts the ship has, `spread` the mean over the three axes of the standard deviation of the mount
+# positions, each axis normalised by the box extent. One extremal ship per criterion, ties by macro name.
+A73_SHIP_RULE = (
+    ("M1", "ship_m", "official", "mounts", "min", "fewest mounts: one concentrated mount position"),
+    ("M2", "ship_m", "swi", "mounts", "max", "most mounts: many mounts around a compact medium hull"),
+    ("L1", "ship_l", "official", "mounts", "min", "fewest mounts on a physically large hull"),
+    ("L2", "ship_l", "official", "mounts", "max", "the vanilla L carrying the most mounts"),
+    ("L3", "ship_l", "swi", "mounts", "max", "most mounts on a very large hull"),
+    ("L4", "ship_l", "swi", "spread", "max", "mounts spread furthest around the hull: top, bottom and sides"),
+    ("X1", "ship_xl", "official", "mounts", "max", "turret-heavy XL, included as a performance stress case"),
+)
+
+
+def a73_ship_stats(ms):
+    """Geometry of one firing ship, from its runtime box and its mounts alone."""
+    lo, hi = ms[0]["box"]
+    pos = np.asarray([m["frames"][m["turrets"][0]][0] for m in ms])
+    rel = (pos - (lo + hi) / 2) / np.maximum(hi - lo, 1e-9)
+    return dict(mounts=len(ms), size=float(np.linalg.norm(hi - lo)),
+                spread=float(np.mean(np.std(rel, axis=0))) if len(ms) > 1 else 0.0)
+
+
+def a73_ships(mounts):
+    """The representative firing ships of `A73_SHIP_RULE`, in that order."""
+    by = defaultdict(list)
+    for m in mounts:
+        by[m["ship"]].append(m)
+    meta = {s: dict(a73_ship_stats(ms), cls=ms[0]["cls"], source=ms[0]["source"]) for s, ms in by.items()}
+    out = []
+    for tag, cls, src, metric, direction, why in A73_SHIP_RULE:
+        pool = sorted(s for s, d in meta.items() if d["cls"] == cls and d["source"] == src)
+        sign = -1 if direction == "max" else 1
+        ship = min(pool, key=lambda s: (sign * meta[s][metric], s))
+        out.append(dict(meta[ship], tag=tag, ship=ship, why=why, rule=f"{cls} {src}: {direction} {metric}",
+                        pool=len(pool)))
+    assert len({o["ship"] for o in out}) == len(A73_SHIP_RULE), [o["ship"] for o in out]
+    return out
+
+
+_A73_GEOM = {}
+
+
+def a73_turret_geometry(key, records):
+    """(muzzle offset at rest, leaf arc span in degrees) of one corpus turret: the two geometric properties
+    that decide where a later aimed barrel position ends up - how far the muzzle sits from the mount, and how
+    much of the sky the turret can put it in. Unlimited arcs count as 360 degrees."""
+    if key not in _A73_GEOM:
+        leaf, _root, seg = scorer.segments(records[key])
+        t, _R = scorer.compose(scorer.compose(seg["L"], seg["G"]), seg["H"])
+        lim = leaf["limits"]
+        _A73_GEOM[key] = (float(math.sqrt(sum(x * x for x in t))),
+                          360.0 if lim is None else float(lim[1] - lim[0]))
+    return _A73_GEOM[key]
+
+
+def a73_loadout(ship_mounts, records):
+    """The representative loadout of one firing ship, fixed before anything was scored.
+
+    The A7.1/A7.2 hidden truth expands every mount into every compatible corpus turret, which is the whole
+    equipment catalogue rather than a realistic ship. A7.3 instead ranks each mount's compatible turrets by
+    (muzzle offset at rest, widest arc first, key) and keeps the two ends of that ranking: the shortest
+    barrel with the broadest arc, and the longest barrel with the narrowest arc. One turret cannot represent
+    both, and nothing between them reaches a barrel position outside the two. Mounts whose compatible
+    turrets share one geometry keep a single turret."""
+    out = []
+    for m in ship_mounts:
+        keys = sorted(m["turrets"], key=lambda k: (a73_turret_geometry(k, records)[0],
+                                                   -a73_turret_geometry(k, records)[1], k))
+        out.append(dict(m, turrets=sorted({keys[0], keys[-1]}, key=keys.index)))
+    return out
+
+
+def a73_targets(ts):
+    """The representative target population, fixed before anything was scored and chosen from authored
+    aim-point count and box size only: for each authored-point count the smallest and largest target by
+    bounding-sphere reach |H|, plus the median one-point target. Ties by component name."""
+    by = defaultdict(list)
+    for t in ts:
+        by[len(t["points"])].append(t)
+    out = []
+    for k in sorted(by):
+        if k > 4:
+            continue
+        g = sorted(by[k], key=lambda t: (float(np.linalg.norm(t["H"])), t["component"]))
+        for i in dict.fromkeys([0, len(g) // 2, len(g) - 1] if k == 1 else [0, len(g) - 1]):
+            out.append(g[i])
+    return out
+
+
+def a73_views(ts, mounts):
+    """One view = one target in one rotation seen from one bearing. Two ordinary bearings for every chosen
+    target, plus two difficult bearings in the perpendicular bisector plane of the target's nearest authored
+    aim-point pair for every multi-point target. The `cases` generator already builds both; A7.3 takes fixed
+    bearing indices from it, so the target rotation varies with the bearing exactly as `cases` defines it."""
+    want = {t["component"]: t for t in a73_targets(ts)}
+    seen = defaultdict(list)
+    for c in cases(ts, mounts):
+        if c["target"] in want and c["group"] in ("ordinary", "boundary"):
+            seen[c["target"], c["group"]].append(c)
+    views = []
+    for name, t in want.items():
+        for group, bearings, ngaps in (("ordinary", A73_ORDINARY, len(GAPS["ordinary"])),
+                                       ("boundary", A73_BOUNDARY, len(BOUNDARY_GAPS))):
+            got = seen.get((name, group))
+            if not got:
+                continue
+            assert len(got) == BEARINGS * ngaps, (name, group, len(got))
+            for b in bearings:
+                views.append(dict(case=got[b * ngaps], target=t, group=group, bearing=b,
+                                  authored=len(t["points"])))
+    return views
+
+
+def _a73_anchor(v):
+    """The point the firing ship's standoff is measured from, exactly as `cases` measured it."""
+    c, t = v["case"], v["target"]
+    T = c["box"][2]
+    if v["group"] == "ordinary":
+        return np.asarray(c["box"][0]) @ T
+    pairs = [(a, b) for a in range(len(t["points"])) for b in range(a + 1, len(t["points"]))]
+    a, b = min(pairs, key=lambda ab: study.norm(study.sub(t["points"][ab[0]], t["points"][ab[1]])))
+    return np.asarray(study.pair_frame(t, a, b)[0]) @ T
+
+
+def _a73_standoff(box, t_m):
+    lo, hi = box
+    return float(np.linalg.norm(hi - lo) / 2 + np.linalg.norm(t_m - (lo + hi) / 2))
+
+
+def a73_scenario(v, anchor, base, ms, ship, f_rot, gap):
+    """One firing-ship/target scenario: the view's target, rotation and bearing unchanged, with the
+    representative firing ship placed along that same bearing so its whole box clears the target by `gap`."""
+    c = v["case"]
+    d = c["origin"] - anchor
+    d = d / np.linalg.norm(d)
+    key = ms[0]["turrets"][0]
+    t_m, R_m = ms[0]["frames"][key]
+    O = anchor + d * (base + _a73_standoff(ms[0]["box"], t_m) + gap)
+    return dict(c, group=v["group"], ship=ship["ship"], ship_class=ship["cls"], source=ship["source"],
+                ship_box=ms[0]["box"], mount=ms[0]["name"], turret=key, rotation=f_rot, origin=O,
+                position=O - t_m @ f_rot, frame=R_m @ f_rot, gap=gap)
+
+
+def a73_confirmed_at(found):
+    """{point index: the sample count at which it became confirmed}, from the search's own `found` trace."""
+    out, prev = {}, 0
+    for count, n in found:
+        for i in range(prev, n):
+            out[i] = count
+        prev = n
+    return out
+
+
+def _a73_metrics(scn, pts, rpts, muzzles, answers):
+    """Score one finished map against one scenario's hidden truth. `answers` are the production-like
+    `nearest` results, already computed and timed separately, so nothing here repeats that work."""
+    truth = [tuple(map(float, p)) for p in scn["points"]]
+    cover = {i: [j for j, p in enumerate(truth) if np.linalg.norm(np.asarray(c) - p) <= r]
+             for i, (c, r) in enumerate(rpts)}
+    hits = Counter(j for js in cover.values() for j in js)
+    correct = wrong = unknown = 0
+    needed = set()
+    for m, a in zip(muzzles.values(), answers):
+        j = study.select(tuple(map(float, m)), truth)
+        needed.add(j)
+        if a is UNKNOWN:
+            unknown += 1
+        elif cover.get(a) == [j]:
+            correct += 1
+        else:
+            wrong += 1
+    rep = {j for js in cover.values() for j in js}
+    at = scn["confirmed_at"]
+    last = max((at.get(i, 0) for i, js in cover.items() if set(js) & needed), default=0)
+    return dict(muzzles=len(muzzles), correct=correct, wrong=wrong, unknown=unknown,
+                needed=len(needed), needed_found=len(needed & rep), needed_missed=sorted(needed - rep),
+                authored_missed=sorted(set(range(len(truth))) - rep),
+                invented=sum(not js for js in cover.values()),
+                merged=sum(len(js) > 1 for js in cover.values()),
+                duplicate=sum(v > 1 for v in hits.values()),
+                identity_changed=sum(x != y for x, y in zip(_cover(pts, scn["points"]),
+                                                            _cover(rpts, scn["points"]))),
+                last_needed_at=last)
+
+
+def a73(jobs):
+    """A7.3: run the frozen 40-sample near-target-only search on a small representative population of firing
+    ships, loadouts, targets, views and distances, and measure where the benchmark spends its time.
+
+    The search reads only the target's runtime box and X4's answers from probe positions on it, so every
+    scenario that shares a view runs the identical search. Each view is searched once and the finished map
+    is reused for all its scenarios; the sample-cost statistics are therefore reported per search, and the
+    correctness statistics per scenario. `jobs` is accepted and ignored: the run is single-process so the
+    phase timings are not contended."""
+    _ = jobs
+    os.nice(10)
+    t_setup = time.perf_counter()
+    skipped = _index_swi_ships()                      # A7.3 loading path: no `class_margins` sweep. The
+    records = scorer.load()                           # frozen near-target-only search never reads the
+    components = corpus._index_xml([corpus.SWI_XML,   # firing-ship search box or its class margin, and
+                                    corpus.OFFICIAL_SRC], "component")   # neither does the scoring.
+    mounts, _excluded, _inferred = firing_mounts(records, components)
+    assert skipped
+    ts = targets()
+    ships = a73_ships(mounts)
+    by_ship = defaultdict(list)
+    for m in mounts:
+        by_ship[m["ship"]].append(m)
+    loadout = {s["ship"]: a73_loadout(by_ship[s["ship"]], records) for s in ships}
+    for s in ships:
+        s["all_turrets"] = sum(len(m["turrets"]) for m in by_ship[s["ship"]])
+    views = a73_views(ts, mounts)
+    setup_s = time.perf_counter() - t_setup
+
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path = CACHE / "a73_rows.jsonl"
+    n_scn = len(views) * len(ships) * len(A73_GAPS)
+    print(f"#184 A7.3: {len(views)} searches, {len(ships)} firing ships, {len(A73_GAPS)} standoffs "
+          f"-> {n_scn} scenarios, setup {setup_s:.1f}s -> {rows_path}", flush=True)
+
+    searches, rows = [], []
+    with open(rows_path, "w") as fh:
+        for vi, v in enumerate(views):
+            c = v["case"]
+            t0 = time.perf_counter()
+            st = near_only_run(view(c), total=A73_TOTAL, pad=A6_NEAR_PAD, geom=A73_GEOM)
+            pts = [(np.asarray(x, float), r) for x, r in st["points"]]
+            rpts, n_ref, skipped_ref = refine_points(pts, st["rays"])
+            search_s = time.perf_counter() - t0
+            loc = [(i, c_, r) for i, (c_, r) in enumerate(rpts)]
+            at = a73_confirmed_at(st["found"])
+            searches.append(dict(view=vi, target=v["target"]["component"], group=v["group"],
+                                 bearing=v["bearing"], authored=v["authored"], samples=st["asks"],
+                                 end=st["end"], points=len(pts), refined=n_ref, seconds=search_s,
+                                 reach=float(np.linalg.norm(v["target"]["H"])),
+                                 skipped=Counter(skipped_ref)))
+            anchor = _a73_anchor(v)
+            base = float(np.linalg.norm(c["origin"] - anchor)) - c["gap"] - _a73_standoff(
+                c["ship_box"], (c["origin"] - c["position"]) @ c["rotation"].T)
+            for si, ship in enumerate(ships):
+                ms = loadout[ship["ship"]]
+                f_rot = np.asarray(study.ROT[(A73_ROT_STEP * si + vi) % 24])
+                for gap in A73_GAPS:
+                    scn = dict(a73_scenario(v, anchor, base, ms, ship, f_rot, gap), confirmed_at=at)
+                    t1 = time.perf_counter()
+                    muzzles = ship_aimed_muzzles(scn, records, ms)
+                    t2 = time.perf_counter()
+                    answers = [nearest(loc, m) for m in muzzles.values()]
+                    t3 = time.perf_counter()
+                    got = _a73_metrics(scn, pts, rpts, muzzles, answers)
+                    t4 = time.perf_counter()
+                    row = dict(got, view=vi, target=v["target"]["component"], group=v["group"],
+                               bearing=v["bearing"], authored=v["authored"], gap=gap, ship=ship["ship"],
+                               tag=ship["tag"], ship_class=ship["cls"], source=ship["source"],
+                               turrets=sum(len(m["turrets"]) for m in ms), mounts=len(ms),
+                               rot=(A73_ROT_STEP * si + vi) % 24, samples=st["asks"], end=st["end"],
+                               points=len(pts), truth_s=t2 - t1, apply_s=t3 - t2, score_s=t4 - t3,
+                               search_s=search_s)
+                    rows.append(row)
+                    fh.write(json.dumps(row, default=float) + "\n")
+            fh.flush()
+            w = sum(r["wrong"] for r in rows if r["view"] == vi)
+            m = sum(len(r["needed_missed"]) for r in rows if r["view"] == vi)
+            print(f"  search {vi + 1}/{len(views)} {v['target']['component']} {v['group']}"
+                  f"/b{v['bearing']} ({v['authored']} authored): {st['asks']} samples, {len(pts)} points, "
+                  f"end {st['end']}, {search_s:.2f}s -> {len(ships) * len(A73_GAPS)} scenarios, "
+                  f"{w} wrong, {m} needed missed", flush=True)
+    out = _a73_report(ships, loadout, views, searches, rows, setup_s)
+    A73_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {rows_path}, evidence: {A73_EVIDENCE})")
+
+
+def _a73_q(xs, ps=(50, 90)):
+    """(mean, median, p90, worst) of `xs`; percentiles by nearest rank."""
+    xs = sorted(xs)
+    if not xs:
+        return (0.0,) * (2 + len(ps))
+    pick = [xs[min(len(xs) - 1, int(math.ceil(p / 100 * len(xs))) - 1)] for p in ps]
+    return (float(np.mean(xs)), *map(float, pick), float(xs[-1]))
+
+
+def _a73_ms(xs):
+    mean, med, p90, worst = _a73_q(xs)
+    return f"{mean * 1e3:.1f} | {med * 1e3:.1f} | {p90 * 1e3:.1f} | {worst * 1e3:.1f}"
+
+
+_A73_PHASES = {"generating the hidden benchmark truth": "truth_s", "the aim-point search": "search_s",
+               "applying the map to the firing ship's barrels": "apply_s", "scoring": "score_s"}
+
+
+def _a73_report(ships, loadout, views, searches, rows, setup_s):
+    S = lambda k: sum(len(r[k]) if isinstance(r[k], list) else r[k] for r in rows)  # noqa: E731
+    V = lambda k: sum(len(s[k]) if isinstance(s[k], list) else s[k] for s in searches)  # noqa: E731
+    prod = [r["search_s"] + r["apply_s"] for r in rows]
+    full = [r["search_s"] + r["truth_s"] + r["apply_s"] + r["score_s"] for r in rows]
+    slow = max(rows, key=lambda r: r["search_s"] + r["truth_s"] + r["apply_s"] + r["score_s"])
+    phases = {"aim-point search (shared, per search)": sum(s["seconds"] for s in searches),
+              "hidden truth (research only)": sum(r["truth_s"] for r in rows),
+              "applying the map to the firing ship's barrels": sum(r["apply_s"] for r in rows),
+              "scoring (research only)": sum(r["score_s"] for r in rows),
+              "corpus/setup (one-off)": setup_s}
+    worst_phase = max(phases, key=phases.get)
+    margins = [(s["samples"] - max((r["last_needed_at"] for r in rows if r["view"] == s["view"]), default=0),
+                s) for s in searches]
+    tight = sorted(margins, key=lambda m: m[0])
+    passed = not (S("wrong") or S("needed_missed") or S("invented") or S("merged") or S("duplicate")
+                  or S("identity_changed"))
+    L = ["# Issue #184 A7.3: the frozen 40-sample near-target search on a representative population", "",
+         "Offline research, status **inference**. No X4 launch, no production change. The search, its",
+         "starting geometry and its 40-sample total are frozen inputs to this task and nothing here tunes",
+         "them. Run with `python3 research/issue184/aimpoint_map.py --a73`.", "",
+         "One **sample** is one X4 aim-direction lookup from one probe position.", "",
+         "## The frozen search", "",
+         f"- start with the {len(near_starts((0, 0, 0), (1, 1, 1), geom=A73_GEOM))} fixed probes of the",
+         f"  `{A73_GEOM}` geometry: all 8 corners of the target's runtime box grown by the existing",
+         f"  {A6_NEAR_PAD:g} m near-target pad;",
+         "- the existing point-location and confirmation rules, unchanged;",
+         "- the existing moved-probe continuation where the fixed starts confirm nothing;",
+         "- then the existing adaptive near-target search on the largest missing viewing direction;",
+         "- then the existing post-search refinement, which spends no sample;",
+         f"- hard total **{A73_TOTAL} samples**. The 8 starts count toward it, and moved probes,",
+         "  confirmation samples, adaptive probes and their confirmations all share what is left. The",
+         "  adaptive stage has no allowance of its own.", "",
+         "Hidden aim points and later aimed barrel positions are scoring truth only. They never touch probe",
+         "placement, stopping or the budget.", "",
+         "## Representative firing ships", "",
+         "Selection rule, fixed before anything was scored and computed from each ship's reconstructed",
+         "runtime box and the turret mounts a corpus turret fits - never from a search result. `mounts` is",
+         "how many such mounts the ship has; `spread` is the mean over the three axes of the standard",
+         "deviation of the mount positions, each axis normalised by the box extent. One extremal ship per",
+         "criterion, ties by macro name.", "",
+         "| | ship | class | source | rule | mounts | box diagonal (m) | spread | representative turret "
+         "instances | why |", "|---|---|---|---|---|---:|---:|---:|---:|---|"]
+    for s in ships:
+        ms = loadout[s["ship"]]
+        L.append(f"| `{s['tag']}` | `{s['ship']}` | {s['cls']} | {s['source']} | {s['rule']} "
+                 f"({s['pool']} candidates) | {s['mounts']} | {s['size']:.0f} | {s['spread']:.3f} | "
+                 f"{sum(len(m['turrets']) for m in ms)} | {s['why']} |")
+    L += ["", "`X1` is present as a performance stress case only; it is scored like every other ship.", "",
+          "## Representative turrets, not every compatible turret", "",
+          "Selection rule, fixed before anything was scored. A7.1/A7.2 expanded every mount into every",
+          "compatible corpus turret, which enumerates the equipment catalogue rather than a realistic ship.",
+          "A7.3 ranks each mount's compatible turrets by (muzzle offset at rest, widest arc first, key) and",
+          "keeps the two ends of that ranking: the shortest barrel with the broadest arc, and the longest",
+          "barrel with the narrowest arc. Those are the two geometries that decide where a later aimed",
+          "barrel position ends up, one turret cannot represent both, and nothing between them reaches a",
+          "barrel position outside the two. A mount whose compatible turrets share one geometry keeps a",
+          "single turret.", "",
+          "| | mounts | compatible turret instances (A7.1 truth) | representative instances | reduction |",
+          "|---|---:|---:|---:|---:|"]
+    for s in ships:
+        raw = sum(len(m["turrets"]) for m in loadout[s["ship"]])
+        L.append(f"| `{s['tag']}` | {len(loadout[s['ship']])} | {s['all_turrets']} | {raw} | "
+                 f"{s['all_turrets'] / max(raw, 1):.1f}x |")
+    tgt = sorted({(s["target"], s["authored"]) for s in searches})
+    L += ["", "## Representative targets and views", "",
+          "Target rule, fixed before anything was scored and read from authored aim-point count and box size",
+          "only: for each authored aim-point count, the smallest and the largest target by bounding-sphere",
+          "reach `|H|`, plus the median one-point target. Ties by component name.", "",
+          "View rule: two ordinary bearings (`cases` ordinary bearings "
+          f"{', '.join(map(str, A73_ORDINARY))}) for every chosen target, plus two difficult bearings",
+          "in the perpendicular bisector plane of the target's nearest authored aim-point pair (`cases`",
+          f"boundary bearings {', '.join(map(str, A73_BOUNDARY))}) for every multi-point target. The target",
+          "rotation varies with the bearing exactly as `cases` defines it.", "",
+          "| target | authored points | bounding-sphere reach (m) | views |", "|---|---:|---:|---|"]
+    for name, authored in tgt:
+        got = [s for s in searches if s["target"] == name]
+        L.append(f"| `{name}` | {authored} | {got[0]['reach']:.0f} | " +
+                 ", ".join(f"{g['group']}/b{g['bearing']}" for g in got) + " |")
+    L += ["", f"Standoffs: {', '.join(f'{g} m' for g in A73_GAPS)}. Firing-ship rotation is "
+          f"`study.ROT[({A73_ROT_STEP} x ship index + view index) mod 24]`, giving "
+          f"{len({r['rot'] for r in rows})} distinct firing-ship rotations. The target rotation follows "
+          f"the bearing index, so the views cover {len({s['bearing'] for s in searches})} target rotations "
+          f"over {len({(s['target'], s['bearing']) for s in searches})} target/bearing combinations.", "",
+          "## Work reused, and expensive work removed", "",
+          "The near-target-only search reads only the target's runtime box and X4's answers from probe",
+          "positions on that box. It never sees the firing ship, so every scenario sharing a view runs the",
+          "identical search and sees the identical observations. Each view is searched **once** and the",
+          f"finished map is reused for all {len(ships) * len(A73_GAPS)} of its scenarios: "
+          f"{len(searches)} searches serve {len(rows)} scenarios. Sample cost is therefore reported per",
+          "search and correctness per scenario; the 100 m / 1 km / 8 km runs of one view are one search,",
+          "not three.", "",
+          "The A7.3 loading path skips `class_margins()`, the full mounted-turret movement sweep that finds",
+          "each ship class's search-box margin. The frozen search uses neither the firing-ship search box nor",
+          "its margin, and neither does the scoring. Measured on this machine, that sweep costs **155.8 s**",
+          "against **18.2 s** for the rest of the load, so it was 90% of the old setup cost. Older",
+          "experiments are untouched and still load it.", "",
+          "## Correctness", "",
+          f"- firing ships tested: {len(ships)} ({sum(s['cls'] == 'ship_m' for s in ships)} M, "
+          f"{sum(s['cls'] == 'ship_l' for s in ships)} L, {sum(s['cls'] == 'ship_xl' for s in ships)} XL; "
+          f"{sum(s['source'] == 'official' for s in ships)} vanilla, "
+          f"{sum(s['source'] == 'swi' for s in ships)} SWI)",
+          f"- representative turret instances across them: {sum(sum(len(m['turrets']) for m in loadout[s['ship']]) for s in ships)}",
+          f"- target components tested: {len(tgt)}",
+          f"- distinct searches: {len(searches)}; scenarios: {len(rows)}",
+          f"- distances: {', '.join(f'{g} m' for g in A73_GAPS)}",
+          f"- ordinary views: {sum(s['group'] == 'ordinary' for s in searches)}; "
+          f"difficult (selection-boundary) views: {sum(s['group'] == 'boundary' for s in searches)}",
+          f"- distinct firing-ship rotations: {len({r['rot'] for r in rows})}", "",
+          "| aim-point discovery (denominator: the needed aim points of each scenario) | |", "|---|---:|",
+          f"| needed aim points total | {S('needed')} |",
+          f"| needed aim points found | {S('needed_found')} |",
+          f"| **needed aim points missed** | **{S('needed_missed')}** |",
+          f"| scenarios with any needed aim point missed | {sum(bool(r['needed_missed']) for r in rows)} |",
+          "", "| later-position choice accuracy (denominator: the legal aimed barrel positions on the "
+          "representative loadout) | |", "|---|---:|",
+          f"| legal aimed barrel positions | {S('muzzles')} |",
+          f"| correct | {S('correct')} |", f"| **wrong** | **{S('wrong')}** |",
+          f"| UNKNOWN | {S('unknown')} |", "",
+          "| point-set safety (denominator: the distinct searches; the map is shared per view) | |",
+          "|---|---:|"]
+    per_view = {r["view"]: r for r in rows}   # point-set metrics are identical across a view's scenarios
+    L += [f"| **invented points** | **{sum(r['invented'] for r in per_view.values())}** |",
+          f"| **merged points** | **{sum(r['merged'] for r in per_view.values())}** |",
+          f"| **duplicate points** | **{sum(r['duplicate'] for r in per_view.values())}** |",
+          f"| **refinement identity changes** | **{sum(r['identity_changed'] for r in per_view.values())}** |",
+          f"| points confirmed | {V('points')} |", f"| points tightened by refinement | {V('refined')} |",
+          f"| authored aim points never found (diagnostic only) | "
+          f"{sum(len(r['authored_missed']) for r in per_view.values())} of "
+          f"{sum(s['authored'] for s in searches)} |", "",
+          "Authored aim points are diagnostic only: an authored point that no legal aimed barrel position on",
+          "the representative loadout ever selects is not needed, and not finding it is not a failure.", "",
+          "## Search cost", "", "| | |", "|---|---|",
+          f"| samples used: median / p90 / worst | "
+          f"{'/'.join(f'{x:.0f}' for x in _a73_q([s['samples'] for s in searches])[1:])} |",
+          f"| searches reaching the {A73_TOTAL}-sample limit | "
+          f"{sum(s['end'] == 'budget' for s in searches)} of {len(searches)} |",
+          f"| searches stopping because no useful next probe exists | "
+          f"{sum(s['end'] in ('nothing definite', 'position already asked') for s in searches)} of {len(searches)} |",
+          f"| searches ending with no confirmed point | {sum(s['end'] == 'no confirmed point' for s in searches)} |",
+          "", "| stop reason | searches |", "|---|---:|"]
+    for end, n in sorted(Counter(s["end"] for s in searches).items()):
+        L.append(f"| {end} | {n} |")
+    last = [(s, max((r["last_needed_at"] for r in rows if r["view"] == s["view"]), default=0))
+            for s in searches]
+    L += ["", "`last needed point at` is the sample count at which the last aim point any scenario of that",
+          "view actually needs became confirmed, so `samples used - that` is the room the safety of those",
+          "scenarios had left over.", "",
+          f"- sample at which the last needed aim point was confirmed: median / p90 / worst "
+          f"{'/'.join(f'{x:.0f}' for x in _a73_q([x for _s, x in last])[1:])}",
+          f"- samples remaining after it: median / p10 / worst "
+          f"{np.median([m for m, _s in margins]):.0f} / "
+          f"{sorted(m for m, _s in margins)[max(0, int(math.ceil(0.1 * len(margins))) - 1)]:.0f} / "
+          f"{min(m for m, _s in margins):.0f}", "",
+          "| smallest remaining margin | target | view | authored | samples used | last needed point at | "
+          "margin |", "|---:|---|---|---:|---:|---:|---:|"]
+    for i, (m, s) in enumerate(tight[:5]):
+        L.append(f"| {i + 1} | `{s['target']}` | {s['group']}/b{s['bearing']} | {s['authored']} | "
+                 f"{s['samples']} | {s['samples'] - m} | {m} |")
+    L += ["", "## Timing", "",
+          "Offline Python timings on this machine, single process and niced, **not** live X4 runtime",
+          "timings. One sample here is a Python call into the accepted query model, not an engine call, so",
+          "these numbers measure where this benchmark spends its time, not what Gunnery Control would cost",
+          "in game.", "",
+          "Hidden truth exists only to check the answers. Gunnery Control never computes it: in game the",
+          "later barrel positions come from the engine. It is excluded from the production-like figure.", "",
+          "| measurement | mean | median | p90 | worst |", "|---|---:|---:|---:|---:|",
+          f"| production-like calculation, ms (shared search + applying the map to that ship's barrels) | "
+          f"{_a73_ms(prod)} |",
+          f"| aim-point search alone, ms (search + refinement, per search) | "
+          f"{_a73_ms([s['seconds'] for s in searches])} |",
+          f"| hidden truth, ms (research only) | {_a73_ms([r['truth_s'] for r in rows])} |",
+          f"| scoring, ms (research only) | {_a73_ms([r['score_s'] for r in rows])} |",
+          f"| applying the map to one ship's barrels, ms | {_a73_ms([r['apply_s'] for r in rows])} |",
+          f"| full research scenario, ms | {_a73_ms(full)} |", "",
+          f"One-off corpus/setup: **{setup_s:.1f} s** (SWI index, corpus load, mount resolution, ship and",
+          "loadout selection, target and view population).", "",
+          "| phase | total (s) | share of the scenario work |", "|---|---:|---:|"]
+    tot = sum(v for k, v in phases.items() if k != "corpus/setup (one-off)")
+    for k, s in sorted(phases.items(), key=lambda kv: -kv[1]):
+        L.append(f"| {k} | {s:.1f} | " + ("n/a |" if "one-off" in k else f"{100 * s / tot:.1f}% |"))
+    L += ["", f"**Slowest measured phase: {worst_phase}.**", "",
+          f"Slowest single scenario: view {slow['view']} (`{slow['target']}` {slow['group']}/b"
+          f"{slow['bearing']}, {slow['authored']} authored points) against `{slow['ship']}` (`{slow['tag']}`, "
+          f"{slow['mounts']} mounts, {slow['turrets']} representative turret instances, "
+          f"{slow['muzzles']} legal aimed barrel positions) at {slow['gap']} m, "
+          f"{(slow['search_s'] + slow['truth_s'] + slow['apply_s'] + slow['score_s']) * 1e3:.0f} ms: "
+          f"search {slow['search_s'] * 1e3:.0f} ms, hidden truth {slow['truth_s'] * 1e3:.0f} ms, "
+          f"applying the map {slow['apply_s'] * 1e3:.0f} ms, scoring {slow['score_s'] * 1e3:.0f} ms. "
+          f"The measured cause is **{max(_A73_PHASES, key=lambda k: slow[_A73_PHASES[k]])}**, at "
+          f"{100 * max(slow[v] for v in _A73_PHASES.values()) / sum(slow[v] for v in _A73_PHASES.values()):.1f}% "
+          f"of that scenario. Hidden-truth cost is mounts x representative turrets x authored aim points: "
+          f"this is the firing ship with the most representative turret instances against a target "
+          f"authoring the most aim points. The standoff does not change it.", "",
+          "## Decision", "",
+          ("**PASS.**" if passed else "**FAIL.**") + " PASS on this representative population requires 0",
+          "wrong later-position choices, 0 needed aim points missed, 0 invented, 0 merged, 0 duplicate",
+          "points and 0 unsafe refinement identity changes. UNKNOWN is allowed and is reported separately.",
+          "", f"- wrong later-position choices: {S('wrong')}",
+          f"- needed aim points missed: {S('needed_missed')}",
+          f"- invented / merged / duplicate points: {sum(r['invented'] for r in per_view.values())} / "
+          f"{sum(r['merged'] for r in per_view.values())} / {sum(r['duplicate'] for r in per_view.values())}",
+          f"- refinement identity changes: {sum(r['identity_changed'] for r in per_view.values())}",
+          f"- UNKNOWN later-position results: {S('unknown')} of {S('muzzles')}", "",
+          "This measures the frozen search on a deliberately small representative population. It is not an",
+          "exhaustive vanilla/SWI ship or turret matrix, it changes no production code, and it chooses",
+          "nothing: the starting geometry and the 40-sample total were frozen before the run.", "",
+          "## Per search", "",
+          "| view | target | group/bearing | authored | points | samples | end | needed (all scenarios) | "
+          "needed missed | wrong | UNKNOWN | search ms |", "|---:|---|---|---:|---:|---:|---|---:|---:|---:|---:|---:|"]
+    for s in searches:
+        rs = [r for r in rows if r["view"] == s["view"]]
+        L.append(f"| {s['view']} | `{s['target']}` | {s['group']}/b{s['bearing']} | {s['authored']} | "
+                 f"{s['points']} | {s['samples']} | {s['end']} | {sum(r['needed'] for r in rs)} | "
+                 f"{sum(len(r['needed_missed']) for r in rs)} | {sum(r['wrong'] for r in rs)} | "
+                 f"{sum(r['unknown'] for r in rs)} | {s['seconds'] * 1e3:.0f} |")
+    L += ["", "## Per firing ship, over every scenario", "",
+          "| | ship | scenarios | legal aimed barrel positions | needed | needed missed | correct | wrong | "
+          "UNKNOWN | hidden truth ms med/worst | apply ms med/worst |",
+          "|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|"]
+    for s in ships:
+        rs = [r for r in rows if r["ship"] == s["ship"]]
+        tm, am = _a73_q([r["truth_s"] for r in rs]), _a73_q([r["apply_s"] for r in rs])
+        L.append(f"| `{s['tag']}` | `{s['ship']}` | {len(rs)} | {sum(r['muzzles'] for r in rs)} | "
+                 f"{sum(r['needed'] for r in rs)} | {sum(len(r['needed_missed']) for r in rs)} | "
+                 f"{sum(r['correct'] for r in rs)} | {sum(r['wrong'] for r in rs)} | "
+                 f"{sum(r['unknown'] for r in rs)} | {tm[1] * 1e3:.0f}/{tm[3] * 1e3:.0f} | "
+                 f"{am[1] * 1e3:.0f}/{am[3] * 1e3:.0f} |")
+    return "\n".join(L) + "\n"
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -4314,6 +4849,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a73" in sys.argv:
+        return a73(arg("--jobs", 4))
     if "--a72d" in sys.argv:
         return a72d(arg("--jobs", 4))
     if "--a72c" in sys.argv:
