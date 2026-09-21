@@ -19,6 +19,7 @@ python3 research/issue184/aimpoint_map.py --a43h      # A4.3 phase 4 coverage ma
 python3 research/issue184/aimpoint_map.py --a43a      # A4.3 phase 5 angular search, same 19 cases
 python3 research/issue184/aimpoint_map.py --a6-near   # A6 near-target probing + point refinement, 19 cases x 3 gaps
 python3 research/issue184/aimpoint_map.py --a7        # A7.1 focused validation + full 24-ask stopping traces
+python3 research/issue184/aimpoint_map.py --a72       # A7.2 stopping rule, cost bound, definite/UNKNOWN rule
 python3 research/issue184/ship_aimpoint_census.py     # A4.4 ship aim-point census, both games (~6 min)
 ```
 
@@ -42,6 +43,13 @@ ship**, through the case's unchanged ship position and rotation, and takes the
 aim points those aimed muzzles select. Out-of-arc poses are discarded and
 resting poses are not tested. It is scoring truth only and never reaches probe
 placement, refinement, stopping or the ask budget.
+
+A7.2 research, [A72_STOPPING.md](A72_STOPPING.md), changes nothing about discovery. It fixes
+the production stopping rule (no early stop; run until no valid probe remains or
+the cost bound blocks the next one), the four-part X4-question bound, and the
+rule that decides a definite aim point versus UNKNOWN. It rescores every state of
+the same 126 focused cases under both the plain `nearest` answer and `nearest`
+plus the completeness guard `target_box_map` already uses.
 
 A4.4 is written up separately in [A44_CENSUS.md](A44_CENSUS.md). It censuses
 pristine vanilla 9.00 and SWI 0.9.1 HF as two independent games — SWI is an

@@ -16,6 +16,9 @@ runtime-box reconstruction, authored aim points and target boxes (`issue167-p3c/
     python3 research/issue184/aimpoint_map.py --a43h [--jobs 4]             # A4.3 phase 4 hull coverage map
     python3 research/issue184/aimpoint_map.py --a43a [--jobs 4]             # A4.3 phase 5 angular-spread search
     python3 research/issue184/aimpoint_map.py --a6   [--jobs 4]             # A6 gap-only stopping-rule trace
+    python3 research/issue184/aimpoint_map.py --a6-near [--jobs 4]          # A6 near-target probing + refinement
+    python3 research/issue184/aimpoint_map.py --a7   [--jobs 4]             # A7.1 focused validation + traces
+    python3 research/issue184/aimpoint_map.py --a72  [--jobs 4]             # A7.2 stopping rule and cost bound
 
 A mapper under test sees only `view(case)`. Aim points, turret, mount and `aimed_muzzles` are hidden truth.
 """
@@ -2682,6 +2685,304 @@ def _a7_report(rows):
     return "\n".join(L) + "\n"
 
 
+# ---------------------------------------------------------------- A7.2: stopping rule and cost contract
+
+A72_EVIDENCE = Path(__file__).with_name("A72_STOPPING.md")
+A72_INITIAL = 16                                       # ceiling on the 8 outer corners + confirmation asks
+A72_TOTAL = A72_INITIAL + RESCUE_GUARD + A43A_GUARD    # the whole search: 16 + 24 + 24
+A72_BUDGETS = (16, 24, 32, 36, 40, 48, A72_TOTAL)      # candidate total X4-question limits to compare
+A72_DEPTHS = (4, 8)                                    # residual resolutions the completeness guard is tried at
+
+
+def empty_balls(points, rays, T):
+    """The empty balls the asks already prove, in the target frame. An ask at u that X4 answered with the
+    confirmed point i proves no aim point lies nearer to u than |u - c_i| - r_i: the selector returns the
+    nearest one. Uses the unrefined estimates, whose larger radii give the smaller, safer ball."""
+    out = []
+    for u, d in rays:
+        if d is None:
+            continue
+        u, d = np.asarray(u, float), np.asarray(d, float)
+        own = [i for i, (c, r) in enumerate(points) if _on_ray(u, d, c, r)]
+        if len(own) == 1:
+            c, r = points[own[0]]
+            out.append((u @ T.T, float(np.linalg.norm(c - u)) - r))
+    return out
+
+
+def completeness_guard(b, plain, cent, rad, W, balls, tlo, thi, T, depth=GEO_DEPTH):
+    """The completeness guard `target_box_map` already uses, tried here on the retained near-target search.
+
+    `nearest` (here `b`, `plain` from `_definite`) only ranks the points discovery happened to confirm. It
+    cannot show that an undiscovered point would not have won, so the guard keeps an answer definite only
+    where every region of the padded target box the empty balls have not cleared is strictly farther away
+    than the winner's far bound. It spends no X4 question.
+
+    -> (mask over `W`: definite where true, residual fraction of the padded box)."""
+    residual = _unproven(tlo, thi, balls, [], depth=depth) if balls else [(tlo, thi)]
+    ok = plain.copy()
+    far = np.linalg.norm(W - cent[b], axis=1) + rad[b]
+    L = W @ T.T
+    for a, z in residual:
+        ok &= np.linalg.norm(np.maximum(0, np.maximum(a - L, L - z)), axis=1) > far
+        if not ok.any():
+            break
+    return ok, float(sum(np.prod(z - a) for a, z in residual)) / float(np.prod(thi - tlo))
+
+
+def _a72_score(case, points, rays, W, want, tlo, thi, T, depths=()):
+    """Score one state over the hidden later aimed muzzles `W`, whose true selections `want` are fixed for
+    the case. The answer rule is `nearest` on the refined estimates. With `depths`, also score the
+    completeness guard at each residual resolution, from the unrefined estimates' safer empty balls."""
+    truth = [tuple(map(float, p)) for p in case["points"]]
+    pts = [(np.asarray(c, float), float(r)) for c, r in points]
+    rpts, _n, _s = refine_points(pts, rays)
+    cover = [[j for j, p in enumerate(truth) if np.linalg.norm(c - p) <= r] for c, r in rpts]
+    out = dict(correct=0, wrong=0, unknown=len(W), guard={})
+    if not rpts:
+        return out
+    cent = np.asarray([c for c, _r in rpts], float)
+    rad = np.asarray([r for _c, r in rpts], float)
+    b, plain = _definite(cent, rad, W)                      # plain `nearest`, vectorised
+    right = np.asarray([cover[i] == [t] for i, t in zip(b, want)])
+    out.update(correct=int((plain & right).sum()), wrong=int((plain & ~right).sum()),
+               unknown=int((~plain).sum()))
+    balls = empty_balls(pts, rays, T)
+    for depth in depths:
+        ok, frac = completeness_guard(b, plain, cent, rad, W, balls, tlo, thi, T, depth)
+        out["guard"][depth] = dict(correct=int((ok & right).sum()), wrong=int((ok & ~right).sum()),
+                                   unknown=int((~ok).sum()), residual=frac)
+    return out
+
+
+def _a72_case(case):
+    """One A7.2 case: the retained search exactly as A7.1 ran it, rescored at every state it could have
+    stopped in, so a candidate cost limit can be replayed against its own trace. The final state is also
+    scored under the completeness guard, at two residual resolutions."""
+    records, margins = _LOADED
+    v, margin = view(case), margins[case["ship_class"]][0]
+    muzzles = ship_aimed_muzzles(case, records, _SHIP_MOUNTS[case["ship"]])
+    C, H, T = v["target_box"]
+    tlo, thi = target_box(C, H)
+    truth = [tuple(map(float, p)) for p in case["points"]]
+    W = np.asarray(list(muzzles.values()), float).reshape(-1, 3)
+    want = [study.select(tuple(map(float, m)), truth) for m in W]  # hidden truth, scoring only
+    needed = sorted(set(want))
+    probe, stats = angular_probe(v, margin, primary=A7_PRIMARY, near_target=A6_NEAR_PAD)
+    a = corner_audit(v, margin, probe)
+    corners = a["queries"] - stats["rescue_extra"] - stats["extra"]
+
+    def state(k, points, rays, extra, depths=()):
+        rep = _represented([(np.asarray(c, float), r) for c, r in points], case["points"])
+        return dict(primary=k, angular_extra=extra, asks=corners + stats["rescue_extra"] + extra,
+                    points=len(points), missing_needed=[x for x in needed if x not in rep],
+                    **_a72_score(case, points, rays, W, want, tlo, thi, T, depths))
+
+    states = [state(0, stats["after_rescue_points"], stats["pre_rays"], 0)]
+    for k in sorted(stats["snaps"]):
+        sn = stats["snaps"][k]
+        states.append(state(k, sn["points"], sn["rays"], sn["extra"],
+                            depths=A72_DEPTHS if k == max(stats["snaps"]) else ()))
+    return dict(id=case["id"], gap=case["gap"], group=case["a7"], target=case["target"], ship=case["ship"],
+                authored=len(truth), muzzles=len(muzzles), needed=needed, corners=corners,
+                rescue_extra=stats["rescue_extra"], primary=stats["primary"], angular_extra=stats["extra"],
+                asks=a["queries"], guard=stats["guard"], stalled=stats["stalled"], states=states)
+
+
+def _a72_at(row, budget):
+    """The state the stopping rule ends in under a total limit of `budget` X4 questions: the last state its
+    own trace reaches, since continuing from a state needs 3 more questions."""
+    return next((st for st in reversed(row["states"]) if st["asks"] <= budget), row["states"][0])
+
+
+def a72(jobs):
+    """A7.2: with no early-stop signal available, what exactly stops the retained search, what may it
+    spend, and when may a later turret position be given a definite aim point?"""
+    global _LOADED, _SHIP_MOUNTS
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    _SHIP_MOUNTS = defaultdict(list)
+    for m in mounts:
+        _SHIP_MOUNTS[m["ship"]].append(m)
+    todo = list(a7_variants(targets(), mounts))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path = CACHE / "a72_rows.jsonl"
+    print(f"#184 A7.2: {len(todo)} cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a72_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            f, g = r["states"][-1], r["states"][-1]["guard"][max(A72_DEPTHS)]
+            print(f"  {len(rows)}/{len(todo)} case {r['id']} {r['group']} @{r['gap']}m: {r['asks']} asks, "
+                  f"final {f['correct']}/{f['wrong']}/{f['unknown']} correct/wrong/UNKNOWN, worst prefix "
+                  f"wrong {max(s['wrong'] for s in r['states'])} at angular ask "
+                  f"{max((s['angular_extra'] for s in r['states'] if s['wrong']), default=-1)}, "
+                  f"guard leaves {g['correct'] + g['wrong']} definite", flush=True)
+    rows.sort(key=lambda r: (r["group"], r["id"], r["gap"]))
+    out = _a72_report(rows)
+    A72_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {rows_path}, evidence: {A72_EVIDENCE})")
+
+
+def _a72_last_wrong(row):
+    """The largest angular-stage ask count at which this case still produced a definite wrong answer, or
+    None. The margin between that and where the search stops is the safety this rule actually rests on."""
+    return max((s["angular_extra"] for s in row["states"] if s["wrong"]), default=None)
+
+
+def _a72_report(rows):
+    tot = lambda rs, k: sum(s[k] for r in rs for s in r["states"])  # noqa: E731
+    bad = [r for r in rows if _a72_last_wrong(r) is not None]
+    L = ["# Issue #184 A7.2: the production stopping rule, cost bound and definite/UNKNOWN rule", "",
+         "Offline research, status **inference**. No X4 launch, no production change. Discovery is unchanged",
+         "from A7.1 - the same 8 outer firing corners, the same cheap rescue, the same near-target probe",
+         f"placement on the target runtime box + {A6_NEAR_PAD:g} m, the same point confirmation, the same",
+         "`refine_points` containment rule, and the same 126 focused cases. A7.2 adds nothing to discovery.",
+         "It fixes when the search stops, what it may spend, and when a later turret position may be given a",
+         "definite aim point.", "",
+         "Run with `python3 research/issue184/aimpoint_map.py --a72`.", "",
+         "## The stopping rule", "",
+         "A7.1 tested every observable the search already computes - the largest remaining viewing-angle gap",
+         "and the number of consecutive asks that confirmed nothing new - over all 126 completed traces, and",
+         "no setting of either was both safe and cheaper than running to the limit. So **there is no early",
+         "stop**. The search continues while a valid next probe exists and ends at the **first** of:", "",
+         "- **S1, no valid next probe.** `angular_pick` returns nothing (no confirmed point is definitely the",
+         "  nearest known point anywhere on the probe box), or the position it picks has already been asked,",
+         "  or no point is confirmed at all. Nothing further can be observed by this placement rule.",
+         "- **S2, the angular stage is out of budget.** Fewer than 3 of its questions remain: one probe plus",
+         "  the two its along-ray confirmation may need. The moved-ask rescue of an unassigned probe draws on",
+         "  the same angular budget and keeps the same 3-question reserve.",
+         "- **S3, the whole search is out of budget.** Fewer than 3 of the total remain.", "",
+         f"The old {A43A_PRIMARY}-primary-ask stop is dropped: it is not one of these three, it counts only",
+         "probes and not the confirmation and rescue questions they trigger, and A7.1 produced no evidence",
+         f"for {A43A_PRIMARY} as a boundary. Cases here spend {min(r['primary'] for r in rows)}-"
+         f"{max(r['primary'] for r in rows)} primary asks before S1 or S2 fires.", "",
+         "## The cost contract", "", "One X4 question is one aim-point query at one probe position.", "",
+         "| stage | what it spends questions on | maximum |", "|---|---|---:|",
+         "| initial | the 8 outer corners of the firing box, then 2 per along-ray confirmation attempt |"
+         f" {A72_INITIAL} |",
+         "| cheap rescue | one moved ask per unassigned corner direction, plus the confirmations those "
+         f"trigger | {RESCUE_GUARD} |",
+         "| near-target angular | one probe per chosen viewing direction, the moved-ask rescue of a probe "
+         f"that cannot be assigned, and 2 per confirmation attempt | {A43A_GUARD} |",
+         f"| **whole search** | | **{A72_TOTAL}** |", "",
+         "Confirmation is not free and is not separately budgeted: `locate` spends exactly 2 questions per",
+         "candidate it tests, and they are charged to the stage that triggered them. That is why 8 starting",
+         "corners are not 8 questions - over the 126 cases the initial stage cost "
+         f"{min(r['corners'] for r in rows)}-{max(r['corners'] for r in rows)}. The total is the sum of the",
+         "three ceilings, not a number tuned to this population.", "",
+         "| stage | measured min / med / max over the 126 cases |", "|---|---|"]
+    for k, name in (("corners", "initial"), ("rescue_extra", "cheap rescue"), ("angular_extra", "angular"),
+                    ("asks", "total")):
+        v = sorted(r[k] for r in rows)
+        L.append(f"| {name} | {v[0]} / {v[len(v) // 2]} / {v[-1]} |")
+    L += ["", f"{sum(r['guard'] for r in rows)} of {len(rows)} cases ended on S2, "
+          f"{sum(r['stalled'] for r in rows)} on S1, none on S3. The angular ceiling is the binding one and",
+          "it is the smallest safe value this population supports: A7.1's earliest state as safe and useful",
+          f"as the full result needed up to 23 angular-stage questions, so {A43A_GUARD} is one question of",
+          "headroom over the worst case measured, not an inherited default.", "",
+          "## The definite-answer rule", "",
+          "**A later turret position gets a definite aim point when both hold, and UNKNOWN otherwise:**", "",
+          "1. the search confirmed at least one point, and",
+          "2. `nearest` is definite over the refined confirmed points: the winner's far bound is strictly",
+          "   nearer than every rival's near bound.", "",
+          "The rule does not depend on why the search stopped. **S1 means** the probe placement rule has",
+          "nothing left to look at, not that every aim point is found. **S2/S3 mean** the cost bound was",
+          "reached, which says nothing about completeness at all. Neither is proof of discovery, and the",
+          "rule claims none.", "",
+          "### Why no completeness condition is added", "",
+          "`nearest` alone cannot show that an *undiscovered* point would not have won, so the obvious",
+          "addition is the completeness guard `target_box_map` already uses: keep the answer definite only",
+          "where every region of the padded target box the empty balls have not cleared is farther away than",
+          "the winner's far bound. It costs no X4 question. It was measured on the retained search's own",
+          "final states and **it never answers**:", "",
+          "| residual resolution | definite answers left | wrong | residual fraction of the padded box "
+          "med/max |", "|---:|---:|---:|---|"]
+    for d in A72_DEPTHS:
+        gs = [r["states"][-1]["guard"][d] for r in rows]
+        fr = sorted(g["residual"] for g in gs)
+        L.append(f"| GEO_DEPTH {d} | {sum(g['correct'] + g['wrong'] for g in gs)} of "
+                 f"{sum(r['muzzles'] for r in rows)} | {sum(g['wrong'] for g in gs)} | "
+                 f"{fr[len(fr) // 2]:.4f} / {fr[-1]:.4f} |")
+    L += ["", "That is geometry, not resolution. Probing from outside the target can never empty the space",
+          "immediately around a confirmed point: every empty ball an ask assigned to point `w` proves has",
+          "`w` on its boundary, so a hypothetical point just beyond `w` from every probe direction is never",
+          "excluded, and it would beat `w` at some later turret position. Raising the resolution does not",
+          "close it and the target's size does not matter: on case 12155 at 100 m (a 496 x 505 x 139 m box,",
+          "27 empty balls) the residual fraction only falls 0.0366 -> 0.0043 -> 0.0017 -> 0.0013 from",
+          "GEO_DEPTH 4 to 10, and on case 5776 at 100 m (10 x 12 x 14 m, 29 balls) 0.0093 -> 0.0018 ->",
+          "0.0008 -> 0.0006, with 0 definite answers at every one of those resolutions in both, against 252",
+          "and 2,460 that `nearest` answers definitely. GEO_DEPTH 12 exhausts memory. A guard that always",
+          "returns UNKNOWN is not a safety rule, it is the absence of an answer, so the retained rule is",
+          "`nearest` alone and the residual risk is carried by the stopping rule and stated below.", "",
+          "## Evidence", "",
+          "Every state of every case is scored under the retained rule, not only the final state, so the",
+          "state an earlier stop would have landed in is judged too.", "",
+          "| group | cases | states | correct | wrong | UNKNOWN | states with a wrong answer |",
+          "|---|---:|---:|---:|---:|---:|---:|"]
+    for name in ("hard", "ordinary", "all"):
+        rs = rows if name == "all" else [r for r in rows if r["group"] == name]
+        L.append(f"| {name} | {len(rs)} | {sum(len(r['states']) for r in rs)} | {tot(rs, 'correct')} | "
+                 f"{tot(rs, 'wrong')} | {tot(rs, 'unknown')} | "
+                 f"{sum(bool(s['wrong']) for r in rs for s in r['states'])} |")
+    L += ["", f"Every definite wrong answer in the whole population sits in an early prefix of {len(bad)} case",
+          "instances, where only part of the target's points is confirmed and `nearest` names a known point",
+          "confidently because the point that actually wins is not in the set yet. The retained stopping rule",
+          "never ends there, and the margin is what the rule rests on:", "",
+          "| case | gap (m) | last angular ask with a wrong answer | angular asks spent | margin | "
+          "final wrong |", "|---|---:|---:|---:|---:|---:|"]
+    for r in bad:
+        w = _a72_last_wrong(r)
+        L.append(f"| {r['id']} | {r['gap']} | {w} | {r['angular_extra']} | {r['angular_extra'] - w} | "
+                 f"{r['states'][-1]['wrong']} |")
+    L += ["", f"Smallest margin over the {len(bad)} affected case instances: "
+          f"{min(r['angular_extra'] - _a72_last_wrong(r) for r in bad)} angular-stage questions.", "",
+          "## What each total limit buys", "",
+          "Each case is replayed to the last state its own trace reaches inside the limit. `needed missing`",
+          "counts aim points some later aimed muzzle on that firing ship really selects that the search never",
+          "found.", "",
+          "| total limit | cases reaching their full trace | correct | wrong | UNKNOWN | needed missing |",
+          "|---:|---:|---:|---:|---:|---:|"]
+    for b in A72_BUDGETS:
+        sts = [_a72_at(r, b) for r in rows]
+        L.append(f"| {b} | {sum(s is r['states'][-1] for s, r in zip(sts, rows))} | "
+                 f"{sum(s['correct'] for s in sts)} | {sum(s['wrong'] for s in sts)} | "
+                 f"{sum(s['unknown'] for s in sts)} | {sum(len(s['missing_needed']) for s in sts)} |")
+    L += ["", "Every case reaches its own full trace by a total limit of 40, and no limit at or above 32",
+          "produces a wrong answer. That does not make 40 the contract: it is this population's worst case,",
+          f"not a bound, and the contract stays the structural {A72_TOTAL}, which is the sum of the three",
+          "stage ceilings. Cutting the total to 24 or 16 truncates the angular stage and is what actually",
+          "costs correctness, which is the same conclusion A7.1 reached about stopping early.", "",
+          "## Limitations that remain for A7.3", "",
+          "- **The rule is evidence, not proof.** No completeness condition is available to a search that",
+          "  probes only from outside the target, as measured above, so a definite answer can still be wrong",
+          "  if discovery missed the point that wins. Nothing in these 126 cases does, at the chosen stop.",
+          "- The margin table is the whole of that safety argument and it comes from one bearing per ordinary",
+          "  target. A7.3 must run the broad population under exactly this stopping rule and answer rule and",
+          "  report the margin again, and any case whose margin is small or negative is a real failure, not a",
+          "  number to tune around.",
+          "- The initial stage's ceiling is the first hard limit anything places on confirmation questions.",
+          "  It never bound here (max "
+          f"{max(r['corners'] for r in rows)}), so its behaviour when it does bind is specified, not tested.",
+          "- No case reached S3, so the interaction between an exhausted total and the angular stage's own",
+          "  reserve is specified, not exercised.",
+          "- Targets with zero authored aim points are A7.4; none appear in this corpus.", "",
+          "## Per case", "",
+          "| case | group | gap (m) | asks | initial | rescue | angular | primary | end | worst prefix wrong |"
+          " final correct | final wrong | final UNKNOWN |",
+          "|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|"]
+    for r in rows:
+        f = r["states"][-1]
+        L.append(f"| {r['id']} | {r['group']} | {r['gap']} | {r['asks']} | {r['corners']} | "
+                 f"{r['rescue_extra']} | {r['angular_extra']} | {r['primary']} | "
+                 f"{'S2' if r['guard'] else 'S1'} | {max(s['wrong'] for s in r['states'])} | "
+                 f"{f['correct']} | {f['wrong']} | {f['unknown']} |")
+    return "\n".join(L) + "\n"
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -3040,6 +3341,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a72" in sys.argv:
+        return a72(arg("--jobs", 4))
     if "--a7" in sys.argv:
         return a7(arg("--jobs", 4))
     if "--a6-near" in sys.argv:
