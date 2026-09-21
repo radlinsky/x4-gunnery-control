@@ -1221,8 +1221,12 @@ local function onScenarioReady(_, param)
         repair_fixtures = repairFixtures, member_ids = selection.memberIDs,
     })
     local currentSession = api() and api().getSession and api().getSession()
-    setObserving(true, currentSession and currentSession.aimTargetID)
-    if request.specId == A8_SPEC_ID then a8Start(request.requestId) end
+    -- A8 times its own search, so it leaves the general observer off.
+    if request.specId == A8_SPEC_ID then
+        a8Start(request.requestId)
+    else
+        setObserving(true, currentSession and currentSession.aimTargetID)
+    end
     returnToGunnery("scenario_ready")
 end
 

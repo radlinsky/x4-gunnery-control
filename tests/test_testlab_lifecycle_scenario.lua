@@ -847,6 +847,13 @@ do
     assert(other.fix.logContains("action=ready") and #a8Events(other) == 0
             and not other.fix.logContains("event=a8_"),
         "READY for any other scenario must not start the A8 searches")
+    local function observerEnabled(h)
+        for _, event in ipairs(h.fix.uiTriggeredEvents) do
+            if event.control == "observe_toggle" and event.params and event.params.enabled == true then return true end
+        end
+        return false
+    end
+    assert(observerEnabled(other), "an ordinary READY must still enable the observer")
 
     local id = "issue-184-a8-near-target-live-r1"
     local harness = loadHarness(localScenario(id))
@@ -859,6 +866,8 @@ do
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady", ready9(requestId, id, { spawned = 1 }))
     assert(harness.countHandoffs("X4GunneryTestLab", "X4GunneryMenu") == 1,
         "the A8 scenario must keep the ordinary READY handoff")
+    assert(#a8Events(harness) == 1 and not observerEnabled(harness),
+        "A8 READY must start A8 without enabling the general observer")
 
     local points = {
         { 0, 84.123, -535.282 }, { 406.370, 37.752, 347.776 },
