@@ -588,8 +588,12 @@ end
 -- confirmation, moved or adaptive, goes through one counter capped at 40.
 local A8_TOTAL, A8_PAD, A8_PAD_Y = 40, 50, 8.86
 local A8_U = 2 ^ -24
-local A8_EPS = 2 ^ -18 / math.sqrt(2) + 8 * A8_U
-local A8_REL, A8_FORWARD = 0.01, 1e-4
+-- Direction error measured in the first live A8 run, doubled: up to 1.1e-4 rad
+-- of pitch, plus a 2.3e-5 m residual on very close samples.
+local A8_EPS, A8_MISS = 2.2e-4, 5e-5
+-- The minimum angle between two useful rays is geometry, not direction error.
+local A8_MIN_ANGLE = 2 * (2 ^ -18 / math.sqrt(2) + 8 * A8_U) / 0.01
+local A8_REL, A8_FORWARD = 0.05, 31.5 * A8_EPS
 local A8_SLACK = 2 * (A8_EPS + 1e-6) / A8_FORWARD
 local A8_ALPHA0, A8_ALPHA_MIN = math.rad(2), math.rad(1 / 64)
 local A8_AXES = { { 2, 3 }, { 1, 3 }, { 1, 2 } }
@@ -619,13 +623,13 @@ local function a8Rho(...)
         local p = select(i, ...)
         for k = 1, 3 do m = math.max(m, math.abs(p[k])) end
     end
-    return 2 * A8_U * m
+    return 2 * A8_U * m + A8_MISS
 end
 
 -- (depth along ray (u, d), depth error bound) where ray (v, e) crosses it, or nil.
 local function a8Crossing(u, d, v, e)
     local c, k = vDot(d, e), vNorm(vCross(d, e))
-    if k < 2 * A8_EPS / A8_REL then return nil end
+    if k < A8_MIN_ANGLE then return nil end
     local w = vSub(u, v)
     local ew, dw = vDot(e, w), vDot(d, w)
     local s, t = (c * ew - dw) / (k * k), (ew - c * dw) / (k * k)
@@ -964,7 +968,6 @@ local function a8Search(C, H, askX4)
     end
     return { samples = n, stop = stop, points = points, refined = refined, found = found }
 end
-menu.a8Search = a8Search
 
 -- The live driver. One Create of the A8 fixture runs A8_RUNS complete searches
 -- on its single spawned target. X4 answers asynchronously, so after every
