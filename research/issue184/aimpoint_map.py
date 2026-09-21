@@ -27,7 +27,7 @@ import math
 import os
 import sys
 import xml.etree.ElementTree as ET
-from collections import Counter
+from collections import Counter, defaultdict
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -386,6 +386,35 @@ def aimed_muzzles(case, records):
         g = study.geometry(turret, tuple(tuple(map(float, r)) for r in R), tuple(map(float, O)), tuple(map(float, p)))
         if g["state"] == "IN_ARC":
             out[i] = O + np.asarray(g["muzzle"]) @ R
+    return out
+
+
+_TURRET = {}  # accepted_turret is pure and re-derived per mount/turret pair otherwise
+
+
+def ship_aimed_muzzles(case, records, ship_mounts):
+    """Hidden benchmark truth, scoring only: every aimed muzzle position any real turret this firing ship
+    can carry reaches while aiming at an authored aim point of this target.
+
+    `aimed_muzzles` uses only the one mount and turret the case happens to have chosen, which is far too
+    narrow for #184 - the shared aim-point result has to serve *later* turret positions on the same ship.
+    Each mount is placed by its own frame through the case's unchanged ship position and rotation, never
+    through the case turret's origin or frame, and only the mount/turret pairs `firing_mounts` already
+    accepts are used. Out-of-arc poses are CANNOT BEAR and contribute nothing; resting poses are not
+    tested. -> {(mount, turret, aimed point): world muzzle}"""
+    P, F = case["position"], case["rotation"]
+    pts = [tuple(map(float, p)) for p in case["points"]]
+    out = {}
+    for m in ship_mounts:
+        for key in m["turrets"]:
+            turret = _TURRET.setdefault(key, scorer.accepted_turret(records[key]))
+            t_m, R_m = m["frames"][key]
+            O, R = P + t_m @ F, R_m @ F
+            Rt, Ot = tuple(tuple(map(float, r)) for r in R), tuple(map(float, O))
+            for j, p in enumerate(pts):
+                g = study.geometry(turret, Rt, Ot, p)
+                if g["state"] == "IN_ARC":
+                    out[(m["name"], key, j)] = O + np.asarray(g["muzzle"]) @ R
     return out
 
 
@@ -2328,6 +2357,7 @@ A7_EVIDENCE = Path(__file__).with_name("A7_FOCUSED.md")
 A7_PRIMARY = 64          # no primary budget: A43A_GUARD stays the only angular-stage limit while tracing
 A7_THRESHOLDS = (90, 60, 45, 30, 20, 15, 10, 5, 2, 1)  # candidate `stop when largest remaining gap <= T` (deg)
 A7_QUIET = (2, 4, 6, 8, 10, 12, 14, 16, 18, 20)        # candidate `stop after k angular asks with no new point`
+_SHIP_MOUNTS = {}      # firing ship -> its mounts; the hidden firing-ship-wide aimed-muzzle truth needs them all
 
 
 def a7_ordinary(ts, mounts):
@@ -2367,7 +2397,7 @@ def _a7_case(case):
     that state's own observations only."""
     records, margins = _LOADED
     v, margin = view(case), margins[case["ship_class"]][0]
-    muzzles = aimed_muzzles(case, records)
+    muzzles = ship_aimed_muzzles(case, records, _SHIP_MOUNTS[case["ship"]])
     truth = case["points"]
     probe, stats = angular_probe(v, margin, primary=A7_PRIMARY, near_target=A6_NEAR_PAD)
     a = corner_audit(v, margin, probe)
@@ -2406,6 +2436,7 @@ def _a7_case(case):
     early = next((st for st in states if st["ok"]), None)
     return dict(id=case["id"], gap=case["gap"], group=case["a7"], kind=case["kind"], target=case["target"],
                 ship=case["ship"], authored=len(truth), muzzles=len(muzzles), needed=needed,
+                case_muzzles=len(aimed_muzzles(case, records)),  # the old single-turret count, for continuity
                 corners=corners, rescue_extra=stats["rescue_extra"], primary=stats["primary"],
                 angular_extra=stats["extra"], asks=a["queries"], guard=stats["guard"],
                 stalled=stats["stalled"], states=states,
@@ -2445,9 +2476,12 @@ def _a7_stop(row, T):
 def a7(jobs):
     """A7.1: does the accepted near-target search plus post-hoc refinement stay safe on ordinary
     geometries, and does the full 24-ask trace support a simple earlier stopping rule?"""
-    global _LOADED
+    global _LOADED, _SHIP_MOUNTS
     records, margins, mounts, _excluded, _inferred = load()
     _LOADED = records, margins
+    _SHIP_MOUNTS = defaultdict(list)
+    for m in mounts:
+        _SHIP_MOUNTS[m["ship"]].append(m)
     todo = list(a7_variants(targets(), mounts))
     CACHE.mkdir(parents=True, exist_ok=True)
     rows_path = CACHE / "a7_rows.jsonl"
@@ -2481,6 +2515,25 @@ def _a7_report(rows):
          f"experiment budget is lifted, so every case runs to the existing {A43A_GUARD}-ask angular-stage",
          "hard limit and the whole trace exists. No stopping rule is implemented.", "",
          "Run with `python3 research/issue184/aimpoint_map.py --a7`.", "",
+         "## Hidden truth: firing-ship-wide aimed muzzles", "",
+         "The shared aim-point result has to serve **later** turret positions on the firing ship, so the",
+         "benchmark cannot judge it against the one mount and turret a case happens to have chosen.",
+         "`ship_aimed_muzzles` builds the truth from every real mount on that same firing ship, paired",
+         "only with the corpus turrets `firing_mounts` already accepts for it. Each mount is placed by its",
+         "own frame through the case's unchanged ship position and rotation - never through the case",
+         "turret's origin or frame. Each such turret is aimed at each authored aim point; out-of-arc poses",
+         "are CANNOT BEAR and are discarded, resting poses are not tested, and the muzzle position after",
+         "aiming is fed to the accepted nearest-aim-point selection model. The points it selects are the",
+         "aim points this firing ship genuinely needs. None of this reaches the search: probe placement,",
+         "probe order, refinement, stopping and the ask budget are computed without it.", "",
+         f"{sum(r['muzzles'] for r in rows):,} aimed muzzle positions over {len(rows)} cases "
+         f"(med/max {_stats2([r['muzzles'] for r in rows])} per case), against "
+         f"{sum(r['case_muzzles'] for r in rows)} under the old single-turret truth - "
+         f"{sum(r['muzzles'] for r in rows) / max(1, sum(r['case_muzzles'] for r in rows)):.0f}x more. "
+         f"They select {sum(len(r['needed']) for r in rows)} needed aim points over the {len(rows)} "
+         f"cases, out of {sum(r['authored'] for r in rows)} authored - so a third of the authored points "
+         "are ones no turret on the firing ship can actually select against, and the benchmark no longer "
+         "credits or blames the search for them.", "",
          "## Population", "",
          f"{len(rows)} cases, fixed before the run and never chosen from A7 results.", "",
          "| group | geometries | cases | targets |", "|---|---:|---:|---|"]
@@ -2605,9 +2658,9 @@ def _a7_report(rows):
           "geometry per target and one bearing, so it measures target variety, not bearing variety.",
           "- The 'as safe and useful as the final result' test compares each case against its own 24-ask "
           "result. It cannot see a point no state of that case ever discovered.",
-          f"- {sum(r['muzzles'] == 0 for r in rows)} of {len(rows)} cases have no IN_ARC aimed muzzle, so "
-          "they contribute discovery, identity and uncertainty evidence but no correct/wrong/UNKNOWN "
-          "answer.",
+          f"- Every case now carries aimed muzzles ({min(r['muzzles'] for r in rows)} at the least), so "
+          "all 126 contribute answer evidence; under the old single-turret truth 27 of them contributed "
+          "none.",
           "- Every case here ran to the 24-ask limit by construction, so the ask counts in this note are "
           "the cost of collecting the trace, not the cost of the accepted method under its own "
           f"{A43A_PRIMARY}-primary-ask budget.",

@@ -34,6 +34,15 @@ to the existing 24-ask angular-stage limit. Every state the search could have
 stopped in is rescored from its own observations only, so candidate stopping
 rules can be tested retrospectively. A7 implements no stopping rule.
 
+A7 also widens the hidden truth. `aimed_muzzles` uses the single mount and
+turret a case happens to have chosen, which cannot judge a result meant to
+serve *later* turret positions, so `ship_aimed_muzzles` aims every corpus
+turret the benchmark already pairs with every real mount **on that same firing
+ship**, through the case's unchanged ship position and rotation, and takes the
+aim points those aimed muzzles select. Out-of-arc poses are discarded and
+resting poses are not tested. It is scoring truth only and never reaches probe
+placement, refinement, stopping or the ask budget.
+
 A4.4 is written up separately in [A44_CENSUS.md](A44_CENSUS.md). It censuses
 pristine vanilla 9.00 and SWI 0.9.1 HF as two independent games — SWI is an
 overhaul, so a pooled statistic describes neither — and applies the SWI
