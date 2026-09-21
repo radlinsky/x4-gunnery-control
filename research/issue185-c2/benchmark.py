@@ -96,8 +96,9 @@ def _limit_rows(turret, record):
                         authored_limit_degrees=limit, side=side,
                     ))
             results = {(row["distance"], row["side"]): row["result"] for row in rows}
+            states = {(row["distance"], row["side"]): row["scorer_state"] for row in rows}
             if any(results[d, "reachable-side"] == "CAN AIM" and
-                   results[d, "unreachable-side"] == "CANNOT BEAR" for d in DISTANCES):
+                   states[d, "unreachable-side"] == "OUT_OF_ARC" for d in DISTANCES):
                 retained.extend(rows)
     return retained
 
@@ -144,6 +145,10 @@ def _write_findings(rows, usable_limits, turrets_with_limits):
     lines += ([f"- {count:,}: `{layout}` / `{state}`"
                for (layout, state), count in unknown.most_common()] or ["- None."])
     lines += [
+        "", "These remaining UNKNOWN rows place the aim point exactly at the fixed joint pivot. "
+        "X4 skips the zero-length direction solve there, so the accepted analysis cannot establish "
+        "a usable stable position. No UNKNOWN row remains because of hidden current position, "
+        "movement, traps, or a wide root limit.",
         "", "## Geometry coverage", "",
         "The retained nonzero distances are **100 m and 8,000 m**. The 100 m near case is "
         "an accepted #176 distance scale where offsets remain material; 8,000 m is a realistic "
@@ -155,8 +160,8 @@ def _write_findings(rows, usable_limits, turrets_with_limits):
         f"**{turrets_with_limits:,} turrets**. For each boundary it poses the accepted geometry "
         "at 0.1 degrees inside and outside the authored limit and supplies a point from the "
         "joint pivot along that posed bore at both distances. A boundary is retained only "
-        "when the accepted scorer observes a CAN AIM / CANNOT BEAR transition at one or both "
-        "distances; UNKNOWN remains unchanged. The four uncovered turrets are ordinary X/Y "
+        "when the accepted scorer observes a CAN AIM / OUT_OF_ARC transition at one or both "
+        "distances. The four uncovered turrets are ordinary X/Y "
         "layouts with unlimited traverse and a -90/+90 degree leaf arc, so they have no "
         "reachable/unreachable mechanical transition to bracket.", "",
         "Every turret also receives the two-distance normal bearing and one component-origin "
@@ -164,7 +169,7 @@ def _write_findings(rows, usable_limits, turrets_with_limits):
         "reporting rather than inheriting ordinary-X/Y evidence. This targeted population "
         "covers distance sensitivity and real reach transitions without recreating the "
         "37,830-case #176 benchmark.", "",
-        "The accepted #176 corpus and scorer are reused unchanged. This benchmark excludes "
+        "The accepted #176 corpus and corrected exact-point scorer are reused. This benchmark excludes "
         "aim-point uncertainty, range, firing solution, line of fire, firing permission, "
         "weapon readiness, projectile behavior, and final ENGAGEABLE. It adds no LIVE evidence.", "",
     ]
@@ -190,6 +195,18 @@ def _validate(records, rows):
             raise AssertionError(f"incomplete category coverage for {layout}")
     if not {"CAN AIM", "CANNOT BEAR", "UNKNOWN"}.issubset(_counter(rows, "result")):
         raise AssertionError("benchmark no longer exercises every C1 result")
+    unknown = [row for row in rows if row["result"] == "UNKNOWN"]
+    if {row["scorer_state"] for row in unknown} != {"UNKNOWN_pivot"}:
+        raise AssertionError("hidden turret state must not make exact-point bearing UNKNOWN")
+    no_rest = {(row["mechanical_layout"], row["result"])
+               for row in rows if row["scorer_state"] == "NO_STABLE_POSITION"}
+    if not {("ordinary_xy", "CANNOT BEAR"), ("rotation_z", "CANNOT BEAR")} <= no_rest:
+        raise AssertionError("proven no-rest cases must be CANNOT BEAR")
+
+    ball = records["swi:turret_s_gauntlet_macro"]
+    wide_limit = _limit_point(ball, "root", 90.0, 100.0)
+    if scorer.score(ball, wide_limit)["decision"] is not True:
+        raise AssertionError("a wide-root-limit stable aiming position must be CAN AIM")
     if not _distance_changes(rows):
         raise AssertionError("benchmark no longer exposes distance-sensitive scorer behavior")
 
@@ -215,8 +232,9 @@ def _validate(records, rows):
         }:
             raise AssertionError(f"incomplete mechanical-limit pair: {key}")
         results = {(row["distance"], row["side"]): row["result"] for row in group}
+        states = {(row["distance"], row["side"]): row["scorer_state"] for row in group}
         if not any(results[d, "reachable-side"] == "CAN AIM" and
-                   results[d, "unreachable-side"] == "CANNOT BEAR" for d in DISTANCES):
+                   states[d, "unreachable-side"] == "OUT_OF_ARC" for d in DISTANCES):
             raise AssertionError(f"mechanical limit has no accepted transition: {key}")
     unusual = {row["mechanical_layout"] for row in limits
                if row["mechanical_layout"] != "ordinary_xy"}

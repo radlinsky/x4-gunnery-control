@@ -3,15 +3,15 @@
 Research only. Bearing/arc geometry of the corpus `ops` path; no range, LOS, hull masking,
 projectile, guidance or readiness. Target points are in the turret component frame.
 
-- ordinary_xy (unlimited root Y, bounded leaf X): the accepted #173 scorer
+- ordinary_xy (unlimited root Y, bounded leaf X): the accepted #173 geometry
   (`research/issue167-p3c/study.py` `geometry()`) on segments split from the corpus ops.
 - bounded_traverse / reversed_xy: both pivots fixed (asserted), so each joint has one
   request. Solve root then leaf in the root's clamped frame (swi-091-turret-geometry.md);
-  IN_ARC iff neither joint clamps. A >=180 deg root span whose request sits on a limit is
-  UNKNOWN: the mover could be parked pi away at the other limit.
+  IN_ARC iff neither joint clamps.
 - rotation_z: the traced root-Z request (turret-target-point-joint-solver.md) is the yaw map with
-  component Y and Z swapped, so the accepted yaw gate finds the resting clocks. Traps or no rest are
-  UNKNOWN; otherwise the leaf X request is scored at every resting clock, any in arc suffices (#173).
+  component Y and Z swapped, so the accepted yaw gate finds the resting clocks. Traps do not affect
+  existence; the leaf X request is scored at every resting clock and any in arc suffices. No resting
+  clock proves CANNOT BEAR; exact-pivot degeneracy remains UNKNOWN.
 """
 from __future__ import annotations
 
@@ -95,11 +95,8 @@ def _fixed_pivot(leaf, root, seg, pt):
     x = _clamp(leaf_req, leaf["limits"])
     hit = r == root_req and x == leaf_req
     aim = mat_mul(L[1], mat_mul(JOINT[leaf["axis"]](x), frame))[2]
-    out = {"state": "IN_ARC" if hit else "OUT_OF_ARC", "decision": hit, "root": r, "leaf": x, "aim": aim, "d": d}
-    lo, hi = root["limits"]
-    if hit and hi - lo >= 180 and not (_in_arc(root_req - 1e-5, root["limits"]) and _in_arc(root_req + 1e-5, root["limits"])):
-        out.update(state="UNKNOWN_root_limit_unwrap", decision=None)
-    return out
+    return {"state": "IN_ARC" if hit else "OUT_OF_ARC", "decision": hit,
+            "root": r, "leaf": x, "aim": aim, "d": d}
 
 
 def _rest_z(leaf, root, seg, pt):
@@ -108,17 +105,21 @@ def _rest_z(leaf, root, seg, pt):
     yaw = {"t_G": SWAP(G[0]), "t_H": SWAP(H[0]), "R_H": tuple(SWAP(r) for r in (H[1][0], H[1][2], H[1][1])),
            "beta": math.atan2(aim[0], aim[1])}  # traced beta_z; no degenerate guard (0 for the dish)
     gate = classify(yaw, SWAP(pt))
-    if gate["traps"] or not gate["resting"]:
-        return {"state": "UNKNOWN_" + gate["class"] + ("_trap" if gate["traps"] else ""), "decision": None, "clocks": gate["class"]}
+    if not gate["resting"]:
+        return {"state": "NO_STABLE_POSITION", "decision": False, "clocks": gate["class"]}
     Rt = lambda M: tuple(zip(*M))  # noqa: E731
     scored = []
     for z in gate["resting"]:
         frame = compose(G, compose((ZERO, JOINT["z"](z)), H))
         d = tuple(p - c for p, c in zip(pt, frame[0]))
         n = math.hypot(*d)
+        if not n:
+            continue  # X4 skips the solve; another stable clock may still be usable.
         d = tuple(0.0 if abs(c) < ZEROING * n else c for c in d)  # caller zeroing; atan2 ignores renormalization
         x = math.remainder(_request("x", vec_mul(d, Rt(frame[1])), L[1][2]), 2 * math.pi)
         scored.append((not _in_arc(x, leaf["limits"]), z, x))
+    if not scored:
+        return {"state": "UNKNOWN_pivot", "decision": None, "clocks": gate["class"]}
     miss, z, x = min(scored, key=lambda r: r[0])
     return {"state": "OUT_OF_ARC" if miss else "IN_ARC", "decision": not miss, "clocks": gate["class"], "root": z, "leaf": x}
 

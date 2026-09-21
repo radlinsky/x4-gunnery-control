@@ -16,7 +16,7 @@ component-origin stress case. For every usable authored joint boundary, the
 benchmark uses the accepted geometry to pose the joint 0.1 degrees inside and
 outside its limit and supplies an exact point from that joint pivot along the
 posed bore at both distances. A boundary is retained only when the scorer
-observes a reachable/unreachable transition at one or both distances. This
+observes a CAN AIM / OUT_OF_ARC transition at one or both distances. This
 keeps real per-turret reach limits without restoring the old many-scenario
 benchmark.
 

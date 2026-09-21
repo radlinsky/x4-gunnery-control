@@ -68,8 +68,8 @@ def check_ordinary_agreement(stride=37):
     trap = audit.synthetic("trap", (-10.0, 90.0), t_g=(1.0, 1.0, 2.0), rg=audit.ry(math.pi / 2))
     none = audit.synthetic("none", (-10.0, 90.0), t_g=(0.0, 1.0, 2.0))
     want = [(several, (0.0, 9.0, 3.0), "IN_ARC"), (several, (0.0, 1.5, 3.0), "IN_ARC"),
-            (several, (0.0, -2.0, 3.0), "OUT_OF_ARC"), (trap, (1.0, 20.0, 2.0), "UNKNOWN_one_trap"),
-            (none, (math.sin(0.7), 1.0, math.cos(0.7)), "UNKNOWN_none_trap")]
+            (several, (0.0, -2.0, 3.0), "OUT_OF_ARC"), (trap, (1.0, 20.0, 2.0), "IN_ARC"),
+            (none, (math.sin(0.7), 1.0, math.cos(0.7)), "NO_STABLE_POSITION")]
     for t, pt, state in want:
         new = s.score(record(t["seg"], t["arc"]), pt)
         assert new["state"] == state and same(s.study.geometry(t, I3, O, pt), new), (t["macro"], pt, new["state"])
@@ -87,9 +87,6 @@ def check_bounded():
             pt = tuple(300.0 * c for c in d)
             new = s.score(r, pt)
             counts[r["macro"], new["state"]] += 1
-            if new["state"].startswith("UNKNOWN"):
-                assert new["state"] == "UNKNOWN_root_limit_unwrap" and abs(abs(math.degrees(new["root"])) - 90) < 1e-3
-                continue
             if new["decision"]:
                 assert angle(new["aim"], new["d"]) < 1e-5
             request = math.atan2(new["d"][0], new["d"][2])  # root Y request; bounded records have beta = 0
@@ -108,7 +105,7 @@ def check_bounded():
         assert out["state"] == state and abs(math.degrees(out["root"]) - root_deg) < 1e-4, (az, el, out)
     assert s.score(nk7, at(90, 0))["state"] == "OUT_OF_ARC"  # 140 deg span: clamped, no unwrap ambiguity
     ball = R["swi:turret_s_gauntlet_macro"]
-    assert s.score(ball, at(90, 0))["state"] == "UNKNOWN_root_limit_unwrap"  # 180 deg span, request on a limit
+    assert s.score(ball, at(90, 0))["state"] == "IN_ARC"  # a stable position exists at the 180-degree limit
     assert s.score(ball, at(89, 0))["state"] == "IN_ARC" and s.score(ball, at(91, 0))["state"] == "OUT_OF_ARC"
     assert s.score(ball, at(0, 90))["state"] == "IN_ARC"  # zenith: traced request 0, pitch 90 inside +/-90
     print("bounded:", dict(Counter(k[1] for k in counts.elements())))
@@ -152,12 +149,12 @@ def check_rotation_z():
                 assert abs(math.degrees(out["leaf"]) - theta) < 0.05, (theta, clock, out)
     # on-axis far targets: 1e-3f zeroing makes the projection degenerate, request 0 rests at clock 0
     assert s.score(dish, (0.0, 0.0, 1e4))["state"] == "IN_ARC" and s.score(dish, (0.0, 0.0, -1e4))["state"] == "OUT_OF_ARC"
-    # hidden state / no rest: pivot f = 2.748 m along the clock; rho < 2f oscillates or holds astern -> UNKNOWN
+    # no rest: pivot f = 2.748 m along the clock; rho < 2f oscillates or holds astern
     for rho in (1.0, 2.0, 4.0, 5.0):
         for clock in range(15, 360, 30):  # off-axis: an axis-aligned clock can rest inside the 1e-3f zeroing band
             out = s.score(dish, (rho * math.sin(math.radians(clock)), rho * math.cos(math.radians(clock)), 50.0))
-            assert out["state"].startswith("UNKNOWN") and out["decision"] is None, (rho, clock, out)
-    assert s.score(dish, (0.0, 0.0, 50.0))["state"].startswith("UNKNOWN")  # on axis, close: pivot holds the target astern
+            assert out["state"] == "NO_STABLE_POSITION" and out["decision"] is False, (rho, clock, out)
+    assert s.score(dish, (0.0, 0.0, 50.0))["state"] == "NO_STABLE_POSITION"  # on axis, close: no rest
     # handedness-free: mirroring the target across either clock plane never changes the answer
     counts = Counter()
     for d in s.study.DIRS:
