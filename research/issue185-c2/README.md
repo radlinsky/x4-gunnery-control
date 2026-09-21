@@ -11,21 +11,21 @@ python3 research/issue176-a4x/corpus.py
 python3 research/issue185-c2/benchmark.py
 ```
 
-Every turret receives the same eight explicit component-frame points. Two
-normal points cover straightforward forward and oblique bearings. Five
-difficult points cover the four component axes and astern, exposing pitch
-poles, exact 90-degree limits, bounded traverse, reversed axes, and rotation-Z
-without tailoring a point to a turret. The component origin is stress-only: it
-deliberately exercises degenerate/pivot and hidden-rest handling without
-distorting the supported-case report. This 2,304-case cross product is the
-smallest set retained after checking that it produces both accepted decisions,
-naturally occurring `UNKNOWN`, and distinct results for every unusual layout.
+Every turret receives one normal oblique bearing at 100 m and 8,000 m, plus one
+component-origin stress case. For every usable authored joint boundary, the
+benchmark uses the accepted geometry to pose the joint 0.1 degrees inside and
+outside its limit and supplies an exact point from that joint pivot along the
+posed bore at both distances. A boundary is retained only when the scorer
+observes a reachable/unreachable transition at one or both distances. This
+keeps real per-turret reach limits without restoring the old many-scenario
+benchmark.
 
 The script writes raw reproducible rows to the ignored
 `.x4-research-cache/issue185-c2/benchmark.jsonl.gz` and the concise tracked
 result to `findings.md`. Each row retains turret/source/layout/category, the
-supplied exact point, scorer state, and the C1 result. It fails on corpus-count
-drift, missing coverage, invalid results, or a turret without all eight cases.
+supplied exact point, scorer state, and the C1 result. Limit rows also retain
+distance, joint/axis, authored limit, edge, and side. The script fails on
+corpus-count drift, missing coverage, incomplete limit pairs, or invalid results.
 
 No point is discovered, reconstructed, probed, varied, or selected from turret
 behavior. The benchmark does not model aim-point uncertainty, range, firing
