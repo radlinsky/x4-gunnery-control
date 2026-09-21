@@ -373,6 +373,9 @@ def cases(targets, mounts):
 def oracle(case):
     """X4's quantised direction to the selected aim point from a query position."""
     pts = [tuple(map(float, p)) for p in case["points"]]
+    if not pts:  # X4 9.00: no authored aim points -> the runtime bounding-box centre
+        C, _H, R = case["box"]
+        pts = [tuple(map(float, np.asarray(C, float) @ R))]
     return lambda u: study.Q(u, pts, [])
 
 
@@ -4836,6 +4839,14 @@ def selftest():
         for m in aimed_muzzles(case, records).values():
             assert inside(firing_box(lo, hi, margins[case["ship_class"]][0]), ship_local(case, m))
     assert seen == {"close", "ordinary", "stress", "boundary", "artificial"}
+
+    # zero authored aim points: the frozen A7.3 search finds X4's runtime-box-centre fallback as one point
+    C, R = np.array([3.0, -2, 7]), np.asarray(study.ROT[5])
+    st = near_only_run(view(dict(case, box=(C, np.array([20.0, 8, 40]), R), points=[])),
+                       total=A73_TOTAL, pad=A6_NEAR_PAD, geom=A73_GEOM)
+    rpts, _, _ = refine_points([(np.asarray(x, float), r) for x, r in st["points"]], st["rays"])
+    assert st["asks"] <= A73_TOTAL and len(rpts) == 1, (st["asks"], rpts)
+    assert np.linalg.norm(rpts[0][0] - C @ R) <= rpts[0][1], (rpts, C @ R)
     print("selftest ok")
 
 
