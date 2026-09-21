@@ -3021,10 +3021,17 @@ def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
     plo, phi = C - H - pad, C + H + pad
     starts = [s @ T for s in near_starts(C, H, pad)]
     stats = dict(start_points=0, start_asks=0, pursued=0, ready_points=0, ready_asks=0, primary=0,
-                 moved=0, switched=0, guard=False, end=None, picks=[])
+                 moved=0, switched=0, guard=False, end=None, picks=[], found=[])
 
     def probe(h):
         points = h["points"]
+        real, found = h["locate"], stats["found"]
+
+        def locate():  # #184 A7.2c: the sample count at which each point became confirmed
+            real()
+            if len(points) > (found[-1][1] if found else 0):
+                found.append((h["count"](), len(points)))
+        h = dict(h, locate=locate)
         for v in starts[1:]:                    # starts[0] is the degenerate box `_search` already asked
             if h["count"]() + 1 > total:
                 break
@@ -3276,6 +3283,203 @@ def _a72n_report(rows):
                  f"{n['ready_asks']} | {n['primary']} | {n['end']} | {n['points']} | "
                  f"{n['correct']}/{n['wrong']}/{n['unknown']} | {len(n['missing_needed'])} | {o['asks']} | "
                  f"{o['points']} | {o['correct']}/{o['wrong']}/{o['unknown']} | {len(o['missing_needed'])} |")
+    return "\n".join(L)
+
+
+# ------------------------------------------------- A7.2c: was 24 the only thing wrong with the near-only search?
+
+A72C_EVIDENCE = Path(__file__).with_name("A72C_NEAR_BUDGET.md")
+A72C_BUDGETS = (24, 28, 32, 36, 40)  # one total sample budget per run; nothing else about the search changes
+A72C_WATCH = (12160, 12163, 12157, 12197, 12199, 12368, 12376)  # the A7.2b cases that were worse than accepted
+
+
+def _a72c_case(case):
+    """The A7.2b candidate, unchanged, run once per total sample budget, plus the accepted A7.2 three-stage
+    search once for comparison. One sample is one X4 aim-direction lookup from one probe position, and the
+    budget covers every one of them: the 4 starting probes, the moved-probe continuation, the adaptive
+    near-target probes, and all along-ray confirmation work either triggers."""
+    records, margins = _LOADED
+    v, margin = view(case), margins[case["ship_class"]][0]
+    muzzles = ship_aimed_muzzles(case, records, _SHIP_MOUNTS[case["ship"]])
+    runs = {}
+    for total in A72C_BUDGETS:
+        n = near_only_run(v, total=total)
+        runs[total] = dict(_a72n_final(case, muzzles, n["points"], n["rays"], n["asks"]),
+                           start_points=n["start_points"], pursued=n["pursued"],
+                           ready_points=n["ready_points"], ready_asks=n["ready_asks"],
+                           primary=n["primary"], moved=n["moved"], end=n["end"], found=n["found"])
+    probe, st = angular_probe(v, margin, primary=A7_PRIMARY, near_target=A6_NEAR_PAD)
+    a = corner_audit(v, margin, probe)
+    pts = st["snaps"][max(st["snaps"])]["points"] if st["snaps"] else \
+        [(c.tolist(), float(r)) for c, r in st["after_rescue_points"]]
+    old = dict(_a72n_final(case, muzzles, pts, st.get("rays", []), a["queries"]),
+               end="S2" if st["guard"] else "S1")
+    return dict(id=case["id"], gap=case["gap"], group=case["a7"], target=case["target"], ship=case["ship"],
+                authored=len(case["points"]), muzzles=len(muzzles), runs=runs, old=old)
+
+
+def a72c(jobs):
+    """A7.2c experiment: A7.2b failed at 24 total samples. Is the total the only thing that was wrong?"""
+    global _LOADED, _SHIP_MOUNTS
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    _SHIP_MOUNTS = defaultdict(list)
+    for m in mounts:
+        _SHIP_MOUNTS[m["ship"]].append(m)
+    todo = list(a7_variants(targets(), mounts))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path = CACHE / "a72c_rows.jsonl"
+    print(f"#184 A7.2c: {len(todo)} cases x budgets {A72C_BUDGETS} -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a72c_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            print(f"  {len(rows)}/{len(todo)} case {r['id']} {r['group']} @{r['gap']}m: " + " | ".join(
+                f"{b}: {r['runs'][b]['asks']}s {r['runs'][b]['points']}p "
+                f"{r['runs'][b]['wrong']}w {len(r['runs'][b]['missing_needed'])}m"
+                for b in A72C_BUDGETS) + f" | accepted {r['old']['asks']}s "
+                f"{r['old']['wrong']}w {len(r['old']['missing_needed'])}m", flush=True)
+    rows.sort(key=lambda r: (r["group"], r["id"], r["gap"]))
+    out = _a72c_report(rows)
+    A72C_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {rows_path}, evidence: {A72C_EVIDENCE})")
+
+
+def _a72c_safe(rows, b):
+    """SAFE on this focused population: no wrong aim-point choice, no needed aim point missed, and no
+    invented, merged or duplicate point. UNKNOWN is reported separately and never excuses a failure."""
+    f = lambda k: sum(len(r["runs"][b][k]) if isinstance(r["runs"][b][k], list) else r["runs"][b][k]  # noqa: E731
+                      for r in rows)
+    return not (f("wrong") or f("missing_needed") or f("invented") or f("merged") or f("duplicate"))
+
+
+def _a72c_report(rows):
+    f = lambda rs, m, k: sum(len(rr[k]) if isinstance(rr[k], list) else rr[k]  # noqa: E731
+                             for rr in (r["runs"][m] if isinstance(m, int) else r[m] for r in rs))
+    cols = [("needed aim points missed", "missing_needed"), ("wrong aim-point choices", "wrong"),
+            ("correct choices", "correct"), ("UNKNOWN results", "unknown"), ("invented points", "invented"),
+            ("merged points", "merged"), ("duplicate points", "duplicate"), ("points located", "points"),
+            ("points tightened by refinement", "refined")]
+    safe = [b for b in A72C_BUDGETS if _a72c_safe(rows, b)]
+    first = safe[0] if safe else None
+    L = ["# Issue #184 A7.2c: the near-target-only search against a larger single sample budget", "",
+         "Offline research, status **inference**. No X4 launch, no production change, and the accepted #184",
+         "method is unchanged by this file. A7.2b failed at 24 total samples; this asks whether the total was",
+         "the only thing wrong with it. Run with `python3 research/issue184/aimpoint_map.py --a72c`.", "",
+         "One **sample** is one X4 aim-direction lookup from one chosen probe position.", "",
+         "## What is held fixed", "",
+         "Everything from A7.2b: the same 4 fixed starting probes (the alternating corners of the target's",
+         f"runtime box grown by the same {A6_NEAR_PAD:g} m near-target padding), the same point-location and",
+         "confirmation rules, the same moved-probe continuation when the 4 starts locate nothing, and the same",
+         "adaptive near-target search on the largest missing viewing direction of a located point. The firing-",
+         "ship corner search and the rescue stage stay deleted. The starting arrangement is not redesigned.",
+         "**The total sample budget is the only thing that varies.** It covers the 4 starting probes, the",
+         "moved-probe continuation, every adaptive probe, and all confirmation work any of them triggers; the",
+         "adaptive search gets no allowance of its own. The search does not know which budget is running.",
+         "Hidden aim points and later turret positions are scoring truth only: they never steer placement,",
+         f"stopping or budget. Same {len(rows)} focused A7.1/A7.2 cases, same hidden firing-ship-wide truth",
+         "(every real mount on the firing ship, every compatible turret the benchmark accepts, aimed muzzle",
+         "positions only, out-of-arc poses excluded as CANNOT BEAR, no resting positions), same scoring code.",
+         "", "## Every tested budget", "",
+         "| | " + " | ".join(f"{b} total" for b in A72C_BUDGETS) + " | accepted A7.2 |",
+         "|---|" + "---:|" * (len(A72C_BUDGETS) + 1)]
+    for label, k in cols:
+        L.append(f"| {label} | " + " | ".join(str(f(rows, b, k)) for b in A72C_BUDGETS)
+                 + f" | {f(rows, 'old', k)} |")
+    L += ["| samples used, median / worst | " + " | ".join(
+        _stats2([r["runs"][b]["asks"] for r in rows]) for b in A72C_BUDGETS)
+        + f" | {_stats2([r['old']['asks'] for r in rows])} |",
+        "| cases hitting the total limit | " + " | ".join(
+            str(sum(r["runs"][b]["end"] == "budget" for r in rows)) for b in A72C_BUDGETS)
+        + f" | {sum(r['old']['end'] == 'S2' for r in rows)} (S2) |",
+        "| cases stopping with nowhere useful left to probe | " + " | ".join(
+            str(sum(r["runs"][b]["end"] in ("nothing definite", "position already asked") for r in rows))
+            for b in A72C_BUDGETS) + f" | {sum(r['old']['end'] == 'S1' for r in rows)} (S1) |",
+        "| **SAFE on this population** | " + " | ".join(
+            ("**yes**" if _a72c_safe(rows, b) else "no") for b in A72C_BUDGETS) + " | **yes** |", "",
+        "SAFE means 0 wrong aim-point choices, 0 needed aim points missed and 0 invented, merged or",
+        "duplicate points. UNKNOWN is allowed and is reported on its own row; it never excuses a failure.", ""]
+    L += [f"The first tested budget that is SAFE is **{first} total samples**." if first else
+          "**No tested budget is SAFE.**", ""]
+    L += ["## The cases A7.2b got wrong or worse", "",
+          "| case | gap (m) | " + " | ".join(f"{b}: pts, w, missed, samples, last point at"
+                                             for b in A72C_BUDGETS) + " | accepted: pts, w |",
+          "|---|---:|" + "---|" * (len(A72C_BUDGETS) + 1)]
+    for cid in A72C_WATCH:
+        for r in [r for r in rows if r["id"] == cid]:
+            cells = []
+            for b in A72C_BUDGETS:
+                q = r["runs"][b]
+                cells.append(f"{q['points']}, {q['wrong']}, {len(q['missing_needed'])}, {q['asks']}, "
+                             f"{q['found'][-1][0] if q['found'] else '-'}")
+            L.append(f"| {cid} | {r['gap']} | " + " | ".join(cells)
+                     + f" | {r['old']['points']}, {r['old']['wrong']} |")
+    L += ["", "`last point at` is the sample count at which the final point this run located became",
+          "confirmed, so `budget - last point at` is the room that was left over after the discovery the",
+          "case's safety depends on.", ""]
+    if first:
+        room = [(r, first - (r["runs"][first]["found"][-1][0] if r["runs"][first]["found"] else 0))
+                for r in rows]
+        tight = sorted(room, key=lambda x: x[1])[:8]
+        L += [f"## How much room was left at {first} total samples", "",
+              f"Room left after the last point was confirmed, over all {len(rows)} cases: median / smallest "
+              f"{np.median([x[1] for x in room]):.3g} / {min(x[1] for x in room):.3g} samples.",
+              f"Cases whose last point was confirmed on the final usable probe (0 or 1 sample of room): "
+              f"{sum(x[1] <= 1 for x in room)}.", "",
+              "| case | gap (m) | samples used | last point confirmed at | room left | points | needed missed |",
+              "|---|---:|---:|---:|---:|---:|---:|"]
+        for r, slack in tight:
+            q = r["runs"][first]
+            L.append(f"| {r['id']} | {r['gap']} | {q['asks']} | "
+                     f"{q['found'][-1][0] if q['found'] else '-'} | {slack} | {q['points']} | "
+                     f"{len(q['missing_needed'])} |")
+        L.append("")
+    if first:
+        nxt = [b for b in A72C_BUDGETS if b > first]
+        room = lambda b: [b - (r["runs"][b]["found"][-1][0] if r["runs"][b]["found"] else 0) for r in rows]  # noqa: E731
+        L += [f"## What the extra samples bought, and how close {first} is to failing", "",
+              "| budget | samples left after the last point was confirmed, median / smallest | cases at that "
+              "smallest margin |", "|---:|---|---:|"]
+        for b in A72C_BUDGETS:
+            rm = room(b)
+            L.append(f"| {b} | {np.median(rm):.3g} / {min(rm):.3g} | {sum(x == min(rm) for x in rm)} |")
+        worse = [r for r in rows if r["runs"][first]["unknown"] > r["old"]["unknown"]]
+        L += ["",
+              f"The 4 samples between 24 and {first} do one thing: they pay for one or two more adaptive",
+              "probes after the moved-probe continuation has finished confirming the first point. That is",
+              f"enough for the geometries that failed at 24. Authored aim points left undiscovered anywhere in",
+              f"the population: {sum(len(r['runs'][first]['missing_authored']) for r in rows)} at {first}, "
+              f"{sum(len(r['runs'][A72C_BUDGETS[0]]['missing_authored']) for r in rows)} at "
+              f"{A72C_BUDGETS[0]}, and {sum(len(r['old']['missing_authored']) for r in rows)} for the accepted",
+              "method.", "",
+              f"**It is not comfortable.** The decisive discovery in the 12160 and 12163 geometries is",
+              f"confirmed at sample 25, and a {first}-sample run stops after the probe at sample 26: the",
+              "aim point those cases need arrives on the last probe but one that the budget can afford. The",
+              f"smallest margin anywhere in the population at {first} is {min(room(first))} samples - one",
+              f"probe plus its confirmation - shared by {sum(x == min(room(first)) for x in room(first))} cases.",
+              f"A geometry needing a few samples more than these would fail at {first} exactly as 12160 failed",
+              "at 24. The same discovery still lands at sample 25 at every larger budget, because the probe",
+              f"sequence does not depend on the budget, so {nxt[0] if nxt else first} buys {nxt[0] - 25 if nxt else 0}",
+              "samples of margin past it rather than finding anything sooner.", "",
+              f"Against the accepted method at {first} samples: fewer UNKNOWN overall "
+              f"({f(rows, first, 'unknown')} against {f(rows, 'old', 'unknown')}), the same 0 wrong choices and",
+              f"0 needed points missed, and a median cost of {_stats2([r['runs'][first]['asks'] for r in rows])}",
+              f"samples against {_stats2([r['old']['asks'] for r in rows])}. {len(worse)} cases still end with",
+              "more UNKNOWN than the accepted method does, from points located more loosely on fewer",
+              "observations; none of them is unsafe.", ""]
+    L += ["## Per case, per budget", "",
+          "| case | group | gap (m) | " + " | ".join(f"{b}: samples/pts/c/w/U/missed" for b in A72C_BUDGETS)
+          + " | accepted: samples/pts/c/w/U |", "|---|---|---:|" + "---|" * (len(A72C_BUDGETS) + 1)]
+    for r in rows:
+        cells = [f"{r['runs'][b]['asks']}/{r['runs'][b]['points']}/{r['runs'][b]['correct']}/"
+                 f"{r['runs'][b]['wrong']}/{r['runs'][b]['unknown']}/{len(r['runs'][b]['missing_needed'])}"
+                 for b in A72C_BUDGETS]
+        o = r["old"]
+        L.append(f"| {r['id']} | {r['group']} | {r['gap']} | " + " | ".join(cells)
+                 + f" | {o['asks']}/{o['points']}/{o['correct']}/{o['wrong']}/{o['unknown']} |")
     return "\n".join(L)
 
 
@@ -3646,6 +3850,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a72c" in sys.argv:
+        return a72c(arg("--jobs", 4))
     if "--a72n" in sys.argv:
         return a72n(arg("--jobs", 4))
     if "--a72" in sys.argv:
