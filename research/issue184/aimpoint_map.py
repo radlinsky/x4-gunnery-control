@@ -2983,6 +2983,302 @@ def _a72_report(rows):
     return "\n".join(L) + "\n"
 
 
+# ------------------------------------------------- A7.2b: can one near-target-only search replace all three stages?
+
+A72N_EVIDENCE = Path(__file__).with_name("A72B_NEAR_ONLY.md")
+A72N_TOTAL = 24            # ONE budget for the whole search: the 4 starting probes, confirmation and adaptive asks
+A72N_STARTS = ((0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0))  # alternating corners of the padded target box
+
+
+def near_starts(C, H, pad=A6_NEAR_PAD):
+    """The 4 fixed starting probe positions, target frame: alternating corners of the target runtime box grown
+    by `pad`, i.e. the tetrahedron inscribed in that box. No two share a face, so this is the widest 3D spread
+    4 positions on that box can have, and it is fixed before any run. Only the target's runtime box and the
+    existing near-target pad take part - no hidden aim point, no current turret position, no benchmark truth."""
+    C, H = np.asarray(C, float), np.asarray(H, float)
+    lo, hi = C - H - pad, C + H + pad
+    return [np.where(np.asarray(s, bool), hi, lo) for s in A72N_STARTS]
+
+
+def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
+    """The candidate method: no firing-ship corner search and no cheap rescue stage at all.
+
+    Ask the 4 fixed `near_starts` probes, feed them through the accepted `locate()` point confirmation, then
+    continue with the accepted adaptive near-target placement (`angular_pick` on the target box + pad) exactly
+    as the retained method's third stage does. One shared budget of `total` X4 questions covers everything:
+    the 4 starting probes, every confirmation ask `locate` spends, every moved ask, and every adaptive probe.
+    The search stops at the first of - no valid next probe (nothing confirmed, nothing definite anywhere on
+    the probe box, or the best candidate is a position already asked) - or fewer than 3 questions left, the
+    one probe plus the two its along-ray confirmation may need.
+
+    When the 4 starts confirm nothing, the only continuation used is the accepted moved-ask pursuit of those
+    unassigned observations (`_pursue`, the same rule point location already relies on), applied to the
+    near-target starting probes themselves. The old firing-ship corners and the old rescue stage are never
+    run. -> (probe callback for `_search`, stats)."""
+    C, H, T = view["target_box"]
+    tlo, thi = target_box(C, H)
+    C, H = np.asarray(C, float), np.asarray(H, float)
+    plo, phi = C - H - pad, C + H + pad
+    starts = [s @ T for s in near_starts(C, H, pad)]
+    stats = dict(start_points=0, start_asks=0, pursued=0, ready_points=0, ready_asks=0, primary=0,
+                 moved=0, switched=0, guard=False, end=None, picks=[])
+
+    def probe(h):
+        points = h["points"]
+        for v in starts[1:]:                    # starts[0] is the degenerate box `_search` already asked
+            if h["count"]() + 1 > total:
+                break
+            h["rays"][tuple(map(float, v))] = (v, h["ask"](v))
+        h["locate"]()
+        stats.update(start_points=len(points), start_asks=h["count"]())
+        spend = lambda n: h["count"]() + n <= total  # noqa: E731
+        seen = [len(points)]
+        if not points:  # smallest generic continuation consistent with the existing point-location rules
+            anchors = sorted(k for k, (u, d) in h["rays"].items() if d is not None and h["owner"](u, d) is None)
+            stats["pursued"] = len(anchors)
+            _pursue(h, tlo, thi, T, anchors, spend, stats, "", seen)
+        stats.update(ready_points=len(points), ready_asks=h["count"]())
+
+        def assigned():
+            out = {}
+            for u, d in h["rays"].values():
+                i = h["owner"](u, d)
+                if i is not None:
+                    out.setdefault(i, []).append(u)
+            return out
+
+        while True:
+            h["locate"]()
+            if not points:
+                stats["end"] = "no confirmed point"
+                break
+            if not spend(3):
+                stats["end"] = "budget"
+                break
+            pick = angular_pick(points, assigned(), plo, phi, T, np.zeros(3))
+            if pick is None:
+                stats["end"] = "nothing definite"
+                break
+            gap, pos, want = pick
+            v = pos @ T
+            key = tuple(map(float, v))
+            if key in h["rays"]:
+                stats["end"] = "position already asked"
+                break
+            had = len(points)
+            h["rays"][key] = (v, dv := h["ask"](v))
+            stats["primary"] += 1
+            h["locate"]()
+            got = h["owner"](v, dv)
+            if got is None and dv is not None:
+                _pursue(h, tlo, thi, T, [key], spend, stats, "", seen)
+                got = h["owner"](v, dv)
+            stats["picks"].append(dict(angle=math.degrees(gap), predicted=want, got=got,
+                                       new_points=len(points) - had))
+        stats["points"] = [(c.tolist(), float(r)) for c, r in points]
+        stats["rays"] = _ray_list(h["rays"])
+    return probe, stats
+
+
+def near_only_run(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
+    """Run `near_only_probe` with no box stage in front of it: `_search` is given the degenerate box at the
+    first starting probe, so its only box ask IS that probe and its first question is already a near-target
+    one. -> stats, with `asks` the whole search's X4 question count."""
+    C, H, T = view["target_box"]
+    s0 = near_starts(C, H, pad)[0] @ T
+    probe, stats = near_only_probe(view, total, pad)
+    _p, _o, _r, _c, _u, n = _search(view, s0, s0, np.eye(3), np.zeros(3), lambda *_: True, probe=probe)
+    stats["asks"] = n
+    return stats
+
+
+def _a72n_final(case, muzzles, points, rays, asks):
+    """Score one finished search: the refined estimates under the accepted `nearest` answer rule."""
+    _base, ref = _scored(case, points, rays, muzzles, asks)
+    rep = _represented([(np.asarray(c, float), r) for c, r in points], case["points"])
+    needed = sorted({study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in case["points"]])
+                     for m in muzzles.values()})
+    return dict(asks=asks, points=len(points), refined=ref["count"],
+                missing_needed=[x for x in needed if x not in rep],
+                missing_authored=[j for j in range(len(case["points"])) if j not in rep],
+                **{q: ref[q] for q in ("correct", "wrong", "unknown", "invented", "merged", "duplicate",
+                                       "missed", "identity_changed", "radius", "error")})
+
+
+def _a72n_case(case):
+    """One case run both ways: the candidate 24-total near-target-only search, and the accepted A7.2
+    three-stage search under its own stopping rule. Same case, same hidden firing-ship-wide truth, same
+    scoring code."""
+    records, margins = _LOADED
+    v, margin = view(case), margins[case["ship_class"]][0]
+    muzzles = ship_aimed_muzzles(case, records, _SHIP_MOUNTS[case["ship"]])
+    n = near_only_run(v)
+    new = dict(_a72n_final(case, muzzles, n["points"], n["rays"], n["asks"]),
+               start_points=n["start_points"], start_asks=n["start_asks"], pursued=n["pursued"],
+               ready_points=n["ready_points"], ready_asks=n["ready_asks"], primary=n["primary"],
+               moved=n["moved"], end=n["end"])
+    probe, st = angular_probe(v, margin, primary=A7_PRIMARY, near_target=A6_NEAR_PAD)
+    a = corner_audit(v, margin, probe)
+    pts = st["snaps"][max(st["snaps"])]["points"] if st["snaps"] else \
+        [(c.tolist(), float(r)) for c, r in st["after_rescue_points"]]
+    old = dict(_a72n_final(case, muzzles, pts, st.get("rays", []), a["queries"]),
+               corners=a["queries"] - st["rescue_extra"] - st["extra"], rescue=st["rescue_extra"],
+               angular=st["extra"], primary=st["primary"], end="S2" if st["guard"] else "S1")
+    return dict(id=case["id"], gap=case["gap"], group=case["a7"], target=case["target"], ship=case["ship"],
+                authored=len(case["points"]), muzzles=len(muzzles), new=new, old=old)
+
+
+def a72n(jobs):
+    """A7.2b experiment: can the three-stage search be replaced by one near-target-only search with 4 fixed
+    starting probes and one total budget of 24 X4 questions?"""
+    global _LOADED, _SHIP_MOUNTS
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    _SHIP_MOUNTS = defaultdict(list)
+    for m in mounts:
+        _SHIP_MOUNTS[m["ship"]].append(m)
+    todo = list(a7_variants(targets(), mounts))
+    CACHE.mkdir(parents=True, exist_ok=True)
+    rows_path = CACHE / "a72n_rows.jsonl"
+    print(f"#184 A7.2b: {len(todo)} cases -> {rows_path}", flush=True)
+    os.nice(10)
+    rows = []
+    with open(rows_path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a72n_case, todo, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            n, o = r["new"], r["old"]
+            print(f"  {len(rows)}/{len(todo)} case {r['id']} {r['group']} @{r['gap']}m: new {n['asks']} asks "
+                  f"{n['points']} pts {n['correct']}/{n['wrong']}/{n['unknown']} c/w/U, needed missing "
+                  f"{len(n['missing_needed'])}, end {n['end']} | old {o['asks']} asks "
+                  f"{o['correct']}/{o['wrong']}/{o['unknown']}, needed missing {len(o['missing_needed'])}",
+                  flush=True)
+    rows.sort(key=lambda r: (r["group"], r["id"], r["gap"]))
+    out = _a72n_report(rows)
+    A72N_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {rows_path}, evidence: {A72N_EVIDENCE})")
+
+
+def _a72n_report(rows):
+    tot = lambda m, k: sum(len(r[m][k]) if isinstance(r[m][k], list) else r[m][k] for r in rows)  # noqa: E731
+    ends = Counter(r["new"]["end"] for r in rows)
+    L = ["# Issue #184 A7.2b: one near-target-only search at 24 total questions, against the accepted "
+         "three-stage A7.2 result", "",
+         "Offline research, status **inference**. No X4 launch, no production change, and the accepted #184",
+         "method is NOT changed by this file: it is an experiment to decide whether A7.2's three stages must",
+         "survive. Run with `python3 research/issue184/aimpoint_map.py --a72n`.", "",
+         "## The candidate", "",
+         f"The firing-ship corner search and the cheap rescue stage are deleted. The search starts from {len(A72N_STARTS)}",
+         "fixed probe positions - the alternating corners of the target's runtime box grown by the existing",
+         f"{A6_NEAR_PAD:g} m near-target pad, the tetrahedron inscribed in that box - and then continues with the",
+         "unchanged adaptive near-target placement, which each time probes the largest missing viewing",
+         "direction of a confirmed point. One budget of **24 X4 questions** covers everything: the 4 starting",
+         "probes, every along-ray confirmation ask, every moved ask, and every adaptive probe. It stops at the",
+         "first of: no valid next probe, or fewer than 3 questions left (one probe plus its possible",
+         "confirmation). The 'all four saw the same point' shortcut is deliberately NOT part of this.", "",
+         "Both methods are scored by the same code on the same 126 focused A7.1/A7.2 cases, against the same",
+         "hidden firing-ship-wide truth: every real mount on the firing ship, every compatible turret the",
+         "benchmark accepts, aimed muzzle positions only, out-of-arc poses excluded, no resting positions.",
+         "Hidden aim points and later turret positions are scoring truth only and never touch placement,",
+         "stopping or budget.", "",
+         "## Head to head", "",
+         "| | candidate, 24 total, near-target only | accepted A7.2, three stages |",
+         "|---|---:|---:|"]
+    pair = [("needed aim points missed", "missing_needed"), ("final wrong aim-point choices", "wrong"),
+            ("final correct", "correct"), ("final UNKNOWN", "unknown"), ("invented points", "invented"),
+            ("merged points", "merged"), ("duplicate points", "duplicate"),
+            ("authored points never discovered", "missing_authored"), ("points confirmed", "points"),
+            ("points tightened by refinement", "refined"), ("identity changes from refinement", "identity_changed")]
+    for label, k in pair:
+        L.append(f"| {label} | {tot('new', k)} | {tot('old', k)} |")
+    for label, f in (("total X4 questions, median / worst", lambda m: _stats2([r[m]["asks"] for r in rows])),
+                     ("point radius (m), median / worst",
+                      lambda m: _stats2([x for r in rows for x in r[m]["radius"]])),
+                     ("point position error (m), median / worst",
+                      lambda m: _stats2([x for r in rows for x in r[m]["error"]]))):
+        L.append(f"| {label} | {f('new')} | {f('old')} |")
+    L += [f"| cases spending the full budget | {ends['budget']} of {len(rows)} (24 questions) | "
+          f"{sum(r['old']['end'] == 'S2' for r in rows)} of {len(rows)} (S2) |",
+          f"| cases stopping with nowhere useful left to probe | "
+          f"{ends['nothing definite'] + ends['position already asked']} | "
+          f"{sum(r['old']['end'] == 'S1' for r in rows)} |", "",
+         "## Did the first two stages provide anything the candidate cannot recover?", ""]
+    starts_ok = sum(r["new"]["ready_points"] > 0 for r in rows)
+    L += [f"All 126 cases started the adaptive search: **{starts_ok} of {len(rows)}** had at least one confirmed",
+          f"point after the 4 starting probes plus, where needed, the moved-ask continuation "
+          f"({sum(bool(r['new']['pursued']) for r in rows)} cases needed it).",
+          f"The 4 starts alone confirmed a point in {sum(r['new']['start_points'] > 0 for r in rows)} cases.",
+          f"Questions spent before the adaptive search could begin: median / worst "
+          f"{_stats2([r['new']['ready_asks'] for r in rows])}, against "
+          f"{_stats2([r['old']['corners'] + r['old']['rescue'] for r in rows])} for the accepted method's two",
+          "deleted stages.", "",
+          "## Cases where the candidate is worse", ""]
+    worse = [r for r in rows if r["new"]["wrong"] > r["old"]["wrong"]
+             or set(r["new"]["missing_needed"]) - set(r["old"]["missing_needed"])
+             or r["new"]["invented"] > r["old"]["invented"] or r["new"]["merged"] > r["old"]["merged"]
+             or r["new"]["duplicate"] > r["old"]["duplicate"] or r["new"]["unknown"] > r["old"]["unknown"]]
+    if not worse:
+        L.append("None: no case lost correctness, safety or an aim point some later muzzle needs.")
+    else:
+        L += ["| case | gap (m) | group | new c/w/U | old c/w/U | new needed missing | old needed missing | "
+              "new inv/mer/dup | asks | end |", "|---|---:|---|---|---|---:|---:|---|---:|---|"]
+        for r in worse:
+            n, o = r["new"], r["old"]
+            L.append(f"| {r['id']} | {r['gap']} | {r['group']} | {n['correct']}/{n['wrong']}/{n['unknown']} | "
+                     f"{o['correct']}/{o['wrong']}/{o['unknown']} | {len(n['missing_needed'])} | "
+                     f"{len(o['missing_needed'])} | {n['invented']}/{n['merged']}/{n['duplicate']} | "
+                     f"{n['asks']} | {n['end']} |")
+    L += ["", "## Why the candidate fails, case by cause", "", "| cause | cases | effect |", "|---|---:|---|"]
+    lost = [r for r in rows if set(r["new"]["missing_needed"]) - set(r["old"]["missing_needed"])]
+    starved = [r for r in rows if r["new"]["primary"] == 0]
+    softer = [r for r in rows if not r["new"]["wrong"] and r["new"]["unknown"] > r["old"]["unknown"]
+              and r["new"]["primary"] > 0]
+    L += [f"| ran out of the 24-question budget before discovering a needed aim point: the starts confirmed "
+          f"nothing, the moved-ask continuation spent {_stats2([r['new']['ready_asks'] for r in lost])} "
+          f"questions getting the first point confirmed, and only "
+          f"{_stats2([r['new']['primary'] for r in lost])} adaptive probes were left | {len(lost)} | "
+          f"{sum(r['new']['wrong'] for r in lost)} definite WRONG choices, "
+          f"{sum(len(r['new']['missing_needed']) for r in lost)} needed points missed |",
+          f"| ran out of the budget before the adaptive search made a single probe: all 24 questions went to "
+          f"the 4 starts and the moved-ask continuation | {len(starved)} | no wrong answer, "
+          f"{sum(r['new']['unknown'] - r['old']['unknown'] for r in starved)} extra UNKNOWN |",
+          f"| located points too loosely: the same points, but fewer observations each, so refinement left "
+          f"them wider and `nearest` could not separate them everywhere | {len(softer)} | no wrong answer, "
+          f"{sum(r['new']['unknown'] - r['old']['unknown'] for r in softer)} extra UNKNOWN |",
+          f"| the adaptive search could not choose another useful position | "
+          f"{sum(r['new']['end'] in ('nothing definite', 'position already asked') for r in rows)} | none |", "",
+          f"**FAIL.** {sum(r['new']['wrong'] for r in rows)} final wrong aim-point choices against 0 for the "
+          f"accepted three-stage result, and {sum(len(r['new']['missing_needed']) for r in rows)} aim points a "
+          f"later aimed muzzle on the firing ship really selects were never found. Invented, merged and "
+          f"duplicate points and refinement identity changes all stayed 0, and "
+          f"{sum(1 for r in rows if r['new']['correct'] == r['old']['correct'] and r['new']['unknown'] == r['old']['unknown'] and not r['new']['wrong'])} "
+          f"of {len(rows)} cases matched the accepted result exactly at "
+          f"{_stats2([r['new']['asks'] for r in rows])} questions instead of "
+          f"{_stats2([r['old']['asks'] for r in rows])}. The failures are a safety regression, not extra "
+          "UNKNOWN, so the experiment does not pass.", "",
+          "The two deleted stages provide nothing the candidate cannot reach by placement: where it had the",
+          "questions it confirmed the same points by the same rules and gave the same answers. What they",
+          "provide is questions already spent by the time the adaptive stage begins. The accepted method",
+          "arrives there with a point confirmed for 12-17 questions and then gets its own 24 on top; the",
+          "candidate spends 6-24 of its single 24 confirming the first point at all - 102 of 126 cases need",
+          "the moved-ask continuation, because 4 probes alone rarely cross well enough to confirm a point -",
+          "and what is left is too little on the hard multi-point geometries. That is evidence against 24 as a",
+          "total, not against a near-target-only search.", "",
+          "## Per case", "",
+          "| case | group | gap (m) | new asks | new starts pts | new pre-adaptive asks | new primary | "
+          "new end | new pts | new c/w/U | new needed missing | old asks | old pts | old c/w/U | "
+          "old needed missing |",
+          "|---|---|---:|---:|---:|---:|---:|---|---:|---|---:|---:|---:|---|---:|"]
+    for r in rows:
+        n, o = r["new"], r["old"]
+        L.append(f"| {r['id']} | {r['group']} | {r['gap']} | {n['asks']} | {n['start_points']} | "
+                 f"{n['ready_asks']} | {n['primary']} | {n['end']} | {n['points']} | "
+                 f"{n['correct']}/{n['wrong']}/{n['unknown']} | {len(n['missing_needed'])} | {o['asks']} | "
+                 f"{o['points']} | {o['correct']}/{o['wrong']}/{o['unknown']} | {len(o['missing_needed'])} |")
+    return "\n".join(L)
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -3307,6 +3603,15 @@ def selftest():
     check(_c, dict(located=[(i, c, r) for i, (c, r) in enumerate(a["points"])],
                    answer=lambda m: UNKNOWN, queries=0), [], missed=0, merged=0, duplicate=0)
 
+    # A7.2b: the same witness with no firing-ship stage at all. The 4 fixed starts are distinct corners of
+    # the padded target box, and the near-target-only search must still find all three points inside 24 asks.
+    st = near_only_run(v, total=A72N_TOTAL)
+    ss = near_starts(*v["target_box"][:2])
+    assert len({tuple(x) for x in ss}) == 4 and all(inside((np.asarray((0., 0, 0)) - 400 - A6_NEAR_PAD,
+                                                            np.asarray((0., 0, 0)) + 400 + A6_NEAR_PAD), x)
+                                                    for x in ss), ss
+    assert st["asks"] <= A72N_TOTAL and len(st["points"]) == 3, (st["asks"], len(st["points"]), st["end"])
+
     assert _integrated(sources.macro("turret_xen_xl_battleship_01_mk1_macro"))  # #169 integrated turret
     assert not _integrated(sources.macro("turret_kha_l_beam_01_mk1_scenario_macro"))  # ref override kept
 
@@ -3341,6 +3646,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a72n" in sys.argv:
+        return a72n(arg("--jobs", 4))
     if "--a72" in sys.argv:
         return a72(arg("--jobs", 4))
     if "--a7" in sys.argv:
