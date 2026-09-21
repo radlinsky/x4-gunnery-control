@@ -379,6 +379,74 @@
         </cue>
 
 
+        <!-- TEMPORARY issue #184 A8 live diagnostic; delete during A9 cleanup.
+             Lua runs the frozen aim-point search and asks one sample at a time.
+             Each request is one event and produces exactly one reply; nothing
+             here polls, delays or resets.
+
+             a8_target {token, specId}: resolve the single ship of the spawned
+             spec and reply with its identity and macro bounding box in
+             millimetres (center, then half-extents; LIVE #167 established that
+             boundingbox.max is the half-extents).
+
+             a8_probe {token, x, y, z}: from that target-local position, ask
+             X4's useaimtarget look_at orientation in the target's own space
+             (the space production's weapon-local pitch query uses) and reply
+             with its forward vector scaled by 1e9. MD's float text keeps only 6
+             significant digits, too coarse for the search, so values travel as
+             (value * scale)i integers; vanilla casts unit-typed numbers the
+             same way, e.g. (10s)i and (0.5 + $StartTime - player.age)i. -->
+        <cue name="A8Target" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'a8_target'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Token" exact="if @event.param3.$token then event.param3.$token else 'none'"/>
+            <set_value name="ScenarioRoot.$A8Target" exact="null"/>
+            <do_if value="ScenarioRoot.$SpawnedSpecId? and ScenarioRoot.$SpawnedSpecId == @event.param3.$specId
+                          and ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.count == 1
+                          and ScenarioRoot.$Spawned.{1}.exists">
+              <set_value name="ScenarioRoot.$A8Target" exact="ScenarioRoot.$Spawned.{1}"/>
+              <set_value name="$T" exact="ScenarioRoot.$A8Target"/>
+              <set_value name="$Center" exact="$T.macro.boundingbox.center"/>
+              <set_value name="$Half" exact="$T.macro.boundingbox.max"/>
+              <debug_text text="'[X4GC TEST A8 MD] target token=' + $Token + ' t=' + player.age + ' target=' + $T + ' name=' + $T.knownname + ' macro=' + $T.macro.id + ' owner=' + $T.owner.id + ' sector=' + $T.sector.knownname + ' c_x=' + $Center.x + ' c_y=' + $Center.y + ' c_z=' + $Center.z + ' h_x=' + $Half.x + ' h_y=' + $Half.y + ' h_z=' + $Half.z"/>
+              <raise_lua_event name="'X4GunneryTestLab.A8Target'"
+                               param="'x4gca8t:' + $Token + ':1:' + $T + ':' + $T.macro.id + ':' + ($Center.x * 1000)i + ':' + ($Center.y * 1000)i + ':' + ($Center.z * 1000)i + ':' + ($Half.x * 1000)i + ':' + ($Half.y * 1000)i + ':' + ($Half.z * 1000)i"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST A8 MD] target token=' + $Token + ' unresolved'"/>
+              <raise_lua_event name="'X4GunneryTestLab.A8Target'" param="'x4gca8t:' + $Token + ':0:none:none:0:0:0:0:0:0'"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <cue name="A8Probe" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabScenario'" control="'a8_probe'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Token" exact="if @event.param3.$token then event.param3.$token else 'none'"/>
+            <set_value name="$T" exact="@ScenarioRoot.$A8Target"/>
+            <do_if value="$T and $T.exists">
+              <set_value name="$X" exact="event.param3.$x"/>
+              <set_value name="$Y" exact="event.param3.$y"/>
+              <set_value name="$Z" exact="event.param3.$z"/>
+              <create_orientation name="$Aim" orientation="look_at" refobject="$T" useaimtarget="true">
+                <position x="$X * 1m" y="$Y * 1m" z="$Z * 1m" object="$T" space="$T"/>
+              </create_orientation>
+              <set_value name="$Fwd" exact="$Aim.forward"/>
+              <debug_text text="'[X4GC TEST A8 MD] probe token=' + $Token + ' t=' + player.age + ' target=' + $T + ' x=' + $X + ' y=' + $Y + ' z=' + $Z + ' fwd_x=' + $Fwd.x + ' fwd_y=' + $Fwd.y + ' fwd_z=' + $Fwd.z + ' yaw=' + $Aim.yaw + ' pitch=' + $Aim.pitch"/>
+              <raise_lua_event name="'X4GunneryTestLab.A8Probe'"
+                               param="'x4gca8p:' + $Token + ':1:' + ($Fwd.x * 1000000000)i + ':' + ($Fwd.y * 1000000000)i + ':' + ($Fwd.z * 1000000000)i"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST A8 MD] probe token=' + $Token + ' target missing'"/>
+              <raise_lua_event name="'X4GunneryTestLab.A8Probe'" param="'x4gca8p:' + $Token + ':0:0:0:0'"/>
+            </do_else>
+          </actions>
+        </cue>
+
         <!-- Repair only after a real player-ship hit. Unlike minimum-hull or
              invulnerability flags, this leaves the fixture attackable and its
              surface elements eligible for the vanilla shoot controller. -->

@@ -51,7 +51,9 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    id      = "issue-184-relative-aim-preselect-r1",
+    -- Issue #184 A8: the A5 Ray shell with one hold-fire target that authors
+    -- four aim points. Its correlated READY starts the temporary A8 searches.
+    id      = "issue-184-a8-near-target-live-r1",
     enabled = false,
 
     setup = {
@@ -65,27 +67,12 @@ X4GunneryTestLabScenarioSpec = {
 
     groups = {
         {
-            label     = "ISSUE184 PRIMARY LEFT OSAKA",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
+            label     = "ISSUE184 A8 CARRIER",
+            macro     = "ship_arg_xl_carrier_02_a_macro",
             faction   = "xenon",
             count     = 1,
-            distance  = 3500,
-            x         = -900,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
-            stripDefenceUnits = true,
-            repairGuard = true,
-        },
-        {
-            label     = "ISSUE184 DISTRACTOR RIGHT OSAKA",
-            macro     = "ship_ter_l_destroyer_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 3500,
-            x         = 900,
+            distance  = 6000,
+            x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",

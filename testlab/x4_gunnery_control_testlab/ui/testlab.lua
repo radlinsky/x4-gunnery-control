@@ -578,6 +578,530 @@ local function despawnTestScenario()
     menu.display()
 end
 
+-- TEMPORARY issue #184 A8 live diagnostic; delete during A9 cleanup.
+--
+-- a8Search is the frozen A7.3/A7.4 near-target aim-point search, ported line for
+-- line from research/issue184/aimpoint_map.py: near_only_run(total=40, pad=50,
+-- geom="C8") followed by refine_points, with the target frame as the identity.
+-- ask(n, p, kind) returns X4's unit direction from target-local position p
+-- toward the aim point X4 selects there, or nil. Every sample, starting,
+-- confirmation, moved or adaptive, goes through one counter capped at 40.
+local A8_TOTAL, A8_PAD, A8_PAD_Y = 40, 50, 8.86
+local A8_U = 2 ^ -24
+local A8_EPS = 2 ^ -18 / math.sqrt(2) + 8 * A8_U
+local A8_REL, A8_FORWARD = 0.01, 1e-4
+local A8_SLACK = 2 * (A8_EPS + 1e-6) / A8_FORWARD
+local A8_ALPHA0, A8_ALPHA_MIN = math.rad(2), math.rad(1 / 64)
+local A8_AXES = { { 2, 3 }, { 1, 3 }, { 1, 2 } }
+local A8_CAPPED, A8_DIVERGED = {}, {}
+
+local function vAdd(a, b) return { a[1] + b[1], a[2] + b[2], a[3] + b[3] } end
+local function vSub(a, b) return { a[1] - b[1], a[2] - b[2], a[3] - b[3] } end
+local function vMul(a, k) return { a[1] * k, a[2] * k, a[3] * k } end
+local function vDot(a, b) return a[1] * b[1] + a[2] * b[2] + a[3] * b[3] end
+local function vCross(a, b) return { a[2] * b[3] - a[3] * b[2], a[3] * b[1] - a[1] * b[3], a[1] * b[2] - a[2] * b[1] } end
+local function vNorm(a) return math.sqrt(vDot(a, a)) end
+local function vUnit(a, len) return { a[1] / len, a[2] / len, a[3] / len } end
+-- Python keys positions by float tuple, where -0.0 == 0.0.
+local function vKey(a) return string.format("%.17g,%.17g,%.17g", a[1] + 0, a[2] + 0, a[3] + 0) end
+local function vLess(a, b)
+    for k = 1, 3 do if a[k] ~= b[k] then return a[k] < b[k] end end
+    return false
+end
+local function vInside(lo, hi, x, r)
+    for k = 1, 3 do if not (lo[k] - r <= x[k] and x[k] <= hi[k] + r) then return false end end
+    return true
+end
+
+local function a8Rho(...)
+    local m = 1
+    for i = 1, select("#", ...) do
+        local p = select(i, ...)
+        for k = 1, 3 do m = math.max(m, math.abs(p[k])) end
+    end
+    return 2 * A8_U * m
+end
+
+-- (depth along ray (u, d), depth error bound) where ray (v, e) crosses it, or nil.
+local function a8Crossing(u, d, v, e)
+    local c, k = vDot(d, e), vNorm(vCross(d, e))
+    if k < 2 * A8_EPS / A8_REL then return nil end
+    local w = vSub(u, v)
+    local ew, dw = vDot(e, w), vDot(d, w)
+    local s, t = (c * ew - dw) / (k * k), (ew - c * dw) / (k * k)
+    local x = vAdd(u, vMul(d, s))
+    local miss = 2 * a8Rho(u, v, x) + A8_EPS * (math.abs(s) + math.abs(t))
+    if s <= 0 or t <= 0 or vNorm(vSub(vSub(x, v), vMul(e, t))) > miss
+            or miss / k > A8_REL * math.max(s, t) then
+        return nil
+    end
+    return s, miss / k
+end
+
+local function a8OnRay(u, d, c, r)
+    local t = vDot(vSub(c, u), d)
+    return t > 0 and vNorm(vSub(vSub(c, u), vMul(d, t))) <= r + A8_EPS * (t + r) + a8Rho(u, c)
+end
+
+local function a8Basis(d)
+    local i = 1
+    for k = 2, 3 do if math.abs(d[k]) < math.abs(d[i]) then i = k end end
+    local e = { 0, 0, 0 }
+    e[i] = 1
+    local a = vCross(d, e)
+    a = vUnit(a, vNorm(a))
+    return a, vCross(d, a)
+end
+
+local function a8Linspace(a, b, count)
+    local out, div = {}, count - 1
+    local step = (b - a) / div
+    for i = 0, count - 1 do
+        out[i + 1] = step == 0 and (i / div) * (b - a) + a or i * step + a
+    end
+    out[count] = b
+    return out
+end
+
+local function a8Search(C, H, askX4)
+    local n, stop = 0, nil
+    local points, found, tried, hits = {}, {}, {}, {}
+    local rays = { order = {}, map = {} }
+    local seen = { n = 0 }
+    local tlo, thi = vSub(C, H), vAdd(vAdd(C, H), { 0, A8_PAD_Y, 0 })
+    local plo = { C[1] - H[1] - A8_PAD, C[2] - H[2] - A8_PAD, C[3] - H[3] - A8_PAD }
+    local phi = { C[1] + H[1] + A8_PAD, C[2] + H[2] + A8_PAD, C[3] + H[3] + A8_PAD }
+
+    local function ask(p, kind)
+        if n >= A8_TOTAL then error(A8_CAPPED, 0) end
+        n = n + 1
+        return askX4(n, p, kind)
+    end
+    local function spend(k) return n + k <= A8_TOTAL end
+    local function addRay(p, d)
+        local key = vKey(p)
+        if not rays.map[key] then rays.order[#rays.order + 1] = key end
+        rays.map[key] = { u = p, d = d }
+        return key
+    end
+    local function byPosition(a, b) return vLess(rays.map[a].u, rays.map[b].u) end
+    local function owner(u, d)
+        if not d then return nil end
+        local only
+        for i, point in ipairs(points) do
+            if a8OnRay(u, d, point.c, point.r) then
+                if only then return nil end
+                only = i
+            end
+        end
+        return only
+    end
+    local function rayOwner(key) return owner(rays.map[key].u, rays.map[key].d) end
+
+    local function confirm(u, d, s, err)
+        local near = s / (1 + 1.5 * A8_SLACK) - 2 * err
+        if near <= 0 then return false end
+        local a = ask(vAdd(u, vMul(d, near)), "confirmation")
+        local b = ask(vAdd(u, vMul(d, s + 2 * err)), "confirmation")
+        return a ~= nil and vDot(a, d) > 0 and vNorm(vCross(a, d)) <= A8_FORWARD
+            and (b == nil or vDot(b, d) <= 0 or vNorm(vCross(b, d)) > A8_FORWARD)
+    end
+
+    local function locate()
+        local freeOrder, free = {}, {}
+        for _, key in ipairs(rays.order) do
+            if rays.map[key].d and rayOwner(key) == nil then
+                freeOrder[#freeOrder + 1] = key
+                free[key] = rays.map[key]
+            end
+        end
+        local sorted = {}
+        for i, key in ipairs(freeOrder) do sorted[i] = key end
+        table.sort(sorted, byPosition)
+        for i, ka in ipairs(sorted) do
+            hits[ka] = hits[ka] or { order = {}, map = {} }
+            local row = hits[ka]
+            for j, kb in ipairs(sorted) do
+                if i ~= j and row.map[kb] == nil then
+                    local s, err = a8Crossing(free[ka].u, free[ka].d, free[kb].u, free[kb].d)
+                    row.map[kb] = s and { s - err, s + err } or false
+                    row.order[#row.order + 1] = kb
+                end
+            end
+        end
+        local candidates = {}
+        for _, ka in ipairs(freeOrder) do
+            local spans = {}
+            for _, kb in ipairs(hits[ka] and hits[ka].order or {}) do
+                if hits[ka].map[kb] and free[kb] then spans[#spans + 1] = { h = hits[ka].map[kb], key = kb } end
+            end
+            for a = 1, #spans - 1 do
+                for b = a + 1, #spans do
+                    local lo = math.max(spans[a].h[1], spans[b].h[1])
+                    local hi = math.min(spans[a].h[2], spans[b].h[2])
+                    local id = ka .. "|" .. spans[a].key .. "|" .. spans[b].key
+                    if lo <= hi and not tried[id] then
+                        candidates[#candidates + 1] = { width = hi - lo, ka = ka, kb = spans[a].key,
+                            kc = spans[b].key, s = (lo + hi) / 2, id = id }
+                    end
+                end
+            end
+        end
+        table.sort(candidates, function(a, b)
+            if a.width ~= b.width then return a.width < b.width end
+            for _, field in ipairs({ "ka", "kb", "kc" }) do
+                if byPosition(a[field], b[field]) then return true end
+                if byPosition(b[field], a[field]) then return false end
+            end
+            return a.s < b.s
+        end)
+        for _, f in ipairs(candidates) do
+            local ray = rays.map[f.ka]
+            if rayOwner(f.ka) == nil and rayOwner(f.kb) == nil and rayOwner(f.kc) == nil then
+                tried[f.id] = true
+                local x = vAdd(ray.u, vMul(ray.d, f.s))
+                local r = f.width / 2 + A8_EPS * f.s + a8Rho(ray.u, x)
+                local apart = true
+                for _, point in ipairs(points) do
+                    if not (vNorm(vSub(point.c, x)) > point.r + r) then apart = false; break end
+                end
+                if vInside(tlo, thi, x, r) and apart and confirm(ray.u, ray.d, f.s, f.width / 2) then
+                    points[#points + 1] = { c = x, r = r }
+                end
+            end
+        end
+        if #points > (found[#found] and found[#found][2] or 0) then found[#found + 1] = { n, #points } end
+    end
+
+    local function boxDepth(u, d)
+        local near, far = 0, math.huge
+        for k = 1, 3 do
+            if math.abs(d[k]) >= 1e-12 then
+                local a, b = (tlo[k] - u[k]) / d[k], (thi[k] - u[k]) / d[k]
+                if b < a then a, b = b, a end
+                near, far = math.max(near, a), math.min(far, b)
+            end
+        end
+        if near <= far and far < math.huge then return 0.5 * (near + far) end
+        return math.max(vDot(vSub(vMul(vAdd(tlo, thi), 0.5), u), d), 1)
+    end
+
+    -- Moved samples sideways of each unassigned ray until it is assigned or too narrow.
+    local function pursue(anchors)
+        local state = {}
+        while #anchors > 0 do
+            locate()
+            local kept = {}
+            for _, key in ipairs(anchors) do if rayOwner(key) == nil then kept[#kept + 1] = key end end
+            anchors = kept
+            if #points > seen.n then
+                seen.n = #points
+            elseif #anchors == 0 or not spend(3) then
+                break
+            else
+                local ray = rays.map[anchors[1]]
+                local st = state[anchors[1]] or { A8_ALPHA0, 0 }
+                local alpha, turn = st[1], st[2]
+                if alpha < A8_ALPHA_MIN then
+                    table.remove(anchors, 1)
+                else
+                    local a, b = a8Basis(ray.d)
+                    local side = vAdd(vMul(a, math.cos(turn * math.pi / 3)), vMul(b, math.sin(turn * math.pi / 3)))
+                    local v = vAdd(ray.u, vMul(side, boxDepth(ray.u, ray.d) * math.tan(alpha)))
+                    local d = ask(v, "moved")
+                    addRay(v, d)
+                    local s = d and a8Crossing(ray.u, ray.d, v, d)
+                    local supported = s and vInside(tlo, thi, vAdd(ray.u, vMul(ray.d, s)), 0)
+                    state[anchors[1]] = { supported and alpha or alpha / 2, turn + 1 }
+                end
+            end
+        end
+        locate()
+    end
+
+    -- The position on the padded box seen from the largest missing viewing
+    -- direction of whichever confirmed point is definitely selected there.
+    local function angularPick()
+        local dirs = {}
+        for i = 1, #points do dirs[i] = {} end
+        for _, key in ipairs(rays.order) do
+            local i = rayOwner(key)
+            if i then
+                local v = vSub(rays.map[key].u, points[i].c)
+                local len = vNorm(v)
+                if len > 0 then dirs[i][#dirs[i] + 1] = vUnit(v, len) end
+            end
+        end
+        local function gapAt(w)
+            local dist, b = {}, 1
+            for i, point in ipairs(points) do
+                dist[i] = vNorm(vSub(w, point.c))
+                if dist[i] < dist[b] then b = i end
+            end
+            local far = dist[b] + points[b].r
+            for i, point in ipairs(points) do
+                if i ~= b and not (dist[i] - point.r > far) then return -1 end
+            end
+            if #dirs[b] == 0 then return math.pi end
+            local v = vSub(w, points[b].c)
+            local len = vNorm(v)
+            v = vUnit(v, len > 0 and len or 1)
+            local gap = math.huge
+            for _, dir in ipairs(dirs[b]) do
+                gap = math.min(gap, math.acos(math.max(-1, math.min(1, vDot(v, dir)))))
+            end
+            return gap
+        end
+        local function scan(k, side, win)
+            local ax, best = A8_AXES[k], nil
+            local ss, ts = a8Linspace(win[1][1], win[1][2], 9), a8Linspace(win[2][1], win[2][2], 9)
+            for i = 1, 9 do
+                for j = 1, 9 do
+                    local w = {}
+                    w[k], w[ax[1]], w[ax[2]] = side, ss[i], ts[j]
+                    local gap = gapAt(w)
+                    if not best or gap > best.gap then best = { gap = gap, k = k, side = side, s = ss[i], t = ts[j] } end
+                end
+            end
+            return best
+        end
+        local best
+        for k = 1, 3 do
+            local ax = A8_AXES[k]
+            for _, side in ipairs({ plo[k], phi[k] }) do
+                local face = scan(k, side, { { plo[ax[1]], phi[ax[1]] }, { plo[ax[2]], phi[ax[2]] } })
+                if face.gap >= 0 and (not best or face.gap > best.gap) then best = face end
+            end
+        end
+        if not best then return nil end
+        local ax = A8_AXES[best.k]
+        local half = { (phi[ax[1]] - plo[ax[1]]) / 2, (phi[ax[2]] - plo[ax[2]]) / 2 }
+        for _ = 1, 3 do
+            half = { half[1] * 0.25, half[2] * 0.25 }
+            local face = scan(best.k, best.side, {
+                { math.max(plo[ax[1]], best.s - half[1]), math.min(phi[ax[1]], best.s + half[1]) },
+                { math.max(plo[ax[2]], best.t - half[2]), math.min(phi[ax[2]], best.t + half[2]) },
+            })
+            if face.gap >= 0 and face.gap > best.gap then best = face end
+        end
+        local pos = {}
+        pos[best.k], pos[ax[1]], pos[ax[2]] = best.side, best.s, best.t
+        return pos
+    end
+
+    local ok, err = pcall(function()
+        local starts = {}
+        for _, x in ipairs({ plo[1], phi[1] }) do
+            for _, y in ipairs({ plo[2], phi[2] }) do
+                for _, z in ipairs({ plo[3], phi[3] }) do starts[#starts + 1] = { x, y, z } end
+            end
+        end
+        addRay(starts[1], ask(starts[1], "start"))
+        locate()
+        for i = 2, #starts do
+            if n + 1 > A8_TOTAL then break end
+            addRay(starts[i], ask(starts[i], "start"))
+        end
+        locate()
+        seen.n = #points
+        if #points == 0 then
+            local anchors = {}
+            for _, key in ipairs(rays.order) do
+                if rays.map[key].d and rayOwner(key) == nil then anchors[#anchors + 1] = key end
+            end
+            table.sort(anchors, byPosition)
+            pursue(anchors)
+        end
+        while true do
+            locate()
+            if #points == 0 then stop = "no confirmed point"; break end
+            if not spend(3) then stop = "budget"; break end
+            local pos = angularPick()
+            if not pos then stop = "nothing definite"; break end
+            if rays.map[vKey(pos)] then stop = "position already asked"; break end
+            local d = ask(pos, "adaptive")
+            local key = addRay(pos, d)
+            locate()
+            if d and rayOwner(key) == nil then pursue({ key }) end
+        end
+    end)
+    if not ok then
+        if err ~= A8_CAPPED then error(err, 0) end
+        stop = "hard cap"
+    end
+
+    -- Refinement: tighten each point from rays already collected; no samples.
+    local refined = {}
+    for i, point in ipairs(points) do
+        local own, best = {}, nil
+        for _, key in ipairs(rays.order) do
+            local ray, count = rays.map[key], 0
+            if ray.d and a8OnRay(ray.u, ray.d, point.c, point.r) then
+                for _, other in ipairs(points) do
+                    if a8OnRay(ray.u, ray.d, other.c, other.r) then count = count + 1 end
+                end
+                if count == 1 then own[#own + 1] = ray end
+            end
+        end
+        for a = 1, #own do
+            for b = 1, #own do
+                local s, err2 = nil, nil
+                if a ~= b then s, err2 = a8Crossing(own[a].u, own[a].d, own[b].u, own[b].d) end
+                if s then
+                    local x = vAdd(own[a].u, vMul(own[a].d, s))
+                    local r = err2 + A8_EPS * s + a8Rho(own[a].u, x)
+                    if not best or r < best.r then best = { c = x, r = r } end
+                end
+            end
+        end
+        local accept = #own >= 2 and best ~= nil and best.r < point.r
+            and vNorm(vSub(best.c, point.c)) + best.r <= point.r
+        for _, ray in ipairs(accept and own or {}) do
+            if not a8OnRay(ray.u, ray.d, best.c, best.r) then accept = false; break end
+        end
+        refined[i] = accept and { c = best.c, r = best.r, refined = true }
+            or { c = point.c, r = point.r, refined = false }
+    end
+    return { samples = n, stop = stop, points = points, refined = refined, found = found }
+end
+menu.a8Search = a8Search
+
+-- The live driver. One Create of the A8 fixture runs A8_RUNS complete searches
+-- on its single spawned target. X4 answers asynchronously, so after every
+-- answer the pure search is replayed from the answers collected so far until
+-- it either needs the next sample or finishes. Exactly one request is
+-- outstanding at a time, and every answer must echo its request's token.
+local A8_SPEC_ID, A8_MARKER = "issue-184-a8-near-target-live-r1", "issue184-a8-live-r1"
+local A8_RUNS, A8_TIMEOUT = 10, 10
+local a8
+
+local function a8Fmt(x) return string.format("%.17g", x) end
+
+local function a8Fail(reason)
+    local session = a8
+    a8 = nil
+    log("a8_run", { result = "FAIL", reason = reason, run = session.run, samples = #session.answers })
+    log("a8_overall", { result = "FAIL", marker = A8_MARKER, reason = reason,
+        runs_complete = session.run - 1, runs = A8_RUNS })
+    scenarioActionStatus = "A8 FAIL in run " .. session.run .. " of " .. A8_RUNS .. " (" .. reason
+        .. "); exit X4 and upload debug.log"
+end
+
+local function a8Request(control, sample, fields)
+    local session = a8
+    local token = session.requestId .. "_" .. session.run .. "_" .. sample
+    session.outstanding, fields.token = token, token
+    AddUITriggeredEvent("X4GunneryTestLabScenario", control, fields)
+    if Helper then
+        Helper.addDelayedOneTimeCallbackOnUpdate(function()
+            if a8 == session and session.outstanding == token then a8Fail("timeout_" .. control) end
+        end, false, getElapsedTime() + A8_TIMEOUT)
+    end
+end
+
+local function a8NextRun()
+    a8.run, a8.answers, a8.compute, a8.t0 = a8.run + 1, {}, 0, nil
+    log("a8_run", { phase = "start", run = a8.run, runs = A8_RUNS })
+    a8.targetSent = GetCurRealTime()
+    a8Request("a8_target", 0, { specId = A8_SPEC_ID })
+end
+
+local function a8Step()
+    local session = a8
+    local started = GetCurRealTime()
+    local ok, result = pcall(a8Search, session.C, session.H, function(n, p, kind)
+        local known = session.answers[n]
+        if not known then error({ n = n, p = p, kind = kind }, 0) end
+        if vKey(known.p) ~= vKey(p) or known.kind ~= kind then error(A8_DIVERGED, 0) end
+        return known.d
+    end)
+    local finished = GetCurRealTime()
+    session.compute = session.compute + (finished - started)
+    if not ok and type(result) == "table" and result.n then
+        session.pending = result
+        log("a8_sample", { phase = "request", run = session.run, sample = result.n, kind = result.kind,
+            x = a8Fmt(result.p[1]), y = a8Fmt(result.p[2]), z = a8Fmt(result.p[3]) })
+        if result.n == 1 then session.t0 = GetCurRealTime() end
+        a8Request("a8_probe", result.n, { x = result.p[1], y = result.p[2], z = result.p[3] })
+        return
+    end
+    if not ok then
+        return a8Fail(result == A8_DIVERGED and "replay_diverged" or ("lua_error " .. tostring(result)))
+    end
+    local counts = { start = 0, confirmation = 0, moved = 0, adaptive = 0 }
+    for _, answer in ipairs(session.answers) do counts[answer.kind] = counts[answer.kind] + 1 end
+    if #result.points == 0 then return a8Fail("no_recovered_point " .. tostring(result.stop)) end
+    log("a8_run", { result = "COMPLETE", run = session.run, samples = result.samples,
+        points = #result.points, stop = result.stop,
+        elapsed_ms = a8Fmt((finished - session.t0) * 1000),
+        final_compute_ms = a8Fmt((finished - started) * 1000),
+        replay_compute_ms = a8Fmt(session.compute * 1000),
+        start = counts.start, confirmation = counts.confirmation,
+        moved = counts.moved, adaptive = counts.adaptive })
+    for i, point in ipairs(result.refined) do
+        local confirmedAt
+        for _, entry in ipairs(result.found) do
+            if not confirmedAt and entry[2] >= i then confirmedAt = entry[1] end
+        end
+        local raw = result.points[i]
+        log("a8_point", { run = session.run, index = i, confirmed_at_sample = confirmedAt,
+            x = a8Fmt(point.c[1]), y = a8Fmt(point.c[2]), z = a8Fmt(point.c[3]), r = a8Fmt(point.r),
+            refined = tostring(point.refined), raw_x = a8Fmt(raw.c[1]), raw_y = a8Fmt(raw.c[2]),
+            raw_z = a8Fmt(raw.c[3]), raw_r = a8Fmt(raw.r) })
+    end
+    session.complete = session.complete + 1
+    if session.run < A8_RUNS then return a8NextRun() end
+    a8 = nil
+    log("a8_overall", { result = "COMPLETE", marker = A8_MARKER, runs = A8_RUNS,
+        runs_complete = session.complete })
+    scenarioActionStatus = "A8 COMPLETE: " .. session.complete .. " of " .. A8_RUNS
+        .. " searches finished; exit X4 and upload debug.log"
+end
+
+local function a8Start(requestId)
+    a8 = { requestId = requestId, run = 0, complete = 0 }
+    log("a8_begin", { marker = A8_MARKER, spec_id = A8_SPEC_ID, request_id = requestId,
+        runs = A8_RUNS, total = A8_TOTAL })
+    scenarioActionStatus = "A8 RUNNING: " .. A8_RUNS .. " aim-point searches; stay seated"
+    a8NextRun()
+end
+
+local function onA8Target(_, param)
+    local token, found, target, macro, cx, cy, cz, hx, hy, hz = tostring(param or ""):match(
+        "^x4gca8t:([^:]+):([01]):([^:]+):([^:]+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    if not a8 or not token or token ~= a8.outstanding then
+        log("a8_ignored", { kind = "target", param = param })
+        return
+    end
+    a8.outstanding = nil
+    if found ~= "1" then return a8Fail("target_unresolved") end
+    a8.C = { tonumber(cx) / 1000, tonumber(cy) / 1000, tonumber(cz) / 1000 }
+    a8.H = { tonumber(hx) / 1000, tonumber(hy) / 1000, tonumber(hz) / 1000 }
+    log("a8_target", { run = a8.run, target = target, macro = macro,
+        c_x = a8Fmt(a8.C[1]), c_y = a8Fmt(a8.C[2]), c_z = a8Fmt(a8.C[3]),
+        h_x = a8Fmt(a8.H[1]), h_y = a8Fmt(a8.H[2]), h_z = a8Fmt(a8.H[3]),
+        query_ms = a8Fmt((GetCurRealTime() - a8.targetSent) * 1000) })
+    a8Step()
+end
+
+local function onA8Probe(_, param)
+    local token, answered, x, y, z = tostring(param or ""):match(
+        "^x4gca8p:([^:]+):([01]):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    if not a8 or not token or token ~= a8.outstanding then
+        log("a8_ignored", { kind = "probe", param = param })
+        return
+    end
+    a8.outstanding = nil
+    if answered ~= "1" then return a8Fail("target_lost") end
+    local pending = a8.pending
+    local d = { tonumber(x) / 1e9, tonumber(y) / 1e9, tonumber(z) / 1e9 }
+    if math.abs(vNorm(d) - 1) > 1e-3 then return a8Fail("bad_direction") end
+    a8.answers[pending.n] = { p = pending.p, kind = pending.kind, d = d }
+    log("a8_sample", { phase = "answer", run = a8.run, sample = pending.n, kind = pending.kind,
+        ix = x, iy = y, iz = z })
+    a8Step()
+end
+
 local function onScenarioReady(_, param)
     local requestId, specId, spawned, safeFixtures, safeWeapons, unsafeWeapons,
         defenceUnits, hostiles, repairFixtures, shooters, shooterWeapons,
@@ -698,6 +1222,7 @@ local function onScenarioReady(_, param)
     })
     local currentSession = api() and api().getSession and api().getSession()
     setObserving(true, currentSession and currentSession.aimTargetID)
+    if request.specId == A8_SPEC_ID then a8Start(request.requestId) end
     returnToGunnery("scenario_ready")
 end
 
@@ -992,6 +1517,8 @@ local function init()
     end
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
+    RegisterEvent("X4GunneryTestLab.A8Target", onA8Target)
+    RegisterEvent("X4GunneryTestLab.A8Probe", onA8Probe)
     if api() then
         api().registerTestLab({ open = function()
             local main = Helper.getMenu("X4GunneryMenu")

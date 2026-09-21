@@ -21,6 +21,7 @@ python3 research/issue184/aimpoint_map.py --a6-near   # A6 near-target probing +
 python3 research/issue184/aimpoint_map.py --a7        # A7.1 focused validation + full 24-ask stopping traces
 python3 research/issue184/aimpoint_map.py --a72       # A7.2 stopping rule, cost bound, definite/UNKNOWN rule
 python3 research/issue184/aimpoint_map.py --a73       # A7.3 frozen 40-sample search, representative population
+python3 research/issue184/a8_trace.py                 # A8 reference traces for the Test Lab port (tests/fixtures)
 python3 research/issue184/ship_aimpoint_census.py     # A4.4 ship aim-point census, both games (~6 min)
 ```
 
