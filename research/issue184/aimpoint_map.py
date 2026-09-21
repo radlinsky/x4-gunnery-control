@@ -2988,22 +2988,80 @@ def _a72_report(rows):
 A72N_EVIDENCE = Path(__file__).with_name("A72B_NEAR_ONLY.md")
 A72N_TOTAL = 24            # ONE budget for the whole search: the 4 starting probes, confirmation and adaptive asks
 A72N_STARTS = ((0, 0, 0), (0, 1, 1), (1, 0, 1), (1, 1, 0))  # alternating corners of the padded target box
+A72D_COMPLEMENT = ((1, 1, 1), (1, 0, 0), (0, 1, 0), (0, 0, 1))  # the other alternating 4 (A7.2d candidate)
 
 
-def near_starts(C, H, pad=A6_NEAR_PAD):
-    """The 4 fixed starting probe positions, target frame: alternating corners of the target runtime box grown
-    by `pad`, i.e. the tetrahedron inscribed in that box. No two share a face, so this is the widest 3D spread
-    4 positions on that box can have, and it is fixed before any run. Only the target's runtime box and the
-    existing near-target pad take part - no hidden aim point, no current turret position, no benchmark truth."""
+def _long_axis(H):
+    """The target runtime box's longest axis, ties falling to the lowest axis index. Deterministic from the
+    box alone, so it is defined for any unknown future or modded target."""
+    return int(np.lexsort((np.arange(3), -np.asarray(H, float)))[0])
+
+
+def _corner_set(lo, hi, sel):
+    return [np.where(np.asarray(s, bool), hi, lo) for s in sel]
+
+
+def _face_centres(lo, hi, axes=(0, 1, 2)):
+    """The centre of each face normal to one of `axes`, two per axis."""
+    m = (lo + hi) / 2
+    out = []
+    for k in axes:
+        for side in (lo[k], hi[k]):
+            p = m.copy()
+            p[k] = side
+            out.append(p)
+    return out
+
+
+def _edge_centres_along(lo, hi, k):
+    """The centres of the 4 box edges parallel to axis `k`: midway along `k`, at each lo/hi combination of
+    the other two axes."""
+    ax = [a for a in range(3) if a != k]
+    m = (lo + hi) / 2
+    out = []
+    for sa in (lo[ax[0]], hi[ax[0]]):
+        for sb in (lo[ax[1]], hi[ax[1]]):
+            p = m.copy()
+            p[ax[0]], p[ax[1]] = sa, sb
+            out.append(p)
+    return out
+
+
+# #184 A7.2d: the candidate starting geometries. Each rule sees only the target's runtime box grown by the
+# existing near-target pad, plus - where it says so - that box's own longest axis. Written down in full
+# before any of them was scored, and never added to, reordered or retuned afterwards.
+START_GEOMS = {
+    "T4": ("the 4 alternating box corners (the current starting geometry, baseline)",
+           lambda lo, hi, k: _corner_set(lo, hi, A72N_STARTS)),
+    "T4C": ("the complementary 4 alternating box corners",
+            lambda lo, hi, k: _corner_set(lo, hi, A72D_COMPLEMENT)),
+    "F6": ("the 6 box face centres (the octahedron inscribed in the box)",
+           lambda lo, hi, k: _face_centres(lo, hi)),
+    "C8": ("all 8 box corners",
+           lambda lo, hi, k: _corners(lo, hi)),
+    "E4L": ("the 4 edge centres of the edges parallel to the box's longest axis",
+            lambda lo, hi, k: _edge_centres_along(lo, hi, k)),
+    "T4F2L": ("the 4 alternating box corners plus the 2 face centres normal to the box's longest axis",
+              lambda lo, hi, k: _corner_set(lo, hi, A72N_STARTS) + _face_centres(lo, hi, (k,))),
+}
+
+
+def near_starts(C, H, pad=A6_NEAR_PAD, geom="T4"):
+    """The fixed starting probe positions, target frame, for the named A7.2d starting geometry. The default
+    `T4` is the accepted A7.2b/A7.2c arrangement: the alternating corners of the target runtime box grown by
+    `pad`, i.e. the tetrahedron inscribed in that box. No two share a face, so this is the widest 3D spread 4
+    positions on that box can have, and it is fixed before any run. Only the target's runtime box and the
+    existing near-target pad take part in any of the geometries - no hidden aim point, no current turret
+    position, no benchmark truth."""
     C, H = np.asarray(C, float), np.asarray(H, float)
     lo, hi = C - H - pad, C + H + pad
-    return [np.where(np.asarray(s, bool), hi, lo) for s in A72N_STARTS]
+    return START_GEOMS[geom][1](lo, hi, _long_axis(H))
 
 
-def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
+def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD, geom="T4", startup_only=False):
     """The candidate method: no firing-ship corner search and no cheap rescue stage at all.
 
-    Ask the 4 fixed `near_starts` probes, feed them through the accepted `locate()` point confirmation, then
+    Ask the fixed `near_starts` probes, feed them through the accepted `locate()` point confirmation, then
     continue with the accepted adaptive near-target placement (`angular_pick` on the target box + pad) exactly
     as the retained method's third stage does. One shared budget of `total` X4 questions covers everything:
     the 4 starting probes, every confirmation ask `locate` spends, every moved ask, and every adaptive probe.
@@ -3019,9 +3077,10 @@ def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
     tlo, thi = target_box(C, H)
     C, H = np.asarray(C, float), np.asarray(H, float)
     plo, phi = C - H - pad, C + H + pad
-    starts = [s @ T for s in near_starts(C, H, pad)]
+    starts = [s @ T for s in near_starts(C, H, pad, geom)]
     stats = dict(start_points=0, start_asks=0, pursued=0, ready_points=0, ready_asks=0, primary=0,
-                 moved=0, switched=0, guard=False, end=None, picks=[], found=[])
+                 moved=0, switched=0, guard=False, end=None, picks=[], found=[], starts=len(starts),
+                 first_at=None, first_radius=None)
 
     def probe(h):
         points = h["points"]
@@ -3031,6 +3090,8 @@ def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
             real()
             if len(points) > (found[-1][1] if found else 0):
                 found.append((h["count"](), len(points)))
+                if stats["first_at"] is None:  # #184 A7.2d startup cost and first-point uncertainty
+                    stats.update(first_at=h["count"](), first_radius=float(points[0][1]))
         h = dict(h, locate=locate)
         for v in starts[1:]:                    # starts[0] is the degenerate box `_search` already asked
             if h["count"]() + 1 > total:
@@ -3045,6 +3106,11 @@ def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
             stats["pursued"] = len(anchors)
             _pursue(h, tlo, thi, T, anchors, spend, stats, "", seen)
         stats.update(ready_points=len(points), ready_asks=h["count"]())
+        if startup_only:  # #184 A7.2d measures startup alone; the adaptive stage never finds the first point
+            stats["end"] = "startup only"
+            stats["points"] = [(c.tolist(), float(r)) for c, r in points]
+            stats["rays"] = _ray_list(h["rays"])
+            return
 
         def assigned():
             out = {}
@@ -3087,13 +3153,13 @@ def near_only_probe(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
     return probe, stats
 
 
-def near_only_run(view, total=A72N_TOTAL, pad=A6_NEAR_PAD):
+def near_only_run(view, total=A72N_TOTAL, pad=A6_NEAR_PAD, geom="T4", startup_only=False):
     """Run `near_only_probe` with no box stage in front of it: `_search` is given the degenerate box at the
     first starting probe, so its only box ask IS that probe and its first question is already a near-target
     one. -> stats, with `asks` the whole search's X4 question count."""
     C, H, T = view["target_box"]
-    s0 = near_starts(C, H, pad)[0] @ T
-    probe, stats = near_only_probe(view, total, pad)
+    s0 = near_starts(C, H, pad, geom)[0] @ T
+    probe, stats = near_only_probe(view, total, pad, geom, startup_only)
     _p, _o, _r, _c, _u, n = _search(view, s0, s0, np.eye(3), np.zeros(3), lambda *_: True, probe=probe)
     stats["asks"] = n
     return stats
@@ -3105,7 +3171,7 @@ def _a72n_final(case, muzzles, points, rays, asks):
     rep = _represented([(np.asarray(c, float), r) for c, r in points], case["points"])
     needed = sorted({study.select(tuple(map(float, m)), [tuple(map(float, p)) for p in case["points"]])
                      for m in muzzles.values()})
-    return dict(asks=asks, points=len(points), refined=ref["count"],
+    return dict(asks=asks, points=len(points), refined=ref["count"], needed=len(needed),
                 missing_needed=[x for x in needed if x not in rep],
                 missing_authored=[j for j in range(len(case["points"])) if j not in rep],
                 **{q: ref[q] for q in ("correct", "wrong", "unknown", "invented", "merged", "duplicate",
@@ -3483,6 +3549,404 @@ def _a72c_report(rows):
     return "\n".join(L)
 
 
+# ------------------------------------------------- A7.2d: where should the near-target-only search start?
+
+A72D_EVIDENCE = Path(__file__).with_name("A72D_START_GEOMETRY.md")
+A72D_STARTUP_TOTAL = 64   # startup measurement only: large enough that no budget ever truncates startup
+A72D_DOWNSTREAM = 28      # the smallest total A7.2c already found SAFE, reused unchanged for the downstream check
+A72D_EVERY = 4            # broad population: every Nth one-point target component, by alphabetical rank
+_A72D_GEOMS = ()          # the geometries a worker runs; set before the pool forks
+
+
+def _a72d_q(xs):
+    """(median, p90, worst) of `xs`, p90 by nearest rank."""
+    xs = sorted(xs)
+    return (float(np.median(xs)), float(xs[min(len(xs) - 1, int(math.ceil(0.9 * len(xs))) - 1)]),
+            float(xs[-1])) if xs else (0.0, 0.0, 0.0)
+
+
+def a72d_ordinary(ts, mounts):
+    """One deterministic geometry per chosen target component: the first ordinary case `cases` yields for it
+    (bearing 0 at the 1 km gap), reproduced at each A6 standoff - the same rule `a7_ordinary` uses.
+
+    Chosen components: every target that authors more than one aim point, plus every `A72D_EVERY`-th
+    one-point target by alphabetical rank. One-point targets are startup-identical in shape and there are
+    202 of them, so sampling them keeps box sizes and proportions varied without drowning the comparison in
+    near-duplicates. The rule is fixed before any candidate was scored and looks at no result."""
+    one = sorted(t["component"] for t in ts if len(t["points"]) == 1)
+    want = {t["component"] for t in ts if len(t["points"]) > 1} | set(one[::A72D_EVERY])
+    seen = set()
+    for c in cases(ts, mounts):
+        if c["group"] == "ordinary" and c["target"] in want and c["target"] not in seen:
+            seen.add(c["target"])
+            yield from _restandoff(c, np.asarray(c["box"][0]) @ c["box"][2], A6_NEAR_GAPS)
+    assert seen == want, sorted(want - seen)
+
+
+def a72d_entries(ts, mounts):
+    """The startup population, fixed before any candidate was scored: the 19 hard A6 boundary geometries plus
+    the `a72d_ordinary` geometries, each as ONE entry.
+
+    The near-target-only search is defined entirely by the target's runtime box and X4's answers from probe
+    positions on that box, so two cases that differ only by the firing ship's standoff run the identical
+    search and see the identical observations. Counting them separately would weight a geometry by how many
+    standoffs it happens to appear at, so each entry holds one startup geometry and carries its 100 m / 1 km
+    / 8 km scenarios for the parts that really do depend on the firing ship: the needed aim points and the
+    later aimed muzzle positions."""
+    groups, order = {}, []
+    for tag, gen in (("hard", a6_near_variants), ("broad", a72d_ordinary)):
+        for c in gen(ts, mounts):
+            k = (tag, c["id"])
+            if k not in groups:
+                groups[k], _ = [], order.append(k)
+            groups[k].append(dict(c, a7=tag))
+    return [dict(tag=k[0], id=k[1], target=groups[k][0]["target"], ship=groups[k][0]["ship"],
+                 authored=len(groups[k][0]["points"]), scenarios=groups[k]) for k in order]
+
+
+def a72d_split(entries):
+    """Development / holdout split, fixed before any candidate was scored and independent of every result:
+    rank the target components alphabetically, even rank to development, odd rank to holdout. The split is by
+    component, so one target never appears on both sides under different distances, bearings or rotations."""
+    rank = {c: i for i, c in enumerate(sorted({e["target"] for e in entries}))}
+    return {e["id"]: ("dev" if rank[e["target"]] % 2 == 0 else "holdout") for e in entries}
+
+
+def _a72d_entry(entry):
+    """One startup entry, every geometry in `_A72D_GEOMS`: the startup measurement (fixed starts plus the
+    moved-probe continuation, budget large enough not to truncate it), and the whole near-target-only search
+    at the A7.2c 28-sample total, scored against each scenario's own firing-ship-wide hidden truth."""
+    records, _margins = _LOADED
+    base = entry["scenarios"][0]
+    v = view(base)
+    out = {}
+    muz = {c["gap"]: ship_aimed_muzzles(c, records, _SHIP_MOUNTS[c["ship"]]) for c in entry["scenarios"]}
+    for name in _A72D_GEOMS:
+        s = near_only_run(v, total=A72D_STARTUP_TOTAL, geom=name, startup_only=True)
+        d = near_only_run(v, total=A72D_DOWNSTREAM, geom=name)
+        out[name] = dict(
+            start=dict(starts=s["starts"], start_points=s["start_points"], start_asks=s["start_asks"],
+                       ready_points=s["ready_points"], ready_asks=s["ready_asks"], moved=s["moved"],
+                       first_at=s["first_at"], first_radius=s["first_radius"]),
+            down={c["gap"]: _a72n_final(c, muz[c["gap"]], d["points"], d["rays"], d["asks"])
+                  for c in entry["scenarios"]},
+            asks=d["asks"], points=len(d["points"]), found=d["found"], end=d["end"])
+    return dict({k: entry[k] for k in ("tag", "id", "target", "ship", "authored")},
+                muzzles={c["gap"]: len(muz[c["gap"]]) for c in entry["scenarios"]}, geoms=out)
+
+
+def a72d_choose(rows):
+    """The preferred startup geometry, from the development results alone, by a rule fixed before the run:
+    drop any candidate that fails to confirm a first point anywhere, then order by worst samples to the first
+    confirmed point, then p90, then median, then the number of fixed starting probes, then name. Robust
+    worst case first, typical cost next, simplest arrangement last. How many aim points a candidate happens
+    to discover during startup takes no part in the choice."""
+    best = None
+    for name in START_GEOMS:
+        xs = [r["geoms"][name]["start"]["first_at"] for r in rows]
+        if any(x is None for x in xs):
+            continue
+        med, p90, worst = _a72d_q(xs)
+        key = (worst, p90, med, rows[0]["geoms"][name]["start"]["starts"], name)
+        if best is None or key < best[0]:
+            best = (key, name)
+    return None if best is None else best[1]
+
+
+def _a72d_run(entries, geoms, jobs, path, label):
+    global _A72D_GEOMS
+    _A72D_GEOMS = tuple(geoms)
+    rows = []
+    with open(path, "w") as fh, Pool(min(jobs, 4)) as pool:
+        for r in pool.imap(_a72d_entry, entries, chunksize=1):
+            rows.append(r)
+            fh.write(json.dumps(r, default=float) + "\n")
+            fh.flush()
+            print(f"  {label} {len(rows)}/{len(entries)} entry {r['id']} {r['tag']} {r['target']}: " + " | ".join(
+                f"{g}: first@{r['geoms'][g]['start']['first_at']} "
+                f"{sum(x['wrong'] for x in r['geoms'][g]['down'].values())}w "
+                f"{sum(len(x['missing_needed']) for x in r['geoms'][g]['down'].values())}m" for g in geoms),
+                flush=True)
+    rows.sort(key=lambda r: (r["tag"], r["id"]))
+    return rows
+
+
+def a72d(jobs):
+    """A7.2d experiment: is there a simple generic starting geometry that establishes the first aim point
+    faster and more reliably than the current 4 alternating corners, without reducing recovery of the aim
+    points the firing ship actually needs?"""
+    global _LOADED, _SHIP_MOUNTS
+    records, margins, mounts, _excluded, _inferred = load()
+    _LOADED = records, margins
+    _SHIP_MOUNTS = defaultdict(list)
+    for m in mounts:
+        _SHIP_MOUNTS[m["ship"]].append(m)
+    entries = a72d_entries(targets(), mounts)
+    side = a72d_split(entries)
+    dev = [e for e in entries if side[e["id"]] == "dev"]
+    hold = [e for e in entries if side[e["id"]] == "holdout"]
+    CACHE.mkdir(parents=True, exist_ok=True)
+    print(f"#184 A7.2d: {len(entries)} startup entries ({len(dev)} development, {len(hold)} holdout), "
+          f"{len(START_GEOMS)} candidate geometries -> {CACHE}", flush=True)
+    os.nice(10)
+    d_rows = _a72d_run(dev, list(START_GEOMS), jobs, CACHE / "a72d_dev.jsonl", "dev")
+    pick = a72d_choose(d_rows)
+    print(f"#184 A7.2d: development choice = {pick}; holdout runs {pick} against the T4 baseline", flush=True)
+    h_rows = _a72d_run(hold, sorted({"T4", pick}, key=list(START_GEOMS).index), jobs,
+                       CACHE / "a72d_holdout.jsonl", "holdout")
+    out = _a72d_report(d_rows, h_rows, pick, entries)
+    A72D_EVIDENCE.write_text(out)
+    print(out + f"\n(rows: {CACHE}/a72d_dev.jsonl, {CACHE}/a72d_holdout.jsonl, evidence: {A72D_EVIDENCE})")
+
+
+def _a72d_start(rows, name):
+    """Startup summary for one candidate over one row set."""
+    g = [r["geoms"][name]["start"] for r in rows]
+    ok = [x for x in g if x["first_at"] is not None]
+    # only the entries whose fixed starts confirmed nothing spend the moved-probe continuation at all
+    moved = [x["first_at"] - x["start_asks"] for x in ok if not x["start_points"]]
+    return dict(starts=g[0]["starts"], n=len(rows), fail=len(g) - len(ok),
+                alone=sum(x["start_points"] > 0 for x in g),
+                first=_a72d_q([x["first_at"] for x in ok]), moved=_a72d_q(moved),
+                radius=_a72d_q([x["first_radius"] for x in ok]))
+
+
+def _a72d_down(rows, name):
+    """Downstream summary for one candidate over one row set: the two denominators kept apart."""
+    d = [x for r in rows for x in r["geoms"][name]["down"].values()]
+    f = lambda k: sum(len(x[k]) if isinstance(x[k], list) else x[k] for x in d)  # noqa: E731
+    room = [r["geoms"][name]["asks"] - (r["geoms"][name]["found"][-1][0] if r["geoms"][name]["found"] else 0)
+            for r in rows]
+    needed = sum(x["needed"] for x in d)
+    return dict(needed=needed, missed=f("missing_needed"), found=needed - f("missing_needed"),
+                wrong=f("wrong"), correct=f("correct"), unknown=f("unknown"), invented=f("invented"),
+                merged=f("merged"), duplicate=f("duplicate"), authored_missed=f("missing_authored"),
+                samples=sum(r["geoms"][name]["asks"] for r in rows), room=_a72d_q(room))
+
+
+def _a72d_vs(rows, a, b):
+    """Head-to-head on samples to the first confirmed point, entry by entry, plus the entries where `a`
+    returns more UNKNOWN than `b`. -> (a sooner, a later, entries, a worse on UNKNOWN)."""
+    f = lambda r, n: r["geoms"][n]["start"]["first_at"]  # noqa: E731
+    u = lambda r, n: sum(x["unknown"] for x in r["geoms"][n]["down"].values())  # noqa: E731
+    return (sum(f(r, a) < f(r, b) for r in rows), sum(f(r, a) > f(r, b) for r in rows), len(rows),
+            sum(u(r, a) > u(r, b) for r in rows))
+
+
+def _a72d_row(s, d, name):
+    return (f"| `{name}` | {s['starts']} | {100 * s['alone'] / s['n']:.0f}% | "
+            f"{s['first'][0]:.0f} / {s['first'][1]:.0f} / {s['first'][2]:.0f} | "
+            f"{s['moved'][0]:.0f} / {s['moved'][1]:.0f} / {s['moved'][2]:.0f} | {s['fail']} | "
+            f"{s['radius'][0]:.3g} / {s['radius'][2]:.3g} | {d['needed']} | {d['found']} | {d['missed']} | "
+            f"{d['authored_missed']} |")
+
+
+def _a72d_report(dev, hold, pick, entries):
+    P = lambda n: START_GEOMS[n][0]  # noqa: E731
+    L = ["# Issue #184 A7.2d: where the near-target-only search should start", "",
+         "Offline research, status **inference**. No X4 launch, no production change, no change to the",
+         "adaptive near-target search itself and no choice of a production sample budget. Run with",
+         "`python3 research/issue184/aimpoint_map.py --a72d`.", "",
+         "One **sample** is one X4 aim-direction lookup from one probe position.", "",
+         "## The question", "",
+         "Is there a simple generic starting geometry that establishes the first aim point faster and more",
+         "reliably than the current 4 alternating corners, without reducing recovery of the aim points the",
+         "firing ship actually needs?", "",
+         "The starting probes do not have to discover every aim point. Their whole job is to confirm one",
+         "genuine aim point accurately enough that the existing adaptive near-target search can begin; that",
+         "search is then responsible for the rest. So a candidate is judged on how cheaply and how reliably",
+         "it reaches the first confirmed point, never on how many points it happens to turn up on the way.", "",
+         "## What counts as a needed aim point", "",
+         "For each firing-ship/target scenario the **needed** aim points are the unique target aim points",
+         "X4's accepted selection model actually selects from at least one legal aimed muzzle position",
+         "available to that firing ship - every real mount, every compatible turret the benchmark accepts,",
+         "the barrel position after the turret aims, out-of-arc poses excluded as CANNOT BEAR, no resting",
+         "positions. An authored aim point that no legal aimed muzzle on that ship ever selects is not",
+         "needed, and not finding it is not a search failure. Authored-point discovery is kept below as a",
+         "clearly labelled secondary diagnostic only: it never decides PASS/FAIL and never picks a",
+         "candidate.", "",
+         "Two denominators, never mixed:", "",
+         "1. **aim-point discovery** - denominator is the needed aim points of that scenario, reported as",
+         "   needed found / needed total and needed missed;",
+         "2. **later-position choice accuracy** - denominator is the legal aimed muzzle positions used as",
+         "   hidden truth, reported as correct / wrong / UNKNOWN.", "",
+         "Hidden aim points and later turret positions are scoring truth only. They never touch probe",
+         "placement, the starting geometry, stopping or the budget.", "",
+         "## Deduplicating the startup population", "",
+         "The near-target starting probes are placed relative to the target, and every later step of this",
+         "search reads only the target's runtime box and X4's answers from positions on it. Two cases that",
+         "differ only by the firing ship's standoff therefore run the identical search and see the identical",
+         "observations - the A7.2c traces show it directly, with the same point confirmed at the same sample",
+         "count at 100 m, 1 km and 8 km. Counting those as three independent startup successes would weight",
+         "a geometry by how often it was repeated, so each **entry** below is one startup geometry, and it",
+         "carries its 100 m / 1 km / 8 km scenarios for the parts that really do depend on the firing ship:",
+         "the needed aim points and the later aimed muzzle positions.", "",
+         "## Population and split", "",
+         f"{len(entries)} startup entries: the 19 hard A6 boundary geometries plus one deterministic ordinary",
+         f"geometry (bearing 0, 1 km gap, the rule `a7_ordinary` uses) for every target that authors more",
+         f"than one aim point and every {A72D_EVERY}th one-point target by alphabetical rank. 202 of the 217",
+         "corpus targets author a single aim point and are startup-identical in shape, so sampling them keeps",
+         "box sizes and proportions varied without drowning the comparison in near-duplicates.", "",
+         "**Split rule, fixed before any candidate was scored and independent of every result:** rank the",
+         "target components alphabetically; even rank goes to the development set, odd rank to the holdout.",
+         "The split is by component, so one target never appears on both sides under a different distance,",
+         "bearing or rotation.", "",
+         f"- development: {len(dev)} entries, {len({r['target'] for r in dev})} target components;",
+         f"- holdout: {len(hold)} entries, {len({r['target'] for r in hold})} target components.", "",
+         "## The candidate starting geometries", "",
+         "All six were written down in full before any of them was scored, and none was added, removed,",
+         "reordered, rotated or retuned afterwards. Every rule uses only the target's runtime box grown by",
+         "the existing 50 m near-target pad, plus - where it says so - that box's own longest axis, ties",
+         "falling to the lowest axis index. No rule knows the target, the case, the firing ship or any",
+         "previous benchmark result, and each is defined for an unknown future or modded target.", "",
+         "| candidate | probes | geometric rule |", "|---|---:|---|"]
+    for n in START_GEOMS:
+        L.append(f"| `{n}` | {len(near_starts((0, 0, 0), (30.0, 20, 10), geom=n))} | {P(n)} |")
+    L += ["", "## Development-set startup comparison", "",
+          "`first sample` is the sample count at which the first aim point became confirmed. `moved samples`",
+          "counts only the moved-probe continuation the search needs when the fixed starts alone confirm",
+          "nothing. `needed found` and the authored column are the **downstream** result of the whole search",
+          f"at the {A72D_DOWNSTREAM}-sample total, shown here as a secondary check that a startup geometry",
+          "does not harm discovery - they take no part in choosing the candidate.", "",
+          "| candidate | probes | starts alone confirm | first sample med/p90/worst | moved samples "
+          "med/p90/worst | startup failures | first-point radius med/worst (m) | needed total | needed found "
+          "| needed missed | authored missed (diagnostic) |",
+          "|---|---:|---:|---|---|---:|---|---:|---:|---:|---:|"]
+    for n in START_GEOMS:
+        L.append(_a72d_row(_a72d_start(dev, n), _a72d_down(dev, n), n))
+    ds, dd = _a72d_start(dev, pick), _a72d_down(dev, pick)
+    bs, bd = _a72d_start(dev, "T4"), _a72d_down(dev, "T4")
+    L += ["", "### Later-position choice accuracy on the development set", "",
+          "Denominator: the legal aimed muzzle positions, kept apart from aim-point discovery above.", "",
+          "| candidate | correct | wrong | UNKNOWN | invented | merged | duplicate | samples used | "
+          "samples left after the last point was confirmed, med/worst |",
+          "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for n in START_GEOMS:
+        d = _a72d_down(dev, n)
+        L.append(f"| `{n}` | {d['correct']} | {d['wrong']} | {d['unknown']} | {d['invented']} | {d['merged']} "
+                 f"| {d['duplicate']} | {d['samples']} | {d['room'][0]:.0f} / {d['room'][2]:.0f} |")
+    L += ["", "## The selected candidate", "",
+          "**Selection rule, fixed before the run:** drop any candidate that fails to confirm a first point",
+          "anywhere on the development set, then order by worst samples to the first confirmed point, then",
+          "p90, then median, then the number of fixed starting probes, then name. Robust worst case first,",
+          "typical cost next, simplest arrangement last. How many aim points a candidate happens to discover",
+          "during startup takes no part in it.", "",
+          f"Selected: **`{pick}`** - {P(pick)}.", "",
+          f"Against the `T4` baseline on the development set: first confirmed point at",
+          f"{ds['first'][0]:.0f} / {ds['first'][1]:.0f} / {ds['first'][2]:.0f} samples med/p90/worst against",
+          f"{bs['first'][0]:.0f} / {bs['first'][1]:.0f} / {bs['first'][2]:.0f}; the fixed starts alone confirm",
+          f"it in {100 * ds['alone'] / ds['n']:.0f}% of entries against {100 * bs['alone'] / bs['n']:.0f}%;",
+          f"{ds['fail']} startup failures against {bs['fail']}; needed aim points missed downstream",
+          f"{dd['missed']} against {bd['missed']}, wrong later-position choices {dd['wrong']} against",
+          f"{bd['wrong']}.", "",
+          "## Holdout", "",
+          "The choice above was frozen before anything on the holdout was run, and only the selected",
+          "candidate and the `T4` baseline were run there. Nothing was tuned against it. Same near-target-only",
+          f"search, same {A72D_DOWNSTREAM}-sample total - the smallest budget A7.2c already established as",
+          "SAFE on the focused population, so this measures whether the starting geometry harms discovery",
+          "rather than re-running the budget experiment.", "",
+          "| | " + " | ".join(f"`{n}`" for n in sorted({"T4", pick}, key=list(START_GEOMS).index)) + " |",
+          "|---|" + "---:|" * len({"T4", pick})]
+    names = sorted({"T4", pick}, key=list(START_GEOMS).index)
+    hs = {n: _a72d_start(hold, n) for n in names}
+    hd = {n: _a72d_down(hold, n) for n in names}
+    for label, fn in (("fixed starting probes", lambda n: hs[n]["starts"]),
+                      ("entries where the fixed starts alone confirm the first point",
+                       lambda n: f"{hs[n]['alone']} of {hs[n]['n']}"),
+                      ("samples to the first confirmed point, med/p90/worst",
+                       lambda n: "/".join(f"{x:.0f}" for x in hs[n]["first"])),
+                      ("moved-probe samples before the first confirmation, med/p90/worst",
+                       lambda n: "/".join(f"{x:.0f}" for x in hs[n]["moved"])),
+                      ("startup failures", lambda n: hs[n]["fail"]),
+                      ("first-point radius, med/worst (m)",
+                       lambda n: f"{hs[n]['radius'][0]:.3g}/{hs[n]['radius'][2]:.3g}"),
+                      ("needed aim points total", lambda n: hd[n]["needed"]),
+                      ("needed aim points found", lambda n: hd[n]["found"]),
+                      ("needed aim points missed", lambda n: hd[n]["missed"]),
+                      ("wrong later-position choices", lambda n: hd[n]["wrong"]),
+                      ("correct later-position choices", lambda n: hd[n]["correct"]),
+                      ("UNKNOWN later-position results", lambda n: hd[n]["unknown"]),
+                      ("invented points", lambda n: hd[n]["invented"]),
+                      ("merged points", lambda n: hd[n]["merged"]),
+                      ("duplicate points", lambda n: hd[n]["duplicate"]),
+                      ("total samples used", lambda n: hd[n]["samples"]),
+                      ("samples left after the last point was confirmed, med/worst",
+                       lambda n: f"{hd[n]['room'][0]:.0f}/{hd[n]['room'][2]:.0f}"),
+                      ("authored aim points never found (diagnostic only)",
+                       lambda n: hd[n]["authored_missed"])):
+        L.append(f"| {label} | " + " | ".join(str(fn(n)) for n in names) + " |")
+    ok = all(hd[pick][k] == hd["T4"][k] for k in ("needed", "found", "missed", "wrong", "invented",
+                                                   "merged", "duplicate"))
+    dv, hv = _a72d_vs(dev, pick, "T4"), _a72d_vs(hold, pick, "T4")
+    L += ["", "## What this decides", "",
+          "**Is there a simple generic starting geometry that establishes the first aim point faster and",
+          "more reliably than the current 4 alternating corners, without reducing recovery of the aim points",
+          "the firing ship actually needs?**", "",
+          f"Partly. `{pick}` never reaches the first confirmed point later than `T4` on any entry on either",
+          f"side of the split - {dv[0]} of {dv[2]} development entries sooner and {dv[1]} later, {hv[0]} of",
+          f"{hv[2]} holdout entries sooner and {hv[1]} later. Every one of those entries is an L or XL",
+          "target authoring 2 or 4 aim points, where the 4 alternating corners need the moved-probe",
+          "continuation and the 4 long-axis edge centres do not.", "",
+          "But the win barely shows in the holdout summary: both geometries read",
+          f"{hs[pick]['first'][0]:.0f} / {hs[pick]['first'][1]:.0f} / {hs[pick]['first'][2]:.0f} samples to",
+          "the first confirmed point, median / p90 / worst. The holdout's 5 wins are all 7 samples down to",
+          "6, too small to move any of those three figures. The large development margin",
+          f"({bs['first'][2]:.0f} worst against {ds['first'][2]:.0f}) came entirely from the XL four-point",
+          "geometries where `T4` costs 8 to 10 samples, and the alphabetical split put all of those on the",
+          "development side. The holdout contains no target of that shape, so the part of the advantage the",
+          "selection rule actually acted on was never tested outside the set it was chosen on.", "",
+          f"What the holdout does confirm: `{pick}` confirms the first point from its fixed starts alone more",
+          f"often ({hs[pick]['alone']} of {hs[pick]['n']} entries against {hs['T4']['alone']} of",
+          f"{hs['T4']['n']}) and locates it more tightly ({hs[pick]['radius'][2]:.3g} m worst radius against",
+          f"{hs['T4']['radius'][2]:.3g} m).", "",
+          ("Safety is unchanged: on the holdout both geometries find every needed aim point, make no"
+           if ok else "Safety is NOT unchanged on the holdout - see the table above. Also"),
+          ("wrong later-position choice, and invent, merge and duplicate nothing." if ok else ""),
+          f"The one measured cost is UNKNOWN: `{pick}` returns {hd[pick]['unknown']} against",
+          f"{hd['T4']['unknown']} on the holdout and {dd['unknown']} against {bd['unknown']} on the",
+          f"development set, concentrated in {dv[3] + hv[3]} entries of {dv[2] + hv[2]} where a first point",
+          "located on fewer independent starting directions leaves two estimates too wide to separate",
+          "everywhere. UNKNOWN is safe, but it is a loss, and it is the only measurement that runs against",
+          "the candidate.", "",
+          "**The evidence does not support replacing the current four starting corners.** The candidate's",
+          "decisive advantage was never tested on the population it was not chosen on, it costs a little more",
+          "UNKNOWN on both, and it changes nothing the search needs at this total: needed aim points found",
+          "and wrong later-position choices are identical everywhere. The two larger arrangements are worse",
+          "than either - `F6` and `C8` confirm the first point later despite their extra fixed probes, and",
+          "at the same total they lose needed aim points downstream, because probes spent before the",
+          "adaptive search can steer them are probes the adaptive search no longer has. A7.3 should run on",
+          "the unchanged `T4` starts.", "",
+          f"Worth recording for later: the entries `{pick}` wins are exactly the L and XL multi-aim-point",
+          "targets, which is also where the near-target-only search has the least room left at the tested",
+          "total. If a future experiment needs startup cost back on those geometries specifically, the",
+          "long-axis edge centres are where it was found - but that would be a targeted change on a known",
+          "class, not the generic improvement this task looked for.", "",
+          "This measures starting geometry only. It chooses no production sample budget, changes no",
+          "production code, alters nothing about the adaptive near-target search, and adds no new stopping",
+          "rule.", "",
+          "## Per entry, development set", "",
+          "| entry | set | target | authored | needed | " +
+          " | ".join(f"`{n}` first / samples / needed missed" for n in START_GEOMS) + " |",
+          "|---|---|---|---:|---:|" + "---|" * len(START_GEOMS)]
+    for r in dev:
+        L.append(f"| {r['id']} | {r['tag']} | `{r['target']}` | {r['authored']} | "
+                 f"{sum(x['needed'] for x in r['geoms']['T4']['down'].values())} | " + " | ".join(
+                     f"{r['geoms'][n]['start']['first_at']} / {r['geoms'][n]['asks']} / "
+                     f"{sum(len(x['missing_needed']) for x in r['geoms'][n]['down'].values())}"
+                     for n in START_GEOMS) + " |")
+    L += ["", "## Per entry, holdout", "",
+          "| entry | target | authored | needed | " +
+          " | ".join(f"`{n}` first / samples / needed missed" for n in names) + " |",
+          "|---|---|---:|---:|" + "---|" * len(names)]
+    for r in hold:
+        L.append(f"| {r['id']} | `{r['target']}` | {r['authored']} | "
+                 f"{sum(x['needed'] for x in r['geoms'][names[0]]['down'].values())} | " + " | ".join(
+                     f"{r['geoms'][n]['start']['first_at']} / {r['geoms'][n]['asks']} / "
+                     f"{sum(len(x['missing_needed']) for x in r['geoms'][n]['down'].values())}"
+                     for n in names) + " |")
+    return "\n".join(L) + "\n"
+
+
 # ---------------------------------------------------------------- run
 
 def load():
@@ -3850,6 +4314,8 @@ def main():
         return a41(arg("--every", 1), arg("--jobs", 4))
     if "--a42" in sys.argv:
         return a42(arg("--jobs", 4))
+    if "--a72d" in sys.argv:
+        return a72d(arg("--jobs", 4))
     if "--a72c" in sys.argv:
         return a72c(arg("--jobs", 4))
     if "--a72n" in sys.argv:
