@@ -307,7 +307,7 @@ Class ids come from the static name/id table at RVA `0x0255D440` (`0x49` =
 XPhys type names are real RTTI names. "Query body", "stop ancestor" and
 "alternate aim mode" are analyst labels.
 
-### `check_line_of_sight` cannot reproduce every exact-pair firing result
+### Superseded: a single or reversed `check_line_of_sight` cannot reproduce every result
 
 - X4: 9.00 build 611726
 - Status: inference
@@ -395,15 +395,11 @@ HUD position id and is not an arbitrary-pair facility. This negative claim is
 bounded to X4 9.00's full `common.xsd`, `scriptproperties.xml`, shipped MD/AI,
 and shipped UI Lua FFI surfaces.
 
-The L4 decision is therefore **BLOCKED** for the general exact-pair method. A
-caller can safely retain definite positives such as the forward action hitting
-the target hierarchy, but the public surface cannot distinguish the material
-false-result cases. UNKNOWN can safely contain them, at the cost of withholding
-a clear/blocked answer for those pairs. A LIVE test could reproduce individual
-fixtures but cannot make the missing hit identity or prohibited second endpoint
-script-accessible, so no L4 LIVE test is warranted.
+This former L4 decision is **SUPERSEDED by the same-ray hierarchy composition
+below**. The negative result remains valid only for a single boolean and the
+already-rejected reversed-ray composition.
 
-### Large-target no-hit policy does not remove the L4 block
+### Superseded boundary: large-target no-hit policy
 
 - X4: 9.00 build 611726
 - Status: inference
@@ -419,12 +415,175 @@ script-accessible, so no L4 LIVE test is warranted.
   `0x007E6CE8` permits an ordinary-mode miss when this byte is true and returns
   blocked when it is false.
 
-This can matter for a recovered aim point that does not produce a collision
-hit: native large-target fire may accept or reject that miss according to
-`+0xB0`, whereas MD exposes neither the field nor even a distinct no-hit result.
-It does not rescue the method and does not justify a new endpoint. It adds one
-more false-result case that must remain UNKNOWN; it does not create a false
-clear when UNKNOWN is retained.
+This former all-misses-UNKNOWN conclusion is **SUPERSEDED by the resolved
+subsets below**. The private byte still matters, but the zone query now
+distinguishes the miss and the endpoint-builder trace resolves part of its
+policy safely.
+
+### Same-ray hierarchy composition recovers the native first-hit class
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned native trace of `CheckLineOfSightAction` at RVA `0x00BCB4D0`,
+  the native first-hit classifier at `0x007E6CB0`, collision-mask initialization
+  at `0x000C6FA0`, and the complete relevant component body-builder/group-getter
+  census
+- Live test: no — the static action, hierarchy, body, and filter traces settle
+  the mechanism
+- Finding: three `check_line_of_sight` calls over one unchanged world-space
+  segment recover every native first-ray class in the supported outer-space
+  scope. Declare in turn the selected target, its public `.object` context, and
+  the querying component's `.zone`, expressing the same supplied endpoint in
+  each declared target's frame.
+
+Let `Q(T,P)` be the primary call to selected target `T` with its target-local
+representation of supplied point `P`; let `Q(O,P)` declare `T.object`; and let
+`Q(Z,P)` declare `weapon.zone`. Every call uses the same supplied firing origin
+and same world-space `P`, with `useaimtarget=false`.
+
+- `Q(T,P)=true` proves the closest hit is `T` or a descendant. This is native
+  first-ray result 1 and is safely clear for all supported non-guided groups.
+- If `Q(T,P)=false` and `Q(O,P)=true`, the closest hit is another component in
+  the same first class-`object` hierarchy. This is native result 0. The native
+  containing object is defined by the `+0x70` parent walk and class id `0x49`
+  (`object`), not by `defensible`. Public `.object` is the matching relationship
+  for whole targets and the supported turret/shield/engine surfaces; on a
+  station it can identify the owning module rather than the station root.
+- If both preceding calls are false and `Q(Z,P)=true`, some other relevant body
+  was hit, which is native result 2 and LINE OF FIRE BLOCKED. The action's
+  result walk at `0x00BCBBEF` continues to null, and every relevant outer-space
+  layer-3 body in the querying physics world reaches that zone through the same
+  `+0x70` chain.
+- If all three are false, the supported query population produced no hit. A
+  miss leaves the collector hit pointer null and reliably returns false. No
+  legitimate supported outer-space layer-3 hit fails the zone ancestry test.
+
+The action's public `object` target type accepts a zone. Explicit
+`targetoffset` follows the normal target-to-zone transform at
+`0x00BCB83D`–`0x00BCBB18`, so a zone-relative representation of `P` preserves
+the endpoint. Use the firing/query zone, not blindly `target.zone`: the shared
+wrapper runs in the world returned by the querying component at vtable slot
+`+0x1D78`. Changing only the declared target changes the endpoint transform and
+post-query parent comparison; after preserving world-space `P`, it does not
+change the physics world, segment, collector, filters, or closest hit.
+
+For exact native parity set `excludeself=false`. The native ray supplies the
+weapon as an exact-only exclusion, while MD false supplies no excluded
+component. Those are equivalent because weapon and turret components own no
+layer-3 body. MD true requests the broader weapon-and-descendants exclusion and
+is not the exact native setting, even though no supported descendant currently
+adds a relevant body.
+
+### The native second ray is reproducible for the supported target population
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned native trace at `0x00817B49`–`0x00817BEB`; supported official
+  and SWI target-class/hierarchy census from the accepted #168/#169/#184 scope
+- Live test: no — static target hierarchy and body ownership settle the
+  descendant mismatch
+- Finding: after the first ray returns same-containing-object result 0, one MD
+  call from the same supplied origin to the selected target component's
+  coordinate origin reproduces the native second-ray decision.
+
+Native permits only when the closest hit is exactly the selected component,
+while MD returns true for that component or a descendant. The difference is not
+reachable in Gunnery Control's supported population: a whole ship cannot reach
+result 0, and supported turret/shield/engine surfaces have no descendant capable
+of owning a relevant layer-3 hit. A turret's weapon descendants own no physics
+body. Thus MD true is exact-target true on this branch, and false matches native
+rejection whether it represents a miss or a different hit. The accepted SWI
+surface population uses the same class boundary.
+
+This call reproduces X4 but uses X4's alternate second segment. It may be viewed
+as an internal classifier while the retained #184 point remains the sole
+supplied aim point; nevertheless, Issue #186 currently forbids an alternate path
+as well as another aim point. Adopting native-equivalent second-ray handling
+therefore requires an explicit contract decision. Without that decision, this
+branch must remain UNKNOWN.
+
+### Large-target misses have a safe resolved subset
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned native trace of `LargeTargetShootController` endpoint builder
+  `0x007E7DE0`, its no-hit method `0x007E5970`, target/controller setup at
+  `0x0080C413`–`0x0080C5DE`, and relevant target vtables
+- Live test: no — static/native analysis only
+- Finding: once all three same-segment queries prove a miss, ordinary
+  controllers are clear and several large-controller cases are also provably
+  clear. Only a bounded selected-surface subset remains UNKNOWN.
+
+The builder resets `+0xB0=true`. If the selected target's parent chain contains
+no `defensible` before the zone, it exits without clearing the byte. This covers
+supported whole-ship and whole-station targets. If it finds a defensible, vtable
+slot `+0x2160` is constant true on L/XL ships and false on stations and S/M/XS
+ships; the true branch also preserves the clear miss. These class relationships
+are public/source-derived, so an L/XL-ship selected surface is a proved clear
+miss.
+
+For a selected surface on a station or S/M/XS ship, two target-state booleans
+loaded at `0x007E7EBF`–`0x007E7ED7` can bypass the byte clear. No safe MD/Lua
+mapping for them was found in the bounded controller trace. When both are false
+the byte becomes false and the miss is rejected; when either is true it remains
+clear. Those large-controller surface misses remain UNKNOWN. Controller setup
+also uses a target virtual predicate and a 540 m runtime-box-radius threshold;
+those inputs are recoverable, but do not expose the two booleans.
+
+Issue #184 cannot prove misses impossible. Authored aim points are independent
+metadata and can lie outside the reconstructed box; no containment or collision
+shape rule guarantees a hit at supplied `P`.
+
+### MD/native collision filters are compatible for this supported method
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned native collision-mask initialization at RVA `0x000C6FA0`, all
+  relevant component vtable `+0x1C40` body builders and `+0x1C58` group getters,
+  and complete RTTI-named outer-space class census
+- Live test: no — static/native analysis only
+- Finding: MD filter index 2 accepts groups 1–15 and 17–18; native filter index
+  14 accepts 1–4, 6–13 and 15–18. The differences — groups 5 and 14 MD-only,
+  group 16 native-only — add no supported outer-space pre-fire blocker.
+
+The relevant population is: ships group 8/11; stations, generic objects and
+eligible modules group 1/11/12; asteroids 13; missiles/explosives 7;
+collectables 15. Gates, mines, satellites/nav beacons/resource probes and
+anomalies either call the base object builder before their override or have no
+eligible body; a resulting outer-space layer-3 body uses the passing
+object-family groups. Turret, weapon, shield and engine children under an
+existing class-`object` owner add no independent layer-3 body. NPC characters
+are the only other layer-3 creator family; their native-only group-16 bodies
+live in an interior/room physics world, not the weapon's outer-space zone world.
+
+Therefore MD sees no supported blocker that native ignores, and native sees no
+supported blocker that MD ignores. Ship hulls, stations/modules, asteroids,
+missiles, mines, gates, satellites, collectables, characters and generic
+objects are accounted for. Planets, regions, highways, zones and sectors have
+no layer-3 body. Pair-specific filters and temporary layer-4 states remain the
+already-recorded runtime caveats; changing the declared target does not alter
+them.
+
+### Exact-pair decision table
+
+Apply each row independently to every #185 origin against the same #184 point.
+Supported guided missiles remain clear without a ray query.
+
+| Supported non-guided case | Proved rule | Result |
+|---|---|---|
+| `Q(T,P)` true | native first-ray result 1 | clear |
+| `Q(T,P)` false; `Q(O,P)` true; second-ray contract accepted; target-origin query true | result 0, then exact supported surface hit | clear |
+| same branch; target-origin query false | native second ray rejects | LINE OF FIRE BLOCKED |
+| `Q(T,P)` and `Q(O,P)` false; `Q(Z,P)` true | unrelated closest hit, result 2 | LINE OF FIRE BLOCKED |
+| all three false; non-large controller | constant-true ordinary no-hit policy | clear |
+| all three false; large controller; whole target or L/XL-ship surface | proved `+0xB0=true` subset | clear |
+| all three false; large controller; station or S/M/XS-ship surface | unmapped target-state booleans can change `+0xB0` | UNKNOWN |
+| `Q(T,P)` false; `Q(O,P)` true; second-ray contract not accepted | current wording forbids required alternate segment | UNKNOWN |
+| unresolved weapon behavior, hierarchy/frame, cross-world target, or material pair-filter uncertainty | outside proved boundary | UNKNOWN |
+
+With native second-ray handling accepted, worst-case cost is four
+`check_line_of_sight` calls per firing-origin + aim-point pair. Under the strict
+same-segment wording it is three, with same-containing-object hits UNKNOWN.
 
 ## Distributing cluster missiles are a separate supported group
 
