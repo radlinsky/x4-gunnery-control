@@ -495,40 +495,80 @@ body. Thus MD true is exact-target true on this branch, and false matches native
 rejection whether it represents a miss or a different hit. The accepted SWI
 surface population uses the same class boundary.
 
-This call reproduces X4 but uses X4's alternate second segment. It may be viewed
-as an internal classifier while the retained #184 point remains the sole
-supplied aim point; nevertheless, Issue #186 currently forbids an alternate path
-as well as another aim point. Adopting native-equivalent second-ray handling
-therefore requires an explicit contract decision. Without that decision, this
-branch must remain UNKNOWN.
+This call reproduces X4 but uses X4's alternate second segment. Issue #186 now
+accepts it only as this internal same-containing-object classifier: it keeps the
+same #185 firing origin, does not replace the #184 aim point being evaluated,
+and is not a general fallback target or aim-point substitution.
 
-### Large-target misses have a safe resolved subset
+### Every supported turret accepts a genuine miss
 
 - X4: 9.00 build 611726
 - Status: inference
 - Source: pinned native trace of `LargeTargetShootController` endpoint builder
-  `0x007E7DE0`, its no-hit method `0x007E5970`, target/controller setup at
-  `0x0080C413`–`0x0080C5DE`, and relevant target vtables
+  `0x007E7DE0`, its no-hit method `0x007E5970`, the complete caller argument
+  construction at `0x008140E3`–`0x008141C2`, target/controller setup at
+  `0x0080C413`–`0x0080C5DE`, and the `U::Turret` and `U::MissileTurret`
+  vtables
 - Live test: no — static/native analysis only
-- Finding: once all three same-segment queries prove a miss, ordinary
-  controllers are clear and several large-controller cases are also provably
-  clear. Only a bounded selected-surface subset remains UNKNOWN.
+- Finding: once the same-segment hierarchy queries prove a genuine miss, every
+  supported turret permits fire. The two formerly unmapped bytes are immutable
+  or already-classified weapon predicates, not selected-target state. The first
+  is always true for both supported runtime turret classes, so the branch that
+  could clear the large controller's no-hit byte is unreachable for the entire
+  supported turret population.
 
-The builder resets `+0xB0=true`. If the selected target's parent chain contains
-no `defensible` before the zone, it exits without clearing the byte. This covers
-supported whole-ship and whole-station targets. If it finds a defensible, vtable
-slot `+0x2160` is constant true on L/XL ships and false on stations and S/M/XS
-ships; the true branch also preserves the clear miss. These class relationships
-are public/source-derived, so an L/XL-ship selected surface is a proved clear
-miss.
+The full value provenance is:
 
-For a selected surface on a station or S/M/XS ship, two target-state booleans
-loaded at `0x007E7EBF`–`0x007E7ED7` can bypass the byte clear. No safe MD/Lua
-mapping for them was found in the bounded controller trace. When both are false
-the byte becomes false and the miss is rejected; when either is true it remains
-clear. Those large-controller surface misses remain UNKNOWN. Controller setup
-also uses a target virtual predicate and a 540 m runtime-box-radius threshold;
-those inputs are recoverable, but do not expose the two booleans.
+- caller `0x008140E3`–`0x00814104` takes shoot-controller slot `+0xA8`, then
+  calls weapon slot `+0x1F50`; it stores that result as endpoint-builder
+  argument 12 at caller stack `+0x58` (`LargeTargetShootController` reads it at
+  `0x007E7EC6`);
+- caller `0x00814108`–`0x00814114` calls weapon slot `+0x1F48` and stores the
+  result as argument 11 at stack `+0x50` (read at `0x007E7EBF`);
+- `U::Turret` vtable RVA `0x02B6E910` and `U::MissileTurret` vtable RVA
+  `0x02B00620` both map slot `+0x1F48` to the constant-true stub at RVA
+  `0x0009C980`. Across the runtime weapon family the slot distinguishes turret
+  weapons from fixed launchers/weapons: `U::Weapon` and `U::MissileLauncher`
+  map it to the constant-false stub at RVA `0x000B38C0`. It has no field,
+  writer, lifetime transition, target dependency, or player/current-target
+  dependency;
+- `U::Turret` maps slot `+0x1F50` to constant false. `U::MissileTurret` maps it
+  to RVA `0x0060A930`, which resolves the currently loaded ammunition defaults
+  and returns guidance byte `+0xBB1`. That byte is the authored ammunition
+  guidance value parsed by the already-recorded writer at RVA `0x00568F45`;
+  it changes only when the loaded ammunition selection changes to ammunition
+  with a different guidance value. It does not depend on the selected target,
+  parent, surface type, target size/attackability/operational state, firing or
+  aiming state, prior target, or player target.
+
+Thus the apparent rule at `0x007E7ECD`–`0x007E7EF1` is: preserve
+`+0xB0=true` when the firing weapon is a turret **or** its loaded ammunition is
+guided; only when both predicates are false does the code consult the target's
+slot `+0x2160` and potentially write false. Every Gunnery Control firing origin
+belongs to a `U::Turret` or `U::MissileTurret`, so the first predicate is always
+true. Guided missile turrets have already bypassed the entire obstruction
+section; conventional and supported unguided/cluster missile turrets reach it
+with the first predicate true. Their genuine misses all leave `+0xB0=true`, and
+`LargeTargetShootController::no-hit` at RVA `0x007E5970` permits fire.
+
+The surrounding target/controller checks do not modify this conclusion.
+Target setup calls target slot `+0x1BF0` at `0x0080C419`; if that predicate is
+false it compares the target's runtime box radius (`slot +0x14B0`, box `+0x20`)
+against the literal **500.0 m** at `0x0080C433`–`0x0080C43F`. Predicate true
+or radius at least 500 m selects/supports the large-target controller path;
+otherwise setup selects the ordinary controller path. The previously reported
+"540 m threshold" conflated the 500 m literal with an observed approximately
+540 m runtime box. Once `LargeTargetShootController` is active, its target
+parent walk and target slot `+0x2160` are reached only after both weapon
+predicates are false. They can affect fixed-weapon callers, but cannot affect a
+supported turret miss and therefore are not inputs Gunnery Control must obtain.
+
+Gunnery Control can reproduce the result before target selection without a new
+API: its supported firing population is, by construction, mounted conventional
+or missile turrets. That source/runtime class fact safely reproduces slot
+`+0x1F48=true`. Guidance remains available through the already-established
+loaded-ammunition classification, although it is unnecessary for a miss after
+the turret predicate has established clear.
 
 Issue #184 cannot prove misses impossible. Authored aim points are independent
 metadata and can lie outside the reconstructed box; no containment or collision
@@ -576,9 +616,7 @@ Supported guided missiles remain clear without a ray query.
 | same branch; target-origin query false | native second ray rejects | LINE OF FIRE BLOCKED |
 | `Q(T,P)` and `Q(O,P)` false; `Q(Z,P)` true | unrelated closest hit, result 2 | LINE OF FIRE BLOCKED |
 | all three false; non-large controller | constant-true ordinary no-hit policy | clear |
-| all three false; large controller; whole target or L/XL-ship surface | proved `+0xB0=true` subset | clear |
-| all three false; large controller; station or S/M/XS-ship surface | unmapped target-state booleans can change `+0xB0` | UNKNOWN |
-| `Q(T,P)` false; `Q(O,P)` true; second-ray contract not accepted | current wording forbids required alternate segment | UNKNOWN |
+| all three false; any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
 | unresolved weapon behavior, hierarchy/frame, cross-world target, or material pair-filter uncertainty | outside proved boundary | UNKNOWN |
 
 With native second-ray handling accepted, worst-case cost is four
