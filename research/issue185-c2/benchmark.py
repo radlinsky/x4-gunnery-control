@@ -24,6 +24,10 @@ EXPECTED_LAYOUTS = {"ordinary_xy": 278, "bounded_traverse": 8,
                     "reversed_xy": 1, "rotation_z": 1}
 EXPECTED_USABLE_LIMITS = 413
 EXPECTED_TURRETS_WITH_USABLE_LIMITS = 284
+KNOWN_MULTI_MUZZLE_CASE = (
+    "official:turret_bor_l_disruptor_01_mk1_macro:"
+    "limit-leaf-x-max-reachable-side-100m"
+)
 CATEGORIES = ("normal supported", "difficult supported", "stress-only")
 RESULT = {True: "CAN AIM", False: "CANNOT BEAR", None: "UNKNOWN"}
 
@@ -71,6 +75,7 @@ def _score(turret, record, case_id, category, point, **fields):
         "supplied_exact_aim_point": list(point),
         "scorer_state": truth["state"],
         "result": RESULT[truth["decision"]],
+        "predicted_muzzle_positions": [list(position) for position in truth.get("muzzles", [])],
         **fields,
     }
 
@@ -195,6 +200,20 @@ def _validate(records, rows):
             raise AssertionError(f"incomplete category coverage for {layout}")
     if not {"CAN AIM", "CANNOT BEAR", "UNKNOWN"}.issubset(_counter(rows, "result")):
         raise AssertionError("benchmark no longer exercises every C1 result")
+    if any(not row["predicted_muzzle_positions"] for row in rows
+           if row["result"] == "CAN AIM"):
+        raise AssertionError("CAN AIM row lacks a predicted muzzle position")
+    if any(row["predicted_muzzle_positions"] for row in rows
+           if row["result"] != "CAN AIM"):
+        raise AssertionError("CANNOT BEAR/UNKNOWN row invents a predicted muzzle position")
+    muzzle_layouts = {row["mechanical_layout"] for row in rows
+                      if row["predicted_muzzle_positions"]}
+    if muzzle_layouts != set(EXPECTED_LAYOUTS):
+        raise AssertionError(f"muzzle output layout coverage drift: {sorted(muzzle_layouts)}")
+    multi = {row["case_id"]: row for row in rows
+             if len(row["predicted_muzzle_positions"]) > 1}
+    if KNOWN_MULTI_MUZZLE_CASE not in multi:
+        raise AssertionError("known multi-stable-position case lost one or more muzzles")
     unknown = [row for row in rows if row["result"] == "UNKNOWN"]
     if {row["scorer_state"] for row in unknown} != {"UNKNOWN_pivot"}:
         raise AssertionError("hidden turret state must not make exact-point bearing UNKNOWN")
@@ -276,6 +295,10 @@ def main():
     print("layouts", dict(_counter(rows, "mechanical_layout")))
     print("categories", dict(_counter(rows, "case_category")))
     print("results", dict(_counter(rows, "result")))
+    multi = [row for row in rows if len(row["predicted_muzzle_positions"]) > 1]
+    maximum = max(len(row["predicted_muzzle_positions"]) for row in multi)
+    print(f"multi-muzzle PASS: {len(multi)} cases; max {maximum} muzzles; "
+          f"known case {KNOWN_MULTI_MUZZLE_CASE}")
 
 
 if __name__ == "__main__":

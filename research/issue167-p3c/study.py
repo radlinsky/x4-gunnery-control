@@ -174,7 +174,8 @@ def geometry(turret, R, O, p):
     pt = tuple(sum((p[k] - O[k]) * R[j][k] for k in range(3)) for j in range(3))  # (p-O)·Rᵀ
     gate = classify(turret["yaw"], pt)
     if not gate["resting"]:
-        return {"state": "NO_STABLE_POSITION", "decision": False, "yaws": gate["class"]}
+        return {"state": "NO_STABLE_POSITION", "decision": False, "yaws": gate["class"],
+                "muzzles": []}
     L, G, H = turret["seg"]["L"], turret["seg"]["G"], turret["seg"]["H"]
     aim = L[1][2]
     lo, hi = turret["arc"]
@@ -192,9 +193,15 @@ def geometry(turret, R, O, p):
         muzzle = compose(compose(compose(L, ((0.0, 0.0, 0.0), joint_matrix(x, 0.0))), G), compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))[0]
         scored.append((not ok, y, x, muzzle))
     if not scored:
-        return {"state": "UNKNOWN_pivot", "decision": None, "yaws": gate["class"]}
+        return {"state": "UNKNOWN_pivot", "decision": None, "yaws": gate["class"],
+                "muzzles": []}
     miss, y, x, muzzle = min(scored, key=lambda r: r[0])
-    return {"state": "OUT_OF_ARC" if miss else "IN_ARC", "decision": not miss, "yaws": gate["class"], "yaw": y, "pitch": x, "muzzle": muzzle}
+    if miss:
+        return {"state": "OUT_OF_ARC", "decision": False, "yaws": gate["class"],
+                "yaw": y, "pitch": x, "muzzles": []}
+    muzzles = [candidate[3] for candidate in scored if not candidate[0]]
+    return {"state": "IN_ARC", "decision": True, "yaws": gate["class"], "yaw": y,
+            "pitch": x, "muzzle": muzzle, "muzzles": muzzles}
 
 
 def engageable(turret, R, O, solutions):
