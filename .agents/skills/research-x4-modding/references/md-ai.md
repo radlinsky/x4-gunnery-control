@@ -459,7 +459,7 @@
   outside their elevation limits against the chosen surface. That question was
   subsequently resolved by the R2/R6 record below.
 
-### Unguided missile turrets ignore own hull but retain an external direct-line check
+### Unguided missile LIVE test proves launches under Gunnery-masked rays, not an engine own-hull exemption
 - X4: 9.00
 - Status: live-tested
 - Source: controlled Test Lab runs 2026-08-23, scenarios
@@ -467,21 +467,27 @@
   rejected-control history in `testing-experiments.md`.
 - Live test: yes — one exact player-owned Odysseus E loadout, clear Xenon K
   hull control and fully Asgard-masked Xenon P control.
-- Finding: in the clear lane, three dumbfire components whose muzzle rays were
-  blocked only by the Odysseus's own hull launched 92 missiles; all 92 exact
-  missiles still existed after 500 ms while retaining the intended K target.
-  In the final blocked lane, the P was wholly hidden by a solid Asgard, all
-  seven dumbfire turrets were within range, and every exact muzzle ray returned
-  `muzzle_los_ex=0`. ENGAGEABLE fell to 8/16: eight guided turrets that could
-  bear remained eligible despite their equally blocked direct rays, while all
-  seven dumbfire turrets were rejected and one guided turret was in CANNOT
-  BEAR.
-- Design consequence: for a missile turret, affirmative loaded-ammunition
-  `macro.isguided` bypasses direct LOS while bearing/range remain mandatory.
-  Unguided or missing-guidance ammunition retains direct LOS with
-  `excludeself="true"`: ignore the firing ship's own hull, not external
-  obstructions. This is verified for the tested vanilla Odysseus/loadout; do
-  not upgrade it to a universal result for arbitrary hulls or modded missiles.
+- Finding: in the clear lane, three dumbfire components whose Gunnery Control
+  muzzle-to-target rays were blocked only by the Odysseus's own hull launched
+  92 missiles; all 92 exact missiles still existed after 500 ms while retaining
+  the intended K target. R2 did not record X4's own pre-fire ray endpoints, so
+  this does not prove that X4's pre-fire obstruction check ignored the firing
+  ship's hull.
+- In the final blocked lane, the P was wholly hidden by a solid Asgard, all
+  seven dumbfire turrets were within range, and every Gunnery Control muzzle ray
+  returned `muzzle_los_ex=0`. ENGAGEABLE fell to 8/16 because Gunnery
+  Control's predicate rejected all seven dumbfire turrets. R6 did not observe
+  X4 withholding an unguided launch, so it does not prove that an external
+  blocker suppresses launch.
+- Later native analysis in
+  `weapon-path-obstruction-groups.md` found no unguided-specific own-hull
+  exemption: conventional and unguided fire use the same pre-fire obstruction
+  query and filters, and the firing ship's hull is a candidate blocker for both.
+  Do not cite R2 as proof that X4 ignores its own hull, or R6 as proof that X4
+  rejects an unguided launch behind an external blocker.
+- Boundary: this record proves the observed launches and Gunnery Control ray
+  results only. It does not establish the missile's post-launch collision rule
+  with its firing ship.
 
 ### Modular targets, attackable defence modules, and the per-module LOS fallback
 - X4: 9.00
