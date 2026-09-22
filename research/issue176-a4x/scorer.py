@@ -125,7 +125,10 @@ def _rest_z(leaf, root, seg, pt):
 
 
 def score(record, pt, _cache={}):
-    """{"state": IN_ARC | OUT_OF_ARC | UNKNOWN_*, "decision": True | False | None, ...}."""
+    """State is IN_ARC, OUT_OF_ARC, NO_STABLE_POSITION, or UNKNOWN_*.
+
+    NO_STABLE_POSITION proves CANNOT BEAR for the supplied exact aim point.
+    """
     cls = record["mechanical_class"]
     if cls == "ordinary_xy":
         key = record["source"] + ":" + record["macro"]

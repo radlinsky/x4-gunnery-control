@@ -48,7 +48,9 @@ python3 research/issue176-a4x/validate.py   # ~4 min, one niced process
 ```
 
 `scorer.score(record, point)` gives mechanical bearing/arc truth for a target in
-the turret component frame: `IN_ARC`, `OUT_OF_ARC` or `UNKNOWN_*`. It reads the
+the turret component frame: `IN_ARC`, `OUT_OF_ARC`, `NO_STABLE_POSITION` or
+`UNKNOWN_*`. `NO_STABLE_POSITION` proves CANNOT BEAR for the supplied exact aim
+point. It reads the
 record's ordered `ops` path. It does not check range, line of sight, own-hull
 masking, projectile flight, guidance or readiness. `weapon_behavior` is not used.
 
