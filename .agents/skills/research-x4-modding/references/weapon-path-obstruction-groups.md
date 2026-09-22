@@ -102,8 +102,70 @@ conventional merely because it is a bullet.
 
 The existing controlled live test established the important minimum boundary:
 guided missile turrets can launch and reach the designated surface even when the
-firing ship masks the direct muzzle-to-target ray. That test does not by itself
-prove every external-obstruction rule for every guided subtype.
+firing ship masks the direct muzzle-to-target ray. PR #66 R1 is that LIVE
+corroboration, and it covers the tested own-hull case for ordinary M/L guided
+Mk1 ammunition only.
+
+PR #66 R6 is not live proof of the external-blocker rule. R6 recorded blocked
+per-turret rays and Gunnery Control's own ENGAGEABLE prediction behind a solid
+Asgard; it never observed X4 launching guided missiles through that blocker.
+
+### Supported guided ammunition bypasses the pre-launch obstruction section
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned executable, SHA-256
+  `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`, image
+  base `0x140000000`; see [native-analysis.md](native-analysis.md) for the
+  recipe and the verify-before-use hash rule
+- Live test: partial — own-hull case corroborated by PR #66 R1; the
+  external-blocker case is native-only
+- Finding: the common pre-fire gate takes one guidance decision for loaded
+  ammunition, and affirmative guidance skips the entire target-directed
+  obstruction section before any collision query runs.
+
+Reproducible native surface:
+
+- the common firing update at RVA `0x008132D0` calls the pre-fire gate at RVA
+  `0x00816D20` (one `.pdata` function spanning `0x00816D20`–`0x00817CEF`);
+- inside that gate, `0x008179A1` issues a virtual call through weapon vtable
+  slot `+0x1F50`, and `0x008179A9` branches on a true result past the
+  target-directed obstruction section `0x008179AF`–`0x00817C46`, landing where
+  the permit flag is set;
+- both of that section's collision queries, `0x00817B09` and `0x00817BDE`, call
+  the shared physics query `0x000BC4D0` and therefore never execute for guided
+  loaded ammunition;
+- slot `+0x1F50` of the `U::MissileTurret` vtable (base RVA `0x02B00620`,
+  confirmed by its RTTI type descriptor) is implemented at RVA `0x0060A930`,
+  which resolves the loaded missile defaults and returns the guidance byte at
+  `+0xBB1`.
+
+Consequences carried by that single branch:
+
+- the firing ship's own hull does not make a supported guided missile LINE OF
+  FIRE BLOCKED;
+- an unrelated external solid ship, station, or module on the direct
+  firing-origin-to-target ray does not make one either, because the same
+  bypassed section holds the only queries that could observe it;
+- subtype does not matter. Swarm, smart/retargeting, torpedo/heat-seeking,
+  interceptor-style, EMP/disruptor, and ordinary guided macros all author the
+  affirmative guidance that this one byte carries, so none of them can select a
+  different pre-launch obstruction branch.
+
+No separate pre-launch local muzzle-clearance veto exists on the traced path:
+neither the `U::MissileTurret` fire method at RVA `0x0060AAF0` nor
+`Missile::Shoot` at RVA `0x00606F20` issues the shared physics query before the
+missile is created.
+
+Collision handling after creation is post-launch behavior and is outside
+Issue #186: the launched-missile update beginning near RVA `0x00606940` runs its
+own collision query at `0x00606B8B`, but by then X4 has already launched, so it
+cannot withhold the launch.
+
+This resolves the supported guided case without further source/native search or
+a new LIVE test. Unknown, future, or unaudited modded ammunition still fails
+closed under the UNKNOWN rule below whenever its loaded-ammunition behavior
+cannot be established safely.
 
 ## Ordinary unguided direct missiles form one supported group
 
@@ -227,6 +289,7 @@ attack/movement code). None exposes the engine's missile-turret launch
 obstruction decision.
 
 No new native-executable analysis was needed to establish the path-group census.
+The guided pre-launch obstruction rule above is the separate native result.
 
 ## Remaining obstruction questions
 
@@ -234,18 +297,16 @@ These are not L2 grouping gaps. They are the unresolved behavior needed before a
 complete line-of-fire rule can be frozen.
 
 1. **Distributing cluster missiles:** source establishes the unguided
-   carrier/guided-child path, but not the engine's exact launch obstruction rule,
-   detachment timing, or how far the carrier must have a clear route before
-   guided children can take over.
+   carrier/guided-child path, but not the engine's exact launch obstruction
+   rule. Prove whether cluster parents reach the same solid-external-blocker
+   rejection path as ordinary unguided missiles.
 
-2. **Conventional variants:** the full source corpus supports one straight-path
-   group, but live obstruction evidence currently covers plasma specifically.
-   Source does not expose the engine-side pre-fire obstruction check for every
-   beam or planned-detonation/area variant.
+2. **Conventional terrain:** determine whether asteroid/terrain collision
+   geometry participates in the conventional pre-fire obstruction query.
 
-3. **Guided subtypes:** shipped source exposes one guidance group and no
-   discriminator supporting a further split, but existing live obstruction
-   evidence does not exercise every guided subtype.
+Guided subtypes are no longer open: the pre-fire gate takes one guidance
+decision and supported guided ammunition bypasses the obstruction section
+entirely, so no subtype split remains to resolve.
 
 Resolve these only to the extent they can materially change the retained
 line-of-fire rule. Prefer further source/native proof before adding new LIVE

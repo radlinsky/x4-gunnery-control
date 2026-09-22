@@ -100,4 +100,5 @@ are real native names.
 | Aim-feasibility surface: HUD aim exports, `Weapon::Defaults` limits, solver clamp, `GetDistanceBetween`, data-getter key hash | [turret-aim-feasibility-surface.md](turret-aim-feasibility-surface.md) |
 | Selected-connection transform composition entry points | [barrelposition-offline-transform-semantics.md](barrelposition-offline-transform-semantics.md) |
 | Live interception of the selected `barrelposition` transform | [barrelposition-live-connection-orientation.md](barrelposition-live-connection-orientation.md) |
+| Missile-turret guidance query and the guided pre-launch obstruction bypass | [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md) |
 | PE export table of the engine (2493 named exports) | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) |
