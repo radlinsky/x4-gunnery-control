@@ -307,6 +307,125 @@ Class ids come from the static name/id table at RVA `0x0255D440` (`0x49` =
 XPhys type names are real RTTI names. "Query body", "stop ancestor" and
 "alternate aim mode" are analyst labels.
 
+### `check_line_of_sight` cannot reproduce every exact-pair firing result
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of RTTI
+  `.?AVCheckLineOfSightAction@Scripts@@`, vtable RVA `0x02C0D738`, run method
+  RVA `0x00BCB4D0`, against the pinned executable (hash and base as above),
+  compared with the pre-fire gate at RVAs `0x00817B09` and `0x00817BDE`;
+  public-surface census in `libraries/common.xsd`,
+  `libraries/scriptproperties.xml`, the full shipped MD/AI tree, and the full
+  shipped UI Lua `ffi.cdef` surface
+- Live test: no — static/native analysis resolves the retained-method question;
+  no runtime question remains that can add the missing hit identity
+- Finding: MD can cast between the exact supplied local offsets, but the action
+  returns only whether its closest hit is the declared target or a descendant.
+  It does not expose the hit component or the native shoot-controller
+  classification. Consequently a false result cannot distinguish an unrelated
+  blocker from a same-containing-object hit that the native firing gate handles
+  with a second, different endpoint. No composition of forward and reversed
+  `check_line_of_sight` calls safely recovers that distinction for every exact
+  pair.
+
+Endpoint and query trace:
+
+- the action resolves `object` and `target` at `0x00BCB518` and `0x00BCB52D`;
+  it evaluates `objectoffset`, builds a translation transform, and composes it
+  from the object's frame into the containing zone at `0x00BCB7D1`–`0x00BCB813`;
+  with `useaimtarget=false`, it does the same for `targetoffset` and the target
+  at `0x00BCB83D`–`0x00BCBB18`. Thus explicit offsets preserve both geometric
+  endpoints. With `useaimtarget=true`, `0x00BCBAFF` calls the separately traced
+  nearest-aim-point selector at `0x00520FC0` instead;
+- `0x00BCBBCB` calls the same shared query wrapper `0x000BC4D0` as the firing
+  gate. Both select object layer 3, but their collision-group configurations
+  differ: MD passes group-filter index 2 and the adjacent selector literal 1;
+  the firing gate passes index 14 and selector literal 7. For the established
+  ship/station/module and
+  asteroid blocker groups the group masks overlap, so this difference does not
+  repair the missing classification. It is still another reason not to call the
+  two actions identical for unaudited object classes;
+- `excludeself=true` supplies the action's `object` as the excluded component
+  at `0x00BCBB49`–`0x00BCBBA2` and sets the descendant flag to 1. The body
+  filter therefore removes that exact component and its descendants. It does
+  not remove ancestors, siblings, or the whole containing object merely because
+  the source is one of its children;
+- the closest-hit component is stored internally at collector `+0x28`. The
+  action reads it at `0x00BCBBE3`–`0x00BCBC01`, walks `+0x70` parents, and sets
+  the returned value true only if that chain reaches the declared target. A
+  miss, an unrelated hit, an ancestor of the target, or a sibling all return
+  false. The action has no option that invokes a shoot controller, returns the
+  component, accepts same-containing-object hits, or requests the native second
+  cast.
+
+The native same-containing-object branch is materially different. When the
+first classifier returns 0, the gate casts again from the same firing origin at
+`0x00817BDE`, but toward the selected target component's coordinate origin
+(`shoot-controller output at caller stack +0x40`), not toward the recovered
+aim point (`+0x30`) used by the first cast. It then permits fire only if the
+closest hit is exactly the target component (`0x00817BE3`–`0x00817BEB`). That
+alternate endpoint can change the native answer even when the first endpoint is
+the exact recovered aim point, and substituting it is outside the exact-pair
+contract. A raw false MD result therefore has to remain UNKNOWN wherever this
+case is possible; treating it as blocked can be a false block, while clearing it
+can be a false clear.
+
+The proposed reversed ray is not a safe workaround:
+
+- for a whole ship or station source, `excludeself=true` removes that root and
+  its descendants, but the boolean is still target-hit rather than no-obstacle:
+  a clear miss and an external blocker both return false, while a firing-ship
+  hull hit can return true when the firing ship is the declared target;
+- for a selected surface element, only that element and its descendants are
+  excluded. Parent-hull/module and sibling geometry remains visible, so reversal
+  can reject geometry that the native target classifier or second-ray path may
+  accept;
+- forward plus reverse can identify some endpoint hits, but the pair of booleans
+  still aliases clear misses, external blockers, and same-containing-object
+  hits. It can therefore produce a false clear if promoted beyond UNKNOWN.
+
+No public hit-identity route was found. `check_line_of_sight` returns one
+boolean; `find_object_surface` returns a generated surface position and normal,
+not the hit component, and its `component=` input aims the cast rather than
+changing that output; script properties expose physics readiness but no
+arbitrary ray result; and the shipped UI FFI exposes no arbitrary component-pair
+ray cast or closest-hit getter. `IsObstructed` remains bound to an engine-owned
+HUD position id and is not an arbitrary-pair facility. This negative claim is
+bounded to X4 9.00's full `common.xsd`, `scriptproperties.xml`, shipped MD/AI,
+and shipped UI Lua FFI surfaces.
+
+The L4 decision is therefore **BLOCKED** for the general exact-pair method. A
+caller can safely retain definite positives such as the forward action hitting
+the target hierarchy, but the public surface cannot distinguish the material
+false-result cases. UNKNOWN can safely contain them, at the cost of withholding
+a clear/blocked answer for those pairs. A LIVE test could reproduce individual
+fixtures but cannot make the missing hit identity or prohibited second endpoint
+script-accessible, so no L4 LIVE test is warranted.
+
+### Large-target no-hit policy does not remove the L4 block
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned native trace of
+  `U::LargeTargetShootController` vtable RVA `0x02B7D088`, no-hit method RVA
+  `0x007E5970`, endpoint builder RVA `0x007E7DE0`, and constructors at
+  `0x0080C5CA`, `0x0081AD1E`, and `0x0085D4FE`
+- Live test: no — static/native analysis only
+- Finding: the formerly untraced no-hit method simply returns controller byte
+  `+0xB0`. Constructors initialize it true. The large-target endpoint builder
+  resets it true at `0x007E7E0E` and can set it false at `0x007E7EF1` for its
+  bounded target/geometry branch. The common classifier at `0x007E6CCD`–
+  `0x007E6CE8` permits an ordinary-mode miss when this byte is true and returns
+  blocked when it is false.
+
+This can matter for a recovered aim point that does not produce a collision
+hit: native large-target fire may accept or reject that miss according to
+`+0xB0`, whereas MD exposes neither the field nor even a distinct no-hit result.
+It does not rescue the method and does not justify a new endpoint. It adds one
+more false-result case that must remain UNKNOWN; it does not create a false
+clear when UNKNOWN is retained.
+
 ## Distributing cluster missiles are a separate supported group
 
 - X4: 9.00 build 611726
