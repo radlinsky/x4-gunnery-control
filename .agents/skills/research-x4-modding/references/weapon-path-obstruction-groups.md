@@ -278,7 +278,13 @@ Why the candidate set is exactly these categories:
 - object layer 3 is assigned only at body creation, RVA `0x000BE550`: argument
   13 selects layer 3; otherwise the layer is 0 or 1. Later
   `SetObjectLayer` calls (Jolt `BodyInterface`, RVA `0x01406460`, body
-  `+0x74`) toggle only between that stored layer and 4, which is never queried;
+  `+0x74`) toggle only between that stored layer and 4, which is never queried.
+  None of its 13 call sites receives a layer-3 body: each toggles a body built
+  with argument 13 false, namely sensor/trigger bodies (`0x0087B530`, created on
+  layer 4 and restored by `0x0087AC00` or parked again by `0x0087AE50`), the
+  bodies at `+0x228` built by `0x00DA46A0`/`0x00DA4790`, and the temporary body
+  from `0x00D5F930`. Layer-4 toggling therefore never adds or removes a
+  pre-fire candidate;
 - only two creators pass argument 13 as true. The generic component builder
   (`0x0051BB90` → `0x0051B730`) gives each physics component a second body at
   `+0x268` on layer 3 next to its layer-0/1 body at `+0x260`. The other creator
@@ -765,10 +771,15 @@ query's Jolt/XPhys filter configuration are separate native results.
 The blocker-category and conventional-terrain questions are settled above as
 native inference. What static analysis cannot settle:
 
-1. **Runtime layer-4 toggles:** several engine paths move a body to the
-   never-queried layer 4 and back. Which lifecycle states do that (for example
-   docking, construction or destruction) was not traced per path. A candidate
-   in such a state is not a blocker.
+1. **Wrecks:** a wreck is the same component in `componentstate.wreck`
+   (`libraries/common.xsd`), and it can be restored. Layer-4 toggling cannot
+   hide it (see above), and the Ship/Station has-physics predicate
+   (`0x00352C80`) does not test component state. Whether the transition to or
+   from the wreck state tears down (`+0x1C48`, `0x0051BC80`) or rebuilds the
+   `+0x268` layer-3 body was not traced, so whether a wreck blocks is UNKNOWN
+   for every wreck state. Even if a wreck proves not to block, any other body
+   on the line still can. `0x0064E3C0` and `0x0064EF00` belong to U::Mine, not
+   ship or module destruction.
 2. **Cross-zone blockers:** an obstruction registered in a different zone's
    physics world from the querying component is not a candidate. How often a
    real firing line crosses such a boundary is a runtime question.
