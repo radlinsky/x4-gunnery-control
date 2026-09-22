@@ -179,15 +179,24 @@ cannot be established safely.
   delivery stage is authored. The scatter missile remains in this group:
   multiple unguided projectiles do not create an alternate guided route.
 
-The retained live test established that the tested dumb-fire turrets could launch
-when only the firing ship masked the direct ray. It did not establish whether an
-external blocker makes X4 withhold an unguided launch; see the R2/R6 distinction
-below.
+The retained live test established that the tested dumb-fire turrets launched
+while Gunnery Control's own muzzle-to-target ray was masked only by the firing
+ship. It did not establish that X4 exempts the firing ship's hull. It also did
+not establish whether an external blocker makes X4 withhold an unguided launch.
 
-Read PR #66 R2 and R6 apart. R2 observed 92 real dumb-fire launches under
-own-hull masking, so the own-hull half is LIVE. R6 behind the solid Asgard
-recorded blocked per-turret rays and Gunnery Control's own predicate result, not
-X4 withholding a launch, so the external-ship half is not LIVE-proven either.
+Read PR #66 R2 and R6 apart. R2 observed 92 real dumb-fire launches, but its
+"own-hull masked" label describes Gunnery Control's ray, not X4's pre-fire ray.
+The native gate has no unguided own-hull exemption: unguided and conventional
+fire run the same query with the same filters, and the firing ship's hull is a
+layer-3 candidate for both. X4 casts its ray from the weapon's selected
+connection (`0x0081C960`, shared by every weapon class) to the shoot
+controller's aim point. For a large target, that controller is
+U::LargeTargetShootController. R2 did not record those endpoints. The most
+likely reading, which is inference, is that X4's own ray was clear in R2. The
+#67 r11 conventional hold-fire result is consistent with the same rule. R6
+behind the solid Asgard recorded blocked per-turret rays and Gunnery Control's
+own predicate result, not X4 withholding a launch, so the external-ship half is
+not LIVE-proven either.
 
 ### The unguided pre-launch obstruction query and its filters
 
@@ -211,8 +220,11 @@ What the trace establishes about the mechanism:
   `JPH::BroadPhaseLayerFilter` whose accept method is a constant-true stub at
   RVA `0x0009C980`, an `XPhys::XObjectLayerFilter` (`ShouldCollide` at RVA
   `0x000B52C0`), and an `XPhys::XBodyFilter`;
-- the body filter carries the firing weapon as an exclude object, which is the
-  mechanism behind the own-hull result rather than a separate rule;
+- the body filter excludes only the firing weapon component itself: the
+  gate's descendant flag is 0, so `0x000BBB00` compares for an exact match.
+  Turret and weapon components own no physics bodies, so this exclusion never
+  removes the firing ship's hull. No unguided-specific own-hull exemption exists
+  on this path;
 - `XPhys` defines exactly five object layers. `XPhys::XBroadphaseLayer`
   (constructed at RVA `0x000C6913`) maps object layers 0..4 to broad-phase
   layers `0,1,2,2,1`, and `GetBroadPhaseLayer` at RVA `0x000B51D0` rejects any
