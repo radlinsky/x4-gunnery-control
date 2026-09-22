@@ -180,9 +180,9 @@ cannot be established safely.
   multiple unguided projectiles do not create an alternate guided route.
 
 The retained live test established that the tested dumb-fire turrets could launch
-when only the firing ship masked the direct ray, while a solid external Asgard
-that blocked the direct path caused rejection. That establishes the tested
-own-ship/external distinction but does not substitute for the broader L3 rule.
+when only the firing ship masked the direct ray. It did not establish whether an
+external blocker makes X4 withhold an unguided launch; see the R2/R6 distinction
+below.
 
 Read PR #66 R2 and R6 apart. R2 observed 92 real dumb-fire launches under
 own-hull masking, so the own-hull half is LIVE. R6 behind the solid Asgard
