@@ -2,13 +2,13 @@
 
 Status: **inference**, offline mechanical bearing/arc benchmark evidence.
 
-The benchmark contains **329 scenarios** from the retained #184 focused population. Each scenario is one definite recovered aim point, its unchanged #184 uncertainty ball, and the case's real selected turret and mount. Hidden authored points are used only for exact truth and audit.
+The benchmark contains **330 scenarios** from the retained #184 focused population. Each scenario is one definite recovered aim point, its unchanged #184 uncertainty ball, and the case's real selected turret and mount. Hidden authored points are used only for exact truth and audit.
 
 ## Comparison
 
 | exact truth | C5 result | scenarios |
 |---|---|---:|
-| CAN AIM | CAN AIM | 274 |
+| CAN AIM | CAN AIM | 275 |
 | CAN AIM | CANNOT BEAR | 0 |
 | CAN AIM | UNKNOWN | 0 |
 | CANNOT BEAR | CAN AIM | 0 |
@@ -21,17 +21,17 @@ Genuine exact geometry UNKNOWN: **0**.
 
 None.
 
-All 55 exact CANNOT BEAR scenarios are ordinary-X/Y OUT_OF_ARC cases beyond a real authored pitch limit. None is near enough for the recovered uncertainty to touch that limit: the closest uncertainty ball remains **2.28556 m** clear (limit surface 2.28797 m from the recovered centre versus a 0.00241583 m #184 radius, 947x the radius).
+All 55 exact CANNOT BEAR scenarios are ordinary-X/Y OUT_OF_ARC cases beyond a real authored pitch limit. None is near enough for the recovered uncertainty to touch that limit: the closest uncertainty ball remains **2.28599 m** clear (limit surface 2.28776 m from the recovered centre versus a 0.00176801 m #184 radius, 1294x the radius).
 
 Closest five exact CANNOT BEAR cases to a real limit:
 
 | case | gap (m) | turret | limit | radius (m) | centre to limit (m) | clearance (m) |
 |---|---:|---|---:|---:|---:|---:|
-| 6280 | 100 | `swi:turret_m_llaser_green_02_macro` | -10° | 0.00241583 | 2.28797 | 2.28556 |
-| 5992 | 100 | `swi:turret_m_llaser_green_macro` | -10° | 0.000578826 | 68.113 | 68.1124 |
-| 5992 | 100 | `swi:turret_m_llaser_green_macro` | -10° | 0.000628627 | 79.4041 | 79.4035 |
-| 6520 | 100 | `swi:turret_m_duallaser_green_02_macro` | -10° | 0.000552746 | 87.0099 | 87.0094 |
-| 6520 | 1000 | `swi:turret_m_duallaser_green_02_macro` | -10° | 0.000532119 | 183.858 | 183.858 |
+| 6280 | 100 | `swi:turret_m_llaser_green_02_macro` | -10° | 0.00176801 | 2.28776 | 2.28599 |
+| 5992 | 100 | `swi:turret_m_llaser_green_macro` | -10° | 0.000569712 | 68.1129 | 68.1123 |
+| 5992 | 100 | `swi:turret_m_llaser_green_macro` | -10° | 0.000554677 | 79.4041 | 79.4035 |
+| 6520 | 100 | `swi:turret_m_duallaser_green_02_macro` | -10° | 0.000508728 | 87.0099 | 87.0093 |
+| 6520 | 1000 | `swi:turret_m_duallaser_green_02_macro` | -10° | 0.000508728 | 183.858 | 183.858 |
 
 ## UNKNOWN and exclusions
 

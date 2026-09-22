@@ -123,16 +123,15 @@ def _uncertainty(record, centre, radius):
     return "CANNOT BEAR", central["state"], None, distance, limit, pivot_distance
 
 
-def _recover(case, margin):
-    """The retained #184 A7.2 search and its existing post-search uncertainty refinement."""
-    probe, stats = aimpoint_map.angular_probe(
-        aimpoint_map.view(case), margin,
-        primary=aimpoint_map.A7_PRIMARY, near_target=aimpoint_map.A6_NEAR_PAD,
+def _recover(case):
+    """The frozen #184 A7.3 search and its existing post-search uncertainty refinement."""
+    search = aimpoint_map.near_only_run(
+        aimpoint_map.view(case), total=aimpoint_map.A73_TOTAL,
+        pad=aimpoint_map.A6_NEAR_PAD, geom=aimpoint_map.A73_GEOM,
     )
-    audit = aimpoint_map.corner_audit(aimpoint_map.view(case), margin, probe)
-    points = [(np.asarray(c, float), float(r)) for c, r in audit["points"]]
-    refined, _count, _skipped = aimpoint_map.refine_points(points, stats["rays"])
-    return refined, audit["queries"]
+    points = [(np.asarray(c, float), float(r)) for c, r in search["points"]]
+    refined, _count, _skipped = aimpoint_map.refine_points(points, search["rays"])
+    return refined, search["asks"]
 
 
 def _row(case, record, label, centre, radius, truth_index, queries):
@@ -224,13 +223,17 @@ def _report(rows, unusable):
 
 def main():
     os.nice(10)
-    records, margins, mounts, _excluded, _inferred = aimpoint_map.load()
+    aimpoint_map._index_swi_ships()
+    records = aimpoint_map.scorer.load()
+    components = aimpoint_map.corpus._index_xml(
+        [aimpoint_map.corpus.SWI_XML, aimpoint_map.corpus.OFFICIAL_SRC], "component")
+    mounts, _excluded, _inferred = aimpoint_map.firing_mounts(records, components)
     cases = list(aimpoint_map.a7_variants(aimpoint_map.targets(), mounts))
     CACHE.mkdir(parents=True, exist_ok=True)
     rows, unusable = [], 0
     with open(CACHE / "benchmark.jsonl", "w") as stream:
         for number, case in enumerate(cases, 1):
-            recovered, queries = _recover(case, margins[case["ship_class"]][0])
+            recovered, queries = _recover(case)
             for label, (centre, radius) in enumerate(recovered):
                 cover = [i for i, point in enumerate(case["points"])
                          if np.linalg.norm(centre - point) <= radius]
