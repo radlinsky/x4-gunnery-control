@@ -313,6 +313,75 @@ Class ids come from the static name/id table at RVA `0x0255D440` (`0x49` =
 XPhys type names are real RTTI names. "Query body", "stop ancestor" and
 "alternate aim mode" are analyst labels.
 
+### Wrecked ships and station modules keep a pre-fire body
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned executable (hash and base as above);
+  `componentstate` and kill-method keyword tables in the executable;
+  `componentstate` and `killmethod` enumerations in `libraries/common.xsd`
+- Live test: no — static trace only
+- Finding: a ship, station or station module that becomes a wreck rebuilds its
+  layer-3 body in the same handler that tore it down. It stays eligible as a
+  blocker while it is a wreck, and after it is restored. An object that is
+  destroyed without leaving a wreck, or a wreck that is itself destroyed, is
+  not rebuilt and cannot block.
+
+| State | Pre-fire body |
+|---|---|
+| Fresh ship wreck | eligible blocker |
+| Persistent wreck | eligible blocker (no separate code path) |
+| Restored wreck | eligible blocker |
+| Station-module wreck | eligible blocker |
+| Destroyed with no wreck, or wreck destroyed | not a blocker |
+
+Eligible means only that the wreck's body is a candidate for the first hit. A
+wreck on the line blocks the shot when it is the closest relevant hit; that
+says nothing about the rest of the line.
+
+Native path:
+
+- component state is the dword at `+0x68`; the keyword table maps
+  `operational` 0, `wreck` 1, `construction` 2. The shared setter core at
+  `0x003D4440` only stores it and posts ChangedStateEvent. Ship and Station
+  (vtable `+0x1368`, `0x006D1C70`) and Module (`0x0051A0E0`) wrap that core. The
+  Ship/Station/Module state handlers call neither the builder nor the
+  teardown;
+- the kill routine (`0x003E51B0`, virtual on every destructible) posts
+  KillEvent. Its dispatch (`0x009A26A0`) calls
+  vtable `+0x40` with the kill method. Ship (`0x007CD610`) and Station
+  (`0x006CFBA0`) tail-jump into the shared handler at `0x00516AE0`, and every
+  station-module class calls it through `0x006AFCE0`;
+- when the object is killing itself, `0x00516AE0` first calls `+0x1C48`
+  teardown (`0x0051BC80` for Ship, Station and Module), which frees `+0x260`
+  and `+0x268`. The kill methods `collected`, `contextkilled`, `detached`,
+  `removed`, `targetpointdiscarded`, `timedout`, `venturecaptured`,
+  `venturekilled` and `weaponswap` then exit with no rebuild;
+- for the other kill methods, including `hitbybullet` and `hitbymissile`, a
+  non-wreck killed by `recycling`, or one whose becomes-wreck predicate (`+0x1E30`: `0x006D2D10` for
+  Ship/Station, `0x005258F0` for Module) returns true reaches `0x00517240`,
+  which sets state 1. At `0x005172E6` it then calls `+0x1C40` (the builder
+  `0x0051BB90`), recreating the layer-3 body at `+0x268`. The rebuild is
+  gated by has-physics (`+0x1B50`) and the general presence gate `+0x1B60`
+  (the gate the unhide handler `0x00517DA0` also uses); neither tests
+  component state;
+- an object already in state 1, or one whose predicate returns false, skips
+  that block and is not rebuilt. The predicate reads macro and runtime data,
+  so which kills leave a wreck is data-dependent;
+- `restore_object` (RestoreObjectAction run `0x00BC7BA0`) posts RestoreEvent,
+  handled by vtable `+0x68` (`0x00517AB0`), then sets state 0. Neither path
+  calls the builder or the teardown, so the wreck body carries over;
+- persistence only changes the despawn timer. SetObjectPersistenceAction
+  (`0x00BC64B0`) touches no body; that `set_wreck_persistence` maps to that
+  action is an analyst inference;
+- the rebuilt body's group comes from `+0x1C58` (Ship `0x007C8890` → 8 or 11,
+  Station `0x0051C4A0` → 1, 11 or 12), which filter 14 accepts in every case.
+  The traced wreck path makes no zone change.
+
+"Kill routine", "becomes-wreck predicate", "presence gate" and "setter core" are analyst
+labels; KillEvent, KilledEvent, ChangedStateEvent and RestoreEvent are RTTI
+names. KilledEvent dispatches to `+0x48`, not to this handler.
+
 ### Superseded: a single or reversed `check_line_of_sight` cannot reproduce every result
 
 - X4: 9.00 build 611726
@@ -771,19 +840,10 @@ query's Jolt/XPhys filter configuration are separate native results.
 The blocker-category and conventional-terrain questions are settled above as
 native inference. What static analysis cannot settle:
 
-1. **Wrecks:** a wreck is the same component in `componentstate.wreck`
-   (`libraries/common.xsd`), and it can be restored. Layer-4 toggling cannot
-   hide it (see above), and the Ship/Station has-physics predicate
-   (`0x00352C80`) does not test component state. Whether the transition to or
-   from the wreck state tears down (`+0x1C48`, `0x0051BC80`) or rebuilds the
-   `+0x268` layer-3 body was not traced, so whether a wreck blocks is UNKNOWN
-   for every wreck state. Even if a wreck proves not to block, any other body
-   on the line still can. `0x0064E3C0` and `0x0064EF00` belong to U::Mine, not
-   ship or module destruction.
-2. **Cross-zone blockers:** an obstruction registered in a different zone's
+1. **Cross-zone blockers:** an obstruction registered in a different zone's
    physics world from the querying component is not a candidate. How often a
    real firing line crosses such a boundary is a runtime question.
-3. **Pair collision filters:** the group filter's final pair lookup
+2. **Pair collision filters:** the group filter's final pair lookup
    (`0x000B9020`, likely backing MD `addcollisionfilter`) was not traced. It
    could exempt a specific object pair.
 
