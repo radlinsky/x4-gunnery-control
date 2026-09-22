@@ -4,7 +4,37 @@ Status: **inference**, offline mechanical bearing/arc benchmark evidence.
 
 The benchmark contains **330 scenarios** from the retained #184 focused population. Each scenario is one definite recovered aim point, its unchanged #184 uncertainty ball, and the case's real selected turret and mount. Hidden authored points are used only for exact truth and audit.
 
-## Comparison
+## C5.2 firing-origin movement
+
+This measures movement caused solely by the unchanged recovered aim-point uncertainty; it is **not prediction error**.
+
+- C5 CAN AIM scenarios measured: **275**
+- Recovered centre has at least one CAN AIM muzzle: **275**
+- CAN AIM exists only off centre: **0**
+- Movement median / p90 / p99 / maximum: **1.77446004e-06 / 1.46585431e-05 / 2.74848373e-05 / 3.28047623e-05 m**
+
+The worst case is **12177**, `swi:turret_l_mando_double_ion_macro`, ordinary_xy, 100 m engagement distance: #184 radius **0.00179534634 m**, 1 centre muzzle(s), maximum movement **3.28047623e-05 m** (**0.0182721081x** the radius).
+
+### Mechanical layout
+
+| layout | scenarios | median (m) | p90 (m) | p99 (m) | maximum (m) |
+|---|---:|---:|---:|---:|---:|
+| ordinary_xy | 275 | 1.77446004e-06 | 1.46585431e-05 | 2.74848373e-05 | 3.28047623e-05 |
+| bounded_traverse | 0 | — | — | — | — |
+| reversed_xy | 0 | — | — | — | — |
+| rotation_z | 0 | — | — | — | — |
+
+### Settled-position branches
+
+Scenarios whose valid settled-muzzle count changes in the ball: **0**. Scenarios where a new branch appears beyond those represented at the centre: **0**.
+
+### Numerical-search stability
+
+The nested coarse search maximum was **3.22148558e-05 m**; adding the denser whole-ball samples gave **3.25459445e-05 m**; final constrained pattern refinement gave **3.28047623e-05 m**. Fine sampling increased the coarse maximum by **3.31e-07 m** and final refinement increased the fine sampled maximum by **2.59e-07 m**.
+
+Each valid muzzle at every point is compared with its nearest centre-predicted muzzle; muzzles are never paired by list order. The deterministic search covers the centre, interior radial shells, the full spherical boundary, and constrained local refinement.
+
+## C5.1 comparison
 
 | exact truth | C5 result | scenarios |
 |---|---|---:|
