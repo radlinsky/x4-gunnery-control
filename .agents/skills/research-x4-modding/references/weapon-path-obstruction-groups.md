@@ -184,14 +184,58 @@ when only the firing ship masked the direct ray, while a solid external Asgard
 that blocked the direct path caused rejection. That establishes the tested
 own-ship/external distinction but does not substitute for the broader L3 rule.
 
+Read PR #66 R2 and R6 apart. R2 observed 92 real dumb-fire launches under
+own-hull masking, so the own-hull half is LIVE. R6 behind the solid Asgard
+recorded blocked per-turret rays and Gunnery Control's own predicate result, not
+X4 withholding a launch, so the external-ship half is not LIVE-proven either.
+
+### The unguided pre-launch obstruction query and its filters
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned executable, SHA-256
+  `19750a6563889a970f434b5566eb396c6b2dc29ff814bd3e336f838176ad6891`, image
+  base `0x140000000`; see [native-analysis.md](native-analysis.md)
+- Live test: no — the mechanism below is static-trace only
+- Finding: for loaded ammunition whose guidance byte is false, the common
+  pre-fire gate runs the target-directed obstruction section, which issues two
+  ray casts into the physics engine under one fixed filter configuration.
+
+What the trace establishes about the mechanism:
+
+- the section's two queries at `0x00817B09` and `0x00817BDE` both call
+  `0x000BC4D0`, a thin wrapper that transforms the endpoints and tail-calls
+  `0x000BB5D0` at `0x000BC71F`;
+- the physics layer is Jolt (`JPH`) behind Egosoft's `XPhys` wrappers. The
+  query builds a `XPhys::XCastRayCollectorClosestHit` collector with a
+  `JPH::BroadPhaseLayerFilter` whose accept method is a constant-true stub at
+  RVA `0x0009C980`, an `XPhys::XObjectLayerFilter` (`ShouldCollide` at RVA
+  `0x000B52C0`), and an `XPhys::XBodyFilter`;
+- the body filter carries the firing weapon as an exclude object, which is the
+  mechanism behind the own-hull result rather than a separate rule;
+- `XPhys` defines exactly five object layers. `XPhys::XBroadphaseLayer`
+  (constructed at RVA `0x000C6913`) maps object layers 0..4 to broad-phase
+  layers `0,1,2,2,1`, and `GetBroadPhaseLayer` at RVA `0x000B51D0` rejects any
+  layer id of 5 or more;
+- `XObjectLayerFilter::ShouldCollide` accepts a body iff its object layer is not
+  4 and its own boolean member equals `layer == 3`. The gate passes that member
+  as a literal `1`, so the pre-fire query reports hits on object layer 3 only.
+  The launched-missile update at `0x00606940` passes `0`, so its collision query
+  at `0x00606B8B` sees object layers 0, 1 and 2 instead;
+- after the first ray cast the gate classifies the hit through a virtual call at
+  `0x00817B27` that returns 0, 1 or 2; that classifier decides what the hit
+  means before the second segment is cast.
+
+This pins the mechanism but not the blocker categories. Which game objects carry
+object layer 3, and what the `0x00817B27` classifier does with a hit, are not
+established here; see the remaining questions.
+
 ## Distributing cluster missiles are a separate supported group
 
 - X4: 9.00 build 611726
 - Status: shipped-source
-- Source:
-  assets/props/WeaponSystems/missile/macros/missile_cluster_heavy_mk1_macro.xml
-  and
-  assets/props/WeaponSystems/missile/macros/missile_cluster_light_mk1_macro.xml,
+- Source: assets/props/WeaponSystems/missile/macros/ —
+  missile_cluster_heavy_mk1_macro.xml and missile_cluster_light_mk1_macro.xml,
   plus their detached guided child missile definitions
 - Live test: no
 - Finding: the heavy and light cluster ammunition macros author an unguided
@@ -199,11 +243,42 @@ own-ship/external distinction but does not substitute for the broader L3 rule.
   parent therefore reports as unguided even though the eventual damage-delivery
   stage can steer after detachment.
 
-This makes a simple "guided=false means ordinary dumb-fire" classifier unsafe.
-The carrier may require a viable launch/deployment segment while its children can
-take different paths after detachment. Shipped source establishes the two-stage
-path but does not establish the exact obstruction rule or detachment boundary
-used by the engine.
+This makes a simple "guided=false means ordinary dumb-fire" classifier unsafe
+for the *post-launch* delivery stage: the carrier's children can take different
+paths after detachment. It does not change the pre-launch rule.
+
+### Cluster parents take the ordinary unguided pre-launch path
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned executable (hash and base as above), plus
+  the two shipped cluster macros
+- Live test: no
+- Finding: `distribute` is not reachable by the pre-launch decision at all. Both
+  cluster parents are `guided="0"`, and guidance is the only ammunition
+  discriminator the pre-fire gate consults, so they enter the same
+  target-directed obstruction section as ordinary unguided missiles.
+
+The proof is the field, not the flag name:
+
+- `distribute` is parsed into the loaded-ammunition defaults at byte `+0xCD1`
+  (attribute id `0xB2`, written at RVA `0x0060905D`), a different field from the
+  guidance byte `+0xBB1` (attribute id `0x10C`, written at RVA `0x00568F45`);
+- a whole-image scan finds exactly one engine reader of `+0xCD1`: RVA
+  `0x006063F0`, reached only through `U::Missile` vtable slot `+0x5C0`. That is
+  a terminal handler on an already-created missile, and it selects between the
+  child-release path at RVA `0x00608650` and ordinary detonation at RVA
+  `0x00608E50`;
+- neither the pre-fire gate `0x00816D20`, nor the `U::MissileTurret` fire method
+  `0x0060AAF0`, nor `Missile::Shoot` `0x00606F20` reads `+0xCD1`;
+- within the gate the only ammunition-behavior queries are weapon vtable slots
+  `+0x1F50` (guidance, RVA `0x0060A930`) and `+0x1F18` (its negation, RVA
+  `0x0060A8C0`), and both read the same `+0xBB1` byte.
+
+So the pre-launch obstruction rule cannot differ between a cluster parent and an
+ordinary unguided missile: the engine has no pre-launch access to the property
+that distinguishes them. Whatever blocker rule the unguided path turns out to
+use applies unchanged to both cluster macros.
 
 ## Runtime classification boundary and UNKNOWN rule
 
@@ -289,24 +364,34 @@ attack/movement code). None exposes the engine's missile-turret launch
 obstruction decision.
 
 No new native-executable analysis was needed to establish the path-group census.
-The guided pre-launch obstruction rule above is the separate native result.
+The guided bypass, the unguided/cluster path convergence, and the pre-fire
+query's Jolt/XPhys filter configuration are separate native results.
 
 ## Remaining obstruction questions
 
 These are not L2 grouping gaps. They are the unresolved behavior needed before a
 complete line-of-fire rule can be frozen.
 
-1. **Distributing cluster missiles:** source establishes the unguided
-   carrier/guided-child path, but not the engine's exact launch obstruction
-   rule. Prove whether cluster parents reach the same solid-external-blocker
-   rejection path as ordinary unguided missiles.
+1. **Blocker categories for the unguided/cluster path:** the pre-fire query is
+   a Jolt closest-hit ray cast restricted to object layer 3, with the firing
+   weapon excluded, and its hit is then classified by the virtual call at
+   `0x00817B27`. What remains unproved is which game objects carry object
+   layer 3 — ships, stations/modules, asteroids and other terrain geometry each
+   need to be placed — and what the classifier's 0/1/2 result does with a hit.
+   A scan for object-layer assignment was too ambiguous to settle this: the
+   assignment is not a single named site. The next source/native attempt should
+   resolve the classifier at `0x00817B27` first, since it sits closer to the
+   fire/no-fire decision than the layer table does.
 
 2. **Conventional terrain:** determine whether asteroid/terrain collision
-   geometry participates in the conventional pre-fire obstruction query.
+   geometry participates in the conventional pre-fire obstruction query. This is
+   the same object-layer question seen from the conventional side, and the two
+   should be resolved together.
 
-Guided subtypes are no longer open: the pre-fire gate takes one guidance
-decision and supported guided ammunition bypasses the obstruction section
-entirely, so no subtype split remains to resolve.
+Two earlier questions are now closed. Guided subtypes: the pre-fire gate takes
+one guidance decision and supported guided ammunition bypasses the obstruction
+section entirely. Cluster parents: `distribute` is unreachable before launch, so
+they share the ordinary unguided path by construction.
 
 Resolve these only to the extent they can materially change the retained
 line-of-fire rule. Prefer further source/native proof before adding new LIVE
