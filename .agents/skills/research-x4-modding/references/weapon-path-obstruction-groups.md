@@ -226,9 +226,74 @@ What the trace establishes about the mechanism:
   `0x00817B27` that returns 0, 1 or 2; that classifier decides what the hit
   means before the second segment is cast.
 
-This pins the mechanism but not the blocker categories. Which game objects carry
-object layer 3, and what the `0x00817B27` classifier does with a hit, are not
-established here; see the remaining questions.
+The same section, with the same query configuration, is the conventional-weapon
+obstruction check; guided ammunition is the only loaded behavior that skips it.
+
+### Blocker categories on the shared pre-fire query
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned executable (hash and base as above)
+- Live test: no — static trace only; no shipped Lua/MD/AI/XSD exposes it
+- Finding: for conventional weapons, ordinary unguided missiles and both cluster
+  parents, an intervening ship, station, station module or asteroid blocks the
+  shot. Planets, regions, highways, zones and sectors are never candidates. The
+  target itself and its own sub-parts never block.
+
+How a hit becomes a fire/no-fire decision:
+
+- the gate asks the weapon's shoot controller (weapon `+0x318`; U::BasicShootController and its
+  large-target/player/bomb-launcher subclasses share RVA `0x007E6CB0`,
+  U::MultipleShootController uses `0x007EAB40`) to classify the closest hit;
+  inputs are the hit component, the current target, and the target's zone as the
+  stop for ancestor walks;
+- result 1, fire permitted: the hit is the target or a descendant of it (walking
+  `+0x70` parents up to the zone). MultipleShootController also accepts its
+  extra target list;
+- result 0, cast again: the hit is not the target, but the hit and the target
+  share the same class-`object` (id `0x49`) ancestor, for example another
+  module of the targeted station. The second segment
+  permits fire only when its closest hit is exactly the target component;
+- result 2, LINE OF FIRE BLOCKED: any other hit. It sets the blocked flag
+  (`+0x85` on the controller) and clears permission (`+0x84`);
+- no hit with the default aim mode: `+0xF0` is constant-true for every
+  controller except U::LargeTargetShootController (`0x007E5970`, not traced), so
+  fire is permitted. In the alternate aim mode (flag set at
+  `0x00817A7F`) any non-target hit, and also a miss, withholds fire.
+
+Why the candidate set is exactly these categories:
+
+- object layer 3 is assigned only at body creation, RVA `0x000BE550`: argument
+  13 selects layer 3; otherwise the layer is 0 or 1. Later
+  `SetObjectLayer` calls (Jolt `BodyInterface`, RVA `0x01406460`, body
+  `+0x74`) toggle only between that stored layer and 4, which is never queried;
+- only two creators pass argument 13 as true. The generic component builder
+  (`0x0051BB90` → `0x0051B730`) gives each physics component a second body at
+  `+0x268` on layer 3 next to its layer-0/1 body at `+0x260`. The other creator
+  makes NPC character bodies;
+- that builder is the vtable `+0x1C40` entry for U::Object, Ship, Station, Module
+  and Missile. Asteroid (`0x0036D810`), Gate, Mine, Satellite/NavBeacon/
+  ResourceProbe, Collectable and Anomaly override `+0x1C40`, but each override
+  calls the base builder first. U::Planet, CelestialBody, Region, Highway,
+  Positional, Zone and Sector do not use it. Their has-physics query
+  (vtable `+0x1B50`) is constant false, so they never own a layer-3 body;
+- Object/Ship/Station/Asteroid have physics unless they are attached under
+  another class-`object` parent. A module gets its own bodies when its owning object is
+  a station. Turrets and weapons have none, so a weapon cannot block its own
+  shot through its own body;
+- bodies register in their zone's physics world. The query runs in the physics
+  world of the querying component;
+- the body filter also applies collision-group filter 14 (argument `0xE`,
+  initialized at RVA `0x000C6FA0`). It accepts body groups 1–4, 6–13 and 15–18
+  and rejects 0, 5 and 14. Per-class group ids (vtable `+0x1C58`): ship 8 or
+  11; station and generic object 1, 11 or 12; a station module inherits its
+  station's group; asteroid 13; collectable 15; missile 7. All of these pass. Body
+  subgroups are 25-bit owner ids and never equal the ray's `-1` subgroup.
+
+Class ids come from the static name/id table at RVA `0x0255D440` (`0x49` =
+`object`, `0x6D` = `zone`, `0x62` = `station`). The shoot-controller and
+XPhys type names are real RTTI names. "Query body", "stop ancestor" and
+"alternate aim mode" are analyst labels.
 
 ## Distributing cluster missiles are a separate supported group
 
@@ -277,8 +342,8 @@ The proof is the field, not the flag name:
 
 So the pre-launch obstruction rule cannot differ between a cluster parent and an
 ordinary unguided missile: the engine has no pre-launch access to the property
-that distinguishes them. Whatever blocker rule the unguided path turns out to
-use applies unchanged to both cluster macros.
+that distinguishes them. The blocker categories above apply unchanged to both
+cluster macros.
 
 ## Runtime classification boundary and UNKNOWN rule
 
@@ -369,29 +434,19 @@ query's Jolt/XPhys filter configuration are separate native results.
 
 ## Remaining obstruction questions
 
-These are not L2 grouping gaps. They are the unresolved behavior needed before a
-complete line-of-fire rule can be frozen.
+The blocker-category and conventional-terrain questions are settled above as
+native inference. What static analysis cannot settle:
 
-1. **Blocker categories for the unguided/cluster path:** the pre-fire query is
-   a Jolt closest-hit ray cast restricted to object layer 3, with the firing
-   weapon excluded, and its hit is then classified by the virtual call at
-   `0x00817B27`. What remains unproved is which game objects carry object
-   layer 3 — ships, stations/modules, asteroids and other terrain geometry each
-   need to be placed — and what the classifier's 0/1/2 result does with a hit.
-   A scan for object-layer assignment was too ambiguous to settle this: the
-   assignment is not a single named site. The next source/native attempt should
-   resolve the classifier at `0x00817B27` first, since it sits closer to the
-   fire/no-fire decision than the layer table does.
-
-2. **Conventional terrain:** determine whether asteroid/terrain collision
-   geometry participates in the conventional pre-fire obstruction query. This is
-   the same object-layer question seen from the conventional side, and the two
-   should be resolved together.
-
-Two earlier questions are now closed. Guided subtypes: the pre-fire gate takes
-one guidance decision and supported guided ammunition bypasses the obstruction
-section entirely. Cluster parents: `distribute` is unreachable before launch, so
-they share the ordinary unguided path by construction.
+1. **Runtime layer-4 toggles:** several engine paths move a body to the
+   never-queried layer 4 and back. Which lifecycle states do that (for example
+   docking, construction or destruction) was not traced per path. A candidate
+   in such a state is not a blocker.
+2. **Cross-zone blockers:** an obstruction registered in a different zone's
+   physics world from the querying component is not a candidate. How often a
+   real firing line crosses such a boundary is a runtime question.
+3. **Pair collision filters:** the group filter's final pair lookup
+   (`0x000B9020`, likely backing MD `addcollisionfilter`) was not traced. It
+   could exempt a specific object pair.
 
 Resolve these only to the extent they can materially change the retained
 line-of-fire rule. Prefer further source/native proof before adding new LIVE
