@@ -3,15 +3,15 @@
 Research only. Bearing/arc geometry of the corpus `ops` path; no range, LOS, hull masking,
 projectile, guidance or readiness. Target points are in the turret component frame.
 
-- ordinary_xy (unlimited root Y, bounded leaf X): the accepted #173 scorer
+- ordinary_xy (unlimited root Y, bounded leaf X): the accepted #173 geometry
   (`research/issue167-p3c/study.py` `geometry()`) on segments split from the corpus ops.
 - bounded_traverse / reversed_xy: both pivots fixed (asserted), so each joint has one
   request. Solve root then leaf in the root's clamped frame (swi-091-turret-geometry.md);
-  IN_ARC iff neither joint clamps. A >=180 deg root span whose request sits on a limit is
-  UNKNOWN: the mover could be parked pi away at the other limit.
+  IN_ARC iff neither joint clamps.
 - rotation_z: the traced root-Z request (turret-target-point-joint-solver.md) is the yaw map with
-  component Y and Z swapped, so the accepted yaw gate finds the resting clocks. Traps or no rest are
-  UNKNOWN; otherwise the leaf X request is scored at every resting clock, any in arc suffices (#173).
+  component Y and Z swapped, so the accepted yaw gate finds the resting clocks. Traps do not affect
+  existence; the leaf X request is scored at every resting clock and any in arc suffices. No resting
+  clock proves CANNOT BEAR; exact-pivot degeneracy remains UNKNOWN.
 """
 from __future__ import annotations
 
@@ -77,6 +77,17 @@ def _request(axis, u, aim):
     return math.atan2(u[i], u[j]) - math.atan2(aim[i], aim[j])
 
 
+def _muzzle(seg, leaf, root, leaf_angle, root_angle):
+    """Compose one solved stable joint pose through the accepted corpus path."""
+    return compose(
+        seg["L"],
+        compose(
+            (ZERO, JOINT[leaf["axis"]](leaf_angle)),
+            compose(seg["G"], compose((ZERO, JOINT[root["axis"]](root_angle)), seg["H"])),
+        ),
+    )[0]
+
+
 def _fixed_pivot(leaf, root, seg, pt):
     L, G, H = seg["L"], seg["G"], seg["H"]
     pivot = [compose(G, compose((ZERO, JOINT[root["axis"]](a)), H))[0] for a in (0.0, 1.0)]
@@ -84,7 +95,8 @@ def _fixed_pivot(leaf, root, seg, pt):
     d = tuple(p - c for p, c in zip(pt, pivot[0]))
     n = math.hypot(*d)
     if not n:
-        return {"state": "UNKNOWN_pivot", "decision": None}  # X4 skips the solve (#173 known limit)
+        # X4 skips the solve (#173 known limit).
+        return {"state": "UNKNOWN_pivot", "decision": None, "muzzles": []}
     d = tuple(0.0 if abs(c) < ZEROING * n else c / n for c in d)  # caller zeroing; solver renormalizes
     d = tuple(c / math.hypot(*d) for c in d)
     Rt = lambda M: tuple(zip(*M))  # noqa: E731
@@ -95,10 +107,11 @@ def _fixed_pivot(leaf, root, seg, pt):
     x = _clamp(leaf_req, leaf["limits"])
     hit = r == root_req and x == leaf_req
     aim = mat_mul(L[1], mat_mul(JOINT[leaf["axis"]](x), frame))[2]
-    out = {"state": "IN_ARC" if hit else "OUT_OF_ARC", "decision": hit, "root": r, "leaf": x, "aim": aim, "d": d}
-    lo, hi = root["limits"]
-    if hit and hi - lo >= 180 and not (_in_arc(root_req - 1e-5, root["limits"]) and _in_arc(root_req + 1e-5, root["limits"])):
-        out.update(state="UNKNOWN_root_limit_unwrap", decision=None)
+    out = {"state": "IN_ARC" if hit else "OUT_OF_ARC", "decision": hit,
+           "root": r, "leaf": x, "aim": aim, "d": d, "muzzles": []}
+    if hit:
+        out["muzzle"] = _muzzle(seg, leaf, root, x, r)
+        out["muzzles"] = [out["muzzle"]]
     return out
 
 
@@ -108,30 +121,47 @@ def _rest_z(leaf, root, seg, pt):
     yaw = {"t_G": SWAP(G[0]), "t_H": SWAP(H[0]), "R_H": tuple(SWAP(r) for r in (H[1][0], H[1][2], H[1][1])),
            "beta": math.atan2(aim[0], aim[1])}  # traced beta_z; no degenerate guard (0 for the dish)
     gate = classify(yaw, SWAP(pt))
-    if gate["traps"] or not gate["resting"]:
-        return {"state": "UNKNOWN_" + gate["class"] + ("_trap" if gate["traps"] else ""), "decision": None, "clocks": gate["class"]}
+    if not gate["resting"]:
+        return {"state": "NO_STABLE_POSITION", "decision": False, "clocks": gate["class"],
+                "muzzles": []}
     Rt = lambda M: tuple(zip(*M))  # noqa: E731
     scored = []
     for z in gate["resting"]:
         frame = compose(G, compose((ZERO, JOINT["z"](z)), H))
         d = tuple(p - c for p, c in zip(pt, frame[0]))
         n = math.hypot(*d)
+        if not n:
+            continue  # X4 skips the solve; another stable clock may still be usable.
         d = tuple(0.0 if abs(c) < ZEROING * n else c for c in d)  # caller zeroing; atan2 ignores renormalization
         x = math.remainder(_request("x", vec_mul(d, Rt(frame[1])), L[1][2]), 2 * math.pi)
-        scored.append((not _in_arc(x, leaf["limits"]), z, x))
-    miss, z, x = min(scored, key=lambda r: r[0])
-    return {"state": "OUT_OF_ARC" if miss else "IN_ARC", "decision": not miss, "clocks": gate["class"], "root": z, "leaf": x}
+        muzzle = _muzzle(seg, leaf, root, x, z)
+        scored.append((not _in_arc(x, leaf["limits"]), z, x, muzzle))
+    if not scored:
+        return {"state": "UNKNOWN_pivot", "decision": None, "clocks": gate["class"],
+                "muzzles": []}
+    miss, z, x, muzzle = min(scored, key=lambda r: r[0])
+    if miss:
+        return {"state": "OUT_OF_ARC", "decision": False, "clocks": gate["class"],
+                "root": z, "leaf": x, "muzzles": []}
+    return {"state": "IN_ARC", "decision": True, "clocks": gate["class"],
+            "root": z, "leaf": x, "muzzle": muzzle,
+            "muzzles": [candidate[3] for candidate in scored if not candidate[0]]}
 
 
 def score(record, pt, _cache={}):
-    """{"state": IN_ARC | OUT_OF_ARC | UNKNOWN_*, "decision": True | False | None, ...}."""
+    """State is IN_ARC, OUT_OF_ARC, NO_STABLE_POSITION, or UNKNOWN_*.
+
+    NO_STABLE_POSITION proves CANNOT BEAR for the supplied exact aim point.
+    `muzzles` contains every in-arc stable-pose muzzle, and is empty otherwise.
+    """
     cls = record["mechanical_class"]
     if cls == "ordinary_xy":
         key = record["source"] + ":" + record["macro"]
         if key not in _cache:
             _cache[key] = accepted_turret(record)
         out = study.geometry(_cache[key], IDENTITY, ZERO, pt)
-        return {**out, "decision": None if out["state"].startswith("UNKNOWN") else out["decision"]}
+        return {**out, "decision": None if out["state"].startswith("UNKNOWN") else out["decision"],
+                "muzzles": out.get("muzzles", [])}
     leaf, root, seg = segments(record)
     assert (root["axis"], leaf["axis"]) in {("y", "x"), ("x", "y"), ("z", "x")}, cls
     return (_rest_z if root["axis"] == "z" else _fixed_pivot)(leaf, root, seg, pt)

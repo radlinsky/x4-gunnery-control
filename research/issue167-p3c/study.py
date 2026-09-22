@@ -167,13 +167,15 @@ def approximate(O, C, H, pts):
 def geometry(turret, R, O, p):
     """#166 split T = L∘Rx(-x)∘G∘Ry(y)∘H; U13 yaw gate; arc from rotation_x limits.
 
-    #176 any-solution: every resting yaw is scored and one in arc suffices. Traps (hidden mover state) and
-    no-rest targets stay UNKNOWN. Pitch uses X4's 1e-3f component zeroing of the pivot direction.
+    #185 existence rule: every resting yaw is scored and one in arc suffices. Traps do not
+    affect existence; no resting yaw proves CANNOT BEAR. Pitch uses X4's 1e-3f component
+    zeroing of the pivot direction.
     """
     pt = tuple(sum((p[k] - O[k]) * R[j][k] for k in range(3)) for j in range(3))  # (p-O)·Rᵀ
     gate = classify(turret["yaw"], pt)
-    if gate["traps"] or not gate["resting"]:
-        return {"state": "UNKNOWN_" + gate["class"] + ("_trap" if gate["traps"] else ""), "decision": False, "yaws": gate["class"]}
+    if not gate["resting"]:
+        return {"state": "NO_STABLE_POSITION", "decision": False, "yaws": gate["class"],
+                "muzzles": []}
     L, G, H = turret["seg"]["L"], turret["seg"]["G"], turret["seg"]["H"]
     aim = L[1][2]
     lo, hi = turret["arc"]
@@ -182,14 +184,24 @@ def geometry(turret, R, O, p):
         frame = compose(G, compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))
         d = sub(pt, frame[0])
         n = norm(d)
+        if not n:
+            continue  # X4 skips the solve; another stable yaw may still be usable.
         d = tuple(0.0 if abs(c) < ZEROING * n else c for c in d)  # caller 0x140e22425; atan2 ignores the renormalization
         qv = row(d, tuple(zip(*frame[1])))
         x = math.remainder(math.atan2(qv[1], qv[2]) - math.atan2(aim[1], aim[2]), 2 * math.pi)
         ok = round(lo, 4) <= round(math.degrees(x), 4) <= round(hi, 4)  # 4-dp degrees absorbs float noise at an authored limit
         muzzle = compose(compose(compose(L, ((0.0, 0.0, 0.0), joint_matrix(x, 0.0))), G), compose(((0.0, 0.0, 0.0), joint_matrix(0.0, y)), H))[0]
         scored.append((not ok, y, x, muzzle))
+    if not scored:
+        return {"state": "UNKNOWN_pivot", "decision": None, "yaws": gate["class"],
+                "muzzles": []}
     miss, y, x, muzzle = min(scored, key=lambda r: r[0])
-    return {"state": "OUT_OF_ARC" if miss else "IN_ARC", "decision": not miss, "yaws": gate["class"], "yaw": y, "pitch": x, "muzzle": muzzle}
+    if miss:
+        return {"state": "OUT_OF_ARC", "decision": False, "yaws": gate["class"],
+                "yaw": y, "pitch": x, "muzzles": []}
+    muzzles = [candidate[3] for candidate in scored if not candidate[0]]
+    return {"state": "IN_ARC", "decision": True, "yaws": gate["class"], "yaw": y,
+            "pitch": x, "muzzle": muzzle, "muzzles": muzzles}
 
 
 def engageable(turret, R, O, solutions):

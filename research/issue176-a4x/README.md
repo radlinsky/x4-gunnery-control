@@ -48,24 +48,27 @@ python3 research/issue176-a4x/validate.py   # ~4 min, one niced process
 ```
 
 `scorer.score(record, point)` gives mechanical bearing/arc truth for a target in
-the turret component frame: `IN_ARC`, `OUT_OF_ARC` or `UNKNOWN_*`. It reads the
+the turret component frame: `IN_ARC`, `OUT_OF_ARC`, `NO_STABLE_POSITION` or
+`UNKNOWN_*`. `NO_STABLE_POSITION` proves CANNOT BEAR for the supplied exact aim
+point. It reads the
 record's ordered `ops` path. It does not check range, line of sight, own-hull
 masking, projectile flight, guidance or readiness. `weapon_behavior` is not used.
 
-- `ordinary_xy` (278): the accepted #173 `study.geometry()` on segments split
-  from the ops. That keeps component zeroing, the 4-dp limit rule, any-rest
-  scoring and trap/no-rest `UNKNOWN`. The split is bit-identical to the
+- `ordinary_xy` (278): the accepted #173 geometry on segments split from the
+  ops. That keeps component zeroing, the 4-dp limit rule, and any-rest
+  scoring. Traps do not affect existence, while no rest proves CANNOT BEAR.
+  The split is bit-identical to the
   accepted 92-turret pickle and to `joint_segments` for all 124 official
   turrets.
 - `bounded_traverse` (8) and `reversed_xy` (1): both pivots are fixed, which is
   asserted. The root joint is solved by its authored axis and clamped to the
   nearer limit, then the leaf is solved in the clamped frame. `IN_ARC` means
-  neither joint clamps. A 180° root span with the request exactly on a limit is
-  `UNKNOWN_root_limit_unwrap`, because a mover parked at the other limit is π
-  away.
+  neither joint clamps. A stable position at a root limit suffices regardless
+  of hidden mover state.
 - `rotation_z` (1, arrestor dish): resolves the actual root-Z resting clocks
   with the accepted yaw gate, then scores leaf pitch at every resting clock.
-  Trap or no-rest outcomes remain UNKNOWN; any in-arc resting clock suffices.
+  Traps do not affect existence, no rest proves CANNOT BEAR, and any in-arc
+  resting clock suffices. Exact-pivot degeneracy remains UNKNOWN.
 
 ## Expanded benchmark
 
