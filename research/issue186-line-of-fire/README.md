@@ -26,8 +26,10 @@ clear with no query. Runtime boxes stand in for whole-ship hit shapes; artificia
 host-part spheres exercise surface branches; the two-module station has invented
 offsets. These fixtures test decision rules and the #184/#185 handoff. They do
 not reproduce X4 collision geometry or prove a hit arrangement physically
-attainable. The `off-box-uncertainty` construction remains an unresolved research
-example, excluded from correctness scoring.
+attainable. The `off-box-uncertainty` construction is retained only to document
+an accepted design risk and is excluded from correctness scoring: #186 deliberately
+uses the centre point supplied by #184 rather than expanding its recovery uncertainty
+area or returning UNKNOWN for a merely theoretical blocker-edge split.
 
 The script fails on wrong definite answers, missing or excess UNKNOWN, moved
 origins or aim points, excess queries and missing coverage. Raw rows go to the
