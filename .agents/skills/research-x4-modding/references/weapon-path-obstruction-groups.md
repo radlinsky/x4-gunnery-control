@@ -3,10 +3,10 @@
 Scope: X4 9.00 build 611726, official base game plus installed official extensions,
 with Star Wars Interworlds 0.9.1 HF checked separately for compatibility.
 
-Purpose: record the source-backed weapon behavior groups that matter when deciding
-whether an obstruction can prevent a selected turret from engaging one supplied
-firing-origin + aim-point pair. This record does not define the final obstruction
-rule for every group.
+Purpose: record the native pre-fire obstruction rule and the descriptive weapon
+behavior groups in the supported corpus. The groups describe delivery after
+launch; they are not prerequisites for a pre-fire decision on one supplied
+firing-origin + aim-point pair.
 
 ## Supported weapon-path groups
 
@@ -18,17 +18,17 @@ rule for every group.
 - Live test: partial — representative conventional, guided-missile, and ordinary
   unguided-missile behavior was live-tested previously; the distributing-cluster
   case has not been live-tested
-- Finding: the supported official combat-turret corpus requires four materially
-  different line-of-fire behavior groups:
+- Finding: the supported official combat-turret corpus contains four descriptive
+  projectile/delivery groups:
   1. conventional straight-path weapons;
   2. guided missiles;
   3. ordinary unguided direct missiles;
   4. distributing cluster missiles whose unguided carrier later releases guided
      child missiles.
 
-The split is based on how the loaded weapon can deliver damage from its firing
-origin toward the supplied aim point. Turret names, faction names, display names,
-and geometry are not classification inputs.
+The split describes how weapons deliver damage after firing. The pre-fire gate
+distinguishes a conventional turret from a missile turret and, for a missile
+turret, reads loaded-ammunition guidance. It does not classify these four groups.
 
 Official supported coverage is 124 combat/equipable turret macros: 92
 conventional turrets and 32 missile turrets. The 32 missile turrets' default
@@ -81,8 +81,8 @@ effect on hit.
 
 One official projectile outside the accepted supported combat-turret corpus has
 maxhits="2" and a small ricochet value. No supported combat turret references
-it. Its existence is a reason not to classify an unaudited modded bullet as
-conventional merely because it is a bullet.
+it. Those properties concern projectile behavior after firing and do not change
+the conventional turret's pre-fire obstruction path.
 
 ## Guided missiles form one supported group
 
@@ -162,10 +162,9 @@ Issue #186: the launched-missile update beginning near RVA `0x00606940` runs its
 own collision query at `0x00606B8B`, but by then X4 has already launched, so it
 cannot withhold the launch.
 
-This resolves the supported guided case without further source/native search or
-a new LIVE test. Unknown, future, or unaudited modded ammunition still fails
-closed under the UNKNOWN rule below whenever its loaded-ammunition behavior
-cannot be established safely.
+This resolves the guided pre-fire branch for loaded ammunition whose guidance
+state can be established. It says nothing about whether a launched missile
+reaches the target.
 
 ## Ordinary unguided direct missiles form one supported group
 
@@ -761,7 +760,7 @@ Supported guided missiles remain clear without a ray query.
 | `Q(T,P)` and `Q(O,P)` false; `Q(Z,P)` true | unrelated closest hit, result 2 | LINE OF FIRE BLOCKED |
 | all three false; non-large controller | constant-true ordinary no-hit policy | clear |
 | all three false; any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
-| unresolved weapon behavior, hierarchy/frame, cross-world target, or material pair-filter uncertainty | outside proved boundary | UNKNOWN |
+| unresolved turret type or missile guidance, hierarchy/frame, cross-zone target, or material pair-filter uncertainty | outside proved boundary | UNKNOWN |
 
 With native second-ray handling accepted, the retained worst-case cost is three
 `check_line_of_sight` calls per supported non-guided firing-origin + aim-point
@@ -824,33 +823,26 @@ cluster macros.
 
 - X4: 9.00 build 611726
 - Status: inference
-- Source: libraries/scriptproperties.xml weapon/ammunition and launched-missile
-  properties plus the audited official projectile/ammunition corpus
-- Live test: no — classification rule derived from the source-visible boundary
-- Finding: safe pre-fire classification needs the exact loaded ammunition macro
-  and enough authored behavior information to distinguish the four path groups.
+- Source: native pre-fire gate traced above; libraries/scriptproperties.xml
+  turret type and loaded-ammunition guidance properties
+- Live test: no — classification rule derived from the accepted native trace
+- Finding: a conventional `U::Turret` uses the normal obstruction check. A
+  `U::MissileTurret` with guided loaded ammunition bypasses it; one with
+  unguided loaded ammunition uses the same normal check. Exact ammunition-macro
+  identity and an audit of projectile behavior are unnecessary for this decision.
 
-The runtime weapon surface exposes the loaded ammunition macro and guidance
-state. It does not expose the loaded ammunition macro's distributing state before
-launch; missile.isdistributing is a property of an already-launched missile.
-Therefore guidance alone cannot distinguish ordinary unguided ammunition from the
-official distributing-cluster ammunition before firing.
+The runtime weapon surface exposes loaded-ammunition guidance. It need not
+expose distribution: the pre-fire gate does not read it. Distribution, ricochet,
+penetration, spawning, steering and other delivery behavior may matter after
+launch, but cannot select a different pre-fire obstruction branch.
 
-For official supported weapons, generated source-derived metadata can safely
-carry the missing authored behavior. It should be derived from ammunition or
-projectile properties rather than a hand-maintained weapon-name list.
-
-Return UNKNOWN instead of guessing when any of the following can materially
-change the path rule:
-
-- there is no loaded ammunition macro;
-- the macro cannot be resolved or has an unrecognized class;
-- guidance state is missing or ambiguous;
-- an unguided missile's distribution/detachment behavior is unavailable;
-- a modded bullet has not been audited for multiple-hit/penetration, ricochet,
-  detachment, spawning, steering, chaining, or another alternate-path facility;
-- a modded guided missile combines guidance with additional unaudited behavior
-  that could materially change the obstruction rule.
+Return UNKNOWN only when a required input or an unresolved part of the normal
+check prevents a sound decision: turret type is unavailable or ambiguous;
+missile guidance is missing or ambiguous; the firing-origin/aim-point hierarchy
+or frame cannot be established; the line may cross physics zones; or the
+recorded collision pair-filter uncertainty applies. A known conventional or
+unguided turret does not become UNKNOWN merely because its projectile or
+ammunition macro is unfamiliar.
 
 ## SWI 0.9.1 HF compatibility
 

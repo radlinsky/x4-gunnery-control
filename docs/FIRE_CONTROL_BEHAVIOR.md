@@ -49,10 +49,10 @@ The situations that matter for this mod. Each is checked against **your target**
 
 **Accepted future behavior — LINE OF FIRE.** Issue #186 has selected the LINE OF FIRE method that #189 will put into production. It uses the exact aim point supplied by the accepted aim-point work and evaluates every accepted firing origin separately against that same point.
 
-- A supported guided missile is **clear** without a direct pre-launch path check.
-- If the loaded weapon or ammunition behavior cannot be identified safely, LINE OF FIRE is **UNKNOWN**. Missing guidance information is not treated as unguided.
+- A conventional turret uses the normal obstruction check. A missile turret with guided loaded ammunition is **clear** without an obstruction check; one with unguided loaded ammunition uses the same normal check. This guided bypass does not guarantee that the missile reaches its target after launch.
+- Missing or ambiguous turret type or missile guidance makes LINE OF FIRE **UNKNOWN**. An unfamiliar ammunition macro or unaudited post-launch projectile behavior alone does not.
 - If the target is outside the X4 zone used by the firing weapon's path check, LINE OF FIRE is **UNKNOWN** rather than treating failed checks as a clear miss.
-- Conventional turrets, ordinary unguided missiles, and distributing cluster missiles all use the same obstruction rules. The firing ship's own hull can block any of these weapons.
+- Conventional and unguided missile turrets, including cluster parents, use the same obstruction rules. The firing ship's own hull can block any of these weapons.
 - If the first thing hit on the firing-origin-to-aim-point path is the selected target, the path is **clear**.
 - If the first thing hit is another part of the same ship or station module that contains the selected target, X4's own second obstruction check is used from the same firing origin to the selected component's origin. If that check accepts the selected component, the path is **clear**; otherwise it is **LINE OF FIRE BLOCKED**.
 - If the first thing hit is an unrelated physical object, the result is **LINE OF FIRE BLOCKED**.
