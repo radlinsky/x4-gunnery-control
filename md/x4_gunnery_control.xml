@@ -5,9 +5,8 @@
   <cues>
     <cue name="State">
       <cues>
-        <!-- One commit carries the encoded Lua record plus the optional target.
-             Keeping them together avoids a save between the old two events
-             producing a session associated with a previous target. -->
+        <!-- Commit the encoded Lua record and optional target together so a
+             save cannot pair the session with a different target. -->
         <cue name="CommitSession" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'session_commit'"/>
@@ -317,15 +316,13 @@
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
-            <!-- Transport contract (live-tested 2026-08-04, final): the engine
-                 PREPENDS $ to every Lua string key during Lua->MD conversion,
+            <!-- The engine prepends $ to every Lua string key during Lua->MD conversion,
                  so Lua "anchor" arrives here as the variable key $anchor, read
                  via event.param3.$anchor. Never pre-prefix $ on the Lua side
                  (it becomes the unreadable $$anchor). Ids arrive as real
                  component objects via ConvertStringToLuaID; keep @ so a
                  malformed event logs instead of erroring. The brace-lookup
-                 fallback covers the only other possible arrival form (a raw
-                 string key), since each live test costs a full relaunch. -->
+                 fallback covers a raw string key. -->
             <set_value name="CutsceneAim.$Anchor" exact="@event.param3.$anchor"/>
             <do_if value="not CutsceneAim.$Anchor">
               <set_value name="CutsceneAim.$Anchor" exact="@event.param3.{'anchor'}"/>
@@ -338,16 +335,14 @@
             <do_if value="not CutsceneAim.$Pov">
               <set_value name="CutsceneAim.$Pov" exact="@event.param3.{'pov'}"/>
             </do_if>
-            <!-- Robustness: if the id arrived as a number instead of a component,
-                 resolve it. Self-diagnosing because each live test costs a full
-                 game relaunch. -->
+            <!-- Resolve numeric ids if they did not arrive as components. -->
             <do_if value="typeof CutsceneAim.$Anchor != datatype.component and CutsceneAim.$Anchor">
               <set_value name="CutsceneAim.$Anchor" exact="component.{CutsceneAim.$Anchor}"/>
             </do_if>
             <do_if value="typeof CutsceneAim.$Target != datatype.component and CutsceneAim.$Target">
               <set_value name="CutsceneAim.$Target" exact="component.{CutsceneAim.$Target}"/>
             </do_if>
-            <!-- Framing (live-tested 2026-08-04, tuned round 5): anchordist=0
+            <!-- Framing: anchordist=0
                  puts the camera inside the anchor's hull. Vanilla idiom
                  (cinematiccamera.xml:2504) is a NEGATIVE distance derived from
                  anchor.size. Per-POV: Sit@Target keeps size + 50m (verified
@@ -451,58 +446,14 @@
       </actions>
     </cue>
 
-    <!-- Legacy name: this cue once also hosted the "Prefer My Target" / "Release
-         Other Turrets" override (removed in #38 as unreachable with the X4 API).
-         It now hosts only Direct-control (DirectFallback + DirectWatch). The name
-         is kept deliberately: renaming a save-persistent cue breaks loads. -->
+    <!-- Keep this save-persistent cue name: renaming it breaks existing saves. -->
     <cue name="PreferAllTurrets">
       <cues>
-        <!-- Gives the directed groups a fallback target list, so a turret that
-             cannot bear on $target rolls to a hostile it can engage instead of
-             tracking one it will never fire on. That idle turret is the whole
-             reason Direct-control hands out a fallback list at all.
-
-             The engine's fallback asks whether a turret can AIM at the preferred
-             target, not whether it can hit it. It therefore recovers CANNOT BEAR
-             and OUT OF RANGE, both confirmed live, and does NOT recover a blocked
-             line of fire: a turret trained on the target with own hull in the way
-             holds fire indefinitely, and no mod can observe that condition well
-             enough to work around it. Accepted, not a bug in this cue.
-
-             The mode is attackenemies, not autoassist. Autoassist discards
-             script-supplied target lists outright; Egosoft say so in a shipped
-             comment at aiscripts/fight.attack.object.capital.xml:1756, so a
-             fallback list issued for it can never arrive. attackenemies honours
-             the list, and vanilla uses exactly this shape at capital.xml:2172.
-             Live-tested 2026-08-09 and 2026-08-10 on a player-piloted capital:
-             an attackenemies group obeyed preferredtarget, and rolled to another
-             hostile when the engaged one was OUT OF RANGE or CANNOT BEAR. It does
-             not roll off a target with a blocked line of fire; that condition is
-             unrecoverable.
-
-             weaponmode stays a real selector because the console binds the
-             checkbox to the mode: a group is in attackenemies exactly when it
-             is ticked, so this reaches the directed groups and no one else.
-
-             Two paths share this cue.
-
-             Engage: $target is hostile, so find_ship already returns it and the
-             indexof guard appends it only if the sector query somehow missed it.
-             Narrow call then wide call, in that order, because stopshootingold
-             defaults true and only drops targets absent from the new list, so
-             a single wide call could never pull a turret off what it already
-             holds. The narrow list of one forces the switch; the wide call then
-             restores a fallback set without dislodging the turrets that just
-             took the preferred target.
-
-             Ownership change: the target changed hands, so the relation filter
-             no longer returns it and mayattack confirms the ship may not shoot
-             it. The narrow call is skipped, because it would lock every turret
-             onto what is now a friendly. Only the wide call is issued, with no
-             preferred target, so stopshootingold drops the stale target and the
-             turrets roll to the next hostile instead of falling silent. This
-             replaces vanilla's cease_fire at capital.xml:1088-1091, which does
-             not reach attackenemies groups the console is directing. -->
+        <!-- weaponmode limits this list to directed attackenemies groups.
+             The narrow call forces a switch to the preferred target; the wide
+             call then restores fallback hostiles. Reversing them can leave a
+             turret on its previous target because stopshootingold only drops
+             targets absent from the new list. -->
         <cue name="DirectFallback" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'direct_fallback'"/>
@@ -521,22 +472,15 @@
                 <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
               </find_ship>
               <do_if value="not $hostiles.indexof.{$target}">
-                <!-- Only re-insert if the ship can still attack the target.
-                     An ownership change makes the target player-owned, so adding
-                     it here would direct turrets at a friendly. mayattack checks
-                     kill relation and fire-authorisation override together
-                     (scriptproperties.xml:119), matching the capital.xml:1070
-                     condition that governs the cease_fire we are replacing. -->
+                <!-- Ownership can make the target friendly; do not re-insert it
+                     unless this ship may still attack it. -->
                 <do_if value="$ship.mayattack.{$target}">
                   <append_to_list name="$hostiles" exact="$target"/>
                 </do_if>
               </do_if>
               <do_if value="$hostiles.indexof.{$target}">
-                <!-- Target is still hostile: narrow call forces every turret
-                     off whatever it holds and onto $target; wide call restores
-                     the fallback set for turrets that have no shot at it.
-                     Both carry preferredtarget so the engine records the
-                     preference even on turrets that cannot engage immediately. -->
+                <!-- Both calls carry preferredtarget for turrets that cannot
+                     engage it immediately. -->
                 <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target" weaponmode="weaponmode.attackenemies"/>
                 <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target" weaponmode="weaponmode.attackenemies"/>
               </do_if>
@@ -555,16 +499,8 @@
           </actions>
         </cue>
 
-        <!-- Arms an ownership-change listener on the engaged target. Emitted by
-             Lua alongside direct_fallback on every target change (emitDirectFallback).
-             Emitted on every Direct-control target change, unconditionally.
-             Direct-control has one weapon mode now: attackenemies. The old
-             pilot-state branch that could send groups to autoassist instead was
-             removed on 2026-08-10, so there is no longer a path that skips this.
-
-             Pattern mirrors CutsceneAim: Arm is instantiate and sets module-scope
-             variables on DirectWatch; OwnerWatch is a plain sibling, reset by
-             Arm each time so only one instance listens at a time. -->
+        <!-- Watch the engaged target for ownership changes. Arm resets the
+             sibling OwnerWatch so only the current target has a listener. -->
         <cue name="DirectWatch">
           <cues>
             <cue name="Arm" instantiate="true">

@@ -590,15 +590,6 @@ local function cameraMember()
     return nil
 end
 
-local function selectedGroupAndMember()
-    local group = currentGroup(session and session.selectedGroupKey)
-    if not group then return nil, nil end
-    for _, member in ipairs(group.members) do
-        if sameID(member.componentID, session.selectedMemberID) then return group, member end
-    end
-    return group, nil
-end
-
 local function setMode(group, mode)
     if group.kind == "group" then C.SetTurretGroupMode2(session.shipID, group.contextID, group.path, group.group, mode)
     else C.SetWeaponMode(group.componentID, mode) end
@@ -625,14 +616,6 @@ local function findSnapshotGroup(snapshot)
         if snapshot.kind == "group" and group.kind == "group" and sameID(group.contextID, snapshot.contextID)
             and group.path == snapshot.path and group.group == snapshot.group then return group end
     end
-end
-
-local function matchesSnapshot(group, snapshot)
-    if snapshot.kind == "single" then
-        return group.kind == "single" and sameID(group.componentID, snapshot.componentID)
-    end
-    return group.kind == "group" and sameID(group.contextID, snapshot.contextID)
-        and group.path == snapshot.path and group.group == snapshot.group
 end
 
 -- A group is "directed" when the session is actively engaged in direct mode
@@ -686,21 +669,8 @@ end
 -- Forward-declared: restoreDirect's deferred repaint calls refresh(), which is defined below it.
 local refresh
 
--- Give the directed groups a fallback target list for this target. The MD
--- DirectFallback cue uses weaponmode="weaponmode.attackenemies" as its turret
--- selector, so the list only reaches turrets in attackenemies: it is emitted
--- only when the session's Direct-control policy resolves to attackenemies
--- (State.TICK_MODE). Under the autoassist policy the checked groups follow the
--- player's soft target, and a script fallback list neither reaches them nor
--- constrains them, so installing one would be a claim the engine does not
--- make. Fire and forget: MD refuses a payload it cannot resolve, and the worst
--- case of a lost event is a turret that holds fire until the next target change
--- rather than rolling to a fallback, so there is nothing here worth a retry.
--- The fallback is re-sent on every target change because the MD cue names a
--- specific target and dies with it. Live-verified 2026-08-10: attackenemies
--- honours the supplied list even when the pilot is actively fighting
--- (aicommandraw="attackobject"); the old autoassist branch for fighting pilots
--- is now removed.
+-- The fallback list reaches only attackenemies turrets. Re-send it on target
+-- changes because the MD cue is bound to one target.
 local function emitDirectFallback(shipID, targetID)
     if isNullID(shipID) or isNullID(targetID) then return false end
     if not session then return false end
@@ -711,15 +681,8 @@ local function emitDirectFallback(shipID, targetID)
     if State.resolveDirectMode(session) == State.TICK_MODE then
         AddUITriggeredEvent("X4GunneryControl", "direct_fallback", payload)
     end
-    -- Arm the ownership-change listener on this specific target. The watch is
-    -- policy-independent: autoassist needs the ownership-change cease just as
-    -- attackenemies does. Each engage resets the MD DirectWatch.OwnerWatch cue,
-    -- so only one target is watched at a time and the prior listener is
-    -- cancelled automatically. The listener signals X4GunneryControl.DirectTargetLost
-    -- when the target's owner changes to a faction the ship can no longer
-    -- attack (surrender, capture). Same payload as direct_fallback: ship+target,
-    -- same transport contract.
-    -- ponytail: reuses the existing payload table; no second allocation needed.
+    -- Watch ownership changes under either policy; MD replaces the prior
+    -- target's listener when this event is sent again.
     AddUITriggeredEvent("X4GunneryControl", "direct_watch", payload)
     return true
 end
@@ -1191,9 +1154,7 @@ local function engageTarget(targetID)
                 group.mode, group.armed = s.mode, s.armed
             end
         end
-        -- Arm the directed (checked) groups in the session's Direct-control
-        -- mode. Live-verified 2026-08-10: attackenemies honours the supplied
-        -- fallback list even when the pilot is actively fighting.
+        -- Arm the directed (checked) groups in the session's Direct-control mode.
         for _, group in ipairs(orderable) do
             local mode = State.resolveDirectMode(session, group.key)
             if group.mode ~= mode then setMode(group, mode); group.mode = mode end
@@ -1211,11 +1172,7 @@ local function engageTarget(targetID)
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
-    -- Hand the directed groups a fallback list for this target. The MD
-    -- DirectFallback cue uses weaponmode.attackenemies as its selector and
-    -- reaches the directed groups. A turret with no firing solution on the
-    -- preferred target rolls to the next best hostile rather than tracking in
-    -- silence (Tests B/C/D, 2026-08-09; live confirmed 2026-08-10).
+    -- Give attackenemies groups a fallback list for this target.
     emitDirectFallback(session.shipID, target)
     -- A target click and the replacement compact frame occur on separate UI
     -- ticks. Keep this explicit so an auto-hide or failed frame creation can
@@ -2015,8 +1972,6 @@ function TestAPI.returnTestCamera()
     C.SetPlayerCameraCockpitView(true)
 end
 
--- ponytail: these are live-test prototype buttons — wrap-up or delete once the
--- cutscene aim experiment concludes.
 local function sendCutsceneAimStop()
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
 end
@@ -2056,8 +2011,8 @@ local function sendCutsceneAimStart(pov)
         anchorID = turretID
         tgtID = targetID
     end
-    -- Transport contract (live-tested 2026-08-04, final): the engine PREPENDS
-    -- $ to every Lua string key during Lua->MD conversion, so plain "anchor"
+    -- The engine prepends $ to every Lua string key during Lua->MD conversion,
+    -- so plain "anchor"
     -- arrives in MD as the variable key $anchor (read via event.param3.$anchor).
     -- Never pre-prefix $ here — "$anchor" becomes the invalid name $$anchor,
     -- stuck as an unreadable string key. Component ids must be converted via
@@ -2464,10 +2419,7 @@ local function onDirectTargetOwnerChanged(_, param)
     -- carry a different target id. sameID normalises both the FFI uint64 form
     -- and the Lua-number form that raise_lua_event delivers.
     if not sameID(param, session.targetObjectID) then return end
-    -- Re-issue the directed fallback. DirectFallback's find_ship uses
-    -- relation=kill, so the now-owned target is absent from the result. The
-    -- new do_else branch in DirectFallback issues a wide call with no preferred
-    -- target, letting turrets roll freely to the next hostile.
+    -- Re-issue the hostile list without preferring the now-friendly target.
     log("directed target ownership changed; re-issuing fallback")
     emitDirectFallback(session.shipID, id(session.targetObjectID))
 end
@@ -3846,17 +3798,8 @@ local function init()
         if #records == 0 then
             return
         end
-        -- Groups are addressed by contextID+path+group, and only a live ship can
-        -- supply a current contextID, so seated is the one state in which any of
-        -- this resolves. A guard, not a path: a save taken while engaged records
-        -- the player seated, so the load puts them back in the chair and this
-        -- has never been observed to fire across the 2026-08-08 runs. Nothing is
-        -- lost if it ever does -- MD still holds the payload and chair ingress
-        -- asks again -- but do not treat the deferral as a tested route.
-        -- An onboard session restores while the player is standing, so the gate
-        -- is "aboard a ship", not "seated". restoreState's ship-name match and the
-        -- post-build sessionContextValid() check below enforce identity/origin, so
-        -- a chair payload restored off the seat (or a mismatched ship) is refused.
+        -- Onboard sessions can restore while standing. Ship and session checks
+        -- below reject a chair payload restored outside its original context.
         if playerShip() == 0 then
             log("restore deferred; player is not aboard a ship")
             return
@@ -3910,10 +3853,6 @@ local function init()
         -- aimTargetID, so persisting it separately would be a second id to keep
         -- in step with the first for nothing.
         session.targetObjectID = target ~= 0 and targetRoot(target) or nil
-        -- firstOperationalMember hands back a (key, componentID) pair for
-        -- selection bookkeeping, not a member table, so enterCamera saw no
-        -- cameraSupported flag and this fallback failed every time it was
-        -- reached -- which is precisely the load case.
         local member = cameraMember()
         if not member or member.operational == false or not member.cameraSupported then
             member = State.firstCameraMember(State.checkedGroups(session))
@@ -3928,16 +3867,7 @@ local function init()
             return
         end
         if target ~= 0 then
-            -- Handed to the watchdog rather than to a delayed callback of its
-            -- own. Two builds scheduled one from inside this event handler and
-            -- neither ever fired -- "re-point scheduled" with no attempt after
-            -- it. Why is still unknown: a probe on 2026-08-08 armed a canary
-            -- here exactly the way those builds armed the re-point, and it fired
-            -- both across a UI reload and across a savegame load, so the
-            -- scheduling mechanism itself is sound and the clock does not rewind
-            -- at load. Whatever killed those builds was something else. The
-            -- watchdog is used because it is measured to run, not because the
-            -- alternative is understood.
+            -- The watchdog re-points the target after restore.
             session.repointTargetID = target
         end
         if menu.shown then
