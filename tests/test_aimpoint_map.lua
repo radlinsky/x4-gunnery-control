@@ -11,8 +11,6 @@ end)
 assert(#probes == result.samples and result.samples <= 40)
 assert(#result.points == 1 and result.points[1].id == 1)
 assert(result.points[1].r > 0)
-assert(map.choose(result, {100, 0, 0}) == result.points[1])
-assert(map.choose({points = {}}, {100, 0, 0}) == nil)
 local corners = {}
 for _, x in ipairs({-60, 60}) do
     for _, y in ipairs({-60, 60}) do
@@ -22,10 +20,4 @@ end
 for i = 1, 8 do
     for k = 1, 3 do assert(probes[i][k] == corners[i][k]) end
 end
-local ambiguous = { points = {
-    {id = 1, c = {-1, 0, 0}, r = 0.1},
-    {id = 2, c = {1, 0, 0}, r = 0.1},
-} }
-assert(map.choose(ambiguous, {0, 0, 0}) == nil)
-assert(map.choose(ambiguous, {-5, 0, 0}) == ambiguous.points[1])
 print('aimpoint map: ok')

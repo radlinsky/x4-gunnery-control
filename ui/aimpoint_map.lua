@@ -379,23 +379,4 @@ local function search(C, H, askX4)
     return { samples = n, stop = stop, points = refined }
 end
 
--- A later position is definite only when one recovered uncertainty ball is
--- strictly closer than every other ball. A missing map is UNKNOWN.
-local function choose(result, position)
-    if not result or #result.points == 0 then return nil end
-    local winner, nearest = nil, math.huge
-    for i, point in ipairs(result.points) do
-        local distance = vNorm(vSub(position, point.c))
-        if distance - point.r < nearest then
-            winner, nearest = i, distance - point.r
-        end
-    end
-    local chosen = result.points[winner]
-    local far = vNorm(vSub(position, chosen.c)) + chosen.r
-    for i, point in ipairs(result.points) do
-        if i ~= winner and vNorm(vSub(position, point.c)) - point.r <= far then return nil end
-    end
-    return chosen
-end
-
-X4GunneryAimPointMap = { search = search, choose = choose }
+X4GunneryAimPointMap = { search = search }
