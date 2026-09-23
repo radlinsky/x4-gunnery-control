@@ -1,12 +1,12 @@
 """Issue #186 L6: research-only LINE OF FIRE benchmark over small constructed scenes.
 
 Offline decision-logic evidence only. Each scene holds explicit bodies (oriented boxes and spheres), a component
-hierarchy, ownership, zones and presence states. Real #184 targets supply runtime boxes, authored aim points and
+hierarchy, ownership, zones and known presence states. Real #184 targets supply runtime boxes, authored aim points and
 host attachment; the frozen #184 A7.3 search recovers the aim point once per target view; #185's C2 row builder
 supplies the firing origins. Truth comes from the accepted native L3/L4 rules applied to the scene's own
 closest hits; the candidate is the accepted MD method (three same-segment `check_line_of_sight` queries and
 X4's conditional second ray), simulated as boolean-only calls. Simplified shapes do not reproduce X4 collision
-meshes.
+meshes or establish that a constructed hit arrangement is physically attainable in X4.
 
     python3 research/issue186-line-of-fire/benchmark.py
 """
@@ -33,13 +33,12 @@ c2 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(c2)
 scorer, sources, study = am.scorer, am.sources, am.study
 
-EPS = 1e-6               # m: closer hits than this are near-coincident; no tie-break is invented
+EPS = 1e-6               # m: numerical tolerance for synthetic intersection checks
 D = 1000.0               # m: standard firing-origin-to-target setup distance
 LARGE = 500.0            # m: X4's target-size controller split (runtime box radius)
 CONV, GUIDED, UNGUIDED, CLUSTER = ("CONVENTIONAL_STRAIGHT_PATH", "GUIDED_MISSILE",
                                    "UNGUIDED_DIRECT_MISSILE", "DISTRIBUTING_CLUSTER_MISSILE")
 CLEAR, BLOCKED, UNKNOWN = "clear", "LINE OF FIRE BLOCKED", "UNKNOWN"
-VARIES = "varies by concrete world"
 L2_OFFICIAL_AMMO = {GUIDED: 15, UNGUIDED: 8, CLUSTER: 2}
 FALLBACK = "current weapon.barrelposition fallback"
 PREDICTED = "geometry-predicted aimed muzzle"
@@ -207,28 +206,23 @@ def truth(scene, origin, P, T, group, reason, r):
 
 # ---------------------------------------------------------------- candidate: accepted L4 MD method
 
-WORLDS = ((True, False), (True, True), (False, False), (False, True))   # (unknown bodies present, reverse ties)
-
-
 def los(scene, log, origin, P, declared, second=False):
     """Simulated `check_line_of_sight` (useaimtarget=false, excludeself=false): the world endpoint is expressed
     in the declared target's frame and transformed back, then True iff the closest hit is `declared` or a
-    descendant. Always a boolean for one concrete world: `scene["world"]` fixes whether unknown-presence bodies
-    exist and which way near-coincident hits order, because X4 itself returns one boolean."""
+    descendant. The constructed scene has one known body-presence state and a deterministic hit order."""
     c = scene["comp"][declared]
     offset = (P - c["pos"]) @ c["R"].T
     end = c["pos"] + offset @ c["R"]
     log.append(dict(declared=declared, start=origin.tolist(), end=end.tolist(), second=second))
-    present, reverse = scene["world"]
     hits = [(t, i, b) for i, b in enumerate(scene["bodies"])
-            if b["presence"] == "present" or (present and b["presence"] == "unknown")
+            if b["presence"] == "present"
             if scene["comp"][b["comp"]]["zone"] == scene["weapon_zone"]
             if (t := _enter(b, origin, end, 0.0)) is not None]
     if not hits:
         return False
     first = min(t for t, _i, _b in hits)
     tied = sorted((i, b) for t, i, b in hits if t - first <= EPS)
-    return declared in chain(scene, tied[-1 if reverse else 0][1]["comp"])
+    return declared in chain(scene, tied[0][1]["comp"])
 
 
 def candidate(scene, origin, P, T, group, reason):
@@ -335,7 +329,7 @@ class Scene:
         tR = np.asarray(study.ROT[view % 24], float)
         X = np.array([1.2e4, 800.0, -4.5e3]) + 50.0 * view
         name = target["component"]
-        if station is not None:                  # whole station: explicit modules, box-centre aim point
+        if station is not None:                  # synthetic module offsets and union box, box-centre aim point
             self.add("station", "zone", True, X, tR, owner="player")
             lo = hi = None
             for i, (mname, off) in enumerate(station):
@@ -358,7 +352,7 @@ class Scene:
             self.add(name, hname, False, X + ht @ tR, TR, owner="enemy", public=hname)
             self.box(name, X + ht @ tR + np.asarray(target["C"]) @ TR, TR, target["H"])
             self.T = name
-        else:                                    # whole ship: its runtime box is its body
+        else:                                    # whole ship: runtime box used as an abstract hit shape
             self.add(name, "zone", True, X, tR, owner="enemy")
             self.box(name, X + np.asarray(target["C"]) @ tR, tR, target["H"])
             self.T, TR = name, tR
@@ -368,7 +362,7 @@ class Scene:
         w = np.asarray(study.fibonacci(8)[view % 8], float) if approach is None else \
             -_basis(np.asarray(approach, float) @ TR)[0]      # O on the target-frame `approach` side
         radius = float(np.linalg.norm(target["H"]))
-        dist = max(dist, radius + 100.0)          # origin stays physically outside large targets
+        dist = max(dist, radius + 100.0)          # origin stays outside the synthetic target box
         O = centre - dist * w
         rec = data.recover((name, view, host and host[0], station is not None), target, TR, O - pos)
         self.record = rec
@@ -465,8 +459,7 @@ def cases(data):
                 ("wrecked station", dict(s=0.5, box=(150.0, 150.0, 150.0))),
                 ("destroyed without wreck", dict(s=0.4, box=(20.0, 8.0, 30.0), presence="absent")),
                 ("wreck killed again", dict(s=0.4, box=(20.0, 8.0, 30.0), presence="absent")),
-                ("wreck timed out", dict(s=0.4, box=(20.0, 8.0, 30.0), presence="absent")),
-                ("wreck state not established", dict(s=0.4, box=(20.0, 8.0, 30.0), presence="unknown")))
+                ("wreck timed out", dict(s=0.4, box=(20.0, 8.0, 30.0), presence="absent")))
     for kind, kw in blockers:
         sc = S(f"blocker-{kind}#M", X("ship_xen_m_fighter_01"), view=9)
         sc.blocker(kind, **kw)
@@ -561,16 +554,10 @@ def cases(data):
             sc.blocker("mine (representative small object)", 0.999, rad=0.2, lateral=_side(sc) * (0.2 + r / 2))
         yield sc, dict(order="genuine miss" if extra is None else f"off-box {label}", surface="ship turret",
                        blocker=None if extra is None else "mine (representative small object)")
-    # cross-zone target and near-coincident hits stay UNKNOWN
+    # cross-zone target stays UNKNOWN
     sc = S("cross-zone#M", X("ship_xen_m_fighter_01"), view=9)
     sc.s["comp"][sc.T]["zone"] = "zone2"
     yield sc, dict(order="cross-zone")
-    sc = S("coincident#M", X("ship_xen_m_fighter_01"), view=9)
-    body = next(b for b in sc.s["bodies"] if b["comp"] == sc.T)
-    o = np.asarray(sc.origins[0]["position"])
-    t0 = _enter(body, o, sc.P, 0.0)
-    sc.blocker("enemy ship", t0, rad=0.5, lateral=(sc.P - o) / np.linalg.norm(sc.P - o) * 0.5)
-    yield sc, dict(order="near-coincident unrelated/target", blocker="enemy ship")
     # #185 handoff: multi-origin (100 m: the only distance with a known multi-stable case), fallback, none
     rec = data.records["official:turret_bor_l_disruptor_01_mk1_macro"]
     leaf, _root, _seg = scorer.segments(rec)
@@ -612,15 +599,7 @@ def evaluate(sc, labels):
     for o in sc.origins:
         origin = np.asarray(o["position"])
         exp, exp_cls, exp_why = truth(sc.s, origin, sc.P, sc.T, group, reason, r)
-        worlds = []                       # every concrete world the offline scene leaves open
-        for world in WORLDS:
-            sc.s["world"] = world
-            worlds.append(candidate(sc.s, origin, sc.P, sc.T, group, reason))
-        got, got_cls, got_why, log = worlds[0]
-        if len({w[0] for w in worlds}) > 1:
-            got, got_cls = VARIES, "varies: " + ", ".join(sorted({w[1] for w in worlds}))
-        per_world = sorted({w[0] for w in worlds})
-        log = max((w[3] for w in worlds), key=len)
+        got, got_cls, got_why, log = candidate(sc.s, origin, sc.P, sc.T, group, reason)
         hidden = truth(sc.s, origin, sc.s["comp"][sc.T]["pos"] + np.asarray(sc.record["hidden_truth"]), sc.T,
                        group, reason, 0.0)[0]      # X4's own authored point: diagnostic only, not the standard
         rows.append(dict(case=sc.id, source=sc.source, target=sc.target["component"], target_type=_ttype(sc, labels),
@@ -629,7 +608,6 @@ def evaluate(sc, labels):
                          origin=o["position"], aim_point=sc.P.tolist(), aim_record=sc.record, c185=sc.row["result"],
                          expected=exp, expected_class=exp_cls, expected_reason=exp_why, result=got,
                          result_class=got_cls, result_reason=got_why, hidden_point_result=hidden,
-                         world_results=per_world,
                          queries=len(log), query_log=log, **labels))
     assert json.dumps(sc.record, sort_keys=True) == before and json.dumps(sc.origins) == origins_in
     if not sc.origins:
@@ -655,9 +633,8 @@ def _ttype(sc, labels):
 REQUIRED = dict(
     group={CONV, GUIDED, UNGUIDED, CLUSTER, "UNKNOWN"},
     expected_class={"selected target", "same object, second ray clears", "same object, second ray blocks",
-                    "unrelated", "genuine miss", "guided bypass", "weapon", "cross-zone", "ambiguous", "no origin"},
-    expected_reason={"aim-point uncertainty", "near-coincident hits", "unestablished wreck/presence state",
-                     "cross-zone target physics world", "missing guidance", "no loaded ammunition",
+                    "unrelated", "genuine miss", "guided bypass", "weapon", "cross-zone", "no origin"},
+    expected_reason={"cross-zone target physics world", "missing guidance", "no loaded ammunition",
                      "unaudited modded ammunition"},
     target_type={"whole ship ship_xs", "whole ship ship_s", "whole ship ship_m", "whole ship ship_l",
                  "whole ship ship_xl", "whole station", "ship turret", "ship shield", "ship engine",
@@ -718,7 +695,7 @@ def check(rows, scenes):
     return fails
 
 
-def _table(rows, field, cols=(CLEAR, BLOCKED, UNKNOWN, VARIES, "no pair")):
+def _table(rows, field, cols=(CLEAR, BLOCKED, UNKNOWN, "no pair")):
     keys = sorted({str(r.get(field)) for r in rows})
     out = [f"| {field} | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
     for k in keys:
@@ -727,10 +704,9 @@ def _table(rows, field, cols=(CLEAR, BLOCKED, UNKNOWN, VARIES, "no pair")):
     return out
 
 
-def report(rows, fails, census, seconds, scenes, searches):
-    W = lambda r: r.get("world_results", [r["result"]])  # noqa: E731
-    wrong_clear = sum(CLEAR in W(r) and r["expected"] == BLOCKED for r in rows)
-    wrong_block = sum(BLOCKED in W(r) and r["expected"] == CLEAR for r in rows)
+def report(rows, fails, census, seconds, scenes, searches, research_rows):
+    wrong_clear = sum(r["result"] == CLEAR and r["expected"] == BLOCKED for r in rows)
+    wrong_block = sum(r["result"] == BLOCKED and r["expected"] == CLEAR for r in rows)
     missing_unknown = sum(r["expected"] == UNKNOWN and r["result"] != UNKNOWN for r in rows)
     excess_unknown = sum(r["result"] == UNKNOWN and r["expected"] in (CLEAR, BLOCKED) for r in rows)
     pairs = [r for r in rows if r["origin_index"] is not None]
@@ -742,7 +718,7 @@ def report(rows, fails, census, seconds, scenes, searches):
          f"**{len(scenes)} scenes, {len(pairs)} firing-origin + aim-point pairs, {len(rows) - len(pairs)} "
          f"no-origin inputs.** Result: **{'PASS' if not fails else 'FAIL'}**.", "",
          "| measure | value |", "|---|---:|",
-         f"| confirmed correct pairs/inputs (every concrete world) | "
+         f"| correct scored pairs/inputs (constructed scenes) | "
          f"{sum(r['expected'] == r['result'] for r in rows)} of {len(rows)} |",
          f"| failing pairs | {len({(r['case'], r['origin_index']) for r in rows if r['expected'] != r['result']})} |",
          f"| wrong clear | {wrong_clear} |", f"| wrong LINE OF FIRE BLOCKED | {wrong_block} |",
@@ -759,14 +735,14 @@ def report(rows, fails, census, seconds, scenes, searches):
          f"| offline Python run time (not X4 cost) | {seconds:.1f} s |", ""]
     if fails:
         L += ["## Failures", ""] + [f"- {f}" for f in fails] + [""]
-    L += ["## Notes", "",
-          "- Simulated `check_line_of_sight` returns only a boolean. Where the offline scene leaves presence "
-          "(unestablished wreck) or near-coincident first-hit order open, each pair runs in every concrete world "
-          "(unknown body present/absent x tie order either way); `varies by concrete world` means the candidate's "
-          "definite answer depends on a state it cannot observe.",
-          "- Aim-point uncertainty: the accepted centre-only candidate cannot return the L5 UNKNOWN when the "
-          "#184 uncertainty ball straddles a blocker edge; `check_line_of_sight` exposes no hit distance. The "
-          "`off-box-uncertainty` scene is that case (its hidden authored point happens to agree). L7 question.",
+    L += ["## Unresolved research example (excluded from correctness scoring)", "",
+          f"- `off-box-uncertainty`: the synthetic blocker edge gives expected "
+          f"{research_rows[0]['expected']} and candidate {research_rows[0]['result']}. This does not establish "
+          "that such an edge occurs for the real X4 collision geometry. Whether #184 point uncertainty can "
+          "change a real exact-pair answer is reserved for the later L6 research task.", "",
+          "## Notes", "",
+          "- Simulated `check_line_of_sight` returns a boolean for one known constructed body-presence state. "
+          "Actual wreck bodies are present or absent; both established rules have scored cases.",
           "- Observed maximum is 3 queries: the tree issues either the zone query or the second ray, never both. "
           "The accepted L4 bound of 4 is still enforced.",
           "- XS comes from #184 `targets()` (the A4.4 census omits XS); `ship_arg_l_destroyer_01` is a real "
@@ -777,9 +753,11 @@ def report(rows, fails, census, seconds, scenes, searches):
           "guided/unguided switch on one turret does not exist in source.",
           "- The multi-origin scene uses 100 m: #185's only known multi-stable case (bor disruptor, leaf limit) "
           "is at that distance; the recovered #184 point is reached along that exact turret-local bearing.",
-          "- The whole station is two real module macros at explicit offsets; its runtime box is their union and "
-          "its aim point the #184 box-centre fallback. Surface hosts use real attachment frames; host hull "
-          "sections are explicit spheres, not runtime boxes.",
+          "- The whole-station scene places two real module macros at invented offsets and uses their synthetic "
+          "union box for a box-centre fallback. It is not a real station layout. Surface hosts use real "
+          "attachment frames, but their host-part spheres are artificial branch fixtures, not hull meshes. "
+          "Whole-ship runtime boxes are also abstract hit shapes, not ship bodies. No modeled hit or miss "
+          "establishes physical attainability in X4.",
           "- Pair-specific collision filters have no runtime-visible input, so no scene models them; they stay "
           "an L8 condition.", ""]
     for field in ("group", "target_type", "target_size", "blocker", "order", "expected_class", "result_reason",
@@ -803,7 +781,10 @@ def main():
     if {k: census[0][k] for k in L2_OFFICIAL_AMMO} != L2_OFFICIAL_AMMO:
         raise SystemExit(f"official ammunition census drift: {dict(census[0])}")
     data = Data()
-    scenes = list(cases(data))
+    all_scenes = list(cases(data))
+    research_scenes = [(sc, labels) for sc, labels in all_scenes if sc.id.startswith("off-box-uncertainty#")]
+    scenes = [(sc, labels) for sc, labels in all_scenes if not sc.id.startswith("off-box-uncertainty#")]
+    research_rows = [row for sc, labels in research_scenes for row in evaluate(sc, labels)]
     rows = [row for sc, labels in scenes for row in evaluate(sc, labels)]
     seconds = time.perf_counter() - t0
     fails = check(rows, scenes)
@@ -812,7 +793,7 @@ def main():
         for r in rows:
             fh.write(json.dumps(r, default=float, sort_keys=True) + "\n")
     searches = (len(data.views), max(st["asks"] for _c, st, _r in data.views.values()))
-    text = report(rows, fails, census, seconds, scenes, searches)
+    text = report(rows, fails, census, seconds, scenes, searches, research_rows)
     (HERE / "findings.md").write_text(text)
     print(text)
     print(f"rows: {OUT}")
