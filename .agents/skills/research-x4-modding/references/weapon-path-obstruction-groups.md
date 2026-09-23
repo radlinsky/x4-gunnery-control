@@ -667,7 +667,8 @@ collectables 15. Gates, mines, satellites/nav beacons/resource probes and
 anomalies either call the base object builder before their override or have no
 eligible body; a resulting outer-space layer-3 body uses the passing
 object-family groups. Turret, weapon, shield and engine children under an
-existing class-`object` owner add no independent layer-3 body. NPC characters
+existing class-`object` owner add no independent layer-3 body; their eligible
+collision meshes are identified sub-shapes of the owner's body (see below). NPC characters
 are the only other layer-3 creator family; their native-only group-16 bodies
 live in an interior/room physics world, not the weapon's outer-space zone world.
 
@@ -678,6 +679,73 @@ objects are accounted for. Planets, regions, highways, zones and sectors have
 no layer-3 body. Pair-specific filters and temporary layer-4 states remain the
 already-recorded runtime caveats; changing the declared target does not alter
 them.
+
+### Attached surface meshes are identified sub-shapes of the owner's body
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: pinned native trace (hash and base as above) from the layer-3 builder
+  `0x0051BB90` → `0x0051B730` through the closest-hit writer `0x000B65C0`
+- Live test: no — static/native analysis only
+- Finding: attached turrets, shields and engines still own no independent
+  layer-3 body. Their eligible collision meshes are added as sub-shapes of the
+  owning body's compound shape, each tagged with its own component id. A
+  closest hit on such a mesh reports that turret, shield or engine component,
+  not the body owner.
+
+Native evidence:
+
+- the layer-3 body shape is a `JPH::MutableCompoundShape` (`+0x1C78` returns 2
+  at `0x0034C610`; created by `0x000B8510`). Membership comes from iterator
+  `0x003383E0` over the component's descendants with RTTI filters
+  `StaticPositionalCheckerByCanHavePhysics` (slot `+0x1B40`) and pruning at
+  `StaticPositionalCheckerByHasOwnPhysics` (slot `+0x1B50`). Turret,
+  MissileTurret, ShieldGenerator and Engine have `+0x1B40` true and `+0x1B50`
+  false, so they join their owner's compound; a descendant with its own
+  physics keeps its own body;
+- each member's `+0x1B70` (`0x00747760`) adds its component mesh and part
+  meshes through `0x000C1560`, passing the member's component id `[comp+8]`.
+  `0x000C128E`–`0x000C1303` wraps each shape in
+  `XPhys::XPartCompoundChildShape` with the id at wrapper `+0x28`. The owner's
+  own meshes are wrapped the same way with the owner's id;
+- the body record stores the owner at `+0` (`0x0051BB59`), used as body user
+  data;
+- the ray collector (`0x000BB5D0` → Jolt `0x0140A730` → XPhys add-hit
+  `0x000B54D0`) calls `0x000B65C0`, the writer of result `+0x28`. It resolves
+  the leaf through shape slot `+0x60` (compound `0x01424530` forwards by
+  sub-shape index; the wrapper `0x00097200` returns itself) and stores
+  `0x000CD480(leaf+0x28)`: the component with that id if it is a class
+  `0x4D` (`positional`) descendant, else null. With no leaf it stores the body
+  owner instead;
+- the pre-fire gate passes that `+0x28` component to the shoot-controller
+  classifier (`0x00817B27`), and its second ray requires it to equal the
+  target exactly (`0x00817BE3`). MD `check_line_of_sight` reads the same slot
+  (`0x00BCBBE3`) and walks `+0x70` parents. A selected surface component can
+  therefore itself be the first-ray hit or the exact second-ray hit.
+
+Ownership: on a ship, surface meshes are sub-shapes of the ship's body. A
+station prunes its modules (Module `+0x1B50`, `0x006B4950`), so each module
+owns its compound, and a module's turrets and shields are sub-shapes of that
+module's body; the parent walk goes surface → module → station. Sub-shapes
+share their owner body's layer, group, physics world and lifetime; this record
+does not establish that an attached mesh survives every wreck or
+component-destruction transition.
+
+Mesh filter: `0x00747760` skips a part whose tags intersect an exclusion set.
+For the layer-3 build that set contains `nocollision` and `triggerpart`, and
+normally `platformcollision`; `nocollision_jolt` parts are **included**
+(the check at `0x00747AA2` is skipped). Tag ids were resolved from their
+interning writers at `0x008D89F2`, `0x008DAB34`, `0x008D90E8` and
+`0x008D8A34`. The layer-3 geometry is therefore the collision meshes, not
+`macro.boundingbox`, which excludes `nocollision`, `nocollision_jolt` and
+`platformcollision` parts and is only a box.
+
+Unresolved: when `0x000CD480` returns null the hit fraction is still stored
+with a null `+0x28`; MD then returns false, but the pre-fire classifier's
+handling of that case was not traced. The conditions that keep
+`platformcollision` parts (`[+0x1EC] >= 9` or the global ancestor check at
+`0x00747930`–`0x00747983`) were not traced. The value written at `+0x30`
+(leaf slot `+0x118`) is unidentified.
 
 ### Exact-pair decision table
 
