@@ -84,16 +84,19 @@ assert(result.aimMap.rows[1].points[1].bearing.state=='UNKNOWN')
 assert(result.aimMap.rows[1].points[1].lineOfFire=='NOT_EVALUATED')
 assert(one('aimpoint_bearing').point==2)
 
--- A timed-out request replaces its token; an old range reply cannot finish it.
+-- Equivalent pending work keeps its token even after the old pending window.
 local clock=100
 getElapsedTime=function() return clock end
 local stale=start(914); e=events(); local old=e[1].params
 clock=103
-local refreshed=fix.API.requestEngageability(914)
-assert(refreshed==stale and refreshed.aimMap.token~=old.token)
 local mark=#fix.uiTriggeredEvents
-range(old,1)
+local refreshed=fix.API.requestEngageability(914)
+assert(refreshed==stale and refreshed.aimMap.token==old.token
+    and #fix.uiTriggeredEvents==mark)
+range(old,2)
 assert(refreshed.pending and #fix.uiTriggeredEvents==mark)
+range(e[2].params,2)
+assert(not refreshed.pending and refreshed.receivedAt==clock)
 print('runtime engageable pipeline edge cases: ok')
 
 -- Surface eligibility reads the owner, even when the selected component has
@@ -115,9 +118,11 @@ C.GetContextByClass=oldContext
 -- A completed answer is cached; an expired answer re-enters pending state.
 GetComponentData=function(_,key) if key=='isenemy' then return true end end
 local cached=start(917)
-e=events(); range(e[1].params,2); range(e[2].params,2)
+e=events(); clock=108; range(e[1].params,2); range(e[2].params,2)
+assert(cached.receivedAt==108 and cached.requestedAt==103)
+clock=108.5
 assert(fix.API.requestEngageability(917)==cached and not cached.pending)
-clock=105
+clock=109
 assert(fix.API.requestEngageability(917)==cached and cached.pending
     and cached.engageable==nil and cached.total==2)
 print('runtime engageable cache and owner gate: ok')

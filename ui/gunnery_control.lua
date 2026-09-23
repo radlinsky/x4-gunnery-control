@@ -1543,13 +1543,13 @@ local function requestEngageabilities(targets, purpose)
             local key = tostring(sessionEpoch) .. ":" .. targetKey
             local cached = engageabilityCache[key]
             if cached and cached.signature == signature and
-                    ((cached.pending and now - cached.requestedAt < 2)
-                    or (not cached.pending and now - cached.requestedAt < 1)) then
+                    (cached.pending or (cached.receivedAt and now - cached.receivedAt < 1)) then
                 results[position] = cached
             else
                 if cached and cached.aimMap then aimMaps[cached.aimMap.token] = nil end
                 cached = cached and cached.signature == signature and cached or {}
-                cached.signature, cached.requestedAt, cached.total = signature, now, #members
+                cached.signature, cached.requestedAt, cached.total, cached.receivedAt =
+                    signature, now, #members, nil
                 cached.engageable, cached.known, cached.pending = nil, nil, #members > 0
                 engageabilityCache[key] = cached
                 results[position] = cached

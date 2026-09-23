@@ -301,8 +301,8 @@ do
     C.GetPlayerOccupiedShipID = function() return sess59.shipID end
     clock = clock + 10
     fix.invokeOnUpdate()
-    assert(#targetEvents59 == 21,
-        "59: automatic refresh must recalculate pinned plus current 20-row page only; got "
+    assert(#targetEvents59 == 1 and targetEvents59[1] == "10000",
+        "59: automatic refresh must recalculate pinned and reuse the pending page batch; got "
             .. tostring(#targetEvents59) .. " phase=" .. tostring(sess59.phase)
             .. " next=" .. tostring(sess59.surfaceBrowser.nextAutoRefreshAt)
             .. " now=" .. tostring(clock))
@@ -314,7 +314,7 @@ do
     assert(type(refreshedPinnedDistance59) == "function" and refreshedPinnedDistance59() == "5.0 km",
         "59: pinned distance must refresh on the same one-second tick as its engageability")
     assert(refreshedPageDistance59 == "27.0 km",
-        "59: automatic page refresh must recapture distance with the new 20-row solution batch")
+        "59: automatic page refresh must recapture distance with the current 20-row solution batch")
     log59 = table.concat(fix.getCapturedLog(), "\n")
     assert(log59:find("event=surface_refresh action=fire reason=automatic root=10000 page=1", 1, true)
             and log59:find("event=surface_snapshot action=create reason=automatic root=10000", 1, true),
