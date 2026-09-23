@@ -735,11 +735,12 @@ def report(rows, fails, census, seconds, scenes, searches, research_rows):
          f"| offline Python run time (not X4 cost) | {seconds:.1f} s |", ""]
     if fails:
         L += ["## Failures", ""] + [f"- {f}" for f in fails] + [""]
-    L += ["## Unresolved research example (excluded from correctness scoring)", "",
+    L += ["## Accepted design-risk example (excluded from correctness scoring)", "",
           f"- `off-box-uncertainty`: the synthetic blocker edge gives expected "
           f"{research_rows[0]['expected']} and candidate {research_rows[0]['result']}. This does not establish "
-          "that such an edge occurs for the real X4 collision geometry. Whether #184 point uncertainty can "
-          "change a real exact-pair answer is reserved for the later L6 research task.", "",
+          "that such an edge occurs for the real X4 collision geometry. The retained design deliberately uses "
+          "#184's supplied centre point for obstruction and accepts this residual edge risk rather than expanding "
+          "the recovery uncertainty area or returning UNKNOWN.", "",
           "## Notes", "",
           "- Simulated `check_line_of_sight` returns a boolean for one known constructed body-presence state. "
           "Actual wreck bodies are present or absent; both established rules have scored cases.",
