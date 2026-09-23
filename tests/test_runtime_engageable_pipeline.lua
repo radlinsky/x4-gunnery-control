@@ -6,6 +6,7 @@ session.phase = 'console'
 session.groups = {{key='selected', members={
     {componentID=101, macro='test', operational=true},
     {componentID=102, macro='test', operational=true},
+    {componentID=103, macro='test', operational=false},
 }}}
 session.checkedGroupKeys = {selected=true}
 GetComponentData = function(_, key)
