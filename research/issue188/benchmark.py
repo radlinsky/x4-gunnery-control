@@ -201,21 +201,26 @@ def named_cases():
 
 def generated_cases():
     pats = tuple(patterns())
-    for authorized, in_range, points in product((False, True), (False, True), product(pats, repeat=2)):
+    for weapon, authorized, in_range, points in product(CLASSES[:4], (False, True),
+                                                       (False, True), product(pats, repeat=2)):
         yield Case("generated single", authorized, (Turret(5 if in_range else 11, 10,
-                                                           "conventional", points),))
+                                                           weapon, points),))
     # Four range masks, with both turrets having independently varying results.
     for mask, left, right in product(range(4), pats, pats):
         yield Case("generated two-turret", True, (
             Turret(5 if mask & 1 else 11, 10, "conventional", (left,)),
             Turret(5 if mask & 2 else 11, 10, "conventional", (right,))))
-    yield Case("generated worst case", True, (Turret(5, 10, "conventional", (
-        Point("CAN AIM", (Origin(BLOCKED, 3), Origin(UNKNOWN, 3))),
-        Point("CAN AIM", (Origin(UNKNOWN, 3), Origin(BLOCKED, 3))))),))
-    for weapon in CLASSES:
+    worst_points = (Point("CAN AIM", (Origin(BLOCKED, 3), Origin(UNKNOWN, 3))),
+                    Point("CAN AIM", (Origin(UNKNOWN, 3), Origin(BLOCKED, 3))))
+    yield Case("generated worst case", True, (Turret(5, 10, "conventional", worst_points),
+                                              Turret(5, 10, "conventional", worst_points)))
+    for weapon in CLASSES[:4]:
         for result, queries in product(("clear", BLOCKED, UNKNOWN), range(4)):
             yield Case("generated weapon", True, (Turret(5, 10, weapon,
                        (Point("CAN AIM", (Origin(result, queries),)),)),))
+    for weapon in CLASSES[4:]:
+        yield Case("generated weapon", True, (Turret(5, 10, weapon,
+                   (Point("CAN AIM", (Origin("clear"),)),)),))
 
 
 def main():
@@ -223,6 +228,13 @@ def main():
     generated = tuple(generated_cases())
     results = [(case, *check(case)) for case in (*named, *generated)]
     assert len(tuple(patterns())) == 15
+    path_inputs = set(product((False, True), (False, True), product(patterns(), repeat=2)))
+    for weapon in CLASSES[:4]:
+        assert {(case.authorized, case.turrets[0].distance <= case.turrets[0].max_range,
+                 case.turrets[0].points) for case in generated
+                if case.name == "generated single" and case.turrets[0].weapon == weapon} == path_inputs
+    assert {case.turrets[0].weapon for case in generated
+            if case.name == "generated weapon" and case.turrets[0].weapon in CLASSES[4:]} == set(CLASSES[4:])
     assert {case.authorized for case in generated} == {False, True}
     assert {t.distance <= t.max_range for case in generated for t in case.turrets} == {False, True}
     assert {t.weapon for case in generated for t in case.turrets} == set(CLASSES)
@@ -242,7 +254,7 @@ def main():
 
 `python3 research/issue188/benchmark.py` passed: **{len(generated)} generated cases** and {len(named)} named cases; reference and ordered ENGAGEABLE answers agree throughout.
 
-The sweep covers both target authorization states, both range states, 15 per-point upstream result patterns (including zero origins), all clear/blocked/UNKNOWN origin orderings through two origins, four two-turret range masks, every supported weapon classification, and abstract normal-path query costs 0–3. The four supported classes are conventional, guided missile, ordinary unguided missile, and distributing cluster missile. Unknown or ambiguous turret type and loaded-ammunition guidance remain LINE OF FIRE UNKNOWN. Guided missiles are clear with zero queries. Exact bbox distance equal to max fire range passes; greater distance fails.
+The full two-aim-point sweep covers both target authorization states, both range states, 15 per-point upstream result patterns (including zero origins), and all clear/blocked/UNKNOWN origin orderings through two origins for each supported weapon class. Four two-turret range masks and abstract normal-path query costs 0–3 are also covered. The four supported classes are conventional, guided missile, ordinary unguided missile, and distributing cluster missile. Unknown or ambiguous turret type and loaded-ammunition guidance remain LINE OF FIRE UNKNOWN. Guided missiles are clear with zero queries. Exact bbox distance equal to max fire range passes; greater distance fails.
 
 UNKNOWN is recorded only for evaluated uncertain checks; deliberately skipped checks and later work remain NOT_EVALUATED. The consistency trap stays not ENGAGEABLE. CAN AIM with zero origins fails safely.
 
@@ -253,7 +265,7 @@ Columns count range checks, shared searches, aim points, firing origins, LINE OF
 | Case | ENGAGEABLE | Range | Search | Aim | Origins | Pairs | Queries |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 """ + "\n".join(rows) + "\n\n"
-    findings += "Maximum measured ordered work in one generated or named calculation: " + ", ".join(f"{key}={worst[key]}" for key in keys) + ". When no result is decisive early, every remaining aim point and firing origin may need evaluation. These are abstract work counts, not gameplay-average savings.\n"
+    findings += "Maximum measured ordered work in one two-surviving-turret calculation: " + ", ".join(f"{key}={worst[key]}" for key in keys) + ". The aim-point search is shared and counted once. When no result is decisive early, every remaining aim point and firing origin may need evaluation. These are abstract work counts, not gameplay-average savings.\n"
     Path(__file__).with_name("findings.md").write_text(findings)
     print(f"PASS: {len(generated)} generated + {len(named)} named cases; reference and ordered agree")
 

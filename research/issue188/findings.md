@@ -1,8 +1,8 @@
 # Issue #188 E8: ENGAGEABLE pipeline benchmark
 
-`python3 research/issue188/benchmark.py` passed: **1897 generated cases** and 13 named cases; reference and ordered ENGAGEABLE answers agree throughout.
+`python3 research/issue188/benchmark.py` passed: **4553 generated cases** and 13 named cases; reference and ordered ENGAGEABLE answers agree throughout.
 
-The sweep covers both target authorization states, both range states, 15 per-point upstream result patterns (including zero origins), all clear/blocked/UNKNOWN origin orderings through two origins, four two-turret range masks, every supported weapon classification, and abstract normal-path query costs 0–3. The four supported classes are conventional, guided missile, ordinary unguided missile, and distributing cluster missile. Unknown or ambiguous turret type and loaded-ammunition guidance remain LINE OF FIRE UNKNOWN. Guided missiles are clear with zero queries. Exact bbox distance equal to max fire range passes; greater distance fails.
+The full two-aim-point sweep covers both target authorization states, both range states, 15 per-point upstream result patterns (including zero origins), and all clear/blocked/UNKNOWN origin orderings through two origins for each supported weapon class. Four two-turret range masks and abstract normal-path query costs 0–3 are also covered. The four supported classes are conventional, guided missile, ordinary unguided missile, and distributing cluster missile. Unknown or ambiguous turret type and loaded-ammunition guidance remain LINE OF FIRE UNKNOWN. Guided missiles are clear with zero queries. Exact bbox distance equal to max fire range passes; greater distance fails.
 
 UNKNOWN is recorded only for evaluated uncertain checks; deliberately skipped checks and later work remain NOT_EVALUATED. The consistency trap stays not ENGAGEABLE. CAN AIM with zero origins fails safely.
 
@@ -26,4 +26,4 @@ Columns count range checks, shared searches, aim points, firing origins, LINE OF
 | guided missile zero queries | yes | 0 | 0 | 0 | 0 | 0 | 0 |
 | unknown weapon classification | no | 0 | 0 | 0 | 0 | 0 | 0 |
 
-Maximum measured ordered work in one generated or named calculation: range_checks=2, search=1, aim_points=2, origins=4, pairs=4, queries=12. When no result is decisive early, every remaining aim point and firing origin may need evaluation. These are abstract work counts, not gameplay-average savings.
+Maximum measured ordered work in one two-surviving-turret calculation: range_checks=2, search=1, aim_points=4, origins=8, pairs=8, queries=24. The aim-point search is shared and counted once. When no result is decisive early, every remaining aim point and firing origin may need evaluation. These are abstract work counts, not gameplay-average savings.
