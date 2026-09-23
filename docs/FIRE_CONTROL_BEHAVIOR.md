@@ -1,6 +1,6 @@
 # Turret behavior by firing situation
 
-What your turrets do in each firing situation, under Direct-control and under Auto-engage. This document describes only what is built and known today. It is updated as more becomes known.
+What your turrets do in each firing situation, under Direct-control and under Auto-engage. This document records current behavior. Where a section is explicitly marked **accepted future behavior**, it describes a method already accepted for the next production update but not yet used by the current runtime code.
 
 ## Terms used here
 
@@ -45,18 +45,23 @@ The situations that matter for this mod. Each is checked against **your target**
 
 **Readiness and authorization in Gunnery Control.** Direct-control applies its attack mode and armed state before ENGAGEABLE is computed. Destroyed turrets are excluded from the selected/evaluated ENGAGEABLE population, so **WEAPON NOT READY** remains a documented firing situation but is not a retained predictor gate under the current mod design. **FIRE NOT AUTHORIZED** does remain part of prospective ENGAGEABLE. The current target-selection path normally limits Direct-control to enemy targets, so authorization should usually be a cheap PASS, but friendly, neutral, surrendered/captured, ownership-changed, or otherwise non-attackable targets must not be treated as ENGAGEABLE merely because the geometry works.
 
-**What the console's ENGAGEABLE ratio measures.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometric check, not a readout of an X4 firing state. It counts each checked turret only when its bearing and range gates pass and its weapon-specific direct-line policy passes:
+**What the console's ENGAGEABLE ratio measures today.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometry check, not a readout of an X4 firing state. The current production code checks bearing, range, and its older line-of-fire method. Issue #189 will replace that older line-of-fire code with the accepted method below as part of the full ENGAGEABLE pipeline.
 
-- the turret has known arc data and its traverse arc contains the aim direction;
-- the target is within weapon range, measured as bounding-box distance (`bboxdistanceto`) against the weapon's max fire range rather than center-to-center distance, so reachable hull or modules on a large ship or station count as in range even when the center is far; and
-- the applicable direct-line policy passes:
-  - a conventional turret requires a clear muzzle-to-target line of fire that includes its own ship, so its own hull or an external object can mask the shot. The line is checked first from where the barrel sits right now. If that line is blocked and the mod has generated barrel geometry for that turret, the check is retried from where the barrel would sit once the turret has swung onto the target, so a shot that is only masked by the turret's current resting position still counts. A conventional turret without generated barrel geometry keeps the current-position check alone;
-  - an unguided missile turret requires a clear direct line that excludes its own ship, so its own hull does not mask a viable launch but terrain or another object still does; ammunition with missing or unrecognized guidance data takes this conservative unguided path; and
-  - a missile turret with affirmatively guided loaded ammunition does not require a direct muzzle-to-target line, because the missile can steer after launch. Bearing and range remain mandatory.
+**Accepted future behavior — LINE OF FIRE.** Issue #186 has selected the LINE OF FIRE method that #189 will put into production. It uses the exact aim point supplied by the accepted aim-point work and evaluates every accepted firing origin separately against that same point.
 
-When a required direct ray against a whole ship or station root is blocked — a large root's aim point may be its bounding-box centre, which sits inside the target hull — and the root is a targetable modular object with more than one operational module (a station, or a capital ship with an embedded targetable defence module), the check falls back to that root's operational and construction modules and counts the turret if any one is reachable under the same weapon-specific policy. An individually selected surface element keeps its own direct-line policy and does not use this fallback.
+- A supported guided missile is **clear** without a direct pre-launch path check.
+- If the loaded weapon or ammunition behavior cannot be identified safely, LINE OF FIRE is **UNKNOWN**. Missing guidance information is not treated as unguided.
+- If the target is outside the X4 zone used by the firing weapon's path check, LINE OF FIRE is **UNKNOWN** rather than treating failed checks as a clear miss.
+- Conventional turrets, ordinary unguided missiles, and distributing cluster missiles all use the same obstruction rules. The firing ship's own hull can block any of these weapons.
+- If the first thing hit on the firing-origin-to-aim-point path is the selected target, the path is **clear**.
+- If the first thing hit is another part of the same ship or station module that contains the selected target, X4's own second obstruction check is used from the same firing origin to the selected component's origin. If that check accepts the selected component, the path is **clear**; otherwise it is **LINE OF FIRE BLOCKED**.
+- If the first thing hit is an unrelated physical object, the result is **LINE OF FIRE BLOCKED**.
+- If the path genuinely hits nothing, the result is **clear** for the supported turret population.
+- The method does **not** try another aim point, another target or module, or another firing origin. If several firing origins are supplied, each keeps its own result for the later ENGAGEABLE decision.
 
-The source-backed rationale and live-test boundaries are recorded in the knowledge base under [missile guidance](../.agents/skills/research-x4-modding/references/md-ai.md#missile-guidance-is-a-shipped-fire-control-discriminator-but-missile-turret-launch-los-is-engine-side), [guided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#guided-missiles-launch-through-an-own-hull-masked-direct-ray-and-reach-the-designated-surface), and [unguided missile turrets](../.agents/skills/research-x4-modding/references/md-ai.md#unguided-missile-turrets-ignore-own-hull-but-retain-an-external-direct-line-check).
+The retained method needs at most three line-of-fire checks for one supported non-guided firing-origin + aim-point pair, and none for a supported guided missile.
+
+The source-backed reasoning and its limits are recorded in [weapon path obstruction groups](../.agents/skills/research-x4-modding/references/weapon-path-obstruction-groups.md) and the supporting [MD/AI research](../.agents/skills/research-x4-modding/references/md-ai.md).
 
 The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio **today** does not prove a valid FIRING SOLUTION, fire authorization, or actual firing — the current range/arc/line-of-fire checks are geometry evidence only. The #79 prediction program extends this toward the full prospective ENGAGEABLE definition above, including FIRE NOT AUTHORIZED. WEAPON NOT READY remains outside that predictor while destroyed turrets are filtered from the evaluated population by design.
 
