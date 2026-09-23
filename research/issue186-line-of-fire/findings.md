@@ -20,9 +20,9 @@ Status: **inference** — offline decision-logic evidence over constructed scene
 | #184 frozen searches (one per target view) / max samples | 14 / 38 |
 | offline Python run time (not X4 cost) | 3.9 s |
 
-## Unresolved research example (excluded from correctness scoring)
+## Accepted design-risk example (excluded from correctness scoring)
 
-- `off-box-uncertainty`: the synthetic blocker edge gives expected UNKNOWN and candidate clear. This does not establish that such an edge occurs for the real X4 collision geometry. Whether #184 point uncertainty can change a real exact-pair answer is reserved for the later L6 research task.
+- `off-box-uncertainty`: the synthetic blocker edge gives expected UNKNOWN and candidate clear. This does not establish that such an edge occurs for the real X4 collision geometry. The retained design deliberately uses #184's supplied centre point for obstruction and accepts this residual edge risk rather than expanding the recovery uncertainty area or returning UNKNOWN.
 
 ## Notes
 
