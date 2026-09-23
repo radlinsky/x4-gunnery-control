@@ -60,4 +60,41 @@ local future = cached.aimMap.bearingResults['102'][1]
 assert(known.aimPoint == point and known.state == 'CAN AIM' and known.firingOrigins[1].source == 'geometry-predicted')
 assert(future.aimPoint == point and future.state == 'CAN AIM' and future.firingOrigins[1].source == 'current-barrelposition-fallback')
 assert(cached.aimMap.bearingPending == 0)
+
+-- Exercise the asynchronous #184 probe handoff and its genuine failure paths.
+local function startMap(target)
+    local request = fix.API.requestEngageability(target).aimMap
+    local token = request.token
+    fix.fireEvent('X4GunneryControl.AimPointBox',
+        'x4gcapb:'..token..':1:0:0:0:10000:10000:10000')
+    return request, token
+end
+local observed
+X4GunneryAimPointMap.search = function(_, _, sample)
+    observed = sample(1, {5,6,7})
+    return {points={},samples=1}
+end
+local replay, replayToken = startMap(901)
+assert(replay.pending and fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == 'aimpoint_probe')
+assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].params.x == 5)
+fix.fireEvent('X4GunneryControl.AimPointProbe',
+    'x4gcapp:'..replayToken..':1:1000000000:0:0')
+assert(replay.result and replay.bearingPending == 0 and replay.lineOfFirePending == 0)
+assert(observed[1] == 1 and observed[2] == 0 and observed[3] == 0)
+
+X4GunneryAimPointMap.search = function() error('bad search') end
+local failed = startMap(902)
+assert(failed.failed and failed.pending == nil)
+
+X4GunneryAimPointMap.search = function(_, _, sample)
+    sample(1, {5,6,7})
+end
+local badReply, badToken = startMap(903)
+fix.fireEvent('X4GunneryControl.AimPointProbe', 'x4gcapp:'..badToken..':0:0:0:0')
+assert(badReply.failed and badReply.pending == nil)
+
+local badVector, badVectorToken = startMap(904)
+fix.fireEvent('X4GunneryControl.AimPointProbe', 'x4gcapp:'..badVectorToken..':1:0:0:0')
+assert(badVector.failed and badVector.pending == nil)
+
 print('turret bearing: ok')

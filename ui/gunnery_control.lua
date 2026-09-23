@@ -1425,12 +1425,12 @@ local function onAimPointBearing(_, param)
         for originIndex, origin in ipairs(bearing.firingOrigins) do
             local p = origin.position
             request.lineOfFirePending = request.lineOfFirePending + 1
-            AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
+            local pair = {
                 token = token, target = request.target, weapon = id(weapon), weaponKey = weapon,
                 point = point.id, origin = originIndex,
                 px = point.c[1], py = point.c[2], pz = point.c[3],
-                ox = p[1], oy = p[2], oz = p[3],
-            })
+                ox = p[1], oy = p[2], oz = p[3] }
+            AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", pair)
         end
     end
     finishAimMap(request)
