@@ -86,7 +86,8 @@ def ordered_evaluate(case):
                 states.append(result)
                 clear |= result == "clear"
                 unknown |= result == UNKNOWN
-            line = "clear" if clear else UNKNOWN if unknown else BLOCKED
+            line = ("clear" if clear else UNKNOWN if unknown else
+                    BLOCKED if states else NE)
             rows.append((point.aim, line, tuple(states)))
             found |= clear
         details.append(tuple(rows))
@@ -123,7 +124,7 @@ def reference_evaluate(case):
                     work["queries"] += sum(cost for _, cost in outcomes)
                     states = tuple(state for state, _ in outcomes)
                     line = ("clear" if "clear" in states else UNKNOWN if UNKNOWN in states
-                            else BLOCKED)
+                            else BLOCKED if states else NE)
                     rows.append((point.aim, line, states))
         details.append(tuple(rows))
         answers.append(survives and any(aim == "CAN AIM" and line == "clear"
@@ -154,7 +155,7 @@ def check(case):
             for point in turret.points)
         assert ordered[0][ti] == expected, case.name
         stopped = not case.authorized or turret.distance > turret.max_range
-        for point, (aim, line, origins) in zip(turret.points, ordered[1][ti]):
+        for pi, (point, (aim, line, origins)) in enumerate(zip(turret.points, ordered[1][ti])):
             if stopped:
                 assert aim == line == NE and all(x == NE for x in origins), case.name
                 continue
@@ -162,6 +163,9 @@ def check(case):
             if aim != "CAN AIM":
                 assert line == NE and all(x == NE for x in origins), case.name
                 continue
+            if not point.origins:
+                assert (aim, line, origins) == ("CAN AIM", NE, ()), case.name
+                assert reference[1][ti][pi] == ("CAN AIM", NE, ()), case.name
             seen_clear = False
             evaluated = []
             for supplied, actual in zip(point.origins, origins):
@@ -172,7 +176,8 @@ def check(case):
                     evaluated.append(actual)
                     seen_clear = actual == "clear"
             assert line == ("clear" if "clear" in evaluated else
-                            UNKNOWN if UNKNOWN in evaluated else BLOCKED), case.name
+                            UNKNOWN if UNKNOWN in evaluated else
+                            BLOCKED if evaluated else NE), case.name
             stopped = line == "clear"
     assert all(ordered[2][key] <= reference[2][key] for key in ordered[2]), case.name
     return reference, ordered
@@ -256,7 +261,7 @@ def main():
 
 The full two-aim-point sweep covers both target authorization states, both range states, 15 per-point upstream result patterns (including zero origins), and all clear/blocked/UNKNOWN origin orderings through two origins for each supported weapon class. Four two-turret range masks and abstract normal-path query costs 0–3 are also covered. The four supported classes are conventional, guided missile, ordinary unguided missile, and distributing cluster missile. Unknown or ambiguous turret type and loaded-ammunition guidance remain LINE OF FIRE UNKNOWN. Guided missiles are clear with zero queries. Exact bbox distance equal to max fire range passes; greater distance fails.
 
-UNKNOWN is recorded only for evaluated uncertain checks; deliberately skipped checks and later work remain NOT_EVALUATED. The consistency trap stays not ENGAGEABLE. CAN AIM with zero origins fails safely.
+UNKNOWN is recorded only for evaluated uncertain checks; deliberately skipped checks and later work remain NOT_EVALUATED. The consistency trap stays not ENGAGEABLE. CAN AIM with zero origins fails safely: CAN AIM is preserved, LINE OF FIRE is NOT_EVALUATED because no firing origin was supplied and no LINE OF FIRE check occurred, and the result is not ENGAGEABLE.
 
 ## Named-case work avoided versus full reference
 
