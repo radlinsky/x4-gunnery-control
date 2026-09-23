@@ -269,9 +269,10 @@ How a hit becomes a fire/no-fire decision:
 - result 2, LINE OF FIRE BLOCKED: any other hit. It sets the blocked flag
   (`+0x85` on the controller) and clears permission (`+0x84`);
 - no hit with the default aim mode: `+0xF0` is constant-true for every
-  controller except U::LargeTargetShootController (`0x007E5970`, not traced), so
-  fire is permitted. In the alternate aim mode (flag set at
-  `0x00817A7F`) any non-target hit, and also a miss, withholds fire.
+  controller except U::LargeTargetShootController. Its no-hit method at
+  `0x007E5970` is resolved below; for every supported Gunnery Control turret
+  that later trace also permits a genuine miss. In the alternate aim mode (flag
+  set at `0x00817A7F`) any non-target hit, and also a miss, withholds fire.
 
 Why the candidate set is exactly these categories:
 
@@ -676,9 +677,9 @@ Therefore MD sees no supported blocker that native ignores, and native sees no
 supported blocker that MD ignores. Ship hulls, stations/modules, asteroids,
 missiles, mines, gates, satellites, collectables, characters and generic
 objects are accounted for. Planets, regions, highways, zones and sectors have
-no layer-3 body. Pair-specific filters and temporary layer-4 states remain the
-already-recorded runtime caveats; changing the declared target does not alter
-them.
+no layer-3 body. Pair-specific filters remain the already-recorded runtime
+caveat. The audited layer-4 toggles never add or remove a layer-3 pre-fire
+candidate. Changing the declared target does not alter either result.
 
 ### Attached surface meshes are identified sub-shapes of the owner's body
 
@@ -762,9 +763,12 @@ Supported guided missiles remain clear without a ray query.
 | all three false; any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
 | unresolved weapon behavior, hierarchy/frame, cross-world target, or material pair-filter uncertainty | outside proved boundary | UNKNOWN |
 
-With native second-ray handling accepted, worst-case cost is four
-`check_line_of_sight` calls per firing-origin + aim-point pair. Under the strict
-same-segment wording it is three, with same-containing-object hits UNKNOWN.
+With native second-ray handling accepted, the retained worst-case cost is three
+`check_line_of_sight` calls per supported non-guided firing-origin + aim-point
+pair. After `Q(T,P)` and `Q(O,P)`, one pair takes either the accepted second
+obstruction ray for a same-containing-object hit or `Q(Z,P)` for the
+unrelated-hit/genuine-miss branch, never both. Same-containing-object hits are
+therefore resolved as clear or LINE OF FIRE BLOCKED rather than UNKNOWN.
 
 ## Distributing cluster missiles are a separate supported group
 
