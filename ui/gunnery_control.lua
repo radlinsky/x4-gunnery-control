@@ -5,157 +5,8 @@ local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
 local TurretArcLimits = X4GunneryTurretArcLimits or {}
-local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
 local AimPointMap = X4GunneryAimPointMap
 local TurretBearing = X4GunneryTurretBearing
-
--- Prospective-muzzle geometry for the supported self-masking macros (#74, #98).
--- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
--- Rather than hand-copy the constants, derive O/P/D from the generated
--- source-resolved record (ui/turret_muzzle_geometry.lua) and hand MD the three
--- fixed vectors as flat scalars. This walks the authored layer/transform chain
--- exactly as tests/test_turret_muzzle_geometry.lua evaluates it, but factors the
--- two runtime rotations (yaw rotator, pitch gun) back out into constants.
--- ponytail: support is whatever deriveProspectiveMuzzle understands in the
--- generated data; no second allow-list to keep in sync (#106).
-
-local function vadd(a, b)
-    return { a[1] + b[1], a[2] + b[2], a[3] + b[3] }
-end
-
-local function qrotate(q, v)
-    local x, y, z, w = q[1], q[2], q[3], q[4]
-    local vx, vy, vz = v[1], v[2], v[3]
-    local tx = 2 * (y * vz - z * vy)
-    local ty = 2 * (z * vx - x * vz)
-    local tz = 2 * (x * vy - y * vx)
-    return {
-        vx + w * tx + y * tz - z * ty,
-        vy + w * ty + z * tx - x * tz,
-        vz + w * tz + x * ty - y * tx,
-    }
-end
-
-local function rotateInFrame(rotations, vector)
-    for index = #rotations, 1, -1 do
-        vector = qrotate(rotations[index], vector)
-    end
-    return vector
-end
-
--- Shared chain math. `fixed` is the accumulated frame rotation stack, `segment`
--- the translation accumulated since the last runtime-rotation split.
-local function chainTranslate(chain, position)
-    chain.segment = vadd(chain.segment, rotateInFrame(chain.fixed, position))
-end
-
-local function chainRotate(chain, quaternion)
-    chain.fixed[#chain.fixed + 1] = quaternion
-end
-
--- The authored connection/part transform pair every layer carries.
-local function chainAuthoredLayer(chain, layer)
-    chainRotate(chain, layer.connection_transform.quaternion)
-    chainTranslate(chain, layer.part_transform.position)
-    chainRotate(chain, layer.part_transform.quaternion)
-end
-
--- Close off the segment feeding a runtime rotation (yaw rotator, pitch gun).
-local function chainSplit(chain, layer)
-    local rotation = layer.runtime_rotation
-    if not rotation then return end
-    if rotation.axis == "y" then
-        chain.origin = chain.segment
-        chain.segment = { 0, 0, 0 }
-    elseif rotation.axis == "x" then
-        chain.pivot = chain.segment
-        chain.segment = { 0, 0, 0 }
-    end
-end
-
--- ponytail: the semantic case names a turret movement rule, so dispatch on it
--- explicitly (#79). Each behavior only orders the per-layer steps around the
--- runtime-rotation split; all math above stays shared, and every turret-specific
--- value still comes from the generated record. Layer order per case mirrors
--- tests/test_turret_muzzle_geometry.lua exactly.
-local semanticCaseBehaviors = {
-    -- Settled translation applies before the split; authored rotations follow it.
-    depth4_dual_translation = function(chain, layer)
-        if layer.settled_position then
-            chainTranslate(chain, layer.settled_position)
-        end
-        chainSplit(chain, layer)
-        chainAuthoredLayer(chain, layer)
-    end,
-    -- Authored rotations plus the settled local-X rotation all precede the split.
-    depth5_additive_x_rotation = function(chain, layer)
-        chainAuthoredLayer(chain, layer)
-        if layer.settled_rotation_x_radians then
-            local half = layer.settled_rotation_x_radians / 2
-            chainRotate(chain, { math.sin(half), 0, 0, math.cos(half) })
-        end
-        chainSplit(chain, layer)
-    end,
-}
-
--- Split L stores the same depth-4 composition with zero settled translations
--- (#79), so it reuses that behavior rather than restating the layer order.
-semanticCaseBehaviors.depth4_zero_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- The one-key barrel case (#79) is the same depth-4 composition with a settled
--- translation on each of the same two edges, so it reuses that behavior too.
-semanticCaseBehaviors.depth4_one_key_barrel_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- The shortened rank-1 one-key case (#137) has the same translation/split
--- ordering over three source layers; only its source-evidence boundary differs.
-semanticCaseBehaviors.depth3_one_key_barrel_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- P6 uses the already-proved depth-4 translation composition; its separate
--- semantic case only preserves the narrower source-evidence boundary.
-semanticCaseBehaviors.depth4_p6_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- P8 (#135) is the same depth-4 translation composition; its separate semantic
--- case only preserves the narrower source-evidence boundary.
-semanticCaseBehaviors.depth4_p8_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- Endpoints are emitted in lexical name order, which is not the engine's
--- barrelposition semantic, so a record naming its representative endpoint is
--- resolved by that identity. Records without the field keep the historical
--- second entry. Returns nil if a named identity is absent, so no prospective
--- geometry is streamed rather than guessing an endpoint.
-local function barrelpositionEndpoint(geometry)
-    local connection = geometry.barrelposition_connection
-    if not connection then return geometry.endpoints[2] end
-    for _, endpoint in ipairs(geometry.endpoints) do
-        if endpoint.connection == connection then return endpoint end
-    end
-end
-
--- Returns nil for an unknown semantic case, so no prospective geometry is
--- streamed and the prospective generated-geometry path is not entered.
-local function deriveProspectiveMuzzle(geometry)
-    local behavior = semanticCaseBehaviors[geometry.semantic_case]
-    if not behavior then return nil end
-    local chain = { fixed = {}, segment = { 0, 0, 0 } }
-    for _, layer in ipairs(geometry.layers) do
-        chainTranslate(chain, layer.connection_transform.position)
-        behavior(chain, layer)
-    end
-    local endpoint = barrelpositionEndpoint(geometry)
-    if not (chain.origin and chain.pivot and endpoint) then return nil end
-    local downstream = vadd(chain.segment, rotateInFrame(chain.fixed, endpoint.transform.position))
-    return { origin = chain.origin, pivot = chain.pivot, downstream = downstream }
-end
-
-local prospectiveMuzzles = {}
-for macroName, geometry in pairs(TurretMuzzleGeometry) do
-    prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry)
-end
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
@@ -1673,18 +1524,9 @@ local function requestEngageabilities(targets, purpose)
             local macro = tostring(member.macro or "")
             if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
             local arc = TurretArcLimits[macro]
-            local muzzle = prospectiveMuzzles[macro]
-            local origin = muzzle and muzzle.origin or nil
-            local pivot = muzzle and muzzle.pivot or nil
-            local downstream = muzzle and muzzle.downstream or nil
             AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
                 nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
-                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0,
-                muzzleknow = muzzle and 1 or 0,
-                mox = origin and origin[1] or 0, moy = origin and origin[2] or 0, moz = origin and origin[3] or 0,
-                mpx = pivot and pivot[1] or 0, mpy = pivot and pivot[2] or 0, mpz = pivot and pivot[3] or 0,
-                mdx = downstream and downstream[1] or 0, mdy = downstream and downstream[2] or 0,
-                mdz = downstream and downstream[3] or 0 })
+                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0 })
         end
         for index = first, last do
             local entry = pending[index]
