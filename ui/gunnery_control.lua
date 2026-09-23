@@ -6,6 +6,7 @@ local State = X4GunneryState
 local Persistence = X4GunneryPersistence
 local TurretArcLimits = X4GunneryTurretArcLimits or {}
 local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
+local AimPointMap = X4GunneryAimPointMap
 
 -- Prospective-muzzle geometry for the supported self-masking macros (#74, #98).
 -- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
@@ -1488,10 +1489,75 @@ local function checkedOperationalTurrets()
     return members
 end
 
--- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
--- events avoid relying on unproven nested-table transport: selected turret ids
--- are streamed once, followed by at most 20 target ids for the batch.
+-- The selected-member batch awaits the downstream ENGAGEABLE replacement.
+-- Attach one shared target map to each pending target for later per-turret checks.
 local engageabilityBatchSize = 20
+local aimMapSerial, aimMaps = 0, {}
+
+-- Replay makes the synchronous search consume one asynchronous MD answer at a
+-- time. Every replay uses the same target-local probes and the same shared
+-- budget; only X4's replies advance it.
+local function advanceAimMap(request)
+    local ok, value = pcall(AimPointMap.search, request.center, request.half, function(n, p)
+        local answer = request.answers[n]
+        if not answer then error({ n = n, p = p }, 0) end
+        return answer
+    end)
+    if not ok and type(value) == "table" and value.n then
+        request.pending = value
+        AddUITriggeredEvent("X4GunneryControl", "aimpoint_probe", {
+            token = request.token, target = request.target,
+            x = value.p[1], y = value.p[2], z = value.p[3],
+        })
+    elseif ok then
+        request.result = value
+        request.pending = nil
+        aimMaps[request.token] = nil
+    else
+        request.failed = true
+        request.pending = nil
+        aimMaps[request.token] = nil
+    end
+end
+
+local function requestAimMap(target)
+    aimMapSerial = aimMapSerial + 1
+    local token = tostring(aimMapSerial)
+    local request = { token = token, target = id(target), answers = {} }
+    aimMaps[token] = request
+    AddUITriggeredEvent("X4GunneryControl", "aimpoint_box", {
+        token = token, target = request.target,
+    })
+    return request
+end
+
+local function onAimPointBox(_, param)
+    local token, valid, cx, cy, cz, hx, hy, hz = tostring(param or ""):match(
+        "^x4gcapb:(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    local request = token and aimMaps[token]
+    if not request or request.center then return end
+    if valid ~= "1" then request.failed = true; aimMaps[token] = nil; return end
+    request.center = { tonumber(cx) / 1000, tonumber(cy) / 1000, tonumber(cz) / 1000 }
+    request.half = { tonumber(hx) / 1000, tonumber(hy) / 1000, tonumber(hz) / 1000 }
+    advanceAimMap(request)
+end
+
+local function onAimPointProbe(_, param)
+    local token, valid, x, y, z = tostring(param or ""):match(
+        "^x4gcapp:(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    local request = token and aimMaps[token]
+    if not request or not request.pending then return end
+    if valid ~= "1" then request.failed = true; request.pending = nil; aimMaps[token] = nil; return end
+    local d = { tonumber(x) / 1000000000, tonumber(y) / 1000000000, tonumber(z) / 1000000000 }
+    local length = math.sqrt(d[1]^2 + d[2]^2 + d[3]^2)
+    if math.abs(length - 1) > 1e-3 then
+        request.failed = true; request.pending = nil; aimMaps[token] = nil; return
+    end
+    request.answers[request.pending.n] = d
+    request.pending = nil
+    advanceAimMap(request)
+end
+
 local function requestEngageabilities(targets, purpose)
     local results = {}
     if not session then return results end
@@ -1540,6 +1606,7 @@ local function requestEngageabilities(targets, purpose)
                     cached = cached and cached.signature == signature and cached or {}
                     cached.signature, cached.requestedAt, cached.pending, cached.total,
                         cached.engageable, cached.known = signature, now, true, #members, nil, nil
+                    cached.aimMap = requestAimMap(target)
                     engageabilityCache[key] = cached
                     if not seen[targetKey] then
                         seen[targetKey] = true
@@ -3826,6 +3893,8 @@ local function init()
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
+    RegisterEvent("X4GunneryControl.AimPointBox", onAimPointBox)
+    RegisterEvent("X4GunneryControl.AimPointProbe", onAimPointProbe)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
