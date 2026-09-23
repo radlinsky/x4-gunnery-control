@@ -1346,6 +1346,12 @@ end
 local engageabilityBatchSize = 20
 local aimMapSerial, aimMaps = 0, {}
 
+local function finishAimMap(request)
+    if request.bearingPending == 0 and request.lineOfFirePending == 0 then
+        aimMaps[request.token] = nil
+    end
+end
+
 -- Replay makes the synchronous search consume one asynchronous MD answer at a
 -- time. Every replay uses the same target-local probes and the same shared
 -- budget; only X4's replies advance it.
@@ -1366,6 +1372,7 @@ local function advanceAimMap(request)
         request.pending = nil
         request.bearingResults = {}
         request.bearingPending = 0
+        request.lineOfFirePending = 0
         local bearingEvents = {}
         for _, member in ipairs(request.members) do
             local macro = tostring(member.macro or "")
@@ -1379,7 +1386,7 @@ local function advanceAimMap(request)
                 bearingEvents[#bearingEvents + 1] = payload
             end
         end
-        if request.bearingPending == 0 then aimMaps[request.token] = nil end
+        if request.bearingPending == 0 then finishAimMap(request) end
         for _, payload in ipairs(bearingEvents) do AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", payload) end
     else
         request.failed = true
@@ -1409,11 +1416,39 @@ local function onAimPointBearing(_, param)
     if not (row and point and point.id == index and row[index] == nil) then return end
     if valid ~= "1" then request.failed = true; aimMaps[token] = nil; return end
     local scale = 1 / 1000000000
-    row[index] = TurretBearing.evaluate(row.macro, point,
+    local bearing = TurretBearing.evaluate(row.macro, point,
         {tonumber(x)*scale, tonumber(y)*scale, tonumber(z)*scale},
         {tonumber(bx)*scale, tonumber(by)*scale, tonumber(bz)*scale})
+    row[index] = bearing
     request.bearingPending = request.bearingPending - 1
-    if request.bearingPending == 0 then aimMaps[token] = nil end
+    if bearing.state == "CAN AIM" then
+        for originIndex, origin in ipairs(bearing.firingOrigins) do
+            local p = origin.position
+            request.lineOfFirePending = request.lineOfFirePending + 1
+            AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
+                token = token, target = request.target, weapon = id(weapon), weaponKey = weapon,
+                point = point.id, origin = originIndex,
+                px = point.c[1], py = point.c[2], pz = point.c[3],
+                ox = p[1], oy = p[2], oz = p[3],
+            })
+        end
+    end
+    finishAimMap(request)
+end
+
+local lineOfFireStates = { [0] = "UNKNOWN", [1] = "clear", [2] = "LINE OF FIRE BLOCKED" }
+
+local function onAimPointLineOfFire(_, param)
+    local token, weapon, pointID, originIndex, code, checks = tostring(param or ""):match(
+        "^x4gcapl:(%d+):(%d+):(%d+):(%d+):([012]):([0123])$")
+    local request = token and aimMaps[token]
+    local row = request and request.bearingResults and request.bearingResults[weapon]
+    local bearing = row and row[tonumber(pointID)]
+    local origin = bearing and bearing.firingOrigins[tonumber(originIndex)]
+    if not origin or origin.lineOfFire then return end
+    origin.lineOfFire = { state = lineOfFireStates[tonumber(code)], checks = tonumber(checks) }
+    request.lineOfFirePending = request.lineOfFirePending - 1
+    finishAimMap(request)
 end
 
 local function onAimPointBox(_, param)
@@ -3772,6 +3807,7 @@ local function init()
     RegisterEvent("X4GunneryControl.AimPointBox", onAimPointBox)
     RegisterEvent("X4GunneryControl.AimPointProbe", onAimPointProbe)
     RegisterEvent("X4GunneryControl.AimPointBearing", onAimPointBearing)
+    RegisterEvent("X4GunneryControl.AimPointLineOfFire", onAimPointLineOfFire)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
