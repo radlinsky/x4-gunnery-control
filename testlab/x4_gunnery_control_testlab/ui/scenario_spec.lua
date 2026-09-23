@@ -51,35 +51,33 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- The spawned ship only triggers the macro-property dump; no target,
-    -- weapon loadout, teleport, or firing measurement is required.
-    id      = "issue-171-origin-inside-box-r1",
+    id      = "issue-189-p9-refresh-ray-r1",
     enabled = false,
 
     setup = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
         shipLabel       = "Ray",
         turretGroup     = "group_front_up_left",
-        turretLabel     = "Front Upper Left",
-        expectedTurrets = 2,
+        turretLabel     = "All Turrets",
+        expectedTurrets = 14,
+        selectAll       = true,
     },
 
     groups = {
         {
-            label     = "ISSUE171 BOX PROBE",
-            macro     = "ship_arg_s_fighter_01_a_macro",
-            faction   = "player",
+            label     = "ISSUE189 P9 TARGET OSAKA",
+            macro     = "ship_ter_l_destroyer_01_a_macro",
+            faction   = "xenon",
             count     = 1,
-            distance  = 2000,
+            distance  = 3500,
             x         = 0,
             y         = 0,
             spread    = 0,
             behaviour = "wait",
-            yaw       = 0,
-            pitch     = 0,
-            roll      = 0,
-            preserveOrientation = true,
+            hostile   = true,
+            holdFire  = true,
             stripDefenceUnits = true,
+            repairGuard = true,
         },
     },
 }
