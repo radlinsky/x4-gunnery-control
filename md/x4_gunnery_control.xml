@@ -117,6 +117,33 @@
       </cues>
     </cue>
 
+    <cue name="EngageabilityRange" instantiate="true">
+      <conditions>
+        <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_range'"/>
+      </conditions>
+      <actions>
+        <set_value name="$target" exact="@event.param3.$target"/>
+        <set_value name="$weapon" exact="@event.param3.$weapon"/>
+        <do_if value="typeof $target != datatype.component and $target">
+          <set_value name="$target" exact="component.{$target}"/>
+        </do_if>
+        <do_if value="typeof $weapon != datatype.component and $weapon">
+          <set_value name="$weapon" exact="component.{$weapon}"/>
+        </do_if>
+        <set_value name="$result" exact="0"/>
+        <do_if value="typeof $target == datatype.component and $target.exists and typeof $weapon == datatype.component and $weapon.exists">
+          <do_if value="$weapon.bboxdistanceto.{$target} le $weapon.maxfirerange">
+            <set_value name="$result" exact="1"/>
+          </do_if>
+          <do_else>
+            <set_value name="$result" exact="2"/>
+          </do_else>
+        </do_if>
+        <raise_lua_event name="'X4GunneryControl.EngageabilityRange'"
+                         param="'x4gcr:' + @event.param3.$token + ':' + @event.param3.$weaponKey + ':' + $result"/>
+      </actions>
+    </cue>
+
     <!-- One target-local #184 map request. The Lua search owns every sample and
          the 40-sample budget; MD supplies only the target box and X4 direction. -->
     <cue name="AimPointMapService">

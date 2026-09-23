@@ -132,41 +132,32 @@ do
         return sess
     end
 
-    -- ENGAGEABLE batches emitted after uiTriggeredEvents index `mark`.
+    local driver42 = dofile('tests/support/engageability_driver.lua')
+    driver42.install()
     local function batchesSince42(mark)
-        local batches, current = {}, nil
-        for i = mark + 1, #fix.uiTriggeredEvents do
-            local e = fix.uiTriggeredEvents[i]
-            if e.control == "engageability_begin" then
-                current = { nonce = e.params.nonce, members = e.params.members,
-                             memberIDs = {}, targets = {} }
-                batches[#batches + 1] = current
-            elseif current ~= nil and e.params and e.params.nonce == current.nonce then
-                if e.control == "engageability_member" then
-                    current.memberIDs[#current.memberIDs + 1] = e.params.weapon
-                elseif e.control == "engageability_target" then
-                    current.targets[#current.targets + 1] = X4GunneryState.normID(e.params.target)
-                elseif e.control == "engageability_commit" then
-                    current = nil
+        local batch, seen = {targets={},memberIDs={}}, {}
+        for i=mark+1,#fix.uiTriggeredEvents do
+            local event=fix.uiTriggeredEvents[i]
+            if event.control=='engageability_range' then
+                local target=X4GunneryState.normID(event.params.target)
+                if not seen[target] then
+                    seen[target]=true
+                    batch.targets[#batch.targets+1]=target
                 end
+                if #batch.memberIDs==0 then batch.memberIDs[1]=event.params.weapon end
             end
         end
-        return batches
+        if #batch.targets==0 then return {} end
+        batch.members=#batch.memberIDs
+        return {batch}
     end
-
-    -- Deliver MD's reply for one batch: an EngageabilityResult per target it
-    -- has a reading for ("engageable:known:total"), then the batch complete.
     local function deliver42(batch, resultsByKey)
         for _, key in ipairs(batch.targets) do
-            local counts = resultsByKey[key]
-            if counts then
-                fix.fireEvent("X4GunneryControl.EngageabilityResult",
-                    "x4gce3:" .. batch.nonce .. ":" .. key .. ":" .. counts)
+            local engageable=resultsByKey[key]
+            if engageable~=nil then
+                driver42.finish(fix,API.requestEngageability(tonumber(key)),engageable)
             end
         end
-        fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
-            "x4gce2c:" .. batch.nonce .. ":" .. tostring(#batch.targets) .. ":"
-                .. tostring(#batch.targets))
     end
 
     local function resetCounts42()
@@ -203,7 +194,7 @@ do
     -- 701 of root 600 with no other root surface alive, drive the existing
     -- production path to the objects stage: the loss tick, the empty-
     -- surfaces escalation to the hull stage, the hull ENGAGEABLE query
-    -- (exactly root 600), the proven-zero "0:1:1" reading, and the
+    -- (exactly root 600), the proven-zero reading, and the
     -- escalation to objects. Returns the UI-event mark of the moment the
     -- objects stage is entered; object-stage batches, results, and actions
     -- stay in the calling scenario.
@@ -222,7 +213,7 @@ do
             "the hull stage must issue one ENGAGEABLE query for exactly the "
             .. "root 600; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["600"] = "0:1:1" })
+        deliver42(batches[1], { ["600"] = false })
         tick42()
         assert(sess.targetFallback ~= nil
             and sess.targetFallback.stage == "objects",
@@ -281,7 +272,7 @@ do
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
         -- 98 proves positive ... then dies before the consume tick, while
         -- 99 comes back operational.
-        deliver42(batches[1], { ["98"] = "1:1:1" })
+        deliver42(batches[1], { ["98"] = true })
         operational42["98"] = false
         operational42["99"] = true
         softtargetCalls42 = {}
@@ -328,7 +319,7 @@ do
             "the tick after the restart must evaluate the surviving 99; "
             .. "targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["99"] = "1:1:1" })
+        deliver42(batches[1], { ["99"] = true })
         softtargetCalls42 = {}
         tick42()
         -- 5. ... and the following consume tick engages it.
@@ -397,7 +388,7 @@ do
         operational42["98"] = false
         -- 3. 99 proves positive, 98 is left unresolved; complete the batch the
         -- standard fixture way (per-target results, then batch complete).
-        deliver42(batches[1], { ["99"] = "1:1:1" })
+        deliver42(batches[1], { ["99"] = true })
         softtargetCalls42 = {}
         local restartMark = #fix.uiTriggeredEvents
         tick42()
@@ -481,7 +472,7 @@ do
             .. "98; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
         -- 98 settles as a proven zero, then dies while 99 comes operational.
-        deliver42(batches[1], { ["98"] = "0:1:1" })
+        deliver42(batches[1], { ["98"] = false })
         operational42["98"] = false
         operational42["99"] = true
         softtargetCalls42 = {}
@@ -509,7 +500,7 @@ do
             and batches[1].targets[1] == "99",
             "the tick after the refresh must query the surviving 99; targets="
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
-        deliver42(batches[1], { ["99"] = "1:1:1" })
+        deliver42(batches[1], { ["99"] = true })
         softtargetCalls42 = {}
         tick42()
         assert(tostring(sess.aimTargetID) == "99" and sess.targetFallback == nil,
@@ -549,7 +540,7 @@ do
             .. table.concat(batches[1] and batches[1].targets or {}, ","))
         -- 2. The positive reading settles in the cache ... and the player
         -- disables Auto-next before the consume tick.
-        deliver42(batches[1], { ["702"] = "1:1:1" })
+        deliver42(batches[1], { ["702"] = true })
         sess.autoNextTarget = false
         softtargetCalls42 = {}
         tick42()

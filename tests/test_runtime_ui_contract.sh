@@ -427,4 +427,7 @@ grep -Fq '<t id="102">' t/0001.xml
 grep -Fq 'controls:addRow("direct_mode", {})' "$main"
 grep -Fq 'applyDirectModeLive()' "$main"
 
+# P5 uses X4's inclusive combat-reach predicate. Equality must survive.
+grep -Fq "\$weapon.bboxdistanceto.{\$target} le \$weapon.maxfirerange" md/x4_gunnery_control.xml
+
 echo "runtime UI contract checks passed"

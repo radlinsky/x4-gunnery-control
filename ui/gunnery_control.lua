@@ -4,7 +4,6 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
-local TurretArcLimits = X4GunneryTurretArcLimits or {}
 local AimPointMap = X4GunneryAimPointMap
 local TurretBearing = X4GunneryTurretBearing
 
@@ -66,7 +65,8 @@ local resumePending, resumeOpenPending, endingSession = false, false, false
 local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
-local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
+local engageabilityCache = {}
+local aimMaps = {}
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local redirectDockedMenu
@@ -134,7 +134,8 @@ end
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship, origin)
-    engageabilityCache, engageabilityRequests = {}, {}
+    engageabilityCache = {}
+    aimMaps = {}
     engageabilityRepaintPending = nil
     engagedOverlayRefreshPending = false
     surfacePinnedUpdatePending = false
@@ -824,7 +825,8 @@ local function discardSession(reason)
     -- route (endForMovement -> endSession) is also covered.
     local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
-    engageabilityCache, engageabilityRequests = {}, {}
+    engageabilityCache = {}
+    aimMaps = {}
     engageabilityRepaintPending = nil
     resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
@@ -1341,21 +1343,80 @@ local function checkedOperationalTurrets()
     return members
 end
 
--- The selected-member batch awaits the downstream ENGAGEABLE replacement.
--- Attach one shared target map to each pending target for later per-turret checks.
-local engageabilityBatchSize = 20
-local aimMapSerial, aimMaps = 0, {}
+-- One request per target. Replies are accepted only while this exact cache
+-- entry is current, so delayed MD work cannot complete a newer refresh.
+local aimMapSerial = 0
+local scheduleEngageabilityRepaint
 
-local function finishAimMap(request)
-    if request.bearingPending == 0 and request.lineOfFirePending == 0 then
-        aimMaps[request.token] = nil
+local function currentAimMap(request)
+    return request and aimMaps[request.token] == request
+        and request.epoch == sessionEpoch
+        and engageabilityCache[request.key] == request.cached
+        and request.cached.aimMap == request and request.cached.pending
+end
+
+local function finishEngageability(request)
+    if not currentAimMap(request) then return end
+    local engageable, known = 0, 0
+    for _, row in ipairs(request.rows) do
+        if row.engageable then engageable = engageable + 1 end
+        if not row.unknown then known = known + 1 end
+    end
+    local cached = request.cached
+    cached.engageable, cached.known, cached.pending, cached.receivedAt =
+        engageable, known, false, getElapsedTime()
+    aimMaps[request.token] = nil
+    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
+        scheduleEngageabilityRepaint(request.purpose)
     end
 end
 
--- Replay makes the synchronous search consume one asynchronous MD answer at a
--- time. Every replay uses the same target-local probes and the same shared
--- budget; only X4's replies advance it.
+local function advanceTurret(request)
+    if not currentAimMap(request) then return end
+    while true do
+        local row = request.rows[request.turretIndex]
+        if not row then finishEngageability(request); return end
+        if row.range ~= "IN RANGE" then
+            request.turretIndex = request.turretIndex + 1
+        else
+            local point = request.result.points[row.pointIndex]
+            if not point then
+                request.turretIndex = request.turretIndex + 1
+            else
+                local result = row.points[row.pointIndex]
+                if result.bearing == "NOT_EVALUATED" then
+                    request.awaiting = { kind = "bearing", weapon = row.weapon, point = point.id }
+                    AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", {
+                        token = request.token, target = request.target, weapon = id(row.weapon),
+                        weaponKey = row.weapon, point = point.id,
+                        x = point.c[1], y = point.c[2], z = point.c[3],
+                    })
+                    return
+                end
+                if result.bearing.state == "CAN AIM"
+                        and result.originIndex <= #result.bearing.firingOrigins then
+                    local origin = result.bearing.firingOrigins[result.originIndex]
+                    local p = origin.position
+                    request.awaiting = { kind = "line", weapon = row.weapon, point = point.id,
+                        origin = result.originIndex }
+                    AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
+                        token = request.token, target = request.target, weapon = id(row.weapon),
+                        weaponKey = row.weapon, point = point.id, origin = result.originIndex,
+                        px = point.c[1], py = point.c[2], pz = point.c[3],
+                        ox = p[1], oy = p[2], oz = p[3],
+                    })
+                    return
+                end
+                row.pointIndex = row.pointIndex + 1
+            end
+        end
+    end
+end
+
+-- The synchronous #184 search replays answered probes; only X4 replies can
+-- advance the shared sample budget.
 local function advanceAimMap(request)
+    if not currentAimMap(request) then return end
     local ok, value = pcall(AimPointMap.search, request.center, request.half, function(n, p)
         local answer = request.answers[n]
         if not answer then error({ n = n, p = p }, 0) end
@@ -1367,73 +1428,76 @@ local function advanceAimMap(request)
             token = request.token, target = request.target,
             x = value.p[1], y = value.p[2], z = value.p[3],
         })
-    elseif ok then
-        request.result = value
-        request.pending = nil
-        request.bearingResults = {}
-        request.bearingPending = 0
-        request.lineOfFirePending = 0
-        local bearingEvents = {}
-        for _, member in ipairs(request.members) do
-            local macro = tostring(member.macro or "")
-            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
-            local weapon = State.normID(member.componentID)
-            request.bearingResults[weapon] = { macro = macro }
-            for _, point in ipairs(value.points) do
-                request.bearingPending = request.bearingPending + 1
-                local payload = { token = request.token, target = request.target, weapon = id(member.componentID),
-                    weaponKey = weapon, point = point.id, x = point.c[1], y = point.c[2], z = point.c[3] }
-                bearingEvents[#bearingEvents + 1] = payload
+    elseif ok and type(value) == "table" and type(value.points) == "table" then
+        request.result, request.pending = value, nil
+        for _, row in ipairs(request.rows) do
+            row.points = {}
+            for i, point in ipairs(value.points) do
+                row.points[i] = { aimPoint = point, bearing = "NOT_EVALUATED",
+                    lineOfFire = "NOT_EVALUATED", originIndex = 1 }
             end
+            if row.range == "IN RANGE" and #value.points == 0 then row.unknown = true end
         end
-        if request.bearingPending == 0 then finishAimMap(request) end
-        for _, payload in ipairs(bearingEvents) do AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", payload) end
+        request.turretIndex = 1
+        advanceTurret(request)
     else
-        request.failed = true
-        request.pending = nil
-        aimMaps[request.token] = nil
+        request.failed, request.pending = true, nil
+        for _, row in ipairs(request.rows) do
+            if row.range == "IN RANGE" then row.unknown = true end
+        end
+        finishEngageability(request)
     end
 end
 
-local function requestAimMap(target, members)
-    aimMapSerial = aimMapSerial + 1
-    local token = tostring(aimMapSerial)
-    local request = { token = token, target = id(target), answers = {}, members = members }
-    aimMaps[token] = request
-    AddUITriggeredEvent("X4GunneryControl", "aimpoint_box", {
-        token = token, target = request.target,
-    })
-    return request
+local function onEngageabilityRange(_, param)
+    local token, weapon, code = tostring(param or ""):match("^x4gcr:(%d+):(%d+):([012])$")
+    local request = token and aimMaps[token]
+    if not currentAimMap(request) or not request.rangePending then return end
+    local row = request.byWeapon[weapon]
+    if not row or row.range ~= "NOT_EVALUATED" then return end
+    row.range = code == "1" and "IN RANGE" or code == "2" and "OUT OF RANGE" or "UNKNOWN"
+    if row.range == "UNKNOWN" then row.unknown = true end
+    request.rangePending = request.rangePending - 1
+    if request.rangePending ~= 0 then return end
+    for _, member in ipairs(request.rows) do
+        if member.range == "IN RANGE" then
+            AddUITriggeredEvent("X4GunneryControl", "aimpoint_box", {
+                token = token, target = request.target,
+            })
+            return
+        end
+    end
+    finishEngageability(request)
 end
 
 local function onAimPointBearing(_, param)
     local token, weapon, pointID, valid, x, y, z, bx, by, bz = tostring(param or ""):match(
         "^x4gcapc:(%d+):(%d+):(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
     local request = token and aimMaps[token]
-    local row = request and request.bearingResults and request.bearingResults[weapon]
-    local index = tonumber(pointID)
-    local point = request and request.result and request.result.points[index]
-    if not (row and point and point.id == index and row[index] == nil) then return end
-    if valid ~= "1" then request.failed = true; aimMaps[token] = nil; return end
-    local scale = 1 / 1000000000
-    local bearing = TurretBearing.evaluate(row.macro, point,
-        {tonumber(x)*scale, tonumber(y)*scale, tonumber(z)*scale},
-        {tonumber(bx)*scale, tonumber(by)*scale, tonumber(bz)*scale})
-    row[index] = bearing
-    request.bearingPending = request.bearingPending - 1
-    if bearing.state == "CAN AIM" then
-        for originIndex, origin in ipairs(bearing.firingOrigins) do
-            local p = origin.position
-            request.lineOfFirePending = request.lineOfFirePending + 1
-            local pair = {
-                token = token, target = request.target, weapon = id(weapon), weaponKey = weapon,
-                point = point.id, origin = originIndex,
-                px = point.c[1], py = point.c[2], pz = point.c[3],
-                ox = p[1], oy = p[2], oz = p[3] }
-            AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", pair)
+    local awaiting = request and request.awaiting
+    if not currentAimMap(request) or not awaiting or awaiting.kind ~= "bearing"
+            or awaiting.weapon ~= weapon or awaiting.point ~= tonumber(pointID) then return end
+    local row = request.byWeapon[weapon]
+    local result = row.points[tonumber(pointID)]
+    local point = result and result.aimPoint
+    if not point or result.bearing ~= "NOT_EVALUATED" then return end
+    request.awaiting = nil
+    if valid == "1" then
+        local scale = 1 / 1000000000
+        result.bearing = TurretBearing.evaluate(row.macro, point,
+            {tonumber(x)*scale, tonumber(y)*scale, tonumber(z)*scale},
+            {tonumber(bx)*scale, tonumber(by)*scale, tonumber(bz)*scale})
+    else
+        result.bearing = { aimPoint = point, state = "UNKNOWN", firingOrigins = {} }
+    end
+    if result.bearing.state == "CAN AIM" then
+        for _, origin in ipairs(result.bearing.firingOrigins) do
+            origin.lineOfFire = { state = "NOT_EVALUATED" }
         end
     end
-    finishAimMap(request)
+    if result.bearing.state == "UNKNOWN" then row.unknown = true end
+    if result.bearing.state ~= "CAN AIM" then row.pointIndex = row.pointIndex + 1 end
+    advanceTurret(request)
 end
 
 local lineOfFireStates = { [0] = "UNKNOWN", [1] = "clear", [2] = "LINE OF FIRE BLOCKED" }
@@ -1442,21 +1506,42 @@ local function onAimPointLineOfFire(_, param)
     local token, weapon, pointID, originIndex, code, checks = tostring(param or ""):match(
         "^x4gcapl:(%d+):(%d+):(%d+):(%d+):([012]):([0123])$")
     local request = token and aimMaps[token]
-    local row = request and request.bearingResults and request.bearingResults[weapon]
-    local bearing = row and row[tonumber(pointID)]
-    local origin = bearing and bearing.firingOrigins[tonumber(originIndex)]
-    if not origin or origin.lineOfFire then return end
+    local awaiting = request and request.awaiting
+    if not currentAimMap(request) or not awaiting or awaiting.kind ~= "line"
+            or awaiting.weapon ~= weapon or awaiting.point ~= tonumber(pointID)
+            or awaiting.origin ~= tonumber(originIndex) then return end
+    local row = request.byWeapon[weapon]
+    local result = row.points[tonumber(pointID)]
+    local origin = result and result.bearing.firingOrigins[tonumber(originIndex)]
+    if not origin or origin.lineOfFire.state ~= "NOT_EVALUATED" then return end
+    request.awaiting = nil
     origin.lineOfFire = { state = lineOfFireStates[tonumber(code)], checks = tonumber(checks) }
-    request.lineOfFirePending = request.lineOfFirePending - 1
-    finishAimMap(request)
+    if code == "1" then
+        result.lineOfFire, row.engageable, row.unknown = "clear", true, false
+        row.pointIndex = #request.result.points + 1
+    else
+        if code == "0" then
+            row.unknown = true
+            result.lineOfFire = "UNKNOWN"
+        elseif result.lineOfFire == "NOT_EVALUATED" then
+            result.lineOfFire = "LINE OF FIRE BLOCKED"
+        end
+        result.originIndex = result.originIndex + 1
+    end
+    advanceTurret(request)
 end
 
 local function onAimPointBox(_, param)
     local token, valid, cx, cy, cz, hx, hy, hz = tostring(param or ""):match(
         "^x4gcapb:(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
     local request = token and aimMaps[token]
-    if not request or request.center then return end
-    if valid ~= "1" then request.failed = true; aimMaps[token] = nil; return end
+    if not currentAimMap(request) or request.center then return end
+    if valid ~= "1" then
+        request.failed = true
+        for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
+        finishEngageability(request)
+        return
+    end
     request.center = { tonumber(cx) / 1000, tonumber(cy) / 1000, tonumber(cz) / 1000 }
     request.half = { tonumber(hx) / 1000, tonumber(hy) / 1000, tonumber(hz) / 1000 }
     advanceAimMap(request)
@@ -1466,12 +1551,20 @@ local function onAimPointProbe(_, param)
     local token, valid, x, y, z = tostring(param or ""):match(
         "^x4gcapp:(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+)$")
     local request = token and aimMaps[token]
-    if not request or not request.pending then return end
-    if valid ~= "1" then request.failed = true; request.pending = nil; aimMaps[token] = nil; return end
+    if not currentAimMap(request) or not request.pending then return end
+    if valid ~= "1" then
+        request.failed, request.pending = true, nil
+        for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
+        finishEngageability(request)
+        return
+    end
     local d = { tonumber(x) / 1000000000, tonumber(y) / 1000000000, tonumber(z) / 1000000000 }
     local length = math.sqrt(d[1]^2 + d[2]^2 + d[3]^2)
     if math.abs(length - 1) > 1e-3 then
-        request.failed = true; request.pending = nil; aimMaps[token] = nil; return
+        request.failed, request.pending = true, nil
+        for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
+        finishEngageability(request)
+        return
     end
     request.answers[request.pending.n] = d
     request.pending = nil
@@ -1486,96 +1579,63 @@ local function requestEngageabilities(targets, purpose)
         signatureParts[#signatureParts + 1] = State.normID(member.componentID)
     end
     local signature = table.concat(signatureParts, ",")
-    local now, pending, seen = getElapsedTime(), {}, {}
-    -- Normally MD follows the final result immediately with batch completion.
-    -- If only that aggregate event is lost, retain the empty request briefly so
-    -- a late completion can still be audited, then reclaim it before the next
-    -- completed-result cache refresh.
-    for nonce, request in pairs(engageabilityRequests) do
-        if request.resultsCompleteAt and now - request.resultsCompleteAt >= 1 then
-            engageabilityRequests[nonce] = nil
-        end
-    end
+    local now = getElapsedTime()
     for position, target in ipairs(targets or {}) do
         if not State.isNullID(target) then
             local targetKey = State.normID(target)
             local key = tostring(sessionEpoch) .. ":" .. targetKey
             local cached = engageabilityCache[key]
-            if cached and cached.signature == signature then
-                if cached.pending and now - cached.requestedAt < 2 then
-                    results[position] = cached
-                elseif not cached.pending and now - cached.requestedAt < 1 then
-                    results[position] = cached
-                end
-            end
-            if not results[position] then
+            if cached and cached.signature == signature and
+                    ((cached.pending and now - cached.requestedAt < 2)
+                    or (not cached.pending and now - cached.requestedAt < 1)) then
+                results[position] = cached
+            else
+                if cached and cached.aimMap then aimMaps[cached.aimMap.token] = nil end
+                cached = cached and cached.signature == signature and cached or {}
+                cached.signature, cached.requestedAt, cached.total = signature, now, #members
+                cached.engageable, cached.known, cached.pending = nil, nil, #members > 0
+                engageabilityCache[key] = cached
+                results[position] = cached
                 if #members == 0 then
-                    cached = { engageable = 0, total = 0, signature = signature, requestedAt = now }
-                    engageabilityCache[key] = cached
+                    cached.engageable, cached.known = 0, 0
                 else
-                    -- Supersede only this target in an older batch. The older
-                    -- request remains alive for its other correlated targets.
-                    if cached and cached.pendingNonce then
-                        local previousNonce = cached.pendingNonce
-                        local previous = engageabilityRequests[previousNonce]
-                        if previous then
-                            previous.targets[targetKey] = nil
-                            if next(previous.targets) == nil then engageabilityRequests[previousNonce] = nil end
+                    aimMapSerial = aimMapSerial + 1
+                    local token = tostring(aimMapSerial)
+                    local request = { token = token, epoch = sessionEpoch, key = key,
+                        target = id(target), cached = cached, purpose = purpose,
+                        rows = {}, byWeapon = {}, answers = {}, rangePending = 0 }
+                    cached.aimMap = request
+                    aimMaps[token] = request
+                    local root = targetRoot(target)
+                    local eligible = (C.IsComponentClass(root, "ship") or C.IsComponentClass(root, "station"))
+                        and componentData(root, "isenemy") == true
+                    if not eligible then
+                        request.authorized = false
+                        for _, member in ipairs(members) do
+                            local row = { weapon = State.normID(member.componentID),
+                                range = "NOT_EVALUATED", points = {} }
+                            request.rows[#request.rows + 1] = row
+                        end
+                        finishEngageability(request)
+                    else
+                        request.authorized = true
+                        for _, member in ipairs(members) do
+                            local weapon = State.normID(member.componentID)
+                            local macro = tostring(member.macro or "")
+                            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
+                            local row = { weapon = weapon, macro = macro,
+                                range = "NOT_EVALUATED", points = {}, pointIndex = 1 }
+                            request.rows[#request.rows + 1] = row
+                            request.byWeapon[weapon] = row
+                            request.rangePending = request.rangePending + 1
+                            AddUITriggeredEvent("X4GunneryControl", "engageability_range", {
+                                token = token, target = request.target,
+                                weapon = id(member.componentID), weaponKey = weapon })
                         end
                     end
-                    cached = cached and cached.signature == signature and cached or {}
-                    cached.signature, cached.requestedAt, cached.pending, cached.total,
-                        cached.engageable, cached.known = signature, now, true, #members, nil, nil
-                    cached.aimMap = requestAimMap(target, members)
-                    engageabilityCache[key] = cached
-                    if not seen[targetKey] then
-                        seen[targetKey] = true
-                        pending[#pending + 1] = { target = target, targetKey = targetKey, key = key, cached = cached }
-                    end
                 end
-                results[position] = cached
             end
         end
-    end
-
-    for first = 1, #pending, engageabilityBatchSize do
-        local last = math.min(first + engageabilityBatchSize - 1, #pending)
-        engageabilitySerial = engageabilitySerial + 1
-        local nonce = tostring(sessionEpoch) .. "_" .. tostring(engageabilitySerial)
-        local request = {
-            epoch = sessionEpoch, signature = signature, selectedTotal = #members,
-            targets = {}, requested = last - first + 1, purpose = purpose,
-        }
-        engageabilityRequests[nonce] = request
-        AddUITriggeredEvent("X4GunneryControl", "engageability_begin", {
-            nonce = nonce, members = #members, targets = request.requested,
-        })
-        for _, member in ipairs(members) do
-            -- GetUpgradeGroupInfo2.currentmacro is the authoritative installed
-            -- equipment macro. Live surface components can return an empty
-            -- The component-data macro field can be blank for installed surface
-            -- components, so use that fallback only for ungrouped
-            -- singleton weapons whose group metadata has no macro.
-            local macro = tostring(member.macro or "")
-            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
-            local arc = TurretArcLimits[macro]
-            AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
-                nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
-                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0 })
-        end
-        for index = first, last do
-            local entry = pending[index]
-            entry.cached.pendingNonce = nonce
-            request.targets[entry.targetKey] = entry.key
-            AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
-                nonce = nonce, target = id(entry.target),
-            })
-        end
-        AddUITriggeredEvent("X4GunneryControl", "engageability_commit", { nonce = nonce })
-        log("event=engageability_batch action=request nonce=" .. nonce
-            .. " requested=" .. tostring(request.requested)
-            .. " selected_total=" .. tostring(#members)
-            .. " selected_signature=" .. string.format("%q", signature))
     end
     return results
 end
@@ -1603,9 +1663,9 @@ end
 -- A target/surface render can issue dozens of independent MD requests. Their
 -- replies commonly arrive in the same UI tick; rebuilding the complete menu
 -- for every reply makes enumeration and audit logging quadratic in row count.
--- One tokenized callback repaints the whole accepted batch. A token survives
+-- One tokenized callback repaints the accepted results. A token survives
 -- stale callbacks safely when session teardown resets the pending marker.
-local function scheduleEngageabilityRepaint(purpose)
+scheduleEngageabilityRepaint = function(purpose)
         if purpose == "surface_pinned" then
         if surfacePinnedUpdatePending then return end
         surfacePinnedUpdatePending = true
@@ -1648,47 +1708,6 @@ local function scheduleEngageabilityRepaint(purpose)
             menu.display()
         end
     end, false, getElapsedTime() + 0.01)
-end
-
-local function onEngageabilityResult(_, param)
-    local nonce, targetKey, engageable, known, total = tostring(param or ""):match(
-        "^x4gce3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    engageable, known, total = tonumber(engageable), tonumber(known), tonumber(total)
-    if total ~= request.selectedTotal or known > total or engageable > known then return end
-    targetKey = State.normID(targetKey)
-    local key = request.targets[targetKey]
-    local cached = key and engageabilityCache[key]
-    if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.engageable, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
-        engageable, known, total, false, nil, getElapsedTime()
-    request.targets[targetKey] = nil
-    if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
-    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        scheduleEngageabilityRepaint(request.purpose)
-    end
-end
-
-
-local function onEngageabilityBatchComplete(_, param)
-    local nonce, accepted, completed = tostring(param or ""):match("^x4gce2c:([^:]+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    local unresolved = 0
-    for _, key in pairs(request.targets) do
-        local cached = engageabilityCache[key]
-        if cached and cached.signature == request.signature and cached.pendingNonce == nonce then
-            cached.pendingNonce = nil
-            unresolved = unresolved + 1
-        end
-    end
-    engageabilityRequests[nonce] = nil
-    log("event=engageability_batch action=complete nonce=" .. nonce
-        .. " requested=" .. tostring(request.requested)
-        .. " accepted=" .. tostring(accepted)
-        .. " completed=" .. tostring(completed)
-        .. " unresolved=" .. tostring(unresolved))
 end
 
 targetRoot = function(component)
@@ -2141,9 +2160,9 @@ local function chooseAimTarget()
     return nil
 end
 
--- One planner page is one MD batch: never let a fallback page span the
--- engageability batch size.
-local fallbackPageSize = engageabilityBatchSize
+-- Bound each fallback page so one tick cannot start an unbounded set of
+-- target requests.
+local fallbackPageSize = 20
 
 -- Session-scoped asynchronous resolution of a Direct surface loss
 -- (Issue #45 Task 5). onDirectTargetLost() refreshes the root's surface
@@ -3802,8 +3821,7 @@ local function init()
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
-    RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
-    RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
+    RegisterEvent("X4GunneryControl.EngageabilityRange", onEngageabilityRange)
     RegisterEvent("X4GunneryControl.AimPointBox", onAimPointBox)
     RegisterEvent("X4GunneryControl.AimPointProbe", onAimPointProbe)
     RegisterEvent("X4GunneryControl.AimPointBearing", onAimPointBearing)
