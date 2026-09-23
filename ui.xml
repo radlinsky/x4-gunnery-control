@@ -8,6 +8,8 @@
     <file name="ui/gunnery_state.lua"/>
     <file name="ui/gunnery_persistence.lua"/>
     <file name="ui/turret_muzzle_geometry.lua"/>
+    <file name="ui/turret_bearing_geometry.lua"/>
+    <file name="ui/turret_bearing.lua"/>
     <file name="ui/aimpoint_map.lua"/>
     <file name="ui/gunnery_control.lua"/>
   </environment>

@@ -54,7 +54,9 @@ do
         return unpack(values)
     end
     AddUITriggeredEvent = function(screen, control, params)
-        events57[#events57 + 1] = { screen = screen, control = control, params = params }
+        if control ~= "aimpoint_box" then
+            events57[#events57 + 1] = { screen = screen, control = control, params = params }
+        end
     end
     local pending57 = API.requestEngageability(900)
     assert(pending57.pending and pending57.total == 2, "57: pending denominator must be two exact selected turrets")

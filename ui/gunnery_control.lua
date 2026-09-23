@@ -7,6 +7,7 @@ local Persistence = X4GunneryPersistence
 local TurretArcLimits = X4GunneryTurretArcLimits or {}
 local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
 local AimPointMap = X4GunneryAimPointMap
+local TurretBearing = X4GunneryTurretBearing
 
 -- Prospective-muzzle geometry for the supported self-masking macros (#74, #98).
 -- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
@@ -1512,7 +1513,23 @@ local function advanceAimMap(request)
     elseif ok then
         request.result = value
         request.pending = nil
-        aimMaps[request.token] = nil
+        request.bearingResults = {}
+        request.bearingPending = 0
+        local bearingEvents = {}
+        for _, member in ipairs(request.members) do
+            local macro = tostring(member.macro or "")
+            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
+            local weapon = State.normID(member.componentID)
+            request.bearingResults[weapon] = { macro = macro }
+            for _, point in ipairs(value.points) do
+                request.bearingPending = request.bearingPending + 1
+                local payload = { token = request.token, target = request.target, weapon = id(member.componentID),
+                    weaponKey = weapon, point = point.id, x = point.c[1], y = point.c[2], z = point.c[3] }
+                bearingEvents[#bearingEvents + 1] = payload
+            end
+        end
+        if request.bearingPending == 0 then aimMaps[request.token] = nil end
+        for _, payload in ipairs(bearingEvents) do AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", payload) end
     else
         request.failed = true
         request.pending = nil
@@ -1520,15 +1537,32 @@ local function advanceAimMap(request)
     end
 end
 
-local function requestAimMap(target)
+local function requestAimMap(target, members)
     aimMapSerial = aimMapSerial + 1
     local token = tostring(aimMapSerial)
-    local request = { token = token, target = id(target), answers = {} }
+    local request = { token = token, target = id(target), answers = {}, members = members }
     aimMaps[token] = request
     AddUITriggeredEvent("X4GunneryControl", "aimpoint_box", {
         token = token, target = request.target,
     })
     return request
+end
+
+local function onAimPointBearing(_, param)
+    local token, weapon, pointID, valid, x, y, z, bx, by, bz = tostring(param or ""):match(
+        "^x4gcapc:(%d+):(%d+):(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    local request = token and aimMaps[token]
+    local row = request and request.bearingResults and request.bearingResults[weapon]
+    local index = tonumber(pointID)
+    local point = request and request.result and request.result.points[index]
+    if not (row and point and point.id == index and row[index] == nil) then return end
+    if valid ~= "1" then request.failed = true; aimMaps[token] = nil; return end
+    local scale = 1 / 1000000000
+    row[index] = TurretBearing.evaluate(row.macro, point,
+        {tonumber(x)*scale, tonumber(y)*scale, tonumber(z)*scale},
+        {tonumber(bx)*scale, tonumber(by)*scale, tonumber(bz)*scale})
+    request.bearingPending = request.bearingPending - 1
+    if request.bearingPending == 0 then aimMaps[token] = nil end
 end
 
 local function onAimPointBox(_, param)
@@ -1606,7 +1640,7 @@ local function requestEngageabilities(targets, purpose)
                     cached = cached and cached.signature == signature and cached or {}
                     cached.signature, cached.requestedAt, cached.pending, cached.total,
                         cached.engageable, cached.known = signature, now, true, #members, nil, nil
-                    cached.aimMap = requestAimMap(target)
+                    cached.aimMap = requestAimMap(target, members)
                     engageabilityCache[key] = cached
                     if not seen[targetKey] then
                         seen[targetKey] = true
@@ -3895,6 +3929,7 @@ local function init()
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
     RegisterEvent("X4GunneryControl.AimPointBox", onAimPointBox)
     RegisterEvent("X4GunneryControl.AimPointProbe", onAimPointProbe)
+    RegisterEvent("X4GunneryControl.AimPointBearing", onAimPointBearing)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu

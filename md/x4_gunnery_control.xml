@@ -165,6 +165,32 @@
             </do_else>
           </actions>
         </cue>
+        <cue name="AimPointBearing" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'aimpoint_bearing'"/>
+          </conditions>
+          <actions>
+            <set_value name="$token" exact="@event.param3.$token"/>
+            <set_value name="$point" exact="@event.param3.$point"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <set_value name="$weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="typeof $weapon != datatype.component and $weapon">
+              <set_value name="$weapon" exact="component.{$weapon}"/>
+            </do_if>
+            <do_if value="typeof $target == datatype.component and $target.exists and typeof $weapon == datatype.component and $weapon.exists">
+              <create_position name="$turretpoint" x="@event.param3.$x * 1m" y="@event.param3.$y * 1m" z="@event.param3.$z * 1m" object="$target" space="$weapon"/>
+              <set_value name="$barrel" exact="$weapon.barrelposition"/>
+              <raise_lua_event name="'X4GunneryControl.AimPointBearing'"
+                               param="'x4gcapc:' + $token + ':' + @event.param3.$weaponKey + ':' + $point + ':1:' + ($turretpoint.x * 1000000000)i + ':' + ($turretpoint.y * 1000000000)i + ':' + ($turretpoint.z * 1000000000)i + ':' + ($barrel.x * 1000000000)i + ':' + ($barrel.y * 1000000000)i + ':' + ($barrel.z * 1000000000)i"/>
+            </do_if>
+            <do_else>
+              <raise_lua_event name="'X4GunneryControl.AimPointBearing'" param="'x4gcapc:' + $token + ':' + @event.param3.$weaponKey + ':' + $point + ':0:0:0:0:0:0:0'"/>
+            </do_else>
+          </actions>
+        </cue>
       </cues>
     </cue>
     <!-- Cinematic aim camera: Follow_A_Lookat_B anchored between a turret and its
