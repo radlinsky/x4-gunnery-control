@@ -39,6 +39,7 @@ LARGE = 500.0            # m: X4's target-size controller split (runtime box rad
 CONV, GUIDED, UNGUIDED, CLUSTER = ("CONVENTIONAL_STRAIGHT_PATH", "GUIDED_MISSILE",
                                    "UNGUIDED_DIRECT_MISSILE", "DISTRIBUTING_CLUSTER_MISSILE")
 CLEAR, BLOCKED, UNKNOWN = "clear", "LINE OF FIRE BLOCKED", "UNKNOWN"
+VARIES = "varies by concrete world"
 L2_OFFICIAL_AMMO = {GUIDED: 15, UNGUIDED: 8, CLUSTER: 2}
 FALLBACK = "current weapon.barrelposition fallback"
 PREDICTED = "geometry-predicted aimed muzzle"
@@ -206,18 +207,28 @@ def truth(scene, origin, P, T, group, reason, r):
 
 # ---------------------------------------------------------------- candidate: accepted L4 MD method
 
+WORLDS = ((True, False), (True, True), (False, False), (False, True))   # (unknown bodies present, reverse ties)
+
+
 def los(scene, log, origin, P, declared, second=False):
     """Simulated `check_line_of_sight` (useaimtarget=false, excludeself=false): the world endpoint is expressed
     in the declared target's frame and transformed back, then True iff the closest hit is `declared` or a
-    descendant. None when the offline scene cannot decide (near-coincident hits or unknown presence)."""
+    descendant. Always a boolean for one concrete world: `scene["world"]` fixes whether unknown-presence bodies
+    exist and which way near-coincident hits order, because X4 itself returns one boolean."""
     c = scene["comp"][declared]
     offset = (P - c["pos"]) @ c["R"].T
     end = c["pos"] + offset @ c["R"]
     log.append(dict(declared=declared, start=origin.tolist(), end=end.tolist(), second=second))
-    hits, miss = first_hits(scene, origin, end, EPS)
-    values = {declared in chain(scene, b["comp"]) for b in hits} | ({False} if miss else set())
-    unknown = any(b["presence"] == "unknown" for b in hits)
-    return None if len(values) > 1 or unknown else values.pop()
+    present, reverse = scene["world"]
+    hits = [(t, i, b) for i, b in enumerate(scene["bodies"])
+            if b["presence"] == "present" or (present and b["presence"] == "unknown")
+            if scene["comp"][b["comp"]]["zone"] == scene["weapon_zone"]
+            if (t := _enter(b, origin, end, 0.0)) is not None]
+    if not hits:
+        return False
+    first = min(t for t, _i, _b in hits)
+    tied = sorted((i, b) for t, i, b in hits if t - first <= EPS)
+    return declared in chain(scene, tied[-1 if reverse else 0][1]["comp"])
 
 
 def candidate(scene, origin, P, T, group, reason):
@@ -229,24 +240,15 @@ def candidate(scene, origin, P, T, group, reason):
         return CLEAR, "guided bypass", None, log
     if scene["comp"][T]["zone"] != scene["weapon_zone"]:
         return UNKNOWN, "cross-zone", "cross-zone target physics world", log
-    q = los(scene, log, origin, P, T)
-    if q is None:
-        return UNKNOWN, "ambiguous", "offline scene undecidable", log
-    if q:
+    if los(scene, log, origin, P, T):
         return CLEAR, "selected target", None, log
-    q = los(scene, log, origin, P, scene["comp"][T]["object"])
-    if q is None:
-        return UNKNOWN, "ambiguous", "offline scene undecidable", log
-    if q:
-        q = los(scene, log, origin, scene["comp"][T]["pos"], T, second=True)
-        if q is None:
-            return UNKNOWN, "ambiguous", "offline scene undecidable", log
-        return (CLEAR, "same object, second ray clears", None, log) if q else \
-            (BLOCKED, "same object, second ray blocks", None, log)
-    q = los(scene, log, origin, P, scene["weapon_zone"])
-    if q is None:
-        return UNKNOWN, "ambiguous", "offline scene undecidable", log
-    return (BLOCKED, "unrelated", None, log) if q else (CLEAR, "genuine miss", None, log)
+    if los(scene, log, origin, P, scene["comp"][T]["object"]):
+        if los(scene, log, origin, scene["comp"][T]["pos"], T, second=True):
+            return CLEAR, "same object, second ray clears", None, log
+        return BLOCKED, "same object, second ray blocks", None, log
+    if los(scene, log, origin, P, scene["weapon_zone"]):
+        return BLOCKED, "unrelated", None, log
+    return CLEAR, "genuine miss", None, log
 
 
 # ---------------------------------------------------------------- real targets, #184 recovery, #185 origins
@@ -610,7 +612,15 @@ def evaluate(sc, labels):
     for o in sc.origins:
         origin = np.asarray(o["position"])
         exp, exp_cls, exp_why = truth(sc.s, origin, sc.P, sc.T, group, reason, r)
-        got, got_cls, got_why, log = candidate(sc.s, origin, sc.P, sc.T, group, reason)
+        worlds = []                       # every concrete world the offline scene leaves open
+        for world in WORLDS:
+            sc.s["world"] = world
+            worlds.append(candidate(sc.s, origin, sc.P, sc.T, group, reason))
+        got, got_cls, got_why, log = worlds[0]
+        if len({w[0] for w in worlds}) > 1:
+            got, got_cls = VARIES, "varies: " + ", ".join(sorted({w[1] for w in worlds}))
+        per_world = sorted({w[0] for w in worlds})
+        log = max((w[3] for w in worlds), key=len)
         hidden = truth(sc.s, origin, sc.s["comp"][sc.T]["pos"] + np.asarray(sc.record["hidden_truth"]), sc.T,
                        group, reason, 0.0)[0]      # X4's own authored point: diagnostic only, not the standard
         rows.append(dict(case=sc.id, source=sc.source, target=sc.target["component"], target_type=_ttype(sc, labels),
@@ -619,6 +629,7 @@ def evaluate(sc, labels):
                          origin=o["position"], aim_point=sc.P.tolist(), aim_record=sc.record, c185=sc.row["result"],
                          expected=exp, expected_class=exp_cls, expected_reason=exp_why, result=got,
                          result_class=got_cls, result_reason=got_why, hidden_point_result=hidden,
+                         world_results=per_world,
                          queries=len(log), query_log=log, **labels))
     assert json.dumps(sc.record, sort_keys=True) == before and json.dumps(sc.origins) == origins_in
     if not sc.origins:
@@ -707,7 +718,7 @@ def check(rows, scenes):
     return fails
 
 
-def _table(rows, field, cols=(CLEAR, BLOCKED, UNKNOWN, "no pair")):
+def _table(rows, field, cols=(CLEAR, BLOCKED, UNKNOWN, VARIES, "no pair")):
     keys = sorted({str(r.get(field)) for r in rows})
     out = [f"| {field} | " + " | ".join(cols) + " |", "|---|" + "---:|" * len(cols)]
     for k in keys:
@@ -717,9 +728,10 @@ def _table(rows, field, cols=(CLEAR, BLOCKED, UNKNOWN, "no pair")):
 
 
 def report(rows, fails, census, seconds, scenes, searches):
-    wrong_clear = sum(r["result"] == CLEAR and r["expected"] == BLOCKED for r in rows)
-    wrong_block = sum(r["result"] == BLOCKED and r["expected"] == CLEAR for r in rows)
-    missing_unknown = sum(r["expected"] == UNKNOWN and r["result"] in (CLEAR, BLOCKED) for r in rows)
+    W = lambda r: r.get("world_results", [r["result"]])  # noqa: E731
+    wrong_clear = sum(CLEAR in W(r) and r["expected"] == BLOCKED for r in rows)
+    wrong_block = sum(BLOCKED in W(r) and r["expected"] == CLEAR for r in rows)
+    missing_unknown = sum(r["expected"] == UNKNOWN and r["result"] != UNKNOWN for r in rows)
     excess_unknown = sum(r["result"] == UNKNOWN and r["expected"] in (CLEAR, BLOCKED) for r in rows)
     pairs = [r for r in rows if r["origin_index"] is not None]
     nonguided = [r["queries"] for r in pairs if r["group"] in (CONV, UNGUIDED, CLUSTER)]
@@ -730,6 +742,9 @@ def report(rows, fails, census, seconds, scenes, searches):
          f"**{len(scenes)} scenes, {len(pairs)} firing-origin + aim-point pairs, {len(rows) - len(pairs)} "
          f"no-origin inputs.** Result: **{'PASS' if not fails else 'FAIL'}**.", "",
          "| measure | value |", "|---|---:|",
+         f"| confirmed correct pairs/inputs (every concrete world) | "
+         f"{sum(r['expected'] == r['result'] for r in rows)} of {len(rows)} |",
+         f"| failing pairs | {len({(r['case'], r['origin_index']) for r in rows if r['expected'] != r['result']})} |",
          f"| wrong clear | {wrong_clear} |", f"| wrong LINE OF FIRE BLOCKED | {wrong_block} |",
          f"| correct UNKNOWN | {sum(r['expected'] == r['result'] == UNKNOWN for r in rows)} |",
          f"| missing UNKNOWN (definite where truth is UNKNOWN) | {missing_unknown} |",
@@ -745,6 +760,10 @@ def report(rows, fails, census, seconds, scenes, searches):
     if fails:
         L += ["## Failures", ""] + [f"- {f}" for f in fails] + [""]
     L += ["## Notes", "",
+          "- Simulated `check_line_of_sight` returns only a boolean. Where the offline scene leaves presence "
+          "(unestablished wreck) or near-coincident first-hit order open, each pair runs in every concrete world "
+          "(unknown body present/absent x tie order either way); `varies by concrete world` means the candidate's "
+          "definite answer depends on a state it cannot observe.",
           "- Aim-point uncertainty: the accepted centre-only candidate cannot return the L5 UNKNOWN when the "
           "#184 uncertainty ball straddles a blocker edge; `check_line_of_sight` exposes no hit distance. The "
           "`off-box-uncertainty` scene is that case (its hidden authored point happens to agree). L7 question.",
