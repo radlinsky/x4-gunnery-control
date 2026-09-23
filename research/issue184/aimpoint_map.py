@@ -182,16 +182,21 @@ def scope(record, hosts):
     return KIND[cls], None, np.asarray(_attach(comp, mating[0], *host)[1])
 
 
+def official_hosts():
+    """[(connection tags, host component, connection)] of every referenced official #169 host, in order."""
+    referenced = {m.find("component").get("ref") for defs in sources.MACROS.values() for _r, m in defs
+                  if m.find("component") is not None}
+    return [(sources.tags(c), comp, c) for name in sorted(referenced) if name in sources.COMPONENTS
+            for rel, comp in sources.COMPONENTS[name] if comp.get("class") in HOSTS and not rel.startswith(SWI)
+            for _n, c in sorted(sources.connections(comp).items()) if "component" not in sources.tags(c)]
+
+
 def targets():
     """Unique official target components Gunnery Control can ask ENGAGEABLE about, with authored aim points,
     runtime-box centre/half-extents, kind and real mounted orientation `R`. An in-scope zero box fails loudly
     (#168: none in X4 9.00)."""
     study.init()
-    referenced = {m.find("component").get("ref") for defs in sources.MACROS.values() for _r, m in defs
-                  if m.find("component") is not None}
-    hosts = [(sources.tags(c), comp, c) for name in sorted(referenced) if name in sources.COMPONENTS
-             for rel, comp in sources.COMPONENTS[name] if comp.get("class") in HOSTS and not rel.startswith(SWI)
-             for _n, c in sorted(sources.connections(comp).items()) if "component" not in sources.tags(c)]
+    hosts = official_hosts()
     kept = {}
     for r in study.CORPUS["records"]:
         kind, reason, R = scope(r, hosts)
