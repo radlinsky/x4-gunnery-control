@@ -167,6 +167,7 @@ do
         } },
     }
     sess59.checkedGroupKeys = { page_group = true }
+    local selectedGroups59 = sess59.groups
     C.IsComponentClass = function(_,class) return class=="ship" end
     C.GetNumUpgradeSlots = function(_, _, upgrade) return upgrade == "turret" and 41 or 0 end
     C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 10000 + slot end
@@ -323,6 +324,26 @@ do
     assert(log59:find('event=surface_page action=request generation=', 1, true)
             and log59:find('requested=20 selected_total=2 selected_signature="11001,11002"', 1, true),
         "59: page request audit must identify exact bounded membership and selected turrets")
+    local cancelledPinned59 = sess59.surfaceBrowser.pinnedResult
+    sess59.groups, sess59.checkedGroupKeys = selectedGroups59, { page_group = true }
+    targetEvents59 = {}
+    fix.buttonByText(ReadText(20991, 95)).handlers.onClick()
+    local replacementPinned59 = sess59.surfaceBrowser.pinnedResult
+    assert(cancelledPinned59.cancelled and replacementPinned59 ~= cancelledPinned59
+            and replacementPinned59.pending and not replacementPinned59.cancelled,
+        "59: changing pages must replace a cancelled pinned calculation")
+    local activeBeforePage59 = API.requestEngageability(10022)
+    dofile('tests/support/engageability_driver.lua').finish(fix, activeBeforePage59, 0)
+    assert(#targetEvents59 == 1 and targetEvents59[1] == "10000",
+        "59: the replacement pinned calculation must start after the old active row finishes")
+    sess59.phase = "console"
+    targetEvents59 = {}
+    local activePinned59 = API.requestEngageability(10000)
+    assert(activePinned59.pending, "59: the pinned calculation must remain active before leaving")
+    dofile('tests/support/engageability_driver.lua').finish(fix, activePinned59, 0)
+    assert(#targetEvents59 == 0, "59: leaving the surface browser must discard queued work")
+    sess59.phase, sess59.controlMode = "engaged", "direct"
+    gcMenu.display()
 
     -- X4 keeps updating UI frames while the simulation is paused. A paused
     -- elapsed clock must not repeatedly satisfy the same pinned/automatic

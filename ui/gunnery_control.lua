@@ -1307,8 +1307,16 @@ end
 -- entry is current, so delayed MD work cannot complete a newer refresh.
 local aimMapSerial = 0
 local scheduleEngageabilityRepaint
+local setBrowserScope
 local function pumpBrowserQueue()
     if browserActive then return end
+    if browserScope and not (session and
+            (browserScope:sub(1, 7) == "target:" and session.phase == "target_select"
+                or browserScope:sub(1, 8) == "surface:" and session.phase == "engaged"
+                    and session.controlMode == "direct")) then
+        setBrowserScope(nil)
+        return
+    end
     while #browserQueue > 0 do
         local work = table.remove(browserQueue, 1)
         if work.scope == browserScope and work.cached.pending
@@ -1320,7 +1328,7 @@ local function pumpBrowserQueue()
     end
 end
 
-local function setBrowserScope(scope)
+setBrowserScope = function(scope)
     if browserScope == scope then return end
     browserScope = scope
     for _, work in ipairs(browserQueue) do
@@ -2733,6 +2741,11 @@ function menu.onShowMenu()
 end
 
 function menu.display()
+    if not session or (session.phase ~= "target_select"
+            and not (session.phase == "engaged" and session.controlMode == "direct"
+                and session.targetObjectID)) then
+        setBrowserScope(nil)
+    end
     if session and session.phase == "engaged" and fullscreenTakeoverDisplayed() then
         hideEngagedOverlayForTakeover()
         engagedOverlayRefreshPending = true
@@ -2994,6 +3007,8 @@ function menu.display()
                     .. tostring(previousMacroFilter) .. " target=" .. tostring(session.targetObjectID))
                 browser.page = 1
                 browser = rebuildSurfaceSnapshot("filter")
+                setBrowserScope("surface:" .. State.normID(browser.rootID) .. ":"
+                    .. tostring(browser.generation) .. ":" .. tostring(browser.page))
                 allSurfaces = browser.allSurfaces
             end
             local macroOptions = { { id = "any", text = text(86), icon = "", displayremoveoption = false } }
@@ -3023,7 +3038,7 @@ function menu.display()
             -- refreshes independently from the frozen alternative pages.
             local pinnedID = session.aimTargetID or session.targetObjectID
             local pinnedSurface = surfaceMetadata(browser, pinnedID)
-            if not browser.pinnedResult then
+            if not browser.pinnedResult or browser.pinnedResult.cancelled then
                 browser.pinnedDistance = surfaceDistance(pinnedID)
                 browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(browser.page))
             end

@@ -499,6 +499,23 @@ do
         assert(rendered57[component][4] == expected.typeName,
             "57: " .. expected.class .. " localized type must be bound to rendered column 4")
     end
+    local savedAdd57, started57 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        if control == "engageability_range" then started57[#started57 + 1] = params end
+        savedAdd57(screen, control, params)
+    end
+    local currentResult57 = API.requestEngageability(570)
+    dofile("tests/support/engageability_driver.lua").finish(fix, currentResult57, 0)
+    assert(not currentResult57.pending and currentResult57.engageable == 0 and #started57 == 1,
+        "57: completing the current target must start one visible browser entry")
+    sess57.phase = "console"
+    local nextResult57 = API.requestEngageability(started57[1].target)
+    dofile("tests/support/engageability_driver.lua").finish(fix, nextResult57, 0)
+    assert(#started57 == 1, "57: leaving the target browser must discard queued entries")
+    gcMenu.display()
+    AddUITriggeredEvent = savedAdd57
+    sess57.phase = "target_select"
+    gcMenu.display()
     local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
