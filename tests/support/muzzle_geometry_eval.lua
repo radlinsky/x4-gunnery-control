@@ -1,7 +1,6 @@
 -- Shared evaluation of the generated turret muzzle records
--- (ui/turret_muzzle_geometry.lua). Used by tests/test_turret_muzzle_geometry.lua
--- and tests/test_runtime_targeting_engageability.lua so neither test carries a
--- second copy of the accepted composition rules.
+-- (ui/turret_muzzle_geometry.lua). Shared by the muzzle geometry tests so
+-- they use one copy of the accepted composition rules.
 -- Usage: local eval = dofile("tests/support/muzzle_geometry_eval.lua")
 
 local M = {}

@@ -25,10 +25,8 @@ local sess = API.getSession()
 assert(sess ~= nil, "expected a live session after onShowMenu()")
 -- Sections 58-60 call API.getSession() without a fresh onShowMenu(), so they
 -- inherit whatever the current session holds. Pre-populate the minimal group
--- state that section 58's seed58() needs to fire engageability_begin.
--- Also set gcMenu.shown = true, which section 57 (engageability) left behind
--- in the original file; callbacks in section 59 guard on menu.shown.
--- (In the original file this state was left by section 57/engageability.)
+-- state that section 58's seed58() needs for selected turret requests.
+-- Callbacks in section 59 guard on menu.shown.
 sess.groups = {
     { key = "selected", members = {
         { componentID = 101, operational = true },
@@ -46,30 +44,28 @@ do
     local sess58 = API.getSession()
     sess58.phase, sess58.controlMode = "console", nil
     sess58.checkedGroupKeys = { selected = true }
-    local savedAdd58, events58 = AddUITriggeredEvent, {}
-    AddUITriggeredEvent = function(screen, control, params)
-        events58[#events58 + 1] = { screen = screen, control = control, params = params }
+    local driver58=dofile('tests/support/engageability_driver.lua')
+    driver58.install()
+    local savedData58=GetComponentData
+    GetComponentData=function(component,...)
+        local keys={...}
+        if #keys==1 and keys[1]=='isenemy' then return true end
+        return savedData58(component,...)
     end
-    local function seed58(target, on)
-        events58 = {}
-        local result = API.requestEngageability(target)
-        local nonce
-        for _, event in ipairs(events58) do
-            if event.control == "engageability_begin" then nonce = event.params.nonce end
-        end
-        fix.fireEvent("X4GunneryControl.EngageabilityResult", "x4gce3:" .. nonce .. ":" .. target .. ":" .. on .. ":2:2")
-        fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete", "x4gce2c:" .. nonce .. ":1:1")
+    local function seed58(target,on)
+        local result=API.requestEngageability(target)
+        driver58.finish(fix,result,on)
         return result
     end
     seed58(701, 2); seed58(702, 0); seed58(703, 1); seed58(704, 0)
     seed58(801, 2); seed58(802, 0)
-    AddUITriggeredEvent = savedAdd58
+    GetComponentData=savedData58
 
     sess58.phase, sess58.controlMode = "engaged", "direct"
     sess58.targetObjectID, sess58.aimTargetID = 900, 900
     sess58.surfaceTypeFilter, sess58.surfaceMacroFilter = "any", "any"
     GetPlayerContextByClass = function() return nil end
-    C.IsComponentClass = function() return false end
+    C.IsComponentClass = function(_,class) return class=="ship" end
     C.GetNumUpgradeSlots = function(_, _, upgrade)
         if upgrade == "turret" then return 4 end
         if upgrade == "shield" then return 1 end
@@ -158,6 +154,7 @@ end
 
 -- ── 59. surface browser pins health and lazily requests exact 20-row pages ──
 do
+    gcMenu.onShowMenu()
     local sess59 = API.getSession()
     sess59.phase, sess59.controlMode = "engaged", "direct"
     sess59.targetObjectID, sess59.aimTargetID = 10000, 10000
@@ -170,7 +167,8 @@ do
         } },
     }
     sess59.checkedGroupKeys = { page_group = true }
-    C.IsComponentClass = function() return false end
+    local selectedGroups59 = sess59.groups
+    C.IsComponentClass = function(_,class) return class=="ship" end
     C.GetNumUpgradeSlots = function(_, _, upgrade) return upgrade == "turret" and 41 or 0 end
     C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 10000 + slot end
     C.GetUpgradeSlotCurrentMacro = function(_, _, _, slot)
@@ -191,6 +189,7 @@ do
             elseif key == "shieldpercent" then vals[#vals + 1] = shieldPercent59
             elseif key == "hullpercent" then vals[#vals + 1] = hullPercent59
             elseif key == "isplayerowned" then vals[#vals + 1] = false
+            elseif key == "isenemy" then vals[#vals + 1] = true
             elseif key == "maxradarrange" then vals[#vals + 1] = 40000
             else vals[#vals + 1] = false end
         end
@@ -201,19 +200,18 @@ do
         if key == "size" then return "" end
         return ""
     end
-    local savedAdd59, targetEvents59, activeNonce59, nonceByTarget59 = AddUITriggeredEvent, {}, nil, {}
+    local savedAdd59, targetEvents59, rangeByTarget59 = AddUITriggeredEvent, {}, {}
     AddUITriggeredEvent = function(screen, control, params)
-        if control == "engageability_begin" then activeNonce59 = params.nonce end
-        if control == "engageability_target" then
-            local target = tostring(params.target)
-            targetEvents59[#targetEvents59 + 1] = target
-            nonceByTarget59[target] = activeNonce59
+        if control == 'engageability_range' then
+            local target=tostring(params.target)
+            if not rangeByTarget59[target] then targetEvents59[#targetEvents59+1]=target end
+            rangeByTarget59[target]=params
         end
         savedAdd59(screen, control, params)
     end
     gcMenu.display()
-    assert(#targetEvents59 == 21,
-        "59: initial surface render must request pinned target plus exactly 20 alternatives; got "
+    assert(#targetEvents59 == 1 and targetEvents59[1] == "10000",
+        "59: initial surface render must start only the pinned target; got "
             .. tostring(#targetEvents59))
     local pageOneRows59 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
@@ -246,10 +244,8 @@ do
     assert(largeRow59 == "Surface 10022",
         "59: surface rows must display only the engine-provided equipment name")
     local pinnedRepaintMark59 = fix.callbackCheckpoint()
-    fix.fireEvent("X4GunneryControl.EngageabilityResult",
-        "x4gce3:" .. nonceByTarget59["10000"] .. ":10000:1:2:2")
-    fix.fireEvent("X4GunneryControl.EngageabilityBatchComplete",
-        "x4gce2c:" .. nonceByTarget59["10000"] .. ":1:1")
+    local pinned=API.requestEngageability(10000)
+    dofile('tests/support/engageability_driver.lua').finish(fix,pinned,1)
     assert(fix.callbackCheckpoint() == pinnedRepaintMark59 + 1,
         "59: pinned result must schedule one isolated element-frame update")
     fix.drainCallbacksSince(pinnedRepaintMark59)
@@ -262,7 +258,7 @@ do
     local nextPage59 = fix.buttonByText(ReadText(20991, 95))
     assert(nextPage59 and nextPage59.active, "59: Next Page must be active for 41 alternatives")
     nextPage59.handlers.onClick()
-    assert(#targetEvents59 == 20, "59: opening page two must request only its 20 alternatives")
+    assert(#targetEvents59 <= 1, "59: opening page two must not start a batch of alternatives")
     local pageTwoRows59 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
         local row = tonumber(tostring(entry.row))
@@ -286,13 +282,13 @@ do
     targetEvents59 = {}
     local previousPage59 = fix.buttonByText(ReadText(20991, 94))
     previousPage59.handlers.onClick()
-    assert(#targetEvents59 == 0, "59: returning to cached page one must issue no solution requests")
+    assert(#targetEvents59 <= 1, "59: returning to page one must retain a single active calculation")
     local cachedPageDistance59
     for _, entry in ipairs(fix.getCreatedTexts()) do
         if tostring(entry.row) == "10022" and entry.column == 3 then cachedPageDistance59 = entry.text end
     end
-    assert(cachedPageDistance59 == "22.0 km",
-        "59: revisiting a cached page must retain the distance captured with its engageability batch")
+    assert(cachedPageDistance59 == "27.0 km",
+        "59: revisiting a cancelled page must capture a fresh distance with its new work")
     local autoRefresh59
     for _, checkbox in ipairs(fix.getCreatedCheckBoxes()) do
         if checkbox.row == "surface_auto_refresh" then autoRefresh59 = checkbox end
@@ -302,13 +298,13 @@ do
     autoRefresh59.handlers.onClick()
     assert(sess59.surfaceBrowser.autoRefresh == true,
         "59: clicking ten-second refresh must enable only session browser state")
-    targetEvents59, nonceByTarget59 = {}, {}
+    targetEvents59, rangeByTarget59 = {}, {}
     C.GetPlayerCurrentControlGroup = function() return "gunnercontrol" end
     C.GetPlayerOccupiedShipID = function() return sess59.shipID end
     clock = clock + 10
     fix.invokeOnUpdate()
-    assert(#targetEvents59 == 21,
-        "59: automatic refresh must recalculate pinned plus current 20-row page only; got "
+    assert(#targetEvents59 == 0 and sess59.surfaceBrowser.pinnedResult.pending,
+        "59: automatic refresh must queue the pinned calculation behind the active row; got "
             .. tostring(#targetEvents59) .. " phase=" .. tostring(sess59.phase)
             .. " next=" .. tostring(sess59.surfaceBrowser.nextAutoRefreshAt)
             .. " now=" .. tostring(clock))
@@ -320,7 +316,7 @@ do
     assert(type(refreshedPinnedDistance59) == "function" and refreshedPinnedDistance59() == "5.0 km",
         "59: pinned distance must refresh on the same one-second tick as its engageability")
     assert(refreshedPageDistance59 == "27.0 km",
-        "59: automatic page refresh must recapture distance with the new 20-row solution batch")
+        "59: automatic page refresh must recapture distance with the current 20-row solution batch")
     log59 = table.concat(fix.getCapturedLog(), "\n")
     assert(log59:find("event=surface_refresh action=fire reason=automatic root=10000 page=1", 1, true)
             and log59:find("event=surface_snapshot action=create reason=automatic root=10000", 1, true),
@@ -328,6 +324,26 @@ do
     assert(log59:find('event=surface_page action=request generation=', 1, true)
             and log59:find('requested=20 selected_total=2 selected_signature="11001,11002"', 1, true),
         "59: page request audit must identify exact bounded membership and selected turrets")
+    local cancelledPinned59 = sess59.surfaceBrowser.pinnedResult
+    sess59.groups, sess59.checkedGroupKeys = selectedGroups59, { page_group = true }
+    targetEvents59 = {}
+    fix.buttonByText(ReadText(20991, 95)).handlers.onClick()
+    local replacementPinned59 = sess59.surfaceBrowser.pinnedResult
+    assert(cancelledPinned59.cancelled and replacementPinned59 ~= cancelledPinned59
+            and replacementPinned59.pending and not replacementPinned59.cancelled,
+        "59: changing pages must replace a cancelled pinned calculation")
+    local activeBeforePage59 = API.requestEngageability(10022)
+    dofile('tests/support/engageability_driver.lua').finish(fix, activeBeforePage59, 0)
+    assert(#targetEvents59 == 1 and targetEvents59[1] == "10000",
+        "59: the replacement pinned calculation must start after the old active row finishes")
+    sess59.phase = "console"
+    targetEvents59 = {}
+    local activePinned59 = API.requestEngageability(10000)
+    assert(activePinned59.pending, "59: the pinned calculation must remain active before leaving")
+    dofile('tests/support/engageability_driver.lua').finish(fix, activePinned59, 0)
+    assert(#targetEvents59 == 0, "59: leaving the surface browser must discard queued work")
+    sess59.phase, sess59.controlMode = "engaged", "direct"
+    gcMenu.display()
 
     -- X4 keeps updating UI frames while the simulation is paused. A paused
     -- elapsed clock must not repeatedly satisfy the same pinned/automatic

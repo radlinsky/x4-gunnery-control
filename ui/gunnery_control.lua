@@ -4,156 +4,8 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
-local TurretArcLimits = X4GunneryTurretArcLimits or {}
-local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
-
--- Prospective-muzzle geometry for the supported self-masking macros (#74, #98).
--- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
--- Rather than hand-copy the constants, derive O/P/D from the generated
--- source-resolved record (ui/turret_muzzle_geometry.lua) and hand MD the three
--- fixed vectors as flat scalars. This walks the authored layer/transform chain
--- exactly as tests/test_turret_muzzle_geometry.lua evaluates it, but factors the
--- two runtime rotations (yaw rotator, pitch gun) back out into constants.
--- ponytail: support is whatever deriveProspectiveMuzzle understands in the
--- generated data; no second allow-list to keep in sync (#106).
-
-local function vadd(a, b)
-    return { a[1] + b[1], a[2] + b[2], a[3] + b[3] }
-end
-
-local function qrotate(q, v)
-    local x, y, z, w = q[1], q[2], q[3], q[4]
-    local vx, vy, vz = v[1], v[2], v[3]
-    local tx = 2 * (y * vz - z * vy)
-    local ty = 2 * (z * vx - x * vz)
-    local tz = 2 * (x * vy - y * vx)
-    return {
-        vx + w * tx + y * tz - z * ty,
-        vy + w * ty + z * tx - x * tz,
-        vz + w * tz + x * ty - y * tx,
-    }
-end
-
-local function rotateInFrame(rotations, vector)
-    for index = #rotations, 1, -1 do
-        vector = qrotate(rotations[index], vector)
-    end
-    return vector
-end
-
--- Shared chain math. `fixed` is the accumulated frame rotation stack, `segment`
--- the translation accumulated since the last runtime-rotation split.
-local function chainTranslate(chain, position)
-    chain.segment = vadd(chain.segment, rotateInFrame(chain.fixed, position))
-end
-
-local function chainRotate(chain, quaternion)
-    chain.fixed[#chain.fixed + 1] = quaternion
-end
-
--- The authored connection/part transform pair every layer carries.
-local function chainAuthoredLayer(chain, layer)
-    chainRotate(chain, layer.connection_transform.quaternion)
-    chainTranslate(chain, layer.part_transform.position)
-    chainRotate(chain, layer.part_transform.quaternion)
-end
-
--- Close off the segment feeding a runtime rotation (yaw rotator, pitch gun).
-local function chainSplit(chain, layer)
-    local rotation = layer.runtime_rotation
-    if not rotation then return end
-    if rotation.axis == "y" then
-        chain.origin = chain.segment
-        chain.segment = { 0, 0, 0 }
-    elseif rotation.axis == "x" then
-        chain.pivot = chain.segment
-        chain.segment = { 0, 0, 0 }
-    end
-end
-
--- ponytail: the semantic case names a turret movement rule, so dispatch on it
--- explicitly (#79). Each behavior only orders the per-layer steps around the
--- runtime-rotation split; all math above stays shared, and every turret-specific
--- value still comes from the generated record. Layer order per case mirrors
--- tests/test_turret_muzzle_geometry.lua exactly.
-local semanticCaseBehaviors = {
-    -- Settled translation applies before the split; authored rotations follow it.
-    depth4_dual_translation = function(chain, layer)
-        if layer.settled_position then
-            chainTranslate(chain, layer.settled_position)
-        end
-        chainSplit(chain, layer)
-        chainAuthoredLayer(chain, layer)
-    end,
-    -- Authored rotations plus the settled local-X rotation all precede the split.
-    depth5_additive_x_rotation = function(chain, layer)
-        chainAuthoredLayer(chain, layer)
-        if layer.settled_rotation_x_radians then
-            local half = layer.settled_rotation_x_radians / 2
-            chainRotate(chain, { math.sin(half), 0, 0, math.cos(half) })
-        end
-        chainSplit(chain, layer)
-    end,
-}
-
--- Split L stores the same depth-4 composition with zero settled translations
--- (#79), so it reuses that behavior rather than restating the layer order.
-semanticCaseBehaviors.depth4_zero_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- The one-key barrel case (#79) is the same depth-4 composition with a settled
--- translation on each of the same two edges, so it reuses that behavior too.
-semanticCaseBehaviors.depth4_one_key_barrel_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- The shortened rank-1 one-key case (#137) has the same translation/split
--- ordering over three source layers; only its source-evidence boundary differs.
-semanticCaseBehaviors.depth3_one_key_barrel_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- P6 uses the already-proved depth-4 translation composition; its separate
--- semantic case only preserves the narrower source-evidence boundary.
-semanticCaseBehaviors.depth4_p6_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- P8 (#135) is the same depth-4 translation composition; its separate semantic
--- case only preserves the narrower source-evidence boundary.
-semanticCaseBehaviors.depth4_p8_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- Endpoints are emitted in lexical name order, which is not the engine's
--- barrelposition semantic, so a record naming its representative endpoint is
--- resolved by that identity. Records without the field keep the historical
--- second entry. Returns nil if a named identity is absent, so no prospective
--- geometry is streamed rather than guessing an endpoint.
-local function barrelpositionEndpoint(geometry)
-    local connection = geometry.barrelposition_connection
-    if not connection then return geometry.endpoints[2] end
-    for _, endpoint in ipairs(geometry.endpoints) do
-        if endpoint.connection == connection then return endpoint end
-    end
-end
-
--- Returns nil for an unknown semantic case, so no prospective geometry is
--- streamed and the prospective generated-geometry path is not entered.
-local function deriveProspectiveMuzzle(geometry)
-    local behavior = semanticCaseBehaviors[geometry.semantic_case]
-    if not behavior then return nil end
-    local chain = { fixed = {}, segment = { 0, 0, 0 } }
-    for _, layer in ipairs(geometry.layers) do
-        chainTranslate(chain, layer.connection_transform.position)
-        behavior(chain, layer)
-    end
-    local endpoint = barrelpositionEndpoint(geometry)
-    if not (chain.origin and chain.pivot and endpoint) then return nil end
-    local downstream = vadd(chain.segment, rotateInFrame(chain.fixed, endpoint.transform.position))
-    return { origin = chain.origin, pivot = chain.pivot, downstream = downstream }
-end
-
-local prospectiveMuzzles = {}
-for macroName, geometry in pairs(TurretMuzzleGeometry) do
-    prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry)
-end
+local AimPointMap = X4GunneryAimPointMap
+local TurretBearing = X4GunneryTurretBearing
 
 ffi.cdef[[
 typedef uint64_t UniverseID;
@@ -213,7 +65,10 @@ local resumePending, resumeOpenPending, endingSession = false, false, false
 local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
-local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
+local engageabilityCache = {}
+local aimMaps = {}
+local browserQueue, browserActive, browserScope = {}, nil, nil
+local targetBrowserState = { view = nil, generation = 0, refresh = false }
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local redirectDockedMenu
@@ -281,7 +136,10 @@ end
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship, origin)
-    engageabilityCache, engageabilityRequests = {}, {}
+    engageabilityCache = {}
+    aimMaps = {}
+    browserQueue, browserActive, browserScope = {}, nil, nil
+    targetBrowserState = { view = nil, generation = 0, refresh = false }
     engageabilityRepaintPending = nil
     engagedOverlayRefreshPending = false
     surfacePinnedUpdatePending = false
@@ -736,15 +594,6 @@ local function cameraMember()
     return nil
 end
 
-local function selectedGroupAndMember()
-    local group = currentGroup(session and session.selectedGroupKey)
-    if not group then return nil, nil end
-    for _, member in ipairs(group.members) do
-        if sameID(member.componentID, session.selectedMemberID) then return group, member end
-    end
-    return group, nil
-end
-
 local function setMode(group, mode)
     if group.kind == "group" then C.SetTurretGroupMode2(session.shipID, group.contextID, group.path, group.group, mode)
     else C.SetWeaponMode(group.componentID, mode) end
@@ -771,14 +620,6 @@ local function findSnapshotGroup(snapshot)
         if snapshot.kind == "group" and group.kind == "group" and sameID(group.contextID, snapshot.contextID)
             and group.path == snapshot.path and group.group == snapshot.group then return group end
     end
-end
-
-local function matchesSnapshot(group, snapshot)
-    if snapshot.kind == "single" then
-        return group.kind == "single" and sameID(group.componentID, snapshot.componentID)
-    end
-    return group.kind == "group" and sameID(group.contextID, snapshot.contextID)
-        and group.path == snapshot.path and group.group == snapshot.group
 end
 
 -- A group is "directed" when the session is actively engaged in direct mode
@@ -832,21 +673,8 @@ end
 -- Forward-declared: restoreDirect's deferred repaint calls refresh(), which is defined below it.
 local refresh
 
--- Give the directed groups a fallback target list for this target. The MD
--- DirectFallback cue uses weaponmode="weaponmode.attackenemies" as its turret
--- selector, so the list only reaches turrets in attackenemies: it is emitted
--- only when the session's Direct-control policy resolves to attackenemies
--- (State.TICK_MODE). Under the autoassist policy the checked groups follow the
--- player's soft target, and a script fallback list neither reaches them nor
--- constrains them, so installing one would be a claim the engine does not
--- make. Fire and forget: MD refuses a payload it cannot resolve, and the worst
--- case of a lost event is a turret that holds fire until the next target change
--- rather than rolling to a fallback, so there is nothing here worth a retry.
--- The fallback is re-sent on every target change because the MD cue names a
--- specific target and dies with it. Live-verified 2026-08-10: attackenemies
--- honours the supplied list even when the pilot is actively fighting
--- (aicommandraw="attackobject"); the old autoassist branch for fighting pilots
--- is now removed.
+-- The fallback list reaches only attackenemies turrets. Re-send it on target
+-- changes because the MD cue is bound to one target.
 local function emitDirectFallback(shipID, targetID)
     if isNullID(shipID) or isNullID(targetID) then return false end
     if not session then return false end
@@ -857,15 +685,8 @@ local function emitDirectFallback(shipID, targetID)
     if State.resolveDirectMode(session) == State.TICK_MODE then
         AddUITriggeredEvent("X4GunneryControl", "direct_fallback", payload)
     end
-    -- Arm the ownership-change listener on this specific target. The watch is
-    -- policy-independent: autoassist needs the ownership-change cease just as
-    -- attackenemies does. Each engage resets the MD DirectWatch.OwnerWatch cue,
-    -- so only one target is watched at a time and the prior listener is
-    -- cancelled automatically. The listener signals X4GunneryControl.DirectTargetLost
-    -- when the target's owner changes to a faction the ship can no longer
-    -- attack (surrender, capture). Same payload as direct_fallback: ship+target,
-    -- same transport contract.
-    -- ponytail: reuses the existing payload table; no second allocation needed.
+    -- Watch ownership changes under either policy; MD replaces the prior
+    -- target's listener when this event is sent again.
     AddUITriggeredEvent("X4GunneryControl", "direct_watch", payload)
     return true
 end
@@ -971,7 +792,10 @@ local function discardSession(reason)
     -- route (endForMovement -> endSession) is also covered.
     local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
-    engageabilityCache, engageabilityRequests = {}, {}
+    engageabilityCache = {}
+    aimMaps = {}
+    browserQueue, browserActive, browserScope = {}, nil, nil
+    targetBrowserState = { view = nil, generation = 0, refresh = false }
     engageabilityRepaintPending = nil
     resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
@@ -1336,9 +1160,7 @@ local function engageTarget(targetID)
                 group.mode, group.armed = s.mode, s.armed
             end
         end
-        -- Arm the directed (checked) groups in the session's Direct-control
-        -- mode. Live-verified 2026-08-10: attackenemies honours the supplied
-        -- fallback list even when the pilot is actively fighting.
+        -- Arm the directed (checked) groups in the session's Direct-control mode.
         for _, group in ipairs(orderable) do
             local mode = State.resolveDirectMode(session, group.key)
             if group.mode ~= mode then setMode(group, mode); group.mode = mode end
@@ -1356,11 +1178,7 @@ local function engageTarget(targetID)
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
-    -- Hand the directed groups a fallback list for this target. The MD
-    -- DirectFallback cue uses weaponmode.attackenemies as its selector and
-    -- reaches the directed groups. A turret with no firing solution on the
-    -- preferred target rolls to the next best hostile rather than tracking in
-    -- silence (Tests B/C/D, 2026-08-09; live confirmed 2026-08-10).
+    -- Give attackenemies groups a fallback list for this target.
     emitDirectFallback(session.shipID, target)
     -- A target click and the replacement compact frame occur on separate UI
     -- ticks. Keep this explicit so an auto-hide or failed frame creation can
@@ -1488,11 +1306,339 @@ local function checkedOperationalTurrets()
     return members
 end
 
--- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
--- events avoid relying on unproven nested-table transport: selected turret ids
--- are streamed once, followed by at most 20 target ids for the batch.
-local engageabilityBatchSize = 20
-local function requestEngageabilities(targets, purpose)
+-- One request per target. Replies are accepted only while this exact cache
+-- entry is current, so delayed MD work cannot complete a newer refresh.
+local aimMapSerial = 0
+local scheduleEngageabilityRepaint
+local setBrowserScope
+local function pumpBrowserQueue()
+    if browserActive then return end
+    if browserScope and not (session and
+            (browserScope:sub(1, 7) == "target:" and session.phase == "target_select"
+                or browserScope:sub(1, 8) == "surface:" and session.phase == "engaged"
+                    and session.controlMode == "direct")) then
+        setBrowserScope(nil)
+        return
+    end
+    while #browserQueue > 0 do
+        local work = table.remove(browserQueue, 1)
+        if work.scope == browserScope and work.cached.pending
+                and engageabilityCache[work.key] == work.cached then
+            browserActive = work
+            work.start()
+            return
+        end
+    end
+end
+
+setBrowserScope = function(scope)
+    if browserScope == scope then return end
+    browserScope = scope
+    for _, work in ipairs(browserQueue) do
+        if engageabilityCache[work.key] == work.cached then
+            engageabilityCache[work.key] = nil
+        end
+        work.cached.cancelled = true
+    end
+    browserQueue = {}
+end
+
+local function profileMs(seconds)
+    return string.format("%.3f", seconds * 1000)
+end
+
+local function finishAimpointProfile(request)
+    local profile = request.profile
+    if profile.aimpointStarted then
+        profile.aimpointWall = GetCurRealTime() - profile.aimpointStarted
+        profile.aimpointStarted = nil
+    end
+end
+
+local function currentAimMap(request)
+    return request and aimMaps[request.token] == request
+        and request.epoch == sessionEpoch
+        and engageabilityCache[request.key] == request.cached
+        and request.cached.aimMap == request and request.cached.pending
+end
+
+local function finishEngageability(request)
+    if not currentAimMap(request) then return end
+    local engageable, known = 0, 0
+    for _, row in ipairs(request.rows) do
+        if row.engageable then engageable = engageable + 1 end
+        if not row.unknown then known = known + 1 end
+    end
+    local cached = request.cached
+    cached.engageable, cached.known, cached.pending, cached.receivedAt =
+        engageable, known, false, getElapsedTime()
+    local p = request.profile
+    finishAimpointProfile(request)
+    log(string.format("event=engageability_profile token=%s purpose=%s target=%s selected=%d in_range=%d aim_points=%d engageable=%d known=%d total_ms=%s range_ms=%s range_requests=%d aimpoint_wall_ms=%s aimpoint_lua_ms=%s aimpoint_probes=%d aimpoint_resumes=%d bearing_ms=%s bearing_requests=%d line_ms=%s line_pairs=%d line_checks=%d pending_reuses=%d",
+        request.token, tostring(request.purpose), tostring(request.target), #request.rows,
+        p.inRange, p.aimPoints, engageable, known, profileMs(GetCurRealTime() - p.started),
+        profileMs(p.rangeWall), p.rangeRequests, profileMs(p.aimpointWall),
+        profileMs(p.aimpointLua), p.aimpointProbes, p.aimpointResumes,
+        profileMs(p.bearingWall), p.bearingRequests, profileMs(p.lineWall),
+        p.linePairs, p.lineChecks, p.pendingReuses))
+    aimMaps[request.token] = nil
+    if targetBrowserState.view and (request.purpose == "target_current" or request.purpose == "target_page") then
+        local targetKey = State.normID(request.target)
+        if targetBrowserState.view.results[targetKey] == cached then
+            targetBrowserState.view.results[targetKey] = {
+                engageable = engageable, known = known, total = cached.total, pending = false,
+            }
+        end
+    end
+    if browserActive and browserActive.request == request then
+        browserActive = nil
+        pumpBrowserQueue()
+    end
+    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
+        scheduleEngageabilityRepaint(request.purpose)
+    end
+end
+
+local function advanceTurret(request)
+    if not currentAimMap(request) then return end
+    while true do
+        local point = request.result.points[request.pointIndex]
+        if not point then finishEngageability(request); return end
+        if not request.bearingRounds[request.pointIndex] then
+            local weapons = {}
+            for _, row in ipairs(request.rows) do
+                if row.range == "IN RANGE" and row.pointIndex == request.pointIndex
+                        and row.points[request.pointIndex].bearing == "NOT_EVALUATED" then
+                    weapons[#weapons + 1] = id(row.weapon)
+                end
+            end
+            request.bearingRounds[request.pointIndex] = true
+            if #weapons > 0 then
+                request.awaiting = { kind = "bearing", point = point.id, weapons = weapons }
+                request.profile.bearingStarted = GetCurRealTime()
+                request.profile.bearingRequests = request.profile.bearingRequests + 1
+                AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", {
+                    token = request.token, target = request.target, point = point.id,
+                    weapons = weapons, x = point.c[1], y = point.c[2], z = point.c[3],
+                })
+                return
+            end
+        end
+        local row = request.rows[request.turretIndex]
+        if not row then
+            request.pointIndex = request.pointIndex + 1
+            request.turretIndex = 1
+        elseif row.range ~= "IN RANGE" or row.pointIndex ~= request.pointIndex then
+            request.turretIndex = request.turretIndex + 1
+        else
+            local result = row.points[request.pointIndex]
+            if result.bearing.state == "CAN AIM"
+                    and result.originIndex <= #result.bearing.firingOrigins then
+                local origin = result.bearing.firingOrigins[result.originIndex]
+                local p = origin.position
+                request.awaiting = { kind = "line", weapon = row.weapon, point = point.id,
+                    origin = result.originIndex }
+                request.profile.lineStarted = GetCurRealTime()
+                request.profile.linePairs = request.profile.linePairs + 1
+                AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
+                    token = request.token, target = request.target, weapon = id(row.weapon),
+                    weaponKey = row.weapon, point = point.id, origin = result.originIndex,
+                    px = point.c[1], py = point.c[2], pz = point.c[3],
+                    ox = p[1], oy = p[2], oz = p[3],
+                })
+                return
+            end
+            row.pointIndex = row.pointIndex + 1
+            request.turretIndex = request.turretIndex + 1
+        end
+    end
+end
+
+-- Resume the same #184 search after each X4 probe reply.
+local function advanceAimMap(request)
+    if not currentAimMap(request) then return end
+    local started = GetCurRealTime()
+    local ok, value, probe = pcall(function()
+        if not request.resumeSearch then request.resumeSearch = AimPointMap.begin(request.center, request.half) end
+        return request.resumeSearch(request.answer)
+    end)
+    request.profile.aimpointLua = request.profile.aimpointLua + GetCurRealTime() - started
+    request.profile.aimpointResumes = request.profile.aimpointResumes + 1
+    request.answer = nil
+    if ok and probe then
+        request.pending = probe
+        request.profile.aimpointProbes = request.profile.aimpointProbes + 1
+        AddUITriggeredEvent("X4GunneryControl", "aimpoint_probe", {
+            token = request.token, target = request.target,
+            x = probe.p[1], y = probe.p[2], z = probe.p[3],
+        })
+    elseif ok and type(value) == "table" and type(value.points) == "table" then
+        request.result, request.pending = value, nil
+        request.profile.aimPoints = #value.points
+        finishAimpointProfile(request)
+        for _, row in ipairs(request.rows) do
+            row.points = {}
+            for i, point in ipairs(value.points) do
+                row.points[i] = { aimPoint = point, bearing = "NOT_EVALUATED",
+                    lineOfFire = "NOT_EVALUATED", originIndex = 1 }
+            end
+            if row.range == "IN RANGE" and #value.points == 0 then row.unknown = true end
+        end
+        request.turretIndex, request.pointIndex, request.bearingRounds = 1, 1, {}
+        advanceTurret(request)
+    else
+        request.failed, request.pending = true, nil
+        finishAimpointProfile(request)
+        for _, row in ipairs(request.rows) do
+            if row.range == "IN RANGE" then row.unknown = true end
+        end
+        finishEngageability(request)
+    end
+end
+
+local function onEngageabilityRange(_, param)
+    local token, weapon, code = tostring(param or ""):match("^x4gcr:(%d+):(%d+):([012])$")
+    local request = token and aimMaps[token]
+    if not currentAimMap(request) or not request.rangePending then return end
+    local row = request.byWeapon[weapon]
+    if not row or row.range ~= "NOT_EVALUATED" then return end
+    row.range = code == "1" and "IN RANGE" or code == "2" and "OUT OF RANGE" or "UNKNOWN"
+    if row.range == "UNKNOWN" then row.unknown = true end
+    request.rangePending = request.rangePending - 1
+    if request.rangePending ~= 0 then return end
+    request.profile.rangeWall = GetCurRealTime() - request.profile.rangeStarted
+    for _, member in ipairs(request.rows) do
+        if member.range == "IN RANGE" then request.profile.inRange = request.profile.inRange + 1 end
+    end
+    for _, member in ipairs(request.rows) do
+        if member.range == "IN RANGE" then
+            request.profile.aimpointStarted = GetCurRealTime()
+            AddUITriggeredEvent("X4GunneryControl", "aimpoint_box", {
+                token = token, target = request.target,
+            })
+            return
+        end
+    end
+    finishEngageability(request)
+end
+
+local function onAimPointBearing(_, param)
+    local token, pointID, entries = tostring(param or ""):match("^x4gcapc:(%d+):(%d+)(.*)$")
+    local request = token and aimMaps[token]
+    local awaiting = request and request.awaiting
+    if not currentAimMap(request) or not awaiting or awaiting.kind ~= "bearing"
+            or awaiting.point ~= tonumber(pointID) then return end
+    request.profile.bearingWall = request.profile.bearingWall
+        + GetCurRealTime() - request.profile.bearingStarted
+    request.awaiting = nil
+    local positions = {}
+    for entry in entries:gmatch("|([^|]+)") do
+        local weapon, valid, x, y, z, bx, by, bz = entry:match(
+            "^(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+        if weapon then positions[weapon] = {valid, x, y, z, bx, by, bz} end
+    end
+    local scale = 1 / 1000000000
+    for _, weapon in ipairs(awaiting.weapons) do
+        local key = tostring(weapon)
+        local row = request.byWeapon[key]
+        local result = row.points[tonumber(pointID)]
+        local point = result.aimPoint
+        local data = positions[key]
+        if data and data[1] == "1" then
+            result.bearing = TurretBearing.evaluate(row.macro, point,
+                {tonumber(data[2])*scale, tonumber(data[3])*scale, tonumber(data[4])*scale},
+                {tonumber(data[5])*scale, tonumber(data[6])*scale, tonumber(data[7])*scale})
+        else
+            result.bearing = { aimPoint = point, state = "UNKNOWN", firingOrigins = {} }
+        end
+        if result.bearing.state == "CAN AIM" then
+            for _, origin in ipairs(result.bearing.firingOrigins) do
+                origin.lineOfFire = { state = "NOT_EVALUATED" }
+            end
+        end
+        if result.bearing.state == "UNKNOWN" then row.unknown = true end
+    end
+    advanceTurret(request)
+end
+
+local lineOfFireStates = { [0] = "UNKNOWN", [1] = "clear", [2] = "LINE OF FIRE BLOCKED" }
+
+local function onAimPointLineOfFire(_, param)
+    local token, weapon, pointID, originIndex, code, checks = tostring(param or ""):match(
+        "^x4gcapl:(%d+):(%d+):(%d+):(%d+):([012]):([0123])$")
+    local request = token and aimMaps[token]
+    local awaiting = request and request.awaiting
+    if not currentAimMap(request) or not awaiting or awaiting.kind ~= "line"
+            or awaiting.weapon ~= weapon or awaiting.point ~= tonumber(pointID)
+            or awaiting.origin ~= tonumber(originIndex) then return end
+    local row = request.byWeapon[weapon]
+    local result = row.points[tonumber(pointID)]
+    local origin = result and result.bearing.firingOrigins[tonumber(originIndex)]
+    if not origin or origin.lineOfFire.state ~= "NOT_EVALUATED" then return end
+    request.profile.lineWall = request.profile.lineWall
+        + GetCurRealTime() - request.profile.lineStarted
+    request.profile.lineChecks = request.profile.lineChecks + tonumber(checks)
+    request.awaiting = nil
+    origin.lineOfFire = { state = lineOfFireStates[tonumber(code)], checks = tonumber(checks) }
+    if code == "1" then
+        result.lineOfFire, row.engageable, row.unknown = "clear", true, false
+        row.pointIndex = #request.result.points + 1
+    else
+        if code == "0" then
+            row.unknown = true
+            result.lineOfFire = "UNKNOWN"
+        elseif result.lineOfFire == "NOT_EVALUATED" then
+            result.lineOfFire = "LINE OF FIRE BLOCKED"
+        end
+        result.originIndex = result.originIndex + 1
+    end
+    advanceTurret(request)
+end
+
+local function onAimPointBox(_, param)
+    local token, valid, cx, cy, cz, hx, hy, hz = tostring(param or ""):match(
+        "^x4gcapb:(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    local request = token and aimMaps[token]
+    if not currentAimMap(request) or request.center then return end
+    if valid ~= "1" then
+        request.failed = true
+        finishAimpointProfile(request)
+        for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
+        finishEngageability(request)
+        return
+    end
+    request.center = { tonumber(cx) / 1000, tonumber(cy) / 1000, tonumber(cz) / 1000 }
+    request.half = { tonumber(hx) / 1000, tonumber(hy) / 1000, tonumber(hz) / 1000 }
+    advanceAimMap(request)
+end
+
+local function onAimPointProbe(_, param)
+    local token, valid, x, y, z = tostring(param or ""):match(
+        "^x4gcapp:(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    local request = token and aimMaps[token]
+    if not currentAimMap(request) or not request.pending then return end
+    if valid ~= "1" then
+        request.failed, request.pending = true, nil
+        finishAimpointProfile(request)
+        for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
+        finishEngageability(request)
+        return
+    end
+    local d = { tonumber(x) / 1000000000, tonumber(y) / 1000000000, tonumber(z) / 1000000000 }
+    local length = math.sqrt(d[1]^2 + d[2]^2 + d[3]^2)
+    if math.abs(length - 1) > 1e-3 then
+        request.failed, request.pending = true, nil
+        finishAimpointProfile(request)
+        for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
+        finishEngageability(request)
+        return
+    end
+    request.answer = d
+    request.pending = nil
+    advanceAimMap(request)
+end
+
+local function requestEngageabilities(targets, purpose, scope, fresh)
     local results = {}
     if not session then return results end
     local members, signatureParts = checkedOperationalTurrets(), {}
@@ -1500,110 +1646,105 @@ local function requestEngageabilities(targets, purpose)
         signatureParts[#signatureParts + 1] = State.normID(member.componentID)
     end
     local signature = table.concat(signatureParts, ",")
-    local now, pending, seen = getElapsedTime(), {}, {}
-    -- Normally MD follows the final result immediately with batch completion.
-    -- If only that aggregate event is lost, retain the empty request briefly so
-    -- a late completion can still be audited, then reclaim it before the next
-    -- completed-result cache refresh.
-    for nonce, request in pairs(engageabilityRequests) do
-        if request.resultsCompleteAt and now - request.resultsCompleteAt >= 1 then
-            engageabilityRequests[nonce] = nil
-        end
-    end
+    local now = getElapsedTime()
+    if scope then setBrowserScope(scope) end
     for position, target in ipairs(targets or {}) do
         if not State.isNullID(target) then
             local targetKey = State.normID(target)
             local key = tostring(sessionEpoch) .. ":" .. targetKey
             local cached = engageabilityCache[key]
-            if cached and cached.signature == signature then
-                if cached.pending and now - cached.requestedAt < 2 then
-                    results[position] = cached
-                elseif not cached.pending and now - cached.requestedAt < 1 then
-                    results[position] = cached
-                end
-            end
-            if not results[position] then
-                if #members == 0 then
-                    cached = { engageable = 0, total = 0, signature = signature, requestedAt = now }
-                    engageabilityCache[key] = cached
-                else
-                    -- Supersede only this target in an older batch. The older
-                    -- request remains alive for its other correlated targets.
-                    if cached and cached.pendingNonce then
-                        local previousNonce = cached.pendingNonce
-                        local previous = engageabilityRequests[previousNonce]
-                        if previous then
-                            previous.targets[targetKey] = nil
-                            if next(previous.targets) == nil then engageabilityRequests[previousNonce] = nil end
-                        end
-                    end
-                    cached = cached and cached.signature == signature and cached or {}
-                    cached.signature, cached.requestedAt, cached.pending, cached.total,
-                        cached.engageable, cached.known = signature, now, true, #members, nil, nil
-                    engageabilityCache[key] = cached
-                    if not seen[targetKey] then
-                        seen[targetKey] = true
-                        pending[#pending + 1] = { target = target, targetKey = targetKey, key = key, cached = cached }
-                    end
+            local reusePending = cached and cached.pending and (not fresh
+                or (scope and scope:sub(1, 7) == "target:" and cached.scope == scope))
+            if cached and cached.signature == signature and
+                    (reusePending or (not fresh and cached.receivedAt and now - cached.receivedAt < 1)) then
+                if cached.pending and cached.aimMap then
+                    cached.aimMap.profile.pendingReuses = cached.aimMap.profile.pendingReuses + 1
                 end
                 results[position] = cached
+            else
+                if cached and cached.aimMap then
+                    aimMaps[cached.aimMap.token] = nil
+                    if browserActive and browserActive.request == cached.aimMap then
+                        browserActive = nil
+                        pumpBrowserQueue()
+                    end
+                end
+                cached = cached and cached.signature == signature and cached or {}
+                cached.signature, cached.scope, cached.requestedAt, cached.total, cached.receivedAt =
+                    signature, scope, now, #members, nil
+                cached.engageable, cached.known, cached.pending = nil, nil, #members > 0
+                engageabilityCache[key] = cached
+                results[position] = cached
+                if #members == 0 then
+                    cached.engageable, cached.known = 0, 0
+                else
+                    aimMapSerial = aimMapSerial + 1
+                    local token = tostring(aimMapSerial)
+                    local request = { token = token, epoch = sessionEpoch, key = key,
+                        target = id(target), cached = cached, purpose = purpose,
+                        rows = {}, byWeapon = {}, rangePending = 0,
+                        profile = { started = GetCurRealTime(), rangeWall = 0, rangeRequests = 0,
+                            inRange = 0, aimpointWall = 0, aimpointLua = 0, aimpointProbes = 0,
+                            aimpointResumes = 0, aimPoints = 0, bearingWall = 0,
+                            bearingRequests = 0, lineWall = 0, linePairs = 0,
+                            lineChecks = 0, pendingReuses = 0 } }
+                    cached.aimMap = request
+                    local function startRequest()
+                        request.profile.started = GetCurRealTime()
+                        aimMaps[token] = request
+                        local root = targetRoot(target)
+                        local eligible = (C.IsComponentClass(root, "ship") or C.IsComponentClass(root, "station"))
+                            and componentData(root, "isenemy") == true
+                        if not eligible then
+                            request.authorized = false
+                            for _, member in ipairs(members) do
+                                local row = { weapon = State.normID(member.componentID),
+                                    range = "NOT_EVALUATED", points = {} }
+                                request.rows[#request.rows + 1] = row
+                            end
+                            finishEngageability(request)
+                        else
+                            request.authorized = true
+                            for _, member in ipairs(members) do
+                                local weapon = State.normID(member.componentID)
+                                local macro = tostring(member.macro or "")
+                                if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
+                                local row = { weapon = weapon, macro = macro,
+                                    range = "NOT_EVALUATED", points = {}, pointIndex = 1 }
+                                request.rows[#request.rows + 1] = row
+                                request.byWeapon[weapon] = row
+                                request.rangePending = request.rangePending + 1
+                                if not request.profile.rangeStarted then
+                                    request.profile.rangeStarted = GetCurRealTime()
+                                end
+                                request.profile.rangeRequests = request.profile.rangeRequests + 1
+                                AddUITriggeredEvent("X4GunneryControl", "engageability_range", {
+                                    token = token, target = request.target,
+                                    weapon = id(member.componentID), weaponKey = weapon })
+                            end
+                        end
+                    end
+                    if scope then
+                        local work = { scope = scope, key = key, cached = cached,
+                            request = request, start = startRequest }
+                        if purpose == "surface_pinned" or purpose == "target_current" then
+                            table.insert(browserQueue, 1, work)
+                        else
+                            browserQueue[#browserQueue + 1] = work
+                        end
+                        pumpBrowserQueue()
+                    else
+                        startRequest()
+                    end
+                end
             end
         end
-    end
-
-    for first = 1, #pending, engageabilityBatchSize do
-        local last = math.min(first + engageabilityBatchSize - 1, #pending)
-        engageabilitySerial = engageabilitySerial + 1
-        local nonce = tostring(sessionEpoch) .. "_" .. tostring(engageabilitySerial)
-        local request = {
-            epoch = sessionEpoch, signature = signature, selectedTotal = #members,
-            targets = {}, requested = last - first + 1, purpose = purpose,
-        }
-        engageabilityRequests[nonce] = request
-        AddUITriggeredEvent("X4GunneryControl", "engageability_begin", {
-            nonce = nonce, members = #members, targets = request.requested,
-        })
-        for _, member in ipairs(members) do
-            -- GetUpgradeGroupInfo2.currentmacro is the authoritative installed
-            -- equipment macro. Live surface components can return an empty
-            -- The component-data macro field can be blank for installed surface
-            -- components, so use that fallback only for ungrouped
-            -- singleton weapons whose group metadata has no macro.
-            local macro = tostring(member.macro or "")
-            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
-            local arc = TurretArcLimits[macro]
-            local muzzle = prospectiveMuzzles[macro]
-            local origin = muzzle and muzzle.origin or nil
-            local pivot = muzzle and muzzle.pivot or nil
-            local downstream = muzzle and muzzle.downstream or nil
-            AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
-                nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
-                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0,
-                muzzleknow = muzzle and 1 or 0,
-                mox = origin and origin[1] or 0, moy = origin and origin[2] or 0, moz = origin and origin[3] or 0,
-                mpx = pivot and pivot[1] or 0, mpy = pivot and pivot[2] or 0, mpz = pivot and pivot[3] or 0,
-                mdx = downstream and downstream[1] or 0, mdy = downstream and downstream[2] or 0,
-                mdz = downstream and downstream[3] or 0 })
-        end
-        for index = first, last do
-            local entry = pending[index]
-            entry.cached.pendingNonce = nonce
-            request.targets[entry.targetKey] = entry.key
-            AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
-                nonce = nonce, target = id(entry.target),
-            })
-        end
-        AddUITriggeredEvent("X4GunneryControl", "engageability_commit", { nonce = nonce })
-        log("event=engageability_batch action=request nonce=" .. nonce
-            .. " requested=" .. tostring(request.requested)
-            .. " selected_total=" .. tostring(#members)
-            .. " selected_signature=" .. string.format("%q", signature))
     end
     return results
 end
 
-local function requestEngageability(target, purpose)
-    return requestEngageabilities({ target }, purpose)[1]
+local function requestEngageability(target, purpose, scope, fresh)
+    return requestEngageabilities({ target }, purpose, scope, fresh)[1]
 end
 
 local function engageabilityText(result)
@@ -1622,12 +1763,11 @@ local function engageabilityAudit(result)
     return "complete", result.engageable or 0, result.known or 0, result.total or 0
 end
 
--- A target/surface render can issue dozens of independent MD requests. Their
--- replies commonly arrive in the same UI tick; rebuilding the complete menu
--- for every reply makes enumeration and audit logging quadratic in row count.
--- One tokenized callback repaints the whole accepted batch. A token survives
+-- Browser calculations finish one at a time. Rebuilding the complete menu
+-- for every reply still repeats enumeration and audit logging for each row.
+-- One tokenized callback repaints the accepted results. A token survives
 -- stale callbacks safely when session teardown resets the pending marker.
-local function scheduleEngageabilityRepaint(purpose)
+scheduleEngageabilityRepaint = function(purpose)
         if purpose == "surface_pinned" then
         if surfacePinnedUpdatePending then return end
         surfacePinnedUpdatePending = true
@@ -1670,47 +1810,6 @@ local function scheduleEngageabilityRepaint(purpose)
             menu.display()
         end
     end, false, getElapsedTime() + 0.01)
-end
-
-local function onEngageabilityResult(_, param)
-    local nonce, targetKey, engageable, known, total = tostring(param or ""):match(
-        "^x4gce3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    engageable, known, total = tonumber(engageable), tonumber(known), tonumber(total)
-    if total ~= request.selectedTotal or known > total or engageable > known then return end
-    targetKey = State.normID(targetKey)
-    local key = request.targets[targetKey]
-    local cached = key and engageabilityCache[key]
-    if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.engageable, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
-        engageable, known, total, false, nil, getElapsedTime()
-    request.targets[targetKey] = nil
-    if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
-    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        scheduleEngageabilityRepaint(request.purpose)
-    end
-end
-
-
-local function onEngageabilityBatchComplete(_, param)
-    local nonce, accepted, completed = tostring(param or ""):match("^x4gce2c:([^:]+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    local unresolved = 0
-    for _, key in pairs(request.targets) do
-        local cached = engageabilityCache[key]
-        if cached and cached.signature == request.signature and cached.pendingNonce == nonce then
-            cached.pendingNonce = nil
-            unresolved = unresolved + 1
-        end
-    end
-    engageabilityRequests[nonce] = nil
-    log("event=engageability_batch action=complete nonce=" .. nonce
-        .. " requested=" .. tostring(request.requested)
-        .. " accepted=" .. tostring(accepted)
-        .. " completed=" .. tostring(completed)
-        .. " unresolved=" .. tostring(unresolved))
 end
 
 targetRoot = function(component)
@@ -2018,8 +2117,6 @@ function TestAPI.returnTestCamera()
     C.SetPlayerCameraCockpitView(true)
 end
 
--- ponytail: these are live-test prototype buttons — wrap-up or delete once the
--- cutscene aim experiment concludes.
 local function sendCutsceneAimStop()
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
 end
@@ -2059,8 +2156,8 @@ local function sendCutsceneAimStart(pov)
         anchorID = turretID
         tgtID = targetID
     end
-    -- Transport contract (live-tested 2026-08-04, final): the engine PREPENDS
-    -- $ to every Lua string key during Lua->MD conversion, so plain "anchor"
+    -- The engine prepends $ to every Lua string key during Lua->MD conversion,
+    -- so plain "anchor"
     -- arrives in MD as the variable key $anchor (read via event.param3.$anchor).
     -- Never pre-prefix $ here — "$anchor" becomes the invalid name $$anchor,
     -- stuck as an unreadable string key. Component ids must be converted via
@@ -2163,9 +2260,9 @@ local function chooseAimTarget()
     return nil
 end
 
--- One planner page is one MD batch: never let a fallback page span the
--- engageability batch size.
-local fallbackPageSize = engageabilityBatchSize
+-- Bound each fallback page so one tick cannot start an unbounded set of
+-- target requests.
+local fallbackPageSize = 20
 
 -- Session-scoped asynchronous resolution of a Direct surface loss
 -- (Issue #45 Task 5). onDirectTargetLost() refreshes the root's surface
@@ -2467,10 +2564,7 @@ local function onDirectTargetOwnerChanged(_, param)
     -- carry a different target id. sameID normalises both the FFI uint64 form
     -- and the Lua-number form that raise_lua_event delivers.
     if not sameID(param, session.targetObjectID) then return end
-    -- Re-issue the directed fallback. DirectFallback's find_ship uses
-    -- relation=kill, so the now-owned target is absent from the result. The
-    -- new do_else branch in DirectFallback issues a wide call with no preferred
-    -- target, letting turrets roll freely to the next hostile.
+    -- Re-issue the hostile list without preferring the now-friendly target.
     log("directed target ownership changed; re-issuing fallback")
     emitDirectFallback(session.shipID, id(session.targetObjectID))
 end
@@ -2660,6 +2754,12 @@ function menu.onShowMenu()
 end
 
 function menu.display()
+    if not session or session.phase ~= "target_select" then targetBrowserState.view = nil end
+    if not session or (session.phase ~= "target_select"
+            and not (session.phase == "engaged" and session.controlMode == "direct"
+                and session.targetObjectID)) then
+        setBrowserScope(nil)
+    end
     if session and session.phase == "engaged" and fullscreenTakeoverDisplayed() then
         hideEngagedOverlayForTakeover()
         engagedOverlayRefreshPending = true
@@ -2881,6 +2981,8 @@ function menu.display()
             local pendingReason = session.surfaceBrowser and session.surfaceBrowser.pendingReason
             if session.surfaceBrowser then session.surfaceBrowser.pendingReason = nil end
             local browser = rebuildSurfaceSnapshot(pendingReason)
+            setBrowserScope("surface:" .. State.normID(browser.rootID) .. ":"
+                .. tostring(browser.generation) .. ":" .. tostring(browser.page))
             local allSurfaces = browser.allSurfaces
             local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})
             autoRefreshRow[1]:createCheckBox(browser.autoRefresh == true,
@@ -2919,6 +3021,8 @@ function menu.display()
                     .. tostring(previousMacroFilter) .. " target=" .. tostring(session.targetObjectID))
                 browser.page = 1
                 browser = rebuildSurfaceSnapshot("filter")
+                setBrowserScope("surface:" .. State.normID(browser.rootID) .. ":"
+                    .. tostring(browser.generation) .. ":" .. tostring(browser.page))
                 allSurfaces = browser.allSurfaces
             end
             local macroOptions = { { id = "any", text = text(86), icon = "", displayremoveoption = false } }
@@ -2948,9 +3052,9 @@ function menu.display()
             -- refreshes independently from the frozen alternative pages.
             local pinnedID = session.aimTargetID or session.targetObjectID
             local pinnedSurface = surfaceMetadata(browser, pinnedID)
-            if not browser.pinnedResult then
+            if not browser.pinnedResult or browser.pinnedResult.cancelled then
                 browser.pinnedDistance = surfaceDistance(pinnedID)
-                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
+                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(browser.page))
             end
             local pinnedName = pinnedSurface and pinnedSurface.name or tgtName
             local pinnedKind = pinnedSurface and pinnedSurface.kind or text(92)
@@ -2983,6 +3087,10 @@ function menu.display()
             browser.page = page
             local pageKey = State.surfacePageKey(browser.generation, pageEntries)
             local pageCache = browser.pageResults[pageKey]
+            if pageCache and (function()
+                for _, result in ipairs(pageCache.results) do if result.cancelled then return true end end
+                return false
+            end)() then pageCache = nil end
             if not pageCache then
                 local pageIDs = {}
                 for _, surface in ipairs(pageEntries) do pageIDs[#pageIDs + 1] = surface.componentID end
@@ -2991,7 +3099,7 @@ function menu.display()
                     signatureParts[#signatureParts + 1] = State.normID(member.componentID)
                 end
                 pageCache = {
-                    results = requestEngageabilities(pageIDs, "surface_page"), audited = false,
+                    results = requestEngageabilities(pageIDs, "surface_page", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(page)), audited = false,
                     distances = {},
                     selectedTotal = #pageMembers, selectedSignature = table.concat(signatureParts, ","),
                 }
@@ -3102,6 +3210,7 @@ function menu.display()
         topActions[1]:setColSpan(12):createButton({}):setText(text(15))
         topActions[1].handlers.onClick = function()
             log("event=target_browser action=refresh location=top")
+            targetBrowserState.refresh = true
             refresh(); menu.display()
         end
         local explanation = tableView:addRow(false, {})
@@ -3119,10 +3228,58 @@ function menu.display()
         header[7]:createText(text(50)); header[8]:setColSpan(2):createText(text(90)); header[10]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
         local classValues, typeValues = 0, 0
-        local candidateIDs = {}
-        for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
-        local candidateEngageabilities = requestEngageabilities(candidateIDs)
-        for index, candidate in ipairs(candidates) do candidate.engageability = candidateEngageabilities[index] end
+        local candidateIDs, candidateKeys = {}, {}
+        for _, candidate in ipairs(candidates) do
+            candidateIDs[#candidateIDs + 1] = candidate.componentID
+            candidateKeys[#candidateKeys + 1] = State.normID(candidate.componentID)
+        end
+        -- Candidate order changes as ships move; use stable text IDs only for view identity.
+        table.sort(candidateKeys)
+        local currentID = current.softtargetID ~= 0 and isEligibleEngagementTarget(current.softtargetID)
+            and current.softtargetID or nil
+        local signatureParts = {}
+        for _, member in ipairs(checkedOperationalTurrets()) do
+            signatureParts[#signatureParts + 1] = State.normID(member.componentID)
+        end
+        local signature = table.concat(signatureParts, ",")
+        local viewKey = State.normID(currentID or 0) .. ":" .. table.concat(candidateKeys, ",")
+        local sameView = targetBrowserState.view and targetBrowserState.view.key == viewKey
+            and targetBrowserState.view.signature == signature
+        if not sameView or targetBrowserState.refresh then
+            local fresh = targetBrowserState.refresh or targetBrowserState.view ~= nil
+            if not sameView then targetBrowserState.generation = targetBrowserState.generation + 1 end
+            targetBrowserState.view = { key = viewKey, signature = signature, fresh = fresh,
+                scope = "target:" .. tostring(targetBrowserState.generation) .. ":" .. viewKey,
+                results = {} }
+        end
+        targetBrowserState.refresh = false
+        local view = targetBrowserState.view
+        local scope = view.scope
+        if currentID then
+            local key = State.normID(currentID)
+            if not view.results[key] then
+                view.results[key] = requestEngageability(currentID, "target_current", scope, view.fresh)
+            end
+        end
+        local missingIDs, missingKeys = {}, {}
+        for _, candidate in ipairs(candidates) do
+            local key = State.normID(candidate.componentID)
+            if not view.results[key] then
+                missingIDs[#missingIDs + 1], missingKeys[#missingKeys + 1] = candidate.componentID, key
+            end
+        end
+        local newResults = requestEngageabilities(missingIDs, "target_page", scope, view.fresh)
+        for index, key in ipairs(missingKeys) do view.results[key] = newResults[index] end
+        for _, candidate in ipairs(candidates) do
+            local key = State.normID(candidate.componentID)
+            local result = view.results[key]
+            if result and not result.pending and result.engageable ~= nil and result.signature then
+                result = { engageable = result.engageable, known = result.known,
+                    total = result.total, pending = false }
+                view.results[key] = result
+            end
+            candidate.engageability = result
+        end
         table.sort(candidates, function(a, b)
             local aEngageable = a.engageability and a.engageability.total > 0 and a.engageability.engageable == a.engageability.total or false
             local bEngageable = b.engageability and b.engageability.total > 0 and b.engageability.engageable == b.engageability.total or false
@@ -3170,6 +3327,7 @@ function menu.display()
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
         actions[1].handlers.onClick = function()
             log("event=target_browser action=refresh location=bottom")
+            targetBrowserState.refresh = true
             refresh(); menu.display()
         end
         if testLabCallbacks and testLabCallbacks.open then
@@ -3374,7 +3532,7 @@ local function updateSessionRuntime()
             browser.pinnedRefreshAt = now + 1
             local pinnedID = session.aimTargetID or session.targetObjectID
             browser.pinnedDistance = surfaceDistance(pinnedID)
-            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
+            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(browser.page))
         end
         if browser.autoRefresh and browser.nextAutoRefreshAt and now >= browser.nextAutoRefreshAt then
             browser.nextAutoRefreshAt = now + 10
@@ -3824,8 +3982,11 @@ local function init()
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
-    RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
-    RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
+    RegisterEvent("X4GunneryControl.EngageabilityRange", onEngageabilityRange)
+    RegisterEvent("X4GunneryControl.AimPointBox", onAimPointBox)
+    RegisterEvent("X4GunneryControl.AimPointProbe", onAimPointProbe)
+    RegisterEvent("X4GunneryControl.AimPointBearing", onAimPointBearing)
+    RegisterEvent("X4GunneryControl.AimPointLineOfFire", onAimPointLineOfFire)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
@@ -3846,17 +4007,8 @@ local function init()
         if #records == 0 then
             return
         end
-        -- Groups are addressed by contextID+path+group, and only a live ship can
-        -- supply a current contextID, so seated is the one state in which any of
-        -- this resolves. A guard, not a path: a save taken while engaged records
-        -- the player seated, so the load puts them back in the chair and this
-        -- has never been observed to fire across the 2026-08-08 runs. Nothing is
-        -- lost if it ever does -- MD still holds the payload and chair ingress
-        -- asks again -- but do not treat the deferral as a tested route.
-        -- An onboard session restores while the player is standing, so the gate
-        -- is "aboard a ship", not "seated". restoreState's ship-name match and the
-        -- post-build sessionContextValid() check below enforce identity/origin, so
-        -- a chair payload restored off the seat (or a mismatched ship) is refused.
+        -- Onboard sessions can restore while standing. Ship and session checks
+        -- below reject a chair payload restored outside its original context.
         if playerShip() == 0 then
             log("restore deferred; player is not aboard a ship")
             return
@@ -3910,10 +4062,6 @@ local function init()
         -- aimTargetID, so persisting it separately would be a second id to keep
         -- in step with the first for nothing.
         session.targetObjectID = target ~= 0 and targetRoot(target) or nil
-        -- firstOperationalMember hands back a (key, componentID) pair for
-        -- selection bookkeeping, not a member table, so enterCamera saw no
-        -- cameraSupported flag and this fallback failed every time it was
-        -- reached -- which is precisely the load case.
         local member = cameraMember()
         if not member or member.operational == false or not member.cameraSupported then
             member = State.firstCameraMember(State.checkedGroups(session))
@@ -3928,16 +4076,7 @@ local function init()
             return
         end
         if target ~= 0 then
-            -- Handed to the watchdog rather than to a delayed callback of its
-            -- own. Two builds scheduled one from inside this event handler and
-            -- neither ever fired -- "re-point scheduled" with no attempt after
-            -- it. Why is still unknown: a probe on 2026-08-08 armed a canary
-            -- here exactly the way those builds armed the re-point, and it fired
-            -- both across a UI reload and across a savegame load, so the
-            -- scheduling mechanism itself is sound and the clock does not rewind
-            -- at load. Whatever killed those builds was something else. The
-            -- watchdog is used because it is measured to run, not because the
-            -- alternative is understood.
+            -- The watchdog re-points the target after restore.
             session.repointTargetID = target
         end
         if menu.shown then

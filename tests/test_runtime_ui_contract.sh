@@ -58,50 +58,7 @@ grep -Fq 'showTickerPermanently = false' "$main"
 grep -Fq 'State.beginTargetSelection(session, group, member)' "$main"
 grep -Fq 'GetContainedShips' "$main"
 grep -Fq 'readSurfaceTargets' "$main"
-grep -Fq 'RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)' "$main"
-grep -Fq 'RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)' "$main"
-grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_member"' "$main"
-grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_target"' "$main"
 grep -Fq 'State.checkedGroups(session)' "$main"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityService'])" "engageability service cue count"
-# Guided missile turrets bypass the direct ray after bearing/range. Unguided
-# missile turrets cast it with own-hull exclusion; conventional turrets cast the
-# same expression as false and retain the existing own-hull-aware behaviour.
-assert_md_xpath "1" "count(//set_value[@name='\$guidedmissileturret'][contains(@exact, '\$weapon.class == class.missileturret')][contains(@exact, '\$weapon.ammo.macro.isguided')])" "guided missile-turret discriminator count"
-assert_md_xpath "1" "count(//do_if[@value='\$guidedmissileturret']/set_value[@name='\$lineoffireclear'][@exact='true'])" "guided missile-turret line-of-fire bypass count"
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='\$weapon.class == class.missileturret'][@useaimtarget='true'][@target='\$target'])" "engageability service root muzzle-origin line-of-fire check count"
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='\$weapon.class == class.missileturret'][@useaimtarget='true'][@target='\$module'])" "engageability service module-fallback muzzle-origin line-of-fire check count"
-assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityResult'\"])" "engageability result event count"
-assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityBatchComplete'\"])" "engageability batch-complete event count"
-grep -Fq "'x4gce3:' + \$nonce + ':' + EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
-grep -Fq "'x4gce2c:' + \$nonce + ':' + EngageabilityService.\$targets.count + ':' + \$completed" "$md"
-# Issue #67 r32 live A/B: X4 fired/hit an exact surface whose component origin
-# was outside +80 degrees while its hittable aim point was inside. Production
-# must evaluate the weapon-local, useaimtarget bearing—not the component origin.
-assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//do_if[contains(@value, 'EngageabilityService.\$arcknown')]/create_orientation[@name='\$aimorientation'][@orientation='look_at'][@refobject='\$target'][@useaimtarget='true']/position[@object='\$weapon'][@space='\$weapon'])" "weapon-local hittable-aim orientation count"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityCommit']//set_value[@name='\$aimpitch'][@exact='\$aimorientation.pitch'])" "hittable-aim pitch assignment count"
-if grep -Fq "\$target.relativeposition.{\$weapon}.rotation.pitch" "$md"; then
-  echo "production MD reintroduced component-origin firing-arc bearing" >&2
-  exit 1
-fi
-grep -Fq "EngageabilityService.\$arcmins.{\$weaponindex} * 1deg" "$md"
-grep -Fq "EngageabilityService.\$arcmaxs.{\$weaponindex} * 1deg" "$md"
-# Issue #54 Task 2: the firing-range gate mirrors shipped combat-AI
-# reachability — bounding-box distance, no size term
-# (move.attack.object.capital.xml:656,680; md-ai.md).
-# The negative is scoped to the old EngageabilityService weapon-reach
-# predicate — point distance plus half the target's size, the
-# asteroid-mining approach form. Unrelated point-distance calculations
-# elsewhere in this MD (e.g. camera framing) stay legal.
-grep -Fq "\$weapon.bboxdistanceto.{\$target} le \$weapon.maxfirerange" "$md"
-if grep -Eq "\\\$weapon\.distanceto\.\{\\\$target\}[[:space:]]*\+[[:space:]]*\(?[[:space:]]*\\\$target\.size[[:space:]]*/[[:space:]]*2" "$md"; then
-  echo "production MD reintroduced the point-distance (distanceto + target.size/2) firing-range predicate" >&2
-  exit 1
-fi
-assert_md_xpath "1" "count(//check_line_of_sight[@target='\$target'][@useaimtarget='true'][@objectoffset='\$weapon.barrelposition'][ancestor::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityMember']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'weapons.count lt')][contains(@value, 'not EngageabilityService.\$weapons.indexof')])" "member nonce/count/duplicate guards"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityTarget']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'targets.count lt')][contains(@value, 'not EngageabilityService.\$targets.indexof')])" "target nonce/count/duplicate guards"
-grep -Fq "[@event.param3.\$targets, 20].min" "$md"
 grep -Fq 'Helper.clearDataForRefresh(menu)' "$main"
 grep -Fq 'State.surfaceAlternatives(allSurfaces, pinnedID,' "$main"
 grep -Fq 'State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)' "$main"
@@ -109,8 +66,8 @@ grep -Fq 'local elemRefresh = elemTable:addRow("surface_refresh", {})' "$main"
 grep -Fq 'local surfaceCrossTypePolicy = "size_first"' "$main"
 grep -Fq 'State.surfacePage(ordered, browser.page, browser.pageSize)' "$main"
 grep -Fq 'State.surfacePageKey(browser.generation, pageEntries)' "$main"
-grep -Fq 'requestEngageability(pinnedID, "surface_pinned")' "$main"
-grep -Fq 'requestEngageabilities(pageIDs, "surface_page")' "$main"
+grep -Fq 'requestEngageability(pinnedID, "surface_pinned", "surface:" .. State.normID(browser.rootID)' "$main"
+grep -Fq 'requestEngageabilities(pageIDs, "surface_page", "surface:" .. State.normID(browser.rootID)' "$main"
 grep -Fq 'local parentHullRow = elemTable:addRow("surface_parent_hull", {})' "$main"
 grep -Fq 'local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})' "$main"
 grep -Fq 'browser.nextAutoRefreshAt = browser.autoRefresh and (getElapsedTime() + 10) or nil' "$main"
@@ -469,5 +426,8 @@ grep -Fq '<t id="102">' t/0001.xml
 # the checked groups' live modes immediately.
 grep -Fq 'controls:addRow("direct_mode", {})' "$main"
 grep -Fq 'applyDirectModeLive()' "$main"
+
+# P5 uses X4's inclusive combat-reach predicate. Equality must survive.
+grep -Fq "\$weapon.bboxdistanceto.{\$target} le \$weapon.maxfirerange" md/x4_gunnery_control.xml
 
 echo "runtime UI contract checks passed"

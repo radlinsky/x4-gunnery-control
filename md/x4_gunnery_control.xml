@@ -5,9 +5,8 @@
   <cues>
     <cue name="State">
       <cues>
-        <!-- One commit carries the encoded Lua record plus the optional target.
-             Keeping them together avoids a save between the old two events
-             producing a session associated with a previous target. -->
+        <!-- Commit the encoded Lua record and optional target together so a
+             save cannot pair the session with a different target. -->
         <cue name="CommitSession" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'session_commit'"/>
@@ -117,287 +116,196 @@
       </cues>
     </cue>
 
-    <!-- Exact selected-turret engageability service. Lua owns checkbox membership
-         and streams flat component ids; MD owns the per-turret range and
-         line-of-fire checks. Each batch repeats its selected members once and
-         accepts at most the declared 20 targets. Responses are packed because
-         raise_lua_event can carry only one scalar. -->
-    <cue name="EngageabilityService">
+    <cue name="EngageabilityRange" instantiate="true">
+      <conditions>
+        <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_range'"/>
+      </conditions>
+      <actions>
+        <set_value name="$target" exact="@event.param3.$target"/>
+        <set_value name="$weapon" exact="@event.param3.$weapon"/>
+        <do_if value="typeof $target != datatype.component and $target">
+          <set_value name="$target" exact="component.{$target}"/>
+        </do_if>
+        <do_if value="typeof $weapon != datatype.component and $weapon">
+          <set_value name="$weapon" exact="component.{$weapon}"/>
+        </do_if>
+        <set_value name="$result" exact="0"/>
+        <do_if value="typeof $target == datatype.component and $target.exists and typeof $weapon == datatype.component and $weapon.exists">
+          <do_if value="$weapon.bboxdistanceto.{$target} le $weapon.maxfirerange">
+            <set_value name="$result" exact="1"/>
+          </do_if>
+          <do_else>
+            <set_value name="$result" exact="2"/>
+          </do_else>
+        </do_if>
+        <raise_lua_event name="'X4GunneryControl.EngageabilityRange'"
+                         param="'x4gcr:' + @event.param3.$token + ':' + @event.param3.$weaponKey + ':' + $result"/>
+      </actions>
+    </cue>
+
+    <!-- One target-local #184 map request. The Lua search owns every sample and
+         the 40-sample budget; MD supplies only the target box and X4 direction. -->
+    <cue name="AimPointMapService">
       <cues>
-        <cue name="EngageabilityBegin" instantiate="true">
+        <cue name="AimPointBox" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_begin'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'aimpoint_box'"/>
           </conditions>
           <actions>
-            <set_value name="EngageabilityService.$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="EngageabilityService.$expectedmembers" exact="@event.param3.$members"/>
-            <set_value name="EngageabilityService.$expectedtargets" exact="[@event.param3.$targets, 20].min"/>
-            <set_value name="EngageabilityService.$weapons" exact="[]"/>
-            <set_value name="EngageabilityService.$arcknown" exact="[]"/>
-            <set_value name="EngageabilityService.$arcmins" exact="[]"/>
-            <set_value name="EngageabilityService.$arcmaxs" exact="[]"/>
-            <!-- Per-weapon prospective-muzzle vectors (#74): flat scalar lists
-                 delivered on engageability_member, one entry per weapon index. -->
-            <set_value name="EngageabilityService.$muzzleknown" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzleox" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzleoy" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzleoz" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzlepx" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzlepy" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzlepz" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzledx" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzledy" exact="[]"/>
-            <set_value name="EngageabilityService.$muzzledz" exact="[]"/>
-            <set_value name="EngageabilityService.$targets" exact="[]"/>
-            <set_value name="EngageabilityService.$targetids" exact="[]"/>
-          </actions>
-        </cue>
-        <cue name="EngageabilityMember" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_member'"/>
-          </conditions>
-          <actions>
-            <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="$weapon" exact="@event.param3.$weapon"/>
-            <set_value name="$arcknow" exact="@event.param3.$arcknow"/>
-            <set_value name="$arcmin" exact="@event.param3.$arcmin"/>
-            <set_value name="$arcmax" exact="@event.param3.$arcmax"/>
-            <set_value name="$muzzleknow" exact="@event.param3.$muzzleknow"/>
-            <set_value name="$mox" exact="@event.param3.$mox"/>
-            <set_value name="$moy" exact="@event.param3.$moy"/>
-            <set_value name="$moz" exact="@event.param3.$moz"/>
-            <set_value name="$mpx" exact="@event.param3.$mpx"/>
-            <set_value name="$mpy" exact="@event.param3.$mpy"/>
-            <set_value name="$mpz" exact="@event.param3.$mpz"/>
-            <set_value name="$mdx" exact="@event.param3.$mdx"/>
-            <set_value name="$mdy" exact="@event.param3.$mdy"/>
-            <set_value name="$mdz" exact="@event.param3.$mdz"/>
-            <do_if value="typeof $weapon != datatype.component and $weapon">
-              <set_value name="$weapon" exact="component.{$weapon}"/>
-            </do_if>
-            <do_if value="$nonce == EngageabilityService.$nonce
-                          and EngageabilityService.$weapons.count lt EngageabilityService.$expectedmembers
-                          and typeof $weapon == datatype.component
-                          and not EngageabilityService.$weapons.indexof.{$weapon}">
-              <append_to_list name="EngageabilityService.$weapons" exact="$weapon"/>
-              <append_to_list name="EngageabilityService.$arcknown" exact="$arcknow"/>
-              <append_to_list name="EngageabilityService.$arcmins" exact="$arcmin"/>
-              <append_to_list name="EngageabilityService.$arcmaxs" exact="$arcmax"/>
-              <append_to_list name="EngageabilityService.$muzzleknown" exact="$muzzleknow"/>
-              <append_to_list name="EngageabilityService.$muzzleox" exact="$mox"/>
-              <append_to_list name="EngageabilityService.$muzzleoy" exact="$moy"/>
-              <append_to_list name="EngageabilityService.$muzzleoz" exact="$moz"/>
-              <append_to_list name="EngageabilityService.$muzzlepx" exact="$mpx"/>
-              <append_to_list name="EngageabilityService.$muzzlepy" exact="$mpy"/>
-              <append_to_list name="EngageabilityService.$muzzlepz" exact="$mpz"/>
-              <append_to_list name="EngageabilityService.$muzzledx" exact="$mdx"/>
-              <append_to_list name="EngageabilityService.$muzzledy" exact="$mdy"/>
-              <append_to_list name="EngageabilityService.$muzzledz" exact="$mdz"/>
-            </do_if>
-          </actions>
-        </cue>
-        <cue name="EngageabilityTarget" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_target'"/>
-          </conditions>
-          <actions>
-            <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="$targetid" exact="@event.param3.$target"/>
-            <set_value name="$target" exact="$targetid"/>
+            <set_value name="$token" exact="@event.param3.$token"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
             <do_if value="typeof $target != datatype.component and $target">
               <set_value name="$target" exact="component.{$target}"/>
             </do_if>
-            <do_if value="$nonce == EngageabilityService.$nonce
-                          and EngageabilityService.$targets.count lt EngageabilityService.$expectedtargets
-                          and typeof $target == datatype.component
-                          and not EngageabilityService.$targets.indexof.{$target}">
-              <append_to_list name="EngageabilityService.$targets" exact="$target"/>
-              <append_to_list name="EngageabilityService.$targetids" exact="$targetid"/>
+            <do_if value="typeof $target == datatype.component and $target.exists">
+              <set_value name="$center" exact="$target.macro.boundingbox.center"/>
+              <set_value name="$half" exact="$target.macro.boundingbox.max"/>
+              <raise_lua_event name="'X4GunneryControl.AimPointBox'"
+                               param="'x4gcapb:' + $token + ':1:' + ($center.x * 1000)i + ':' + ($center.y * 1000)i + ':' + ($center.z * 1000)i + ':' + ($half.x * 1000)i + ':' + ($half.y * 1000)i + ':' + ($half.z * 1000)i"/>
             </do_if>
+            <do_else>
+              <raise_lua_event name="'X4GunneryControl.AimPointBox'" param="'x4gcapb:' + $token + ':0:0:0:0:0:0:0'"/>
+            </do_else>
           </actions>
         </cue>
-        <cue name="EngageabilityCommit" instantiate="true">
+        <cue name="AimPointProbe" instantiate="true">
           <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_commit'"/>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'aimpoint_probe'"/>
           </conditions>
           <actions>
-            <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <do_if value="$nonce == EngageabilityService.$nonce">
-              <set_value name="$completed" exact="0"/>
-              <do_for_each name="$target" in="EngageabilityService.$targets" counter="$targetindex">
-                <set_value name="$engageable" exact="0"/>
-                <set_value name="$known" exact="0"/>
-                <do_for_each name="$weapon" in="EngageabilityService.$weapons" counter="$weaponindex">
-                  <!-- rotation_x restrictions in shipped turret components are
-                       pitch limits in this fixed mount-local reference frame.
-                       Issue #67 r32 live-proved that X4 fires when a selected
-                       component's origin is outside the stop but its hittable
-                       aim point is inside, so evaluate the weapon-local
-                       useaimtarget bearing rather than the component origin.
-                       Unknown/modded macros remain UNKNOWN rather than being
-                       falsely promoted by range + line of fire alone. -->
-                  <do_if value="EngageabilityService.$arcknown.{$weaponindex} == 1">
-                    <set_value name="$known" operation="add"/>
-                    <create_orientation name="$aimorientation" orientation="look_at"
-                                        refobject="$target" useaimtarget="true">
-                      <position object="$weapon" space="$weapon"/>
-                    </create_orientation>
-                    <set_value name="$aimpitch" exact="$aimorientation.pitch"/>
-                    <do_if value="$aimpitch ge (EngageabilityService.$arcmins.{$weaponindex} * 1deg)
-                                  and $aimpitch le (EngageabilityService.$arcmaxs.{$weaponindex} * 1deg)
-                                  and $weapon.bboxdistanceto.{$target} le $weapon.maxfirerange">
-                      <!-- Guided missile turrets need only be able to bear and
-                           reach: the missile can steer clear after launch, and
-                           the engine does not require a direct muzzle-to-target
-                           ray. Unguided missile turrets retain a direct line-of-
-                           fire gate but exclude the firing ship so its own hull
-                           does not mask a viable launch. Missing or modded ammo
-                           guidance data takes this conservative unguided path.
-                           Conventional turrets keep the own-hull-aware probe. -->
-                      <set_value name="$guidedmissileturret" exact="$weapon.class == class.missileturret and $weapon.ammo.macro and $weapon.ammo.macro.isguided"/>
-                      <do_if value="$guidedmissileturret">
-                        <set_value name="$lineoffireclear" exact="true"/>
-                      </do_if>
-                      <do_else>
-                        <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="$weapon.class == class.missileturret" useaimtarget="true"/>
-                      </do_else>
-                      <!-- A large ship/station root's aim point is its bounding-
-                           box centre (see check_line_of_sight useaimtarget in the
-                           9.00 XSD), which sits inside the hull, so the root ray
-                           self-blocks even while turrets fire at surface modules.
-                           Mirror vanilla move.attack.object.capital (9.00): on a
-                           modular target whose root has no line of fire, fall back
-                           to per-module line of fire. First visible module counts
-                           this weapon as engageable, matching engine behaviour.
-                           Only when $target IS the whole defensible root: vanilla
-                           only ever feeds this loop a whole-object attack target
-                           (it retargets to a visible module), and on a whole object
-                           .defensible is the object itself. A player-selected
-                           surface element's .defensible resolves to its parent
-                           station, so without this guard the fallback would count
-                           any weapon that can see ANY station module as engageable
-                           against that one element, inflating the count (#62).
-                           canhaveattackablemodules (ship datatype, @-guarded so a
-                           station root safely reads null) extends the same root
-                           fallback to the rare capital ships whose macro embeds a
-                           targetable defence module, matching vanilla target
-                           selection (lib.target.selection ismodular or
-                           canhaveattackablemodules); harmless where a ship's
-                           defence modules are not exposed via .modules. -->
-                      <do_if value="not $lineoffireclear
-                                    and $target == $target.defensible
-                                    and ($target.defensible.ismodular or @$target.canhaveattackablemodules)
-                                    and $target.defensible.modules.operational.count gt 1">
-                        <set_value name="$modules" exact="$target.defensible.modules.operational.list"/>
-                        <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
-                        <do_for_each name="$module" in="$modules">
-                          <do_if value="$weapon.bboxdistanceto.{$module} le $weapon.maxfirerange">
-                            <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$module" excludeself="$weapon.class == class.missileturret" useaimtarget="true"/>
-                            <do_if value="$lineoffireclear">
-                              <break/>
-                            </do_if>
-                          </do_if>
-                        </do_for_each>
-                        <remove_value name="$modules"/>
-                      </do_if>
-                      <!-- Bounded surface-element line-of-fire fallback (#69). The
-                           root useaimtarget ray above samples a SINGLE hittable
-                           aim point of the victim mesh; live proof on the selected
-                           Argon L engine shows that point (and the bbox centre)
-                           self-block while X4 fires at and hits a different in-arc
-                           point of the same component. When the target is a child
-                           surface element (its .defensible resolves to the parent
-                           ship/station, i.e. $target != $target.defensible, which
-                           is the complement of the whole-root module fallback
-                           above) on a conventional turret, probe a fixed handful of
-                           interior bounding-box points and accept on the first one
-                           with a clear muzzle ray. bbox min per axis = 2*center -
-                           max (repo idiom). Six face-interior samples only: two per
-                           axis at 0.25/0.75 with the others centred; this is a
-                           bounded diagnostic-derived witness set, not a
-                           reproduction of native fire-control sampling. -->
-                      <do_if value="not $lineoffireclear
-                                    and $weapon.class != class.missileturret
-                                    and $target != $target.defensible">
-                        <set_value name="$surfaceminx" exact="2 * $target.macro.boundingbox.center.x - $target.macro.boundingbox.max.x"/>
-                        <set_value name="$surfaceminy" exact="2 * $target.macro.boundingbox.center.y - $target.macro.boundingbox.max.y"/>
-                        <set_value name="$surfaceminz" exact="2 * $target.macro.boundingbox.center.z - $target.macro.boundingbox.max.z"/>
-                        <set_value name="$surfacespanx" exact="$target.macro.boundingbox.max.x - $surfaceminx"/>
-                        <set_value name="$surfacespany" exact="$target.macro.boundingbox.max.y - $surfaceminy"/>
-                        <set_value name="$surfacespanz" exact="$target.macro.boundingbox.max.z - $surfaceminz"/>
-                        <set_value name="$surfacexfracs" exact="[0.25, 0.75, 0.50, 0.50, 0.50, 0.50]"/>
-                        <set_value name="$surfaceyfracs" exact="[0.50, 0.50, 0.25, 0.75, 0.50, 0.50]"/>
-                        <set_value name="$surfacezfracs" exact="[0.50, 0.50, 0.50, 0.50, 0.25, 0.75]"/>
-                        <do_for_each name="$surfacefrac" in="$surfacexfracs" counter="$surfacei">
-                          <create_position name="$surfacesample" object="$target" space="$target"
-                                           x="$surfaceminx + $surfacexfracs.{$surfacei} * $surfacespanx"
-                                           y="$surfaceminy + $surfaceyfracs.{$surfacei} * $surfacespany"
-                                           z="$surfaceminz + $surfacezfracs.{$surfacei} * $surfacespanz"/>
-                          <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" targetoffset="$surfacesample" useaimtarget="false" excludeself="false"/>
-                          <do_if value="$lineoffireclear">
-                            <break/>
-                          </do_if>
-                        </do_for_each>
-                        <!-- A turret can still be self-masked at its resting/current
-                             barrelposition while its authored deployed muzzle has a
-                             clear ray. Only after the current-origin fast query and
-                             all six current-origin witnesses remain blocked, use the
-                             accepted per-macro prospective construction. This is not
-                             generic turret geometry: O + Ry(runtime aim yaw) *
-                             (P + Rx(-runtime aim pitch) * D). The muzzle-known flag
-                             is the gate: UI Lua streams O/P/D only for the macros it
-                             explicitly supports. -->
-                        <do_if value="not $lineoffireclear and EngageabilityService.$muzzleknown.{$weaponindex} == 1">
-                          <!-- Prospective muzzle from the generated source-resolved
-                               record (ui/turret_muzzle_geometry.lua), delivered as
-                               flat per-weapon scalars. Accepted construction
-                               O + Ry(yaw) * (P + Rx(-pitch) * D); the O/P/D vectors
-                               are derived from authored layers/transforms in UI Lua
-                               rather than hand-copied here. Only the generated path
-                               remains (#74 A2): no hardcoded Beam literals. -->
-                          <create_orientation name="$prospectivebearing" orientation="look_at" refobject="$target" useaimtarget="true">
-                            <position object="$weapon" space="$weapon"/>
-                          </create_orientation>
-                          <create_rotation name="$prospectivepitchrotation" pitch="$prospectivebearing.pitch"/>
-                          <create_rotation name="$prospectiveyawrotation" yaw="$prospectivebearing.yaw"/>
-                          <transform_position name="$prospectivepitcheddownstream" refposition="position.[0m,0m,0m]" refrotation="$prospectivepitchrotation">
-                            <position x="EngageabilityService.$muzzledx.{$weaponindex} * 1m" y="EngageabilityService.$muzzledy.{$weaponindex} * 1m" z="EngageabilityService.$muzzledz.{$weaponindex} * 1m"/>
-                          </transform_position>
-                          <create_position name="$prospectiveyaworigin" x="EngageabilityService.$muzzleox.{$weaponindex} * 1m" y="EngageabilityService.$muzzleoy.{$weaponindex} * 1m" z="EngageabilityService.$muzzleoz.{$weaponindex} * 1m"/>
-                          <transform_position name="$prospectivemuzzle" refposition="$prospectiveyaworigin" refrotation="$prospectiveyawrotation">
-                            <position x="$prospectivepitcheddownstream.x + EngageabilityService.$muzzlepx.{$weaponindex} * 1m" y="$prospectivepitcheddownstream.y + EngageabilityService.$muzzlepy.{$weaponindex} * 1m" z="$prospectivepitcheddownstream.z + EngageabilityService.$muzzlepz.{$weaponindex} * 1m"/>
-                          </transform_position>
-                          <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" useaimtarget="true" excludeself="false"/>
-                          <do_if value="not $lineoffireclear">
-                            <do_for_each name="$prospectivefrac" in="$surfacexfracs" counter="$prospectivei">
-                              <create_position name="$prospectivesample" object="$target" space="$target"
-                                               x="$surfaceminx + $surfacexfracs.{$prospectivei} * $surfacespanx"
-                                               y="$surfaceminy + $surfaceyfracs.{$prospectivei} * $surfacespany"
-                                               z="$surfaceminz + $surfacezfracs.{$prospectivei} * $surfacespanz"/>
-                              <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$prospectivemuzzle" target="$target" targetoffset="$prospectivesample" useaimtarget="false" excludeself="false"/>
-                              <do_if value="$lineoffireclear">
-                                <break/>
-                              </do_if>
-                            </do_for_each>
-                          </do_if>
+            <set_value name="$token" exact="@event.param3.$token"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="typeof $target == datatype.component and $target.exists">
+              <create_orientation name="$aim" orientation="look_at" refobject="$target" useaimtarget="true">
+                <position x="@event.param3.$x * 1m" y="@event.param3.$y * 1m" z="@event.param3.$z * 1m" object="$target" space="$target"/>
+              </create_orientation>
+              <set_value name="$forward" exact="$aim.forward"/>
+              <raise_lua_event name="'X4GunneryControl.AimPointProbe'"
+                               param="'x4gcapp:' + $token + ':1:' + ($forward.x * 1000000000)i + ':' + ($forward.y * 1000000000)i + ':' + ($forward.z * 1000000000)i"/>
+            </do_if>
+            <do_else>
+              <raise_lua_event name="'X4GunneryControl.AimPointProbe'" param="'x4gcapp:' + $token + ':0:0:0:0'"/>
+            </do_else>
+          </actions>
+        </cue>
+        <cue name="AimPointBearing" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'aimpoint_bearing'"/>
+          </conditions>
+          <actions>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <set_value name="$reply" exact="'x4gcapc:' + @event.param3.$token + ':' + @event.param3.$point"/>
+            <set_value name="$index" exact="0"/>
+            <do_all exact="@event.param3.$weapons.count">
+              <set_value name="$index" operation="add"/>
+              <set_value name="$weaponKey" exact="@event.param3.$weapons.{$index}"/>
+              <set_value name="$weapon" exact="$weaponKey"/>
+              <do_if value="typeof $weapon != datatype.component and $weapon">
+                <set_value name="$weapon" exact="component.{$weapon}"/>
+              </do_if>
+              <do_if value="typeof $target == datatype.component and $target.exists and typeof $weapon == datatype.component and $weapon.exists">
+                <create_position name="$turretpoint" x="@event.param3.$x * 1m" y="@event.param3.$y * 1m" z="@event.param3.$z * 1m" object="$target" space="$weapon"/>
+                <set_value name="$barrel" exact="$weapon.barrelposition"/>
+                <set_value name="$reply" exact="$reply + '|' + $weaponKey + ':1:' + ($turretpoint.x * 1000000000)i + ':' + ($turretpoint.y * 1000000000)i + ':' + ($turretpoint.z * 1000000000)i + ':' + ($barrel.x * 1000000000)i + ':' + ($barrel.y * 1000000000)i + ':' + ($barrel.z * 1000000000)i"/>
+              </do_if>
+              <do_else>
+                <set_value name="$reply" exact="$reply + '|' + $weaponKey + ':0:0:0:0:0:0:0'"/>
+              </do_else>
+            </do_all>
+            <raise_lua_event name="'X4GunneryControl.AimPointBearing'" param="$reply"/>
+          </actions>
+        </cue>
+
+        <cue name="AimPointLineOfFire" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryControl'" control="'aimpoint_line_of_fire'"/>
+          </conditions>
+          <actions>
+            <set_value name="$token" exact="@event.param3.$token"/>
+            <set_value name="$point" exact="@event.param3.$point"/>
+            <set_value name="$originIndex" exact="@event.param3.$origin"/>
+            <set_value name="$weaponKey" exact="@event.param3.$weaponKey"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <set_value name="$weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <do_if value="typeof $weapon != datatype.component and $weapon">
+              <set_value name="$weapon" exact="component.{$weapon}"/>
+            </do_if>
+            <set_value name="$result" exact="0"/>
+            <set_value name="$checks" exact="0"/>
+            <do_if value="typeof $target == datatype.component and $target.exists and typeof $weapon == datatype.component and $weapon.exists">
+              <set_value name="$normal" exact="false"/>
+              <do_if value="$weapon.class == class.turret">
+                <set_value name="$normal" exact="true"/>
+              </do_if>
+              <do_if value="$weapon.class == class.missileturret and @$weapon.ammo.macro">
+                <do_if value="$weapon.ammo.macro.isguided == true">
+                  <set_value name="$result" exact="1"/>
+                </do_if>
+                <do_else>
+                  <do_if value="$weapon.ammo.macro.isguided == false">
+                    <set_value name="$normal" exact="true"/>
+                  </do_if>
+                </do_else>
+              </do_if>
+              <do_if value="$normal and @$target.zone and @$weapon.zone and $target.zone == $weapon.zone">
+                <set_value name="$containing" exact="@$target.object"/>
+                <do_if value="typeof $containing == datatype.component and $containing.exists">
+                  <create_position name="$origin" x="@event.param3.$ox * 1m" y="@event.param3.$oy * 1m" z="@event.param3.$oz * 1m" object="$weapon" space="$weapon"/>
+                  <create_position name="$pointTarget" x="@event.param3.$px * 1m" y="@event.param3.$py * 1m" z="@event.param3.$pz * 1m" object="$target" space="$target"/>
+                  <check_line_of_sight name="$hitTarget" object="$weapon" objectoffset="$origin" target="$target" targetoffset="$pointTarget" useaimtarget="false" excludeself="false"/>
+                  <set_value name="$checks" exact="1"/>
+                  <do_if value="$hitTarget">
+                    <set_value name="$result" exact="1"/>
+                  </do_if>
+                  <do_else>
+                    <set_value name="$checkZone" exact="true"/>
+                    <do_if value="$containing != $target">
+                      <create_position name="$pointContaining" x="@event.param3.$px * 1m" y="@event.param3.$py * 1m" z="@event.param3.$pz * 1m" object="$target" space="$containing"/>
+                      <check_line_of_sight name="$hitContaining" object="$weapon" objectoffset="$origin" target="$containing" targetoffset="$pointContaining" useaimtarget="false" excludeself="false"/>
+                      <set_value name="$checks" exact="2"/>
+                      <do_if value="$hitContaining">
+                        <set_value name="$checkZone" exact="false"/>
+                        <create_position name="$componentOrigin" x="0m" y="0m" z="0m" object="$target" space="$target"/>
+                        <check_line_of_sight name="$secondHit" object="$weapon" objectoffset="$origin" target="$target" targetoffset="$componentOrigin" useaimtarget="false" excludeself="false"/>
+                        <set_value name="$checks" exact="3"/>
+                        <do_if value="$secondHit">
+                          <set_value name="$result" exact="1"/>
                         </do_if>
-                      </do_if>
-                      <do_if value="$lineoffireclear">
-                        <set_value name="$engageable" operation="add"/>
+                        <do_else>
+                          <set_value name="$result" exact="2"/>
+                        </do_else>
                       </do_if>
                     </do_if>
-                  </do_if>
-                </do_for_each>
-                <raise_lua_event name="'X4GunneryControl.EngageabilityResult'" param="'x4gce3:' + $nonce + ':' + EngageabilityService.$targetids.{$targetindex} + ':' + $engageable + ':' + $known + ':' + EngageabilityService.$expectedmembers"/>
-                <set_value name="$completed" operation="add"/>
-              </do_for_each>
-              <raise_lua_event name="'X4GunneryControl.EngageabilityBatchComplete'" param="'x4gce2c:' + $nonce + ':' + EngageabilityService.$targets.count + ':' + $completed"/>
+                    <do_if value="$checkZone">
+                      <create_position name="$pointZone" x="@event.param3.$px * 1m" y="@event.param3.$py * 1m" z="@event.param3.$pz * 1m" object="$target" space="$weapon.zone"/>
+                      <check_line_of_sight name="$hitZone" object="$weapon" objectoffset="$origin" target="$weapon.zone" targetoffset="$pointZone" useaimtarget="false" excludeself="false"/>
+                      <set_value name="$checks" exact="$checks + 1"/>
+                      <do_if value="$hitZone">
+                        <set_value name="$result" exact="2"/>
+                      </do_if>
+                      <do_else>
+                        <set_value name="$result" exact="1"/>
+                      </do_else>
+                    </do_if>
+                  </do_else>
+                </do_if>
+              </do_if>
             </do_if>
+            <raise_lua_event name="'X4GunneryControl.AimPointLineOfFire'"
+                             param="'x4gcapl:' + $token + ':' + $weaponKey + ':' + $point + ':' + $originIndex + ':' + $result + ':' + $checks"/>
           </actions>
         </cue>
       </cues>
     </cue>
-
     <!-- Cinematic aim camera: Follow_A_Lookat_B anchored between a turret and its
          target. Prototype / live-test; see docs/goals/engage-camera-aim.md. -->
     <cue name="CutsceneAim">
@@ -412,15 +320,13 @@
               <stop_cutscene cutscene="CutsceneAim.$Handle"/>
               <set_value name="CutsceneAim.$Handle" exact="null"/>
             </do_if>
-            <!-- Transport contract (live-tested 2026-08-04, final): the engine
-                 PREPENDS $ to every Lua string key during Lua->MD conversion,
+            <!-- The engine prepends $ to every Lua string key during Lua->MD conversion,
                  so Lua "anchor" arrives here as the variable key $anchor, read
                  via event.param3.$anchor. Never pre-prefix $ on the Lua side
                  (it becomes the unreadable $$anchor). Ids arrive as real
                  component objects via ConvertStringToLuaID; keep @ so a
                  malformed event logs instead of erroring. The brace-lookup
-                 fallback covers the only other possible arrival form (a raw
-                 string key), since each live test costs a full relaunch. -->
+                 fallback covers a raw string key. -->
             <set_value name="CutsceneAim.$Anchor" exact="@event.param3.$anchor"/>
             <do_if value="not CutsceneAim.$Anchor">
               <set_value name="CutsceneAim.$Anchor" exact="@event.param3.{'anchor'}"/>
@@ -433,16 +339,14 @@
             <do_if value="not CutsceneAim.$Pov">
               <set_value name="CutsceneAim.$Pov" exact="@event.param3.{'pov'}"/>
             </do_if>
-            <!-- Robustness: if the id arrived as a number instead of a component,
-                 resolve it. Self-diagnosing because each live test costs a full
-                 game relaunch. -->
+            <!-- Resolve numeric ids if they did not arrive as components. -->
             <do_if value="typeof CutsceneAim.$Anchor != datatype.component and CutsceneAim.$Anchor">
               <set_value name="CutsceneAim.$Anchor" exact="component.{CutsceneAim.$Anchor}"/>
             </do_if>
             <do_if value="typeof CutsceneAim.$Target != datatype.component and CutsceneAim.$Target">
               <set_value name="CutsceneAim.$Target" exact="component.{CutsceneAim.$Target}"/>
             </do_if>
-            <!-- Framing (live-tested 2026-08-04, tuned round 5): anchordist=0
+            <!-- Framing: anchordist=0
                  puts the camera inside the anchor's hull. Vanilla idiom
                  (cinematiccamera.xml:2504) is a NEGATIVE distance derived from
                  anchor.size. Per-POV: Sit@Target keeps size + 50m (verified
@@ -546,58 +450,14 @@
       </actions>
     </cue>
 
-    <!-- Legacy name: this cue once also hosted the "Prefer My Target" / "Release
-         Other Turrets" override (removed in #38 as unreachable with the X4 API).
-         It now hosts only Direct-control (DirectFallback + DirectWatch). The name
-         is kept deliberately: renaming a save-persistent cue breaks loads. -->
+    <!-- Keep this save-persistent cue name: renaming it breaks existing saves. -->
     <cue name="PreferAllTurrets">
       <cues>
-        <!-- Gives the directed groups a fallback target list, so a turret that
-             cannot bear on $target rolls to a hostile it can engage instead of
-             tracking one it will never fire on. That idle turret is the whole
-             reason Direct-control hands out a fallback list at all.
-
-             The engine's fallback asks whether a turret can AIM at the preferred
-             target, not whether it can hit it. It therefore recovers CANNOT BEAR
-             and OUT OF RANGE, both confirmed live, and does NOT recover a blocked
-             line of fire: a turret trained on the target with own hull in the way
-             holds fire indefinitely, and no mod can observe that condition well
-             enough to work around it. Accepted, not a bug in this cue.
-
-             The mode is attackenemies, not autoassist. Autoassist discards
-             script-supplied target lists outright; Egosoft say so in a shipped
-             comment at aiscripts/fight.attack.object.capital.xml:1756, so a
-             fallback list issued for it can never arrive. attackenemies honours
-             the list, and vanilla uses exactly this shape at capital.xml:2172.
-             Live-tested 2026-08-09 and 2026-08-10 on a player-piloted capital:
-             an attackenemies group obeyed preferredtarget, and rolled to another
-             hostile when the engaged one was OUT OF RANGE or CANNOT BEAR. It does
-             not roll off a target with a blocked line of fire; that condition is
-             unrecoverable.
-
-             weaponmode stays a real selector because the console binds the
-             checkbox to the mode: a group is in attackenemies exactly when it
-             is ticked, so this reaches the directed groups and no one else.
-
-             Two paths share this cue.
-
-             Engage: $target is hostile, so find_ship already returns it and the
-             indexof guard appends it only if the sector query somehow missed it.
-             Narrow call then wide call, in that order, because stopshootingold
-             defaults true and only drops targets absent from the new list, so
-             a single wide call could never pull a turret off what it already
-             holds. The narrow list of one forces the switch; the wide call then
-             restores a fallback set without dislodging the turrets that just
-             took the preferred target.
-
-             Ownership change: the target changed hands, so the relation filter
-             no longer returns it and mayattack confirms the ship may not shoot
-             it. The narrow call is skipped, because it would lock every turret
-             onto what is now a friendly. Only the wide call is issued, with no
-             preferred target, so stopshootingold drops the stale target and the
-             turrets roll to the next hostile instead of falling silent. This
-             replaces vanilla's cease_fire at capital.xml:1088-1091, which does
-             not reach attackenemies groups the console is directing. -->
+        <!-- weaponmode limits this list to directed attackenemies groups.
+             The narrow call forces a switch to the preferred target; the wide
+             call then restores fallback hostiles. Reversing them can leave a
+             turret on its previous target because stopshootingold only drops
+             targets absent from the new list. -->
         <cue name="DirectFallback" instantiate="true">
           <conditions>
             <event_ui_triggered screen="'X4GunneryControl'" control="'direct_fallback'"/>
@@ -616,22 +476,15 @@
                 <match_relation_to faction="faction.player" relation="kill" comparison="le"/>
               </find_ship>
               <do_if value="not $hostiles.indexof.{$target}">
-                <!-- Only re-insert if the ship can still attack the target.
-                     An ownership change makes the target player-owned, so adding
-                     it here would direct turrets at a friendly. mayattack checks
-                     kill relation and fire-authorisation override together
-                     (scriptproperties.xml:119), matching the capital.xml:1070
-                     condition that governs the cease_fire we are replacing. -->
+                <!-- Ownership can make the target friendly; do not re-insert it
+                     unless this ship may still attack it. -->
                 <do_if value="$ship.mayattack.{$target}">
                   <append_to_list name="$hostiles" exact="$target"/>
                 </do_if>
               </do_if>
               <do_if value="$hostiles.indexof.{$target}">
-                <!-- Target is still hostile: narrow call forces every turret
-                     off whatever it holds and onto $target; wide call restores
-                     the fallback set for turrets that have no shot at it.
-                     Both carry preferredtarget so the engine records the
-                     preference even on turrets that cannot engage immediately. -->
+                <!-- Both calls carry preferredtarget for turrets that cannot
+                     engage it immediately. -->
                 <set_turret_targets object="$ship" target="[$target]" preferredtarget="$target" weaponmode="weaponmode.attackenemies"/>
                 <set_turret_targets object="$ship" target="$hostiles" preferredtarget="$target" weaponmode="weaponmode.attackenemies"/>
               </do_if>
@@ -650,16 +503,8 @@
           </actions>
         </cue>
 
-        <!-- Arms an ownership-change listener on the engaged target. Emitted by
-             Lua alongside direct_fallback on every target change (emitDirectFallback).
-             Emitted on every Direct-control target change, unconditionally.
-             Direct-control has one weapon mode now: attackenemies. The old
-             pilot-state branch that could send groups to autoassist instead was
-             removed on 2026-08-10, so there is no longer a path that skips this.
-
-             Pattern mirrors CutsceneAim: Arm is instantiate and sets module-scope
-             variables on DirectWatch; OwnerWatch is a plain sibling, reset by
-             Arm each time so only one instance listens at a time. -->
+        <!-- Watch the engaged target for ownership changes. Arm resets the
+             sibling OwnerWatch so only the current target has a listener. -->
         <cue name="DirectWatch">
           <cues>
             <cue name="Arm" instantiate="true">

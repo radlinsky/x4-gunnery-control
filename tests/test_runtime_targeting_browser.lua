@@ -403,6 +403,17 @@ do
     gcMenu.onShowMenu()
     local sess57 = API.getSession()
     sess57.phase = "target_select"
+    local group57 = fix.makeGroup{
+        key = "single:27", displayName = "T1",
+        members = { { componentID = 27, operational = true, componentKey = "member:27" } },
+    }
+    sess57.groups = { group57 }
+    sess57.checkedGroupKeys = { [group57.key] = true }
+    local savedSlots57, savedComponent57, savedSlotGroup57 =
+        C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 27 end
+    C.GetUpgradeSlotGroup = function() return { path = "", group = "" } end
     GetPlayerContextByClass = function() return 1 end
     GetContainedShips = function() return { 570, 572, 573, 574, 575, 576 } end
     GetContainedStations = function() return { 571 } end
@@ -414,6 +425,8 @@ do
     C.IsComponentClass = function(component, class)
         local comp = tonumber(tostring(component))
         return classByComponent57[comp] == class
+            or (class == "ship" and classByComponent57[comp] ~= nil
+                and classByComponent57[comp] ~= "station")
     end
     C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
@@ -457,7 +470,6 @@ do
     local byID57 = {}
     for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
     assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
-    assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
     assert(byID57["570"].typeName == "Behemoth Vanguard", "57: localized ship type missing")
     assert(byID57["573"].class == "S Ship", "57: S ship class label missing")
     assert(byID57["574"].class == "M Ship", "57: M ship class label missing")
@@ -475,6 +487,11 @@ do
     assert(currentStation57 and currentStation57.class == ReadText(20991, 45),
         "57: current soft-target station must retain localized Station class")
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
+    local savedAdd57, started57 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        if control == "engageability_range" then started57[#started57 + 1] = params end
+        savedAdd57(screen, control, params)
+    end
     gcMenu.display()
     local rendered57 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
@@ -495,17 +512,61 @@ do
         assert(rendered57[component][4] == expected.typeName,
             "57: " .. expected.class .. " localized type must be bound to rendered column 4")
     end
+    local function finishStarted57(entry)
+        fix.fireEvent("X4GunneryControl.EngageabilityRange",
+            "x4gcr:" .. entry.token .. ":" .. entry.weaponKey .. ":2")
+    end
+    assert(#started57 == 1, "57: current target must start before queued rows")
+    local completed57 = {}
+    for step = 1, 3 do
+        clock = clock + 2
+        gcMenu.display()
+        local displayed57 = {}
+        for _, entry in ipairs(fix.getCreatedTexts()) do
+            if entry.column == 8 then displayed57[tostring(entry.row)] = entry.text end
+        end
+        for _, component in ipairs(completed57) do
+            assert(displayed57[component] == "0 / 1",
+                "57: completed browser result must stay numeric while later rows are queued: " .. component)
+        end
+        assert(#started57 == step, "57: redraw must not restart completed targets")
+        local nextTarget = tostring(started57[step].target)
+        finishStarted57(started57[step])
+        assert(#started57 == step + 1,
+            "57: each completion must advance exactly one visible target")
+        completed57[#completed57 + 1] = nextTarget
+    end
+    sess57.phase = "console"
+    finishStarted57(started57[4])
+    assert(#started57 == 4, "57: leaving the target browser must discard queued entries")
+    gcMenu.display()
+    sess57.phase = "target_select"
+    gcMenu.display()
+    assert(#started57 == 5, "57: returning to the browser starts the current target")
+    finishStarted57(started57[5])
+    assert(#started57 == 6, "57: completed current target advances the queue")
+    local activeToken57 = started57[6].token
     local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
     end
     assert(#refreshButtons57 >= 2, "57: target browser needs refresh controls at top and bottom")
     refreshButtons57[1].handlers.onClick()
+    assert(#started57 == 6, "57: Refresh must keep the active calculation and queued work")
     local refreshedButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshedButtons57[#refreshedButtons57 + 1] = button end
     end
     refreshedButtons57[#refreshedButtons57].handlers.onClick()
+    assert(#started57 == 6 and started57[6].token == activeToken57,
+        "57: repeated Refresh must not restart unfinished work")
+    finishStarted57(started57[6])
+    assert(#started57 == 7 and tostring(started57[7].target) == "570",
+        "57: completed current target must recalculate with current-target priority; count="
+            .. #started57 .. " target=" .. tostring(started57[7] and started57[7].target))
+    AddUITriggeredEvent = savedAdd57
+    C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent = savedSlots57, savedComponent57
+    C.GetUpgradeSlotGroup = savedSlotGroup57
     local log57 = table.concat(fix.getCapturedLog(), "\n")
     assert(log57:find("event=target_browser action=refresh location=top", 1, true),
         "57: top refresh click needs audit evidence")
@@ -517,6 +578,7 @@ do
         local evidence = 'event=target_browser action=row component=' .. component
             .. ' name="0" class="' .. expected.class .. '" type="' .. expected.typeName
             .. '" macro="' .. expected.macro .. '"'
+        if component == "570" then evidence = evidence .. ' position=1 engageability_state=pending' end
         assert(log57:find(evidence, 1, true),
             "57: rendered row audit needs exact " .. expected.class .. " component/class/macro evidence")
     end
