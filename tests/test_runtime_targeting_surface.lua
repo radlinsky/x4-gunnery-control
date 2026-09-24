@@ -1,5 +1,5 @@
 -- test_runtime_targeting_surface.lua
--- Bounded IN RANGE dispatch and station surface size resolution.
+-- Turret-first IN RANGE sweep and station surface size resolution.
 
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local gcMenu = fix.gcMenu
@@ -40,7 +40,7 @@ sess.checkedGroupKeys = { selected = true }
 C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
 gcMenu.shown = true
 
--- A full page is dispatched one target at a time; a selected target wins first.
+-- Each selected turret visits a full page with the selected target first.
 do
     local session = API.getSession()
     assert(API.rangeText(nil) == "0 / 0 IN RANGE"
@@ -62,11 +62,12 @@ do
         "stationary-capability ships and engines get no allowance")
     C.IsComponentClass, C.GetContextByClass, GetComponentData = oldClass, oldContext, oldData
     session.phase, session.controlMode = "target_select", nil
-    session.groups = {{ key = "selected", members = {
-        { componentID = 101, operational = true },
-        { componentID = 102, operational = true },
-    } }}
-    session.checkedGroupKeys = { selected = true }
+    local savedSofttarget, selectedTarget = C.GetSofttarget2, 720
+    C.GetSofttarget2 = function() return { softtargetID = selectedTarget, softtargetConnectionName = "" } end
+    local many = {}
+    for member = 1, 19 do many[#many + 1] = { componentID = 2000 + member, operational = true } end
+    session.groups = {{ key = "many", members = many }}
+    session.checkedGroupKeys = { many = true }
     local targets = {}
     for target = 701, 720 do targets[#targets + 1] = target end
     API.setRangeTargets(targets, 720)
@@ -75,107 +76,73 @@ do
     AddUITriggeredEvent = function(_, control, params)
         events[#events + 1] = { control = control, params = params }
     end
+    local function pass(bits)
+        local start = #events
+        API.runRangeSweep(clock)
+        assert(#events - start == 22 and events[start + 1].control == "in_range_begin"
+            and events[start + 2].params.target == 720
+            and events[start + 22].control == "in_range_commit",
+            "each turret must check selected target first and all 19 other rows")
+        API.runRangeSweep(clock)
+        assert(#events == start + 22, "pending turret pass must not overlap")
+        local begin = events[start + 1].params
+        fix.fireEvent("X4GunneryControl.InRangeResult",
+            "x4gcr2:" .. begin.nonce .. ":" .. tostring(begin.weapon) .. ":" .. bits)
+        return begin
+    end
+    local callbackMark = fix.callbackCheckpoint()
+    local syntheticStart = os.clock()
+    pass(string.rep("1", 20))
+    local lightMs = (os.clock() - syntheticStart) * 1000
+    assert(API.rangeResult(720).count == 1 and API.rangeResult(701).count == 1,
+        "first contribution must appear on every row")
+    for _ = 2, 19 do pass(string.rep("0", 20)) end
+    local fullMs = (os.clock() - syntheticStart) * 1000
+    assert(API.rangeResult(720).count == 1 and API.rangeResult(720).total == 19,
+        "full sweep must preserve exact denominator")
+    clock = clock + 1.1
+    pass(string.rep("0", 20))
+    assert(API.rangeResult(720).count == 0,
+        "next sweep must replace the same turret's previous contribution")
+    local beforePage = #events
     API.runRangeSweep(clock)
-    assert(#events == 4 and events[1].control == "in_range_begin"
-        and events[1].params.targetid == "720" and events[1].params.members == 2
-        and events[4].control == "in_range_commit",
-        "IN RANGE must request only the selected target with exact selected members")
+    local stalePage = events[beforePage + 1].params
+    selectedTarget = 801
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. stalePage.nonce .. ":" .. tostring(stalePage.weapon) .. ":" .. string.rep("1", 20))
+    assert(API.rangeResult(720).count == 0, "changed selection must reject an active reply")
+    API.setRangeTargets({ 801 }, 801)
+    assert(API.rangeResult(720) == nil, "old page must not publish")
+    local beforeMembers = #events
     API.runRangeSweep(clock)
-    assert(#events == 4, "IN RANGE must not overlap pending MD work")
+    local staleMembers = events[beforeMembers + 1].params
+    session.checkedGroupKeys = {}
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. staleMembers.nonce .. ":" .. tostring(staleMembers.weapon) .. ":1")
+    assert(API.rangeResult(801) == nil, "unchecked turret must reject an active reply")
+    API.setRangeTargets({ 801 }, 801)
+    API.runRangeSweep(clock)
+    assert(API.rangeResult(801).count == 0 and API.rangeResult(801).total == 0,
+        "membership change must use the current denominator")
+    session.checkedGroupKeys = { many = true }
+    selectedTarget = 720
+    API.setRangeTargets(targets, 720)
+    local beforeTimeout = #events
+    API.runRangeSweep(clock)
+    local obsolete = events[beforeTimeout + 1].params
     clock = clock + 2.1
     API.runRangeSweep(clock)
-    assert(#events == 8, "timed-out work must be replaced by one request")
-    events = { unpack(events, 5) }
-    local nonce = events[1].params.nonce
-    assert(events[1].params.targetid == "701", "timeout must let the rest of the page advance")
-    fix.fireEvent("X4GunneryControl.InRangeResult", "x4gcr1:" .. nonce .. ":701:1:2")
-    assert(API.rangeResult(701).count == 1 and API.rangeResult(701).total == 2,
-        "IN RANGE must accept an ordinary numeric result")
-    clock = clock + 0.25
-    API.runRangeSweep(clock)
-    assert(#events == 8 and events[5].params.targetid == "702",
-        "IN RANGE must spread a 20-row page across update ticks")
-    API.setRangeTargets({ 800 }, 800)
-    fix.fireEvent("X4GunneryControl.InRangeResult", "x4gcr1:" .. events[5].params.nonce .. ":702:2:2")
-    assert(API.rangeResult(702) == nil, "obsolete page result must be discarded")
-    API.setRangeTargets(targets, 720)
-    local firstTick, firstComplete, peak = clock, nil, 0
-    for tick = 1, 120 do
-        clock = clock + 0.25
-        local before = #events
-        API.runRangeSweep(clock)
-        local work = #events - before
-        peak = math.max(peak, work)
-        if work > 0 then
-            assert(work == 4, "one update must dispatch at most one target and two members")
-            local begin = events[before + 1].params
-            fix.fireEvent("X4GunneryControl.InRangeResult",
-                "x4gcr1:" .. begin.nonce .. ":" .. begin.targetid .. ":1:2")
-        end
-        local complete = 0
-        for _, target in ipairs(targets) do
-            if API.rangeResult(target) then complete = complete + 1 end
-        end
-        if complete == 20 then firstComplete = clock - firstTick; break end
-    end
-    assert(firstComplete and peak == 4, "full page must complete with bounded per-update work")
-    print(string.format("offline IN RANGE 20-row sweep: peak 1 target / 2 members / %d events per update; first complete %.2fs", peak, firstComplete))
-    session.checkedGroupKeys = {}
-    API.setRangeTargets({ 900 }, 900)
-    clock = clock + 0.25
-    API.runRangeSweep(clock)
-    assert(API.rangeResult(900).count == 0 and API.rangeResult(900).total == 0,
-        "no selected operational turret must settle as 0 / 0")
-    API.runRangeSweep(clock + 0.25)
-    local many = {}
-    for member = 1, 19 do many[#many + 1] = { componentID = 2000 + member, operational = true } end
-    session.groups = {{ key = "many", members = many }}
-    session.checkedGroupKeys = { many = true }
-    API.setRangeTargets({ 950 }, 950)
-    local expectedChunks = { 8, 8, 3 }
-    for _, chunkSize in ipairs(expectedChunks) do
-        clock = clock + 0.25
-        local before = #events
-        API.runRangeSweep(clock)
-        assert(#events - before == chunkSize + 2 and events[before + 1].params.members == chunkSize,
-            "large turret selection must dispatch at most eight members per update")
-        local begin = events[before + 1].params
-        fix.fireEvent("X4GunneryControl.InRangeResult",
-            "x4gcr1:" .. begin.nonce .. ":950:" .. chunkSize .. ":" .. chunkSize)
-        if chunkSize ~= 3 then
-            assert(API.rangeResult(950) == nil, "partial target result must not publish")
-        end
-    end
-    assert(API.rangeResult(950).count == 19 and API.rangeResult(950).total == 19,
-        "completed chunks must publish one exact aggregate result")
-    local heavyTargets = {}
-    for target = 970, 989 do heavyTargets[#heavyTargets + 1] = target end
-    API.setRangeTargets(heavyTargets, 989)
-    local heavyStart, heavyComplete, heavyWork, heavyPeak = clock, nil, 0, 0
-    for _ = 1, 300 do
-        clock = clock + 0.25
-        local before = #events
-        API.runRangeSweep(clock)
-        if #events > before then
-            local begin = events[before + 1].params
-            local work = begin.members
-            heavyWork, heavyPeak = heavyWork + work, math.max(heavyPeak, work)
-            assert(work <= 8 and #events - before == work + 2,
-                "heavy page must keep each update within eight turret checks")
-            fix.fireEvent("X4GunneryControl.InRangeResult",
-                "x4gcr1:" .. begin.nonce .. ":" .. begin.targetid .. ":" .. work .. ":" .. work)
-        end
-        local complete = 0
-        for _, target in ipairs(heavyTargets) do
-            if API.rangeResult(target) then complete = complete + 1 end
-        end
-        if complete == 20 then heavyComplete = clock - heavyStart; break end
-    end
-    assert(heavyComplete and heavyPeak == 8 and heavyWork >= 380,
-        "heavy page must complete with bounded per-update work")
-    print(string.format("offline IN RANGE 20-row heavy sweep: peak %d checks/update; total %d checks; first complete %.2fs",
-        heavyPeak, heavyWork, heavyComplete))
-    AddUITriggeredEvent = savedAdd
+    local replacement = events[#events - 21].params
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. obsolete.nonce .. ":" .. tostring(obsolete.weapon) .. ":" .. string.rep("1", 20))
+    assert(API.rangeResult(720) == nil, "timed-out reply must be rejected")
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. replacement.nonce .. ":" .. tostring(replacement.weapon) .. ":" .. string.rep("1", 20))
+    clock = clock + 0.1
+    gcMenu.onUpdate()
+    fix.drainCallbacksSince(callbackMark)
+    print(string.format("synthetic Lua event simulation: light 1x20 %.3f ms; full 19x20 %.3f ms; peak 20 checks/update (excludes X4 MD and transport)", lightMs, fullMs))
+    AddUITriggeredEvent, C.GetSofttarget2 = savedAdd, savedSofttarget
 end
 
 -- ── 60. station surfaces resolve size from the exact installed module slot ─
@@ -252,15 +219,14 @@ do
         rangeEvents60[#rangeEvents60 + 1] = { control = control, params = params }
     end
     API.runRangeSweep(clock)
-    local selectedNonce60 = rangeEvents60[1].params.nonce
-    fix.fireEvent("X4GunneryControl.InRangeResult", "x4gcr1:" .. selectedNonce60 .. ":12000:1:1")
-    clock = clock + 0.25
-    API.runRangeSweep(clock)
-    local pageNonce60 = rangeEvents60[4].params.nonce
-    fix.fireEvent("X4GunneryControl.InRangeResult", "x4gcr1:" .. pageNonce60 .. ":12002:1:1")
-    assert(rangeProgress60():find("1/3 scanned", 1, true),
-        "surface progress must include completed visible rows")
+    local request60 = rangeEvents60[1].params
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. request60.nonce .. ":" .. tostring(request60.weapon) .. ":1000")
+    assert(API.rangeResult(12000).count == 1,
+        "engaged selection must accept its current turret contribution")
     AddUITriggeredEvent = savedRangeAdd60
+    assert(rangeProgress60():find("turret", 1, true),
+        "surface progress must identify the current turret pass")
     assert(#installedMacroCalls60 == 3,
         "60: every station surface needs one exact installed-equipment lookup")
     for _, call in ipairs(installedMacroCalls60) do

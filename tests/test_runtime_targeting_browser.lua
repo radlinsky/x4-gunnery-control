@@ -511,11 +511,9 @@ do
     local beforeRange57 = #fix.uiTriggeredEvents
     API.runRangeSweep(clock)
     local request57 = fix.uiTriggeredEvents[beforeRange57 + 1]
-    assert(request57 and request57.control == "in_range_begin", "57: range sweep must request selected target")
-    fix.fireEvent("X4GunneryControl.InRangeResult",
-        "x4gcr1:" .. request57.params.nonce .. ":570:1:1")
-    assert(progress57():find("1/7 scanned", 1, true),
-        "57: progress must include completed results")
+    assert(request57 and request57.control == "in_range_begin", "57: range sweep must request a selected turret")
+    assert(progress57():find("turret", 1, true),
+        "57: progress must identify the current turret pass")
     fix.drainCallbacksSince(repaintMark57)
     assert(log57:find("event=target_browser action=rendered candidates=7 class_values=7 type_values=7", 1, true),
         "57: rendered target metadata needs aggregate audit evidence")

@@ -64,15 +64,12 @@ grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_member"' "$main
 grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_target"' "$main"
 grep -Fq 'State.checkedGroups(session)' "$main"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityService'])" "engageability service cue count"
-assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$range'][@exact='\$weapon.maxfirerange'])" "loaded-ammunition range getter"
-assert_md_xpath "1" "count(//cue[@name='InRangeService']//do_if[contains(@value, 'InRangeService.\$moving == 1')][contains(@value, 'not \$weapon.isbeam')]/set_value[@name='\$extra'][@exact='[\$range * 1.1, 500m].min'])" "non-beam moving-target allowance"
-assert_md_xpath "1" "count(//cue[@name='InRangeService']//do_if[contains(@value, 'InRangeService.\$target.bboxdistanceto.{\$weapon} lt \$range + \$extra')])" "target-box to turret-origin strict range gate"
-# UI identifiers must become components before IN RANGE reads their properties;
-# incomplete conversion must not be reported as a zero-count result.
-assert_md_xpath "1" "count(//cue[@name='InRangeBegin']//do_if[@value='typeof InRangeService.\$target != datatype.component and InRangeService.\$target']/set_value[@name='InRangeService.\$target'][@exact='component.{InRangeService.\$target}'])" "in-range target conversion"
-assert_md_xpath "1" "count(//cue[@name='InRangeMember']//do_if[@value='typeof \$weapon != datatype.component and \$weapon']/set_value[@name='\$weapon'][@exact='component.{\$weapon}'])" "in-range turret conversion"
-assert_md_xpath "1" "count(//cue[@name='InRangeMember']//do_if[contains(@value, 'typeof \$weapon == datatype.component')]/append_to_list[@name='InRangeService.\$weapons'][@exact='\$weapon'])" "only converted turrets enter the in-range count"
-assert_md_xpath "1" "count(//cue[@name='InRangeCommit']//do_if[contains(@value, 'InRangeService.\$weapons.count == InRangeService.\$expected')][contains(@value, 'typeof InRangeService.\$target == datatype.component')]/raise_lua_event[@name=\"'X4GunneryControl.InRangeResult'\"])" "in-range result requires converted target and every turret"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$range'][@exact='InRangeService.\$weapon.maxfirerange'])" "one range read per turret pass"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$beam'][@exact='InRangeService.\$weapon.isbeam'])" "one beam read per turret pass"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//do_if[contains(@value, 'InRangeService.\$moving.{\$index} == 1')][contains(@value, 'not \$beam')]/set_value[@name='\$extra'][@exact='[\$range * 1.1, 500m].min'])" "non-beam moving-target allowance"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//do_if[contains(@value, '\$target.bboxdistanceto.{InRangeService.\$weapon} lt \$range + \$extra')])" "target-box to turret-origin strict range gate"
+assert_md_xpath "2" "count(//cue[@name='InRangeBegin']//do_if[@value='typeof InRangeService.\$weapon != datatype.component and InRangeService.\$weapon'] | //cue[@name='InRangeTarget']//do_if[@value='typeof \$target != datatype.component and \$target'])" "in-range turret and target conversion"
+assert_md_xpath "1" "count(//cue[@name='InRangeCommit']//do_if[contains(@value, 'InRangeService.\$targets.count == InRangeService.\$expected')][contains(@value, 'typeof InRangeService.\$weapon == datatype.component')]/raise_lua_event[@name=\"'X4GunneryControl.InRangeResult'\"])" "compact result requires complete target pass"
 # Guided missile turrets bypass the direct ray after bearing/range. Unguided
 # missile turrets cast it with own-hull exclusion; conventional turrets cast the
 # same expression as false and retain the existing own-hull-aware behaviour.
