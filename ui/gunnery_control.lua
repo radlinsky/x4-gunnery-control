@@ -3228,8 +3228,13 @@ function menu.display()
         header[7]:createText(text(50)); header[8]:setColSpan(2):createText(text(90)); header[10]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
         local classValues, typeValues = 0, 0
-        local candidateIDs = {}
-        for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
+        local candidateIDs, candidateKeys = {}, {}
+        for _, candidate in ipairs(candidates) do
+            candidateIDs[#candidateIDs + 1] = candidate.componentID
+            candidateKeys[#candidateKeys + 1] = State.normID(candidate.componentID)
+        end
+        -- Candidate order changes as ships move; use stable text IDs only for view identity.
+        table.sort(candidateKeys)
         local currentID = current.softtargetID ~= 0 and isEligibleEngagementTarget(current.softtargetID)
             and current.softtargetID or nil
         local signatureParts = {}
@@ -3237,7 +3242,7 @@ function menu.display()
             signatureParts[#signatureParts + 1] = State.normID(member.componentID)
         end
         local signature = table.concat(signatureParts, ",")
-        local viewKey = tostring(currentID or 0) .. ":" .. table.concat(candidateIDs, ",")
+        local viewKey = State.normID(currentID or 0) .. ":" .. table.concat(candidateKeys, ",")
         local sameView = targetBrowserState.view and targetBrowserState.view.key == viewKey
             and targetBrowserState.view.signature == signature
         if not sameView or targetBrowserState.refresh then
