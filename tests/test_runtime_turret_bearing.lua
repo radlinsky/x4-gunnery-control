@@ -44,7 +44,7 @@ assert(sent.control=='aimpoint_bearing' and sent.params.x==point.c[1])
 local values={}
 for _,v in ipairs(point.c) do values[#values+1]=string.format('%.0f',v*1e9) end
 fix.fireEvent('X4GunneryControl.AimPointBearing',
-    'x4gcapc:'..request.token..':101:1:1:'..table.concat(values,':')..':9000000000:8000000000:7000000000')
+    'x4gcapc:'..request.token..':1|101:1:'..table.concat(values,':')..':9000000000:8000000000:7000000000')
 local bearingResult=request.rows[1].points[1].bearing
 assert(bearingResult.aimPoint==point and bearingResult.state=='CAN AIM')
 assert(bearingResult.firingOrigins[1].source=='current-barrelposition-fallback')

@@ -1352,45 +1352,54 @@ end
 local function advanceTurret(request)
     if not currentAimMap(request) then return end
     while true do
+        local point = request.result.points[request.pointIndex]
+        if not point then finishEngageability(request); return end
+        if not request.bearingRounds[request.pointIndex] then
+            local weapons = {}
+            for _, row in ipairs(request.rows) do
+                if row.range == "IN RANGE" and row.pointIndex == request.pointIndex
+                        and row.points[request.pointIndex].bearing == "NOT_EVALUATED" then
+                    weapons[#weapons + 1] = id(row.weapon)
+                end
+            end
+            request.bearingRounds[request.pointIndex] = true
+            if #weapons > 0 then
+                request.awaiting = { kind = "bearing", point = point.id, weapons = weapons }
+                request.profile.bearingStarted = GetCurRealTime()
+                request.profile.bearingRequests = request.profile.bearingRequests + 1
+                AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", {
+                    token = request.token, target = request.target, point = point.id,
+                    weapons = weapons, x = point.c[1], y = point.c[2], z = point.c[3],
+                })
+                return
+            end
+        end
         local row = request.rows[request.turretIndex]
-        if not row then finishEngageability(request); return end
-        if row.range ~= "IN RANGE" then
+        if not row then
+            request.pointIndex = request.pointIndex + 1
+            request.turretIndex = 1
+        elseif row.range ~= "IN RANGE" or row.pointIndex ~= request.pointIndex then
             request.turretIndex = request.turretIndex + 1
         else
-            local point = request.result.points[row.pointIndex]
-            if not point then
-                request.turretIndex = request.turretIndex + 1
-            else
-                local result = row.points[row.pointIndex]
-                if result.bearing == "NOT_EVALUATED" then
-                    request.awaiting = { kind = "bearing", weapon = row.weapon, point = point.id }
-                    request.profile.bearingStarted = GetCurRealTime()
-                    request.profile.bearingRequests = request.profile.bearingRequests + 1
-                    AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", {
-                        token = request.token, target = request.target, weapon = id(row.weapon),
-                        weaponKey = row.weapon, point = point.id,
-                        x = point.c[1], y = point.c[2], z = point.c[3],
-                    })
-                    return
-                end
-                if result.bearing.state == "CAN AIM"
-                        and result.originIndex <= #result.bearing.firingOrigins then
-                    local origin = result.bearing.firingOrigins[result.originIndex]
-                    local p = origin.position
-                    request.awaiting = { kind = "line", weapon = row.weapon, point = point.id,
-                        origin = result.originIndex }
-                    request.profile.lineStarted = GetCurRealTime()
-                    request.profile.linePairs = request.profile.linePairs + 1
-                    AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
-                        token = request.token, target = request.target, weapon = id(row.weapon),
-                        weaponKey = row.weapon, point = point.id, origin = result.originIndex,
-                        px = point.c[1], py = point.c[2], pz = point.c[3],
-                        ox = p[1], oy = p[2], oz = p[3],
-                    })
-                    return
-                end
-                row.pointIndex = row.pointIndex + 1
+            local result = row.points[request.pointIndex]
+            if result.bearing.state == "CAN AIM"
+                    and result.originIndex <= #result.bearing.firingOrigins then
+                local origin = result.bearing.firingOrigins[result.originIndex]
+                local p = origin.position
+                request.awaiting = { kind = "line", weapon = row.weapon, point = point.id,
+                    origin = result.originIndex }
+                request.profile.lineStarted = GetCurRealTime()
+                request.profile.linePairs = request.profile.linePairs + 1
+                AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
+                    token = request.token, target = request.target, weapon = id(row.weapon),
+                    weaponKey = row.weapon, point = point.id, origin = result.originIndex,
+                    px = point.c[1], py = point.c[2], pz = point.c[3],
+                    ox = p[1], oy = p[2], oz = p[3],
+                })
+                return
             end
+            row.pointIndex = row.pointIndex + 1
+            request.turretIndex = request.turretIndex + 1
         end
     end
 end
@@ -1425,7 +1434,7 @@ local function advanceAimMap(request)
             end
             if row.range == "IN RANGE" and #value.points == 0 then row.unknown = true end
         end
-        request.turretIndex = 1
+        request.turretIndex, request.pointIndex, request.bearingRounds = 1, 1, {}
         advanceTurret(request)
     else
         request.failed, request.pending = true, nil
@@ -1464,34 +1473,41 @@ local function onEngageabilityRange(_, param)
 end
 
 local function onAimPointBearing(_, param)
-    local token, weapon, pointID, valid, x, y, z, bx, by, bz = tostring(param or ""):match(
-        "^x4gcapc:(%d+):(%d+):(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+    local token, pointID, entries = tostring(param or ""):match("^x4gcapc:(%d+):(%d+)(.*)$")
     local request = token and aimMaps[token]
     local awaiting = request and request.awaiting
     if not currentAimMap(request) or not awaiting or awaiting.kind ~= "bearing"
-            or awaiting.weapon ~= weapon or awaiting.point ~= tonumber(pointID) then return end
-    local row = request.byWeapon[weapon]
-    local result = row.points[tonumber(pointID)]
-    local point = result and result.aimPoint
-    if not point or result.bearing ~= "NOT_EVALUATED" then return end
+            or awaiting.point ~= tonumber(pointID) then return end
     request.profile.bearingWall = request.profile.bearingWall
         + GetCurRealTime() - request.profile.bearingStarted
     request.awaiting = nil
-    if valid == "1" then
-        local scale = 1 / 1000000000
-        result.bearing = TurretBearing.evaluate(row.macro, point,
-            {tonumber(x)*scale, tonumber(y)*scale, tonumber(z)*scale},
-            {tonumber(bx)*scale, tonumber(by)*scale, tonumber(bz)*scale})
-    else
-        result.bearing = { aimPoint = point, state = "UNKNOWN", firingOrigins = {} }
+    local positions = {}
+    for entry in entries:gmatch("|([^|]+)") do
+        local weapon, valid, x, y, z, bx, by, bz = entry:match(
+            "^(%d+):([01]):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)$")
+        if weapon then positions[weapon] = {valid, x, y, z, bx, by, bz} end
     end
-    if result.bearing.state == "CAN AIM" then
-        for _, origin in ipairs(result.bearing.firingOrigins) do
-            origin.lineOfFire = { state = "NOT_EVALUATED" }
+    local scale = 1 / 1000000000
+    for _, weapon in ipairs(awaiting.weapons) do
+        local key = tostring(weapon)
+        local row = request.byWeapon[key]
+        local result = row.points[tonumber(pointID)]
+        local point = result.aimPoint
+        local data = positions[key]
+        if data and data[1] == "1" then
+            result.bearing = TurretBearing.evaluate(row.macro, point,
+                {tonumber(data[2])*scale, tonumber(data[3])*scale, tonumber(data[4])*scale},
+                {tonumber(data[5])*scale, tonumber(data[6])*scale, tonumber(data[7])*scale})
+        else
+            result.bearing = { aimPoint = point, state = "UNKNOWN", firingOrigins = {} }
         end
+        if result.bearing.state == "CAN AIM" then
+            for _, origin in ipairs(result.bearing.firingOrigins) do
+                origin.lineOfFire = { state = "NOT_EVALUATED" }
+            end
+        end
+        if result.bearing.state == "UNKNOWN" then row.unknown = true end
     end
-    if result.bearing.state == "UNKNOWN" then row.unknown = true end
-    if result.bearing.state ~= "CAN AIM" then row.pointIndex = row.pointIndex + 1 end
     advanceTurret(request)
 end
 

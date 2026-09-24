@@ -45,7 +45,7 @@ local cases = {
     {name='two surviving turrets worst case', turrets={
         turret(1, mixed, point('CAN AIM',{U,B}), {'U','V'}),
         turret(1, mixed, point('CAN AIM',{U,B}), {'U','V'})},
-        answer=0, known=0, work={2,1,4,8,24}},
+        answer=0, known=0, work={2,1,2,8,24}},
 }
 
 local expected = {
@@ -81,10 +81,10 @@ local function run(case, number)
         searches = searches + 1
         return function() return {points=points} end
     end
-    local activeTurret
+    local activeTurrets = {}
     X4GunneryTurretBearing.evaluate = function(_, aim, center, barrel)
         assert(aim == points[aim.id] and center[1] == aim.c[1] and barrel[1] == 0)
-        local spec = case.turrets[activeTurret].points[aim.id]
+        local spec = case.turrets[table.remove(activeTurrets, 1)].points[aim.id]
         local origins = {}
         for i=1,#spec.origins do
             origins[i] = {position={aim.c[1] + i, 0, 0}}
@@ -112,10 +112,15 @@ local function run(case, number)
             payload = 'x4gcapb:'..p.token..':1:0:0:0:10000:10000:10000'
         elseif event.control == 'aimpoint_bearing' then
             work[3] = work[3] + 1
-            assert(spec and p.x == points[p.point].c[1])
-            activeTurret = turretIndex
-            payload = 'x4gcapc:'..p.token..':'..p.weaponKey..':'..p.point..':1:'
-                ..(p.x*1000000000)..':'..(p.y*1000000000)..':'..(p.z*1000000000)..':0:0:0'
+            assert(p.x == points[p.point].c[1])
+            local entries = {}
+            for _, weapon in ipairs(p.weapons) do
+                local index = tonumber(weapon) - 100
+                activeTurrets[#activeTurrets+1] = index
+                entries[#entries+1] = weapon..':1:'
+                    ..(p.x*1000000000)..':'..(p.y*1000000000)..':'..(p.z*1000000000)..':0:0:0'
+            end
+            payload = 'x4gcapc:'..p.token..':'..p.point..'|'..table.concat(entries,'|')
         elseif event.control == 'aimpoint_line_of_fire' then
             work[4] = work[4] + 1
             local origin = spec.points[p.point].origins[p.origin]
@@ -139,7 +144,7 @@ local function run(case, number)
     for _, turretSpec in ipairs(case.turrets) do
         if case.authorized ~= false and turretSpec.range == 1 then
             reference[2] = 1
-            reference[3] = reference[3] + #turretSpec.points
+            reference[3] = #turretSpec.points
             for _, aim in ipairs(turretSpec.points) do
                 if aim.aim == 'CAN AIM' then
                     reference[4] = reference[4] + #aim.origins

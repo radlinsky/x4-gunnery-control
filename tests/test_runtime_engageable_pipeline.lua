@@ -88,7 +88,7 @@ X4GunneryAimPointMap.begin=function() return function() return {points=points} e
 result,b=started(913); box(b)
 local bad=one('aimpoint_bearing')
 fix.fireEvent('X4GunneryControl.AimPointBearing',
-    'x4gcapc:'..bad.token..':'..bad.weaponKey..':1:0:0:0:0:0:0:0')
+    'x4gcapc:'..bad.token..':1|'..bad.weapons[1]..':0:0:0:0:0:0:0')
 assert(result.aimMap.rows[1].points[1].bearing.state=='UNKNOWN')
 assert(result.aimMap.rows[1].points[1].lineOfFire=='NOT_EVALUATED')
 assert(one('aimpoint_bearing').point==2)

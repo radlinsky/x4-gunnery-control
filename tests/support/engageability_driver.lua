@@ -21,10 +21,16 @@ function M.finish(fix, request, engageable)
     if desired==0 or not request.pending then return end
     fix.fireEvent('X4GunneryControl.AimPointBox',
         'x4gcapb:'..map.token..':1:0:0:0:10000:10000:10000')
+    local entries = {}
     for _, row in ipairs(map.rows) do
         if row.range == 'IN RANGE' then
-            fix.fireEvent('X4GunneryControl.AimPointBearing',
-                'x4gcapc:'..map.token..':'..row.weapon..':1:1:1000000000:2000000000:3000000000:0:0:0')
+            entries[#entries+1] = row.weapon..':1:1000000000:2000000000:3000000000:0:0:0'
+        end
+    end
+    fix.fireEvent('X4GunneryControl.AimPointBearing',
+        'x4gcapc:'..map.token..':1|'..table.concat(entries,'|'))
+    for _, row in ipairs(map.rows) do
+        if row.range == 'IN RANGE' then
             fix.fireEvent('X4GunneryControl.AimPointLineOfFire',
                 'x4gcapl:'..map.token..':'..row.weapon..':1:1:1:1')
         end

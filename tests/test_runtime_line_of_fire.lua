@@ -16,7 +16,7 @@ local token=cached.aimMap.token
 fix.fireEvent('X4GunneryControl.EngageabilityRange','x4gcr:'..token..':101:1')
 fix.fireEvent('X4GunneryControl.AimPointBox','x4gcapb:'..token..':1:0:0:0:10000:10000:10000')
 fix.fireEvent('X4GunneryControl.AimPointBearing',
-    'x4gcapc:'..token..':101:1:1:10000000000:20000000000:30000000000:0:0:0')
+    'x4gcapc:'..token..':1|101:1:10000000000:20000000000:30000000000:0:0:0')
 local first=fix.uiTriggeredEvents[#fix.uiTriggeredEvents]
 assert(first.control=='aimpoint_line_of_fire' and first.params.point==1
     and first.params.origin==1 and first.params.ox==1 and first.params.px==10)
