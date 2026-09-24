@@ -101,4 +101,5 @@ are real native names.
 | Selected-connection transform composition entry points | [barrelposition-offline-transform-semantics.md](barrelposition-offline-transform-semantics.md) |
 | Live interception of the selected `barrelposition` transform | [barrelposition-live-connection-orientation.md](barrelposition-live-connection-orientation.md) |
 | Missile-turret guidance query, guided pre-launch bypass, `distribute` field, and the pre-fire Jolt/XPhys ray-cast filters | [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md) |
+| Pre-fire range gate, `maxfirerange`/`bboxdistanceto` handlers, box getters, and weapon range parameters | [turret-fire-range-gate.md](turret-fire-range-gate.md) |
 | PE export table of the engine (2493 named exports) | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) |
