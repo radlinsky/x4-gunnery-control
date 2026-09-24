@@ -1305,6 +1305,18 @@ end
 local aimMapSerial = 0
 local scheduleEngageabilityRepaint
 
+local function profileMs(seconds)
+    return string.format("%.3f", seconds * 1000)
+end
+
+local function finishAimpointProfile(request)
+    local profile = request.profile
+    if profile.aimpointStarted then
+        profile.aimpointWall = GetCurRealTime() - profile.aimpointStarted
+        profile.aimpointStarted = nil
+    end
+end
+
 local function currentAimMap(request)
     return request and aimMaps[request.token] == request
         and request.epoch == sessionEpoch
@@ -1322,6 +1334,15 @@ local function finishEngageability(request)
     local cached = request.cached
     cached.engageable, cached.known, cached.pending, cached.receivedAt =
         engageable, known, false, getElapsedTime()
+    local p = request.profile
+    finishAimpointProfile(request)
+    log(string.format("event=engageability_profile token=%s purpose=%s target=%s selected=%d in_range=%d aim_points=%d engageable=%d known=%d total_ms=%s range_ms=%s range_requests=%d aimpoint_wall_ms=%s aimpoint_lua_ms=%s aimpoint_probes=%d aimpoint_resumes=%d bearing_ms=%s bearing_requests=%d line_ms=%s line_pairs=%d line_checks=%d pending_reuses=%d",
+        request.token, tostring(request.purpose), tostring(request.target), #request.rows,
+        p.inRange, p.aimPoints, engageable, known, profileMs(GetCurRealTime() - p.started),
+        profileMs(p.rangeWall), p.rangeRequests, profileMs(p.aimpointWall),
+        profileMs(p.aimpointLua), p.aimpointProbes, p.aimpointResumes,
+        profileMs(p.bearingWall), p.bearingRequests, profileMs(p.lineWall),
+        p.linePairs, p.lineChecks, p.pendingReuses))
     aimMaps[request.token] = nil
     if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
         scheduleEngageabilityRepaint(request.purpose)
@@ -1343,6 +1364,8 @@ local function advanceTurret(request)
                 local result = row.points[row.pointIndex]
                 if result.bearing == "NOT_EVALUATED" then
                     request.awaiting = { kind = "bearing", weapon = row.weapon, point = point.id }
+                    request.profile.bearingStarted = GetCurRealTime()
+                    request.profile.bearingRequests = request.profile.bearingRequests + 1
                     AddUITriggeredEvent("X4GunneryControl", "aimpoint_bearing", {
                         token = request.token, target = request.target, weapon = id(row.weapon),
                         weaponKey = row.weapon, point = point.id,
@@ -1356,6 +1379,8 @@ local function advanceTurret(request)
                     local p = origin.position
                     request.awaiting = { kind = "line", weapon = row.weapon, point = point.id,
                         origin = result.originIndex }
+                    request.profile.lineStarted = GetCurRealTime()
+                    request.profile.linePairs = request.profile.linePairs + 1
                     AddUITriggeredEvent("X4GunneryControl", "aimpoint_line_of_fire", {
                         token = request.token, target = request.target, weapon = id(row.weapon),
                         weaponKey = row.weapon, point = point.id, origin = result.originIndex,
@@ -1373,19 +1398,25 @@ end
 -- Resume the same #184 search after each X4 probe reply.
 local function advanceAimMap(request)
     if not currentAimMap(request) then return end
+    local started = GetCurRealTime()
     local ok, value, probe = pcall(function()
         if not request.resumeSearch then request.resumeSearch = AimPointMap.begin(request.center, request.half) end
         return request.resumeSearch(request.answer)
     end)
+    request.profile.aimpointLua = request.profile.aimpointLua + GetCurRealTime() - started
+    request.profile.aimpointResumes = request.profile.aimpointResumes + 1
     request.answer = nil
     if ok and probe then
         request.pending = probe
+        request.profile.aimpointProbes = request.profile.aimpointProbes + 1
         AddUITriggeredEvent("X4GunneryControl", "aimpoint_probe", {
             token = request.token, target = request.target,
             x = probe.p[1], y = probe.p[2], z = probe.p[3],
         })
     elseif ok and type(value) == "table" and type(value.points) == "table" then
         request.result, request.pending = value, nil
+        request.profile.aimPoints = #value.points
+        finishAimpointProfile(request)
         for _, row in ipairs(request.rows) do
             row.points = {}
             for i, point in ipairs(value.points) do
@@ -1398,6 +1429,7 @@ local function advanceAimMap(request)
         advanceTurret(request)
     else
         request.failed, request.pending = true, nil
+        finishAimpointProfile(request)
         for _, row in ipairs(request.rows) do
             if row.range == "IN RANGE" then row.unknown = true end
         end
@@ -1415,8 +1447,13 @@ local function onEngageabilityRange(_, param)
     if row.range == "UNKNOWN" then row.unknown = true end
     request.rangePending = request.rangePending - 1
     if request.rangePending ~= 0 then return end
+    request.profile.rangeWall = GetCurRealTime() - request.profile.rangeStarted
+    for _, member in ipairs(request.rows) do
+        if member.range == "IN RANGE" then request.profile.inRange = request.profile.inRange + 1 end
+    end
     for _, member in ipairs(request.rows) do
         if member.range == "IN RANGE" then
+            request.profile.aimpointStarted = GetCurRealTime()
             AddUITriggeredEvent("X4GunneryControl", "aimpoint_box", {
                 token = token, target = request.target,
             })
@@ -1437,6 +1474,8 @@ local function onAimPointBearing(_, param)
     local result = row.points[tonumber(pointID)]
     local point = result and result.aimPoint
     if not point or result.bearing ~= "NOT_EVALUATED" then return end
+    request.profile.bearingWall = request.profile.bearingWall
+        + GetCurRealTime() - request.profile.bearingStarted
     request.awaiting = nil
     if valid == "1" then
         local scale = 1 / 1000000000
@@ -1470,6 +1509,9 @@ local function onAimPointLineOfFire(_, param)
     local result = row.points[tonumber(pointID)]
     local origin = result and result.bearing.firingOrigins[tonumber(originIndex)]
     if not origin or origin.lineOfFire.state ~= "NOT_EVALUATED" then return end
+    request.profile.lineWall = request.profile.lineWall
+        + GetCurRealTime() - request.profile.lineStarted
+    request.profile.lineChecks = request.profile.lineChecks + tonumber(checks)
     request.awaiting = nil
     origin.lineOfFire = { state = lineOfFireStates[tonumber(code)], checks = tonumber(checks) }
     if code == "1" then
@@ -1494,6 +1536,7 @@ local function onAimPointBox(_, param)
     if not currentAimMap(request) or request.center then return end
     if valid ~= "1" then
         request.failed = true
+        finishAimpointProfile(request)
         for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
         finishEngageability(request)
         return
@@ -1510,6 +1553,7 @@ local function onAimPointProbe(_, param)
     if not currentAimMap(request) or not request.pending then return end
     if valid ~= "1" then
         request.failed, request.pending = true, nil
+        finishAimpointProfile(request)
         for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
         finishEngageability(request)
         return
@@ -1518,6 +1562,7 @@ local function onAimPointProbe(_, param)
     local length = math.sqrt(d[1]^2 + d[2]^2 + d[3]^2)
     if math.abs(length - 1) > 1e-3 then
         request.failed, request.pending = true, nil
+        finishAimpointProfile(request)
         for _, row in ipairs(request.rows) do if row.range == "IN RANGE" then row.unknown = true end end
         finishEngageability(request)
         return
@@ -1543,6 +1588,9 @@ local function requestEngageabilities(targets, purpose)
             local cached = engageabilityCache[key]
             if cached and cached.signature == signature and
                     (cached.pending or (cached.receivedAt and now - cached.receivedAt < 1)) then
+                if cached.pending and cached.aimMap then
+                    cached.aimMap.profile.pendingReuses = cached.aimMap.profile.pendingReuses + 1
+                end
                 results[position] = cached
             else
                 if cached and cached.aimMap then aimMaps[cached.aimMap.token] = nil end
@@ -1559,7 +1607,12 @@ local function requestEngageabilities(targets, purpose)
                     local token = tostring(aimMapSerial)
                     local request = { token = token, epoch = sessionEpoch, key = key,
                         target = id(target), cached = cached, purpose = purpose,
-                        rows = {}, byWeapon = {}, rangePending = 0 }
+                        rows = {}, byWeapon = {}, rangePending = 0,
+                        profile = { started = GetCurRealTime(), rangeWall = 0, rangeRequests = 0,
+                            inRange = 0, aimpointWall = 0, aimpointLua = 0, aimpointProbes = 0,
+                            aimpointResumes = 0, aimPoints = 0, bearingWall = 0,
+                            bearingRequests = 0, lineWall = 0, linePairs = 0,
+                            lineChecks = 0, pendingReuses = 0 } }
                     cached.aimMap = request
                     aimMaps[token] = request
                     local root = targetRoot(target)
@@ -1584,6 +1637,10 @@ local function requestEngageabilities(targets, purpose)
                             request.rows[#request.rows + 1] = row
                             request.byWeapon[weapon] = row
                             request.rangePending = request.rangePending + 1
+                            if not request.profile.rangeStarted then
+                                request.profile.rangeStarted = GetCurRealTime()
+                            end
+                            request.profile.rangeRequests = request.profile.rangeRequests + 1
                             AddUITriggeredEvent("X4GunneryControl", "engageability_range", {
                                 token = token, target = request.target,
                                 weapon = id(member.componentID), weaponKey = weapon })
