@@ -32,7 +32,7 @@ local session = fix.API.getSession()
 session.groups = {{key='selected', members={{componentID=101,macro='future_turret_macro',operational=true}}}}
 session.checkedGroupKeys = {selected=true}
 GetComponentData = function(_,key) if key=='isenemy' then return true end end
-X4GunneryAimPointMap.search = function() return {points={point},samples=12} end
+X4GunneryAimPointMap.begin = function() return function() return {points={point},samples=12} end end
 local cached=fix.API.requestEngageability(900)
 local request=cached.aimMap
 assert(request and request.result==nil and fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control=='engageability_range')

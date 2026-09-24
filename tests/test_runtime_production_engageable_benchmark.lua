@@ -77,9 +77,9 @@ local function run(case, number)
         {id=2,c={21,22,23},r=0.5},
     }
     local searches = 0
-    X4GunneryAimPointMap.search = function()
+    X4GunneryAimPointMap.begin = function()
         searches = searches + 1
-        return {points=points}
+        return function() return {points=points} end
     end
     local activeTurret
     X4GunneryTurretBearing.evaluate = function(_, aim, center, barrel)

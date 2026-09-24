@@ -13,7 +13,7 @@ GetComponentData = function(_, key)
     if key == 'isenemy' then return true end
 end
 local points = {{id=1,c={1,2,3},r=0.25}, {id=2,c={4,5,6},r=0.5}}
-X4GunneryAimPointMap.search = function() return {points=points} end
+X4GunneryAimPointMap.begin = function() return function() return {points=points} end end
 X4GunneryTurretBearing.evaluate = function(_, point)
     return {aimPoint=point,state='CAN AIM',firingOrigins={{position={1,0,0}}}}
 end
@@ -55,19 +55,28 @@ end
 result,b=started(908)
 fix.fireEvent('X4GunneryControl.AimPointBox','x4gcapb:'..b.token..':0:0:0:0:0:0:0')
 assert(not result.pending and result.known==1 and result.aimMap.failed)
-X4GunneryAimPointMap.search=function() error('failed search') end
+X4GunneryAimPointMap.begin=function() error('failed search') end
 result,b=started(909); box(b)
 assert(not result.pending and result.known==1 and result.aimMap.failed)
 
-local observed
-X4GunneryAimPointMap.search=function(_,_,sample)
-    observed=sample(1,{5,6,7})
-    return {points={}}
+local observed, steps = {}, 0
+X4GunneryAimPointMap.begin=function()
+    local waiting=0
+    return function(answer)
+        steps=steps+1
+        if waiting > 0 then observed[waiting]=answer end
+        waiting=waiting+1
+        if waiting <= 2 then return nil,{n=waiting,p={4+waiting,6,7}} end
+        return {points={}}
+    end
 end
 result,b=started(910); box(b)
 local probe=one('aimpoint_probe'); assert(probe.x==5)
 fix.fireEvent('X4GunneryControl.AimPointProbe','x4gcapp:'..probe.token..':1:1000000000:0:0')
-assert(observed[1]==1 and not result.pending and result.known==1)
+probe=one('aimpoint_probe'); assert(probe.x==6 and steps==2 and #observed==1)
+fix.fireEvent('X4GunneryControl.AimPointProbe','x4gcapp:'..probe.token..':1:0:1000000000:0')
+assert(observed[1][1]==1 and observed[2][2]==1 and steps==3
+    and not result.pending and result.known==1)
 result,b=started(911); box(b); probe=one('aimpoint_probe')
 fix.fireEvent('X4GunneryControl.AimPointProbe','x4gcapp:'..probe.token..':0:0:0:0')
 assert(not result.pending and result.known==1 and result.aimMap.failed)
@@ -75,7 +84,7 @@ result,b=started(912); box(b); probe=one('aimpoint_probe')
 fix.fireEvent('X4GunneryControl.AimPointProbe','x4gcapp:'..probe.token..':1:0:0:0')
 assert(not result.pending and result.known==1 and result.aimMap.failed)
 
-X4GunneryAimPointMap.search=function() return {points=points} end
+X4GunneryAimPointMap.begin=function() return function() return {points=points} end end
 result,b=started(913); box(b)
 local bad=one('aimpoint_bearing')
 fix.fireEvent('X4GunneryControl.AimPointBearing',

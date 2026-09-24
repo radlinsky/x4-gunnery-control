@@ -5,7 +5,7 @@ session.groups={{key='selected',members={{componentID=101,macro='known',operatio
 session.checkedGroupKeys={selected=true}
 GetComponentData=function(_,key) if key=='isenemy' then return true end end
 local point={id=1,c={10,20,30},r=0.25}
-X4GunneryAimPointMap.search=function() return {points={point},samples=12} end
+X4GunneryAimPointMap.begin=function() return function() return {points={point},samples=12} end end
 X4GunneryTurretBearing.evaluate=function(_,aim)
     return {aimPoint=aim,state='CAN AIM',firingOrigins={
         {position={1,2,3},source='geometry-predicted'},

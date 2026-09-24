@@ -1370,20 +1370,19 @@ local function advanceTurret(request)
     end
 end
 
--- The synchronous #184 search replays answered probes; only X4 replies can
--- advance the shared sample budget.
+-- Resume the same #184 search after each X4 probe reply.
 local function advanceAimMap(request)
     if not currentAimMap(request) then return end
-    local ok, value = pcall(AimPointMap.search, request.center, request.half, function(n, p)
-        local answer = request.answers[n]
-        if not answer then error({ n = n, p = p }, 0) end
-        return answer
+    local ok, value, probe = pcall(function()
+        if not request.resumeSearch then request.resumeSearch = AimPointMap.begin(request.center, request.half) end
+        return request.resumeSearch(request.answer)
     end)
-    if not ok and type(value) == "table" and value.n then
-        request.pending = value
+    request.answer = nil
+    if ok and probe then
+        request.pending = probe
         AddUITriggeredEvent("X4GunneryControl", "aimpoint_probe", {
             token = request.token, target = request.target,
-            x = value.p[1], y = value.p[2], z = value.p[3],
+            x = probe.p[1], y = probe.p[2], z = probe.p[3],
         })
     elseif ok and type(value) == "table" and type(value.points) == "table" then
         request.result, request.pending = value, nil
@@ -1523,7 +1522,7 @@ local function onAimPointProbe(_, param)
         finishEngageability(request)
         return
     end
-    request.answers[request.pending.n] = d
+    request.answer = d
     request.pending = nil
     advanceAimMap(request)
 end
@@ -1560,7 +1559,7 @@ local function requestEngageabilities(targets, purpose)
                     local token = tostring(aimMapSerial)
                     local request = { token = token, epoch = sessionEpoch, key = key,
                         target = id(target), cached = cached, purpose = purpose,
-                        rows = {}, byWeapon = {}, answers = {}, rangePending = 0 }
+                        rows = {}, byWeapon = {}, rangePending = 0 }
                     cached.aimMap = request
                     aimMaps[token] = request
                     local root = targetRoot(target)

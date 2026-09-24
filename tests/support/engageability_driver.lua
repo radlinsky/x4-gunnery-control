@@ -1,8 +1,8 @@
 -- Drive the asynchronous production checks with small synthetic MD replies.
 local M = {}
 function M.install()
-    X4GunneryAimPointMap.search = function()
-        return {points={{id=1,c={1,2,3},r=0.25}}}
+    X4GunneryAimPointMap.begin = function()
+        return function() return {points={{id=1,c={1,2,3},r=0.25}}} end
     end
     X4GunneryTurretBearing.evaluate = function(_, point)
         return {aimPoint=point,state='CAN AIM',firingOrigins={{position={0,0,0}}}}

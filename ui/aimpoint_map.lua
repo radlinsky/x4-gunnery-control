@@ -78,7 +78,7 @@ local function aimLinspace(a, b, count)
     return out
 end
 
-local function search(C, H, askX4)
+local function begin(C, H)
     local n, stop = 0, nil
     local points, tried, hits = {}, {}, {}
     local rays = { order = {}, map = {} }
@@ -90,7 +90,7 @@ local function search(C, H, askX4)
     local function ask(p, kind)
         if n >= AIM_TOTAL then error(AIM_CAPPED, 0) end
         n = n + 1
-        return askX4(n, p, kind)
+        return coroutine.yield({ n = n, p = p, kind = kind })
     end
     local function spend(k) return n + k <= AIM_TOTAL end
     local function addRay(p, d)
@@ -303,7 +303,7 @@ local function search(C, H, askX4)
         return pos
     end
 
-    local ok, err = pcall(function()
+    local work = coroutine.create(function()
         local starts = {}
         for _, x in ipairs({ plo[1], phi[1] }) do
             for _, y in ipairs({ plo[2], phi[2] }) do
@@ -339,44 +339,58 @@ local function search(C, H, askX4)
             if d and rayOwner(key) == nil then pursue({ key }) end
         end
     end)
-    if not ok then
-        if err ~= AIM_CAPPED then error(err, 0) end
-        stop = "hard cap"
-    end
-
-    -- Refinement: tighten each point from rays already collected; no samples.
-    local refined = {}
-    for i, point in ipairs(points) do
-        local own, best = {}, nil
-        for _, key in ipairs(rays.order) do
-            local ray, count = rays.map[key], 0
-            if ray.d and aimOnRay(ray.u, ray.d, point.c, point.r) then
-                for _, other in ipairs(points) do
-                    if aimOnRay(ray.u, ray.d, other.c, other.r) then count = count + 1 end
-                end
-                if count == 1 then own[#own + 1] = ray end
-            end
-        end
-        for a = 1, #own do
-            for b = 1, #own do
-                local s, err2 = nil, nil
-                if a ~= b then s, err2 = aimCrossing(own[a].u, own[a].d, own[b].u, own[b].d) end
-                if s then
-                    local x = vAdd(own[a].u, vMul(own[a].d, s))
-                    local r = err2 + AIM_EPS * s + aimRho(own[a].u, x)
-                    if not best or r < best.r then best = { c = x, r = r } end
+    local function finish(capped)
+        if capped then stop = "hard cap" end
+        -- Refinement: tighten each point from rays already collected; no samples.
+        local refined = {}
+        for i, point in ipairs(points) do
+            local own, best = {}, nil
+            for _, key in ipairs(rays.order) do
+                local ray, count = rays.map[key], 0
+                if ray.d and aimOnRay(ray.u, ray.d, point.c, point.r) then
+                    for _, other in ipairs(points) do
+                        if aimOnRay(ray.u, ray.d, other.c, other.r) then count = count + 1 end
+                    end
+                    if count == 1 then own[#own + 1] = ray end
                 end
             end
+            for a = 1, #own do
+                for b = 1, #own do
+                    local s, err2 = nil, nil
+                    if a ~= b then s, err2 = aimCrossing(own[a].u, own[a].d, own[b].u, own[b].d) end
+                    if s then
+                        local x = vAdd(own[a].u, vMul(own[a].d, s))
+                        local r = err2 + AIM_EPS * s + aimRho(own[a].u, x)
+                        if not best or r < best.r then best = { c = x, r = r } end
+                    end
+                end
+            end
+            local accept = #own >= 2 and best ~= nil and best.r < point.r
+                and vNorm(vSub(best.c, point.c)) + best.r <= point.r
+            for _, ray in ipairs(accept and own or {}) do
+                if not aimOnRay(ray.u, ray.d, best.c, best.r) then accept = false; break end
+            end
+            refined[i] = accept and { id = i, c = best.c, r = best.r }
+                or { id = i, c = point.c, r = point.r }
         end
-        local accept = #own >= 2 and best ~= nil and best.r < point.r
-            and vNorm(vSub(best.c, point.c)) + best.r <= point.r
-        for _, ray in ipairs(accept and own or {}) do
-            if not aimOnRay(ray.u, ray.d, best.c, best.r) then accept = false; break end
-        end
-        refined[i] = accept and { id = i, c = best.c, r = best.r }
-            or { id = i, c = point.c, r = point.r }
+        return { samples = n, stop = stop, points = refined }
     end
-    return { samples = n, stop = stop, points = refined }
+    return function(answer)
+        local ok, value = coroutine.resume(work, answer)
+        if not ok and value ~= AIM_CAPPED then error(value, 0) end
+        if not ok or coroutine.status(work) == "dead" then return finish(not ok) end
+        return nil, value
+    end
 end
 
-X4GunneryAimPointMap = { search = search }
+local function search(C, H, askX4)
+    local resume = begin(C, H)
+    local answer
+    while true do
+        local result, probe = resume(answer)
+        if result then return result end
+        answer = askX4(probe.n, probe.p, probe.kind)
+    end
+end
+
+X4GunneryAimPointMap = { search = search, begin = begin }
