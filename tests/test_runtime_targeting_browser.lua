@@ -495,22 +495,28 @@ do
         assert(rendered57[component][4] == expected.typeName,
             "57: " .. expected.class .. " localized type must be bound to rendered column 4")
     end
-    local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
-        if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
+        assert(button.text ~= ReadText(20991, 15), "57: target browser must not expose Refresh")
     end
-    assert(#refreshButtons57 >= 2, "57: target browser needs refresh controls at top and bottom")
-    refreshButtons57[1].handlers.onClick()
-    local refreshedButtons57 = {}
-    for _, button in ipairs(fix.getCreatedButtons()) do
-        if button.text == ReadText(20991, 15) then refreshedButtons57[#refreshedButtons57 + 1] = button end
-    end
-    refreshedButtons57[#refreshedButtons57].handlers.onClick()
     local log57 = table.concat(fix.getCapturedLog(), "\n")
-    assert(log57:find("event=target_browser action=refresh location=top", 1, true),
-        "57: top refresh click needs audit evidence")
-    assert(log57:find("event=target_browser action=refresh location=bottom", 1, true),
-        "57: bottom refresh click needs audit evidence")
+    local progress57
+    for _, entry in ipairs(fix.getCreatedTexts()) do
+        if entry.row == "target_range_progress" then progress57 = entry.text end
+    end
+    assert(type(progress57) == "function" and progress57():find("IN RANGE", 1, true),
+        "57: target browser must expose text-only IN RANGE progress")
+    sess57.groups, sess57.checkedGroupKeys = { grp27 }, { grp27 = true }
+    API.setRangeTargets({ 570 }, 570)
+    local repaintMark57 = fix.callbackCheckpoint()
+    local beforeRange57 = #fix.uiTriggeredEvents
+    API.runRangeSweep(clock)
+    local request57 = fix.uiTriggeredEvents[beforeRange57 + 1]
+    assert(request57 and request57.control == "in_range_begin", "57: range sweep must request selected target")
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr1:" .. request57.params.nonce .. ":570:1:1")
+    assert(progress57():find("1/7 scanned", 1, true),
+        "57: progress must include completed results")
+    fix.drainCallbacksSince(repaintMark57)
     assert(log57:find("event=target_browser action=rendered candidates=7 class_values=7 type_values=7", 1, true),
         "57: rendered target metadata needs aggregate audit evidence")
     for component, expected in pairs(expectedRendered57) do
@@ -569,20 +575,12 @@ do
     gcMenu.display()
     rowDropdown(fix, "surface_macro_filter").handlers.onDropDownConfirmed(nil, "turret_l")
     assert(sess57.surfaceMacroFilter == "turret_l", "57: macro lock was not retained")
-    local surfaceRefresh57
-    for _, button in ipairs(fix.getCreatedButtons()) do
-        if button.row == "surface_refresh" then surfaceRefresh57 = button end
-    end
-    assert(surfaceRefresh57, "57: top surface Refresh button missing")
     C.GetUpgradeSlotGroup = function() return { path = "", group = "" } end
-    surfaceRefresh57.handlers.onClick()
     local log58 = table.concat(fix.getCapturedLog(), "\n")
     assert(log58:find("event=surface_browser action=filter kind=type value=turret equipment_reset=any target=600", 1, true),
         "57: type filter change needs audit evidence")
     assert(log58:find("event=surface_browser action=filter kind=equipment value=turret_l target=600", 1, true),
         "57: equipment filter change needs audit evidence")
-    assert(log58:find("event=surface_browser action=refresh location=top target=600", 1, true),
-        "57: surface Refresh needs audit evidence")
     assert(log58:find("event=surface_browser action=rendered target=600 target_name=\"0\"", 1, true)
             and log58:find("type_filter=turret equipment_filter=turret_l all=2 alternatives=1 equipment_options=2", 1, true),
         "57: filtered surface render needs exact count/filter evidence")

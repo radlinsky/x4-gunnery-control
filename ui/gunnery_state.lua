@@ -357,9 +357,8 @@ end
 function State.newSurfaceBrowser(rootID)
     return {
         rootID = rootID, generation = 0, filterSignature = "",
-        autoRefresh = false, nextAutoRefreshAt = nil,
         page = 1, pageSize = 20, orderedIDs = {}, metadataByID = {},
-        pageResults = {}, pinnedResult = nil, pinnedRefreshAt = nil,
+        pinnedRefreshAt = nil,
     }
 end
 

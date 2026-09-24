@@ -214,8 +214,8 @@ local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
 local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
-local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
-local surfacePinnedUpdatePending = false
+local Range = { serial = 0, cache = {}, targets = {}, order = {}, members = {},
+    totalWork = 0, peakWork = 0, completed = 0 }
 local redirectDockedMenu
 local completeReleasedOnboardHandoff
 local reopenPendingSession
@@ -282,9 +282,13 @@ end
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship, origin)
     engageabilityCache, engageabilityRequests = {}, {}
-    engageabilityRepaintPending = nil
+    Range.cache, Range.targets, Range.order, Range.active = {}, {}, {}, nil
+    Range.signature, Range.members = nil, {}
+    Range.totalWork, Range.peakWork, Range.completed = 0, 0, 0
+    Range.nextBrowserMembershipAt, Range.nextSurfaceMembershipAt = nil, nil
+    Range.selectedKey = nil
     engagedOverlayRefreshPending = false
-    surfacePinnedUpdatePending = false
+    Range.consoleGroupSignature = nil
     local session = State.newSession(ship, "gunnercontrol", origin or "chair")
     session.shipName = str(C.GetComponentName(ship))
     return session
@@ -972,7 +976,7 @@ local function discardSession(reason)
     local hadDirectControl = session.controlMode == "direct"
     sessionEpoch = sessionEpoch + 1
     engageabilityCache, engageabilityRequests = {}, {}
-    engageabilityRepaintPending = nil
+    Range.active, Range.targets, Range.order = nil, {}, {}
     resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
     clearOwnShipSofttarget()
@@ -1424,6 +1428,19 @@ refresh = function()
     State.retainSelection(session, readGroups(session.shipID))
 end
 
+function Range.groupDisplaySignature()
+    local parts = {}
+    for _, group in ipairs(session.groups or {}) do
+        parts[#parts + 1] = table.concat({ group.key, group.displayName or "",
+            tostring(group.operationalCount), tostring(group.totalCount),
+            group.mode or "", tostring(group.armed) }, ":")
+        for _, member in ipairs(group.members or {}) do
+            parts[#parts + 1] = State.normID(member.componentID) .. ":" .. tostring(member.operational)
+        end
+    end
+    return table.concat(parts, "|")
+end
+
 -- "Update turret behavior" commit. Writes the staged config to every mutable
 -- group and advances committedBaseline so a later stand-up reverts to this new
 -- state rather than to what the ship looked like at sit-down. Only the main
@@ -1486,6 +1503,147 @@ local function checkedOperationalTurrets()
         return State.normID(a.componentID) < State.normID(b.componentID)
     end)
     return members
+end
+
+-- Browser range evidence is separate from Auto-next's retained ENGAGEABLE
+-- service. A sweep has one MD request in flight and spends at most one target
+-- times the selected turret count on any update tick.
+function Range.rangeText(result)
+    local total = result and result.total or #Range.members
+    local count = result and result.count
+    return tostring(count or 0) .. " / " .. tostring(total) .. " IN RANGE"
+end
+
+function Range.rangeMovingTarget(target)
+    local object = id(target)
+    local root = C.GetContextByClass(object, "container", true)
+    if C.IsComponentClass(object, "ship") then
+        return (tonumber(componentData(object, "maxspeed")) or 0) > 0
+    end
+    if C.IsComponentClass(object, "engine") and root ~= 0 and C.IsComponentClass(root, "ship") then
+        return (tonumber(componentData(root, "maxspeed")) or 0) > 0
+    end
+    return false
+end
+
+function Range.setRangeTargets(targets, selected)
+    local members, parts = checkedOperationalTurrets(), {}
+    for _, member in ipairs(members) do parts[#parts + 1] = State.normID(member.componentID) end
+    local signature = table.concat(parts, ",")
+    if signature ~= Range.signature then
+        Range.signature, Range.members, Range.cache, Range.active = signature, members, {}, nil
+        Range.nextSortAt = nil
+    end
+    local previous, wanted, order = Range.targets, {}, {}
+    local function add(target)
+        if isNullID(target) then return end
+        local key = State.normID(target)
+        if wanted[key] then return end
+        wanted[key] = previous[key] or { target = target, key = key }
+        wanted[key].target = target
+        order[#order + 1] = wanted[key]
+    end
+    add(selected)
+    Range.selectedKey = not isNullID(selected) and State.normID(selected) or nil
+    for _, target in ipairs(targets or {}) do add(target) end
+    Range.targets, Range.order = wanted, order
+    for key in pairs(previous) do if not wanted[key] then Range.nextSortAt = nil end end
+    for key in pairs(wanted) do if not previous[key] then Range.nextSortAt = nil end end
+    if Range.active and not wanted[Range.active.key] then Range.active = nil end
+end
+
+function Range.rangeResult(target)
+    return Range.cache[State.normID(target)]
+end
+
+function Range.runRangeSweep(now)
+    if C.IsGamePaused() or not session or (session.phase ~= "target_select"
+            and not (session.phase == "engaged" and session.controlMode == "direct")) then return end
+    if Range.active then
+        if now - Range.active.started < 2 then return end
+        log("event=in_range action=timeout target=" .. Range.active.key)
+        local timedOut = Range.targets[Range.active.key]
+        if timedOut then timedOut.retryAt = now + 5 end
+        Range.active = nil
+    end
+    local entry = Range.selectedKey and Range.targets[Range.selectedKey]
+    if entry and ((entry.retryAt and now < entry.retryAt)
+            or (entry.visitedAt and now - entry.visitedAt < 1)) then entry = nil end
+    local selectedDue = entry ~= nil
+    for _, candidate in ipairs(Range.order) do
+        if not selectedDue and (not candidate.retryAt or now >= candidate.retryAt) and (not entry or
+                (not candidate.visitedAt and entry.visitedAt) or
+                (candidate.visitedAt and entry.visitedAt and candidate.visitedAt < entry.visitedAt)) then
+            entry = candidate
+        end
+    end
+    if not entry then return end
+    local interval = selectedDue and 1 or 2
+    if entry.visitedAt and now - entry.visitedAt < interval then
+        return
+    end
+    entry.visitedAt = now
+    entry.retryAt = nil
+    Range.serial = Range.serial + 1
+    local nonce = tostring(sessionEpoch) .. "_" .. tostring(Range.serial)
+    Range.active = { nonce = nonce, key = entry.key, signature = Range.signature,
+        started = now, total = #Range.members }
+    if #Range.members == 0 then
+        Range.cache[entry.key] = { count = 0, total = 0, receivedAt = now }
+        Range.active = nil
+        return
+    end
+    Range.totalWork = Range.totalWork + #Range.members
+    Range.peakWork = math.max(Range.peakWork, #Range.members)
+    AddUITriggeredEvent("X4GunneryControl", "in_range_begin", {
+        nonce = nonce, target = id(entry.target), targetid = entry.key,
+        moving = Range.rangeMovingTarget(entry.target) and 1 or 0, members = #Range.members })
+    for _, member in ipairs(Range.members) do
+        AddUITriggeredEvent("X4GunneryControl", "in_range_member", {
+            nonce = nonce, weapon = id(member.componentID) })
+    end
+    AddUITriggeredEvent("X4GunneryControl", "in_range_commit", { nonce = nonce })
+    log("event=in_range action=request nonce=" .. nonce .. " target=" .. entry.key
+        .. " members=" .. tostring(#Range.members) .. " peak_targets_per_update=1")
+end
+
+function Range.onRangeResult(_, param)
+    local nonce, key, count, total = tostring(param or ""):match("^x4gcr1:([^:]+):([^:]+):(%d+):(%d+)$")
+    local active = Range.active
+    if not session or not active or nonce ~= active.nonce or key ~= active.key
+            or active.signature ~= Range.signature or not Range.targets[key] then return end
+    count, total = tonumber(count), tonumber(total)
+    if total ~= active.total or count > total then return end
+    local now = getElapsedTime()
+    Range.cache[key] = { count = count, total = total, receivedAt = now }
+    Range.active = nil
+    Range.completed = Range.completed + 1
+    local visible, oldest = 0, 0
+    for _, entry in ipairs(Range.order) do
+        local result = Range.cache[entry.key]
+        if result then
+            visible = visible + 1
+            oldest = math.max(oldest, now - result.receivedAt)
+        end
+    end
+    log("event=in_range action=result target=" .. key .. " count=" .. tostring(count)
+        .. " total=" .. tostring(total) .. " delay_ms=" .. tostring(math.floor((now - active.started) * 1000))
+        .. " peak_work=" .. tostring(Range.peakWork) .. " total_work=" .. tostring(Range.totalWork)
+        .. " completed=" .. tostring(Range.completed) .. " visible=" .. tostring(visible)
+        .. "/" .. tostring(#Range.order) .. " oldest_ms=" .. tostring(math.floor(oldest * 1000)))
+    if menu.frame and not suspendedOverlayRegistration then
+        menu.frame:update()
+        if menu.elementFrame then menu.elementFrame:update() end
+    end
+    if session.phase == "target_select" and visible == #Range.order
+            and (not Range.nextSortAt or now >= Range.nextSortAt) then
+        Range.nextSortAt = now + 5
+        local expectedSession, expectedEpoch = session, sessionEpoch
+        Helper.addDelayedOneTimeCallbackOnUpdate(function()
+            if currentSession(expectedSession, expectedEpoch) and menu.shown
+                    and session.phase == "target_select" then menu.display() end
+        end, false, now + 0.01)
+    end
 end
 
 -- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
@@ -1606,72 +1764,6 @@ local function requestEngageability(target, purpose)
     return requestEngageabilities({ target }, purpose)[1]
 end
 
-local function engageabilityText(result)
-    if not result then return "-" end
-    if result.pending and result.engageable == nil then return "… / " .. tostring(result.total) end
-    local label = tostring(result.engageable or 0) .. " / " .. tostring(result.total or 0)
-    local unknown = math.max(0, (result.total or 0) - (result.known or 0))
-    if unknown > 0 then return label .. "  " .. tostring(unknown) .. " " .. text(100) end
-    if (result.total or 0) > 0 and result.engageable == result.total then return label .. "  " .. text(89) end
-    return label
-end
-
-local function engageabilityAudit(result)
-    if not result then return "unavailable", "-", 0, 0 end
-    if result.pending then return "pending", "-", 0, result.total or 0 end
-    return "complete", result.engageable or 0, result.known or 0, result.total or 0
-end
-
--- A target/surface render can issue dozens of independent MD requests. Their
--- replies commonly arrive in the same UI tick; rebuilding the complete menu
--- for every reply makes enumeration and audit logging quadratic in row count.
--- One tokenized callback repaints the whole accepted batch. A token survives
--- stale callbacks safely when session teardown resets the pending marker.
-local function scheduleEngageabilityRepaint(purpose)
-        if purpose == "surface_pinned" then
-        if surfacePinnedUpdatePending then return end
-        surfacePinnedUpdatePending = true
-        local expectedSession, expectedEpoch = session, sessionEpoch
-        Helper.addDelayedOneTimeCallbackOnUpdate(function()
-            surfacePinnedUpdatePending = false
-            if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
-            if session.phase == "engaged" and session.controlMode == "direct"
-                    and menu.frame and not suspendedOverlayRegistration then
-                local browser = session.surfaceBrowser
-                local pinnedID = session.aimTargetID or session.targetObjectID
-                local result = browser and browser.pinnedResult
-                local state, engageable, known, total = engageabilityAudit(result)
-                local shielded, shieldpercent, hullpercent = surfaceHealth(pinnedID)
-                log("event=surface_pinned action=refresh component=" .. tostring(pinnedID)
-                    .. " engageability_state=" .. state .. " engageability_engageable=" .. tostring(engageable)
-                    .. " engageability_known=" .. tostring(known)
-                    .. " engageability_total=" .. tostring(total)
-                    .. " distance=" .. tostring(browser and browser.pinnedDistance or -1)
-                    .. " shield_capacity=" .. tostring(shielded)
-                    .. " shield_percent=" .. tostring(shieldpercent)
-                    .. " hull_percent=" .. tostring(hullpercent))
-                menu.frame:update()
-                if menu.elementFrame then menu.elementFrame:update() end
-            end
-        end, false, getElapsedTime() + 0.01)
-        return
-    end
-    if engageabilityRepaintPending then return end
-    engageabilityRepaintSerial = engageabilityRepaintSerial + 1
-    local token = engageabilityRepaintSerial
-    engageabilityRepaintPending = token
-    local expectedSession, expectedEpoch = session, sessionEpoch
-    Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        if engageabilityRepaintPending ~= token then return end
-        engageabilityRepaintPending = nil
-        if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
-        if session.phase == "target_select"
-                or (session.phase == "engaged" and session.controlMode == "direct") then
-            menu.display()
-        end
-    end, false, getElapsedTime() + 0.01)
-end
-
 local function onEngageabilityResult(_, param)
     local nonce, targetKey, engageable, known, total = tostring(param or ""):match(
         "^x4gce3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
@@ -1687,9 +1779,6 @@ local function onEngageabilityResult(_, param)
         engageable, known, total, false, nil, getElapsedTime()
     request.targets[targetKey] = nil
     if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
-    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        scheduleEngageabilityRepaint(request.purpose)
-    end
 end
 
 
@@ -1901,11 +1990,9 @@ local function rebuildSurfaceSnapshot(reason)
     for _, surface in ipairs(alternatives) do
         browser.orderedIDs[#browser.orderedIDs + 1] = State.normID(surface.componentID)
     end
-    browser.pageResults, browser.pinnedResult = {}, nil
     browser.page = math.max(1, tonumber(browser.page) or 1)
     local _, normalizedPage, pageCount = State.surfacePage(browser.orderedIDs, browser.page, browser.pageSize)
     browser.page = normalizedPage
-    if browser.autoRefresh then browser.nextAutoRefreshAt = getElapsedTime() + 10 end
     log("event=surface_snapshot action=create reason=" .. tostring(reason or "open")
         .. " root=" .. tostring(root)
         .. " generation=" .. tostring(browser.generation)
@@ -2577,8 +2664,12 @@ function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
 function TestAPI.requestEngageability(target) return requestEngageability(target) end
+function TestAPI.setRangeTargets(targets, selected) return Range.setRangeTargets(targets, selected) end
+function TestAPI.rangeResult(target) return Range.rangeResult(target) end
+function TestAPI.runRangeSweep(now) return Range.runRangeSweep(now) end
+function TestAPI.rangeMovingTarget(target) return Range.rangeMovingTarget(target) end
+function TestAPI.rangeText(result) return Range.rangeText(result) end
 function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
-function TestAPI.engageabilityText(result) return engageabilityText(result) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
@@ -2871,28 +2962,13 @@ function menu.display()
             local tgtName = str(C.GetComponentName(id(session.targetObjectID)))
             local elemHeader = elemTable:addRow(false, { bgColor = Color["row_title_background"] })
             elemHeader[1]:setColSpan(5):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
-            local elemRefresh = elemTable:addRow("surface_refresh", {})
-            elemRefresh[1]:setColSpan(5):createButton({}):setText(text(15))
-            elemRefresh[1].handlers.onClick = function()
-                log("event=surface_browser action=refresh location=top target=" .. tostring(session.targetObjectID))
-                session.surfaceBrowser.pendingReason = "manual"
-                refresh(); menu.display()
-            end
             local pendingReason = session.surfaceBrowser and session.surfaceBrowser.pendingReason
             if session.surfaceBrowser then session.surfaceBrowser.pendingReason = nil end
             local browser = rebuildSurfaceSnapshot(pendingReason)
-            local allSurfaces = browser.allSurfaces
-            local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})
-            autoRefreshRow[1]:createCheckBox(browser.autoRefresh == true,
-                { width = Helper.standardTextHeight, height = Helper.standardTextHeight })
-            autoRefreshRow[1].handlers.onClick = function()
-                browser.autoRefresh = not browser.autoRefresh
-                browser.nextAutoRefreshAt = browser.autoRefresh and (getElapsedTime() + 10) or nil
-                log("event=surface_refresh action=toggle automatic=" .. tostring(browser.autoRefresh)
-                    .. " root=" .. tostring(session.targetObjectID))
-                menu.display()
+            if not Range.nextSurfaceMembershipAt then
+                Range.nextSurfaceMembershipAt = getElapsedTime() + 10
             end
-            autoRefreshRow[2]:setColSpan(4):createText(text(97))
+            local allSurfaces = browser.allSurfaces
             local typeOptions = {
                 { id = "any", text = text(86), icon = "", displayremoveoption = false },
                 { id = "turret", text = text(46), icon = "", displayremoveoption = false },
@@ -2948,10 +3024,7 @@ function menu.display()
             -- refreshes independently from the frozen alternative pages.
             local pinnedID = session.aimTargetID or session.targetObjectID
             local pinnedSurface = surfaceMetadata(browser, pinnedID)
-            if not browser.pinnedResult then
-                browser.pinnedDistance = surfaceDistance(pinnedID)
-                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
-            end
+            browser.pinnedDistance = surfaceDistance(pinnedID)
             local pinnedName = pinnedSurface and pinnedSurface.name or tgtName
             local pinnedKind = pinnedSurface and pinnedSurface.kind or text(92)
             local pinnedTitle = elemTable:addRow("surface_pinned_title", { bgColor = Color["row_title_background"] })
@@ -2959,11 +3032,11 @@ function menu.display()
             local surfaceHeader = elemTable:addRow("surface_header", { bgColor = Color["row_background_unselectable"] })
             surfaceHeader[1]:setColSpan(2):createText(text(59))
             surfaceHeader[3]:createText(text(50))
-            surfaceHeader[4]:createText(text(89))
+            surfaceHeader[4]:createText("IN RANGE")
             local pinnedRow = elemTable:addRow("surface_pinned", {})
             pinnedRow[1]:setColSpan(2):createText(pinnedKind)
             pinnedRow[3]:createText(function() return surfaceDistanceText(browser.pinnedDistance) end)
-            pinnedRow[4]:createText(function() return engageabilityText(browser.pinnedResult) end)
+            pinnedRow[4]:createText(function() return Range.rangeText(Range.rangeResult(pinnedID)) end)
             pinnedRow[5]:createText(function() return surfaceShieldText(pinnedID) end)
             local pinnedHullRow = elemTable:addRow("surface_pinned_hull", {})
             pinnedHullRow[5]:createText(function() return surfaceHullText(pinnedID) end)
@@ -2981,30 +3054,25 @@ function menu.display()
             local pageEntries, page, pageCount, firstIndex, lastIndex =
                 State.surfacePage(ordered, browser.page, browser.pageSize)
             browser.page = page
-            local pageKey = State.surfacePageKey(browser.generation, pageEntries)
-            local pageCache = browser.pageResults[pageKey]
-            if not pageCache then
-                local pageIDs = {}
-                for _, surface in ipairs(pageEntries) do pageIDs[#pageIDs + 1] = surface.componentID end
-                local pageMembers, signatureParts = checkedOperationalTurrets(), {}
-                for _, member in ipairs(pageMembers) do
-                    signatureParts[#signatureParts + 1] = State.normID(member.componentID)
-                end
-                pageCache = {
-                    results = requestEngageabilities(pageIDs, "surface_page"), audited = false,
-                    distances = {},
-                    selectedTotal = #pageMembers, selectedSignature = table.concat(signatureParts, ","),
-                }
-                for position, surface in ipairs(pageEntries) do
-                    pageCache.distances[position] = surfaceDistance(surface.componentID)
-                end
-                browser.pageResults[pageKey] = pageCache
-                log("event=surface_page action=request generation=" .. tostring(browser.generation)
-                    .. " page=" .. tostring(page) .. " first=" .. tostring(firstIndex)
-                    .. " last=" .. tostring(lastIndex) .. " requested=" .. tostring(#pageIDs)
-                    .. " selected_total=" .. tostring(pageCache.selectedTotal)
-                    .. " selected_signature=" .. string.format("%q", pageCache.selectedSignature))
+            local pageIDs, pageDistances = {}, {}
+            for position, surface in ipairs(pageEntries) do
+                pageIDs[#pageIDs + 1] = surface.componentID
+                pageDistances[position] = surfaceDistance(surface.componentID)
             end
+            Range.setRangeTargets(pageIDs, pinnedID)
+            local progress = elemTable:addRow("surface_range_progress", {})
+            progress[1]:setColSpan(5):createText(function()
+                local complete, oldest = 0, nil
+                for _, target in ipairs(pageIDs) do
+                    local result = Range.rangeResult(target)
+                    if result then
+                        complete = complete + 1
+                        oldest = math.max(oldest or 0, getElapsedTime() - result.receivedAt)
+                    end
+                end
+                return "IN RANGE " .. tostring(complete) .. "/" .. tostring(#pageIDs)
+                    .. " scanned; oldest " .. (oldest and tostring(math.floor(oldest)) .. "s" or "pending")
+            end)
             local pageControls = elemTable:addRow("surface_page_controls", {})
             pageControls[1]:createButton({ active = page > 1 }):setText(text(94))
             pageControls[1].handlers.onClick = function()
@@ -3020,20 +3088,7 @@ function menu.display()
                 menu.display()
             end
             if #pageEntries > 0 then
-                local complete = true
                 for position, surface in ipairs(pageEntries) do
-                    local result = pageCache.results[position]
-                    if not result or result.pending then complete = false end
-                    if complete and not pageCache.audited then
-                        local engageabilityState, engageabilityEngageable, engageabilityKnown, engageabilityTotal = engageabilityAudit(result)
-                        log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s macro=%q size=%s size_source=%s distance=%s snapshot_distance=%s position=%d page=%d pinned=false engageability_state=%s engageability_engageable=%s engageability_known=%s engageability_total=%s engageability_text=%q",
-                            tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
-                            surface.kindKey, surface.macro, surface.size, surface.sizeSource,
-                            tostring(pageCache.distances[position]),
-                            tostring(surface.distance), position, page,
-                            engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
-                            tostring(engageabilityTotal), engageabilityText(result)))
-                    end
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
                     local suggestion = currentTestEngagementSuggestion()
                     local surfaceName = surface.name
@@ -3041,18 +3096,11 @@ function menu.display()
                         surfaceName = "[TEST TARGET] " .. surfaceName
                     end
                     surfRow[1]:setColSpan(2):createText(surfaceName)
-                    surfRow[3]:createText(surfaceDistanceText(pageCache.distances[position]))
-                    surfRow[4]:createText(engageabilityText(result))
+                    surfRow[3]:createText(surfaceDistanceText(pageDistances[position]))
+                    local targetID = surface.componentID
+                    surfRow[4]:createText(function() return Range.rangeText(Range.rangeResult(targetID)) end)
                     surfRow[5]:createButton({}):setText(text(60))
                     surfRow[5].handlers.onClick = function() engageTarget(surface.componentID) end
-                end
-                if complete and not pageCache.audited then
-                    pageCache.audited = true
-                    log("event=surface_page action=complete generation=" .. tostring(browser.generation)
-                        .. " page=" .. tostring(page) .. " requested=" .. tostring(#pageEntries)
-                        .. " accepted=" .. tostring(#pageEntries) .. " completed=" .. tostring(#pageEntries)
-                        .. " selected_total=" .. tostring(pageCache.selectedTotal)
-                        .. " selected_signature=" .. string.format("%q", pageCache.selectedSignature))
                 end
             else
                 local noSurfRow = elemTable:addRow(false, {})
@@ -3098,12 +3146,6 @@ function menu.display()
         local tableView = frame:addTable(12, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
         title[1]:setColSpan(12):createText(text(33), Helper.headerRowCenteredProperties)
-        local topActions = tableView:addRow("target_refresh_top", {})
-        topActions[1]:setColSpan(12):createButton({}):setText(text(15))
-        topActions[1].handlers.onClick = function()
-            log("event=target_browser action=refresh location=top")
-            refresh(); menu.display()
-        end
         local explanation = tableView:addRow(false, {})
         explanation[1]:setColSpan(12):createText(text(34), { wordwrap = true })
         local current = C.GetSofttarget2()
@@ -3116,17 +3158,20 @@ function menu.display()
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
         header[4]:setColSpan(2):createText(text(38)); header[6]:createText(text(49))
-        header[7]:createText(text(50)); header[8]:setColSpan(2):createText(text(90)); header[10]:setColSpan(3):createText("")
+        header[7]:createText(text(50)); header[8]:setColSpan(2):createText("IN RANGE"); header[10]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
+        if not Range.nextBrowserMembershipAt then
+            Range.nextBrowserMembershipAt = getElapsedTime() + 5
+        end
         local classValues, typeValues = 0, 0
         local candidateIDs = {}
         for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
-        local candidateEngageabilities = requestEngageabilities(candidateIDs)
-        for index, candidate in ipairs(candidates) do candidate.engageability = candidateEngageabilities[index] end
+        Range.setRangeTargets(candidateIDs, current.softtargetID ~= 0 and current.softtargetID or nil)
         table.sort(candidates, function(a, b)
-            local aEngageable = a.engageability and a.engageability.total > 0 and a.engageability.engageable == a.engageability.total or false
-            local bEngageable = b.engageability and b.engageability.total > 0 and b.engageability.engageable == b.engageability.total or false
-            if aEngageable ~= bEngageable then return aEngageable end
+            local aRange, bRange = Range.rangeResult(a.componentID), Range.rangeResult(b.componentID)
+            local aAll = aRange and aRange.total > 0 and aRange.count == aRange.total or false
+            local bAll = bRange and bRange.total > 0 and bRange.count == bRange.total or false
+            if aAll ~= bAll then return aAll end
             if a.priority ~= b.priority then return a.priority < b.priority end
             if a.distance ~= b.distance then
                 if a.distance < 0 then return false end
@@ -3142,12 +3187,23 @@ function menu.display()
         log("event=target_browser action=rendered candidates=" .. tostring(#candidates)
             .. " class_values=" .. tostring(classValues)
             .. " type_values=" .. tostring(typeValues))
+        local progress = tableView:addRow("target_range_progress", {})
+        progress[1]:setColSpan(12):createText(function()
+            local complete, oldest = 0, nil
+            for _, target in ipairs(candidateIDs) do
+                local result = Range.rangeResult(target)
+                if result then
+                    complete = complete + 1
+                    oldest = math.max(oldest or 0, getElapsedTime() - result.receivedAt)
+                end
+            end
+            return "IN RANGE " .. tostring(complete) .. "/" .. tostring(#candidateIDs)
+                .. " scanned; oldest " .. (oldest and tostring(math.floor(oldest)) .. "s" or "pending")
+        end)
         for position, candidate in ipairs(candidates) do
-            local engageabilityState, engageabilityEngageable, engageabilityKnown, engageabilityTotal = engageabilityAudit(candidate.engageability)
-            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d engageability_state=%s engageability_engageable=%s engageability_known=%s engageability_total=%s engageability_text=%q",
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d",
                 tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName,
-                candidate.macro, position, engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
-                tostring(engageabilityTotal), engageabilityText(candidate.engageability)))
+                candidate.macro, position))
             local row = tableView:addRow(tostring(candidate.componentID), {})
             local candidateName = candidate.name ~= "" and candidate.name or text(51)
             local suggestion = currentTestEngagementSuggestion()
@@ -3158,7 +3214,8 @@ function menu.display()
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
             row[6]:createText(candidate.relation)
             row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
-            row[8]:setColSpan(2):createText(engageabilityText(candidate.engageability))
+            local targetID = candidate.componentID
+            row[8]:setColSpan(2):createText(function() return Range.rangeText(Range.rangeResult(targetID)) end)
             row[10]:setColSpan(3):createButton({}):setText(text(52))
             row[10].handlers.onClick = function() engageTarget(candidate.componentID) end
         end
@@ -3167,11 +3224,6 @@ function menu.display()
             row[1]:setColSpan(12):createText(text(53), { color = Color["text_error"] })
         end
         local actions = tableView:addRow("actions", {})
-        actions[1]:setColSpan(3):createButton({}):setText(text(15))
-        actions[1].handlers.onClick = function()
-            log("event=target_browser action=refresh location=bottom")
-            refresh(); menu.display()
-        end
         if testLabCallbacks and testLabCallbacks.open then
             actions[4]:setColSpan(2):createButton({}):setText(text(32))
             actions[4].handlers.onClick = openTestLab
@@ -3188,6 +3240,7 @@ function menu.display()
     end
 
     -- Console: 8-column table.
+    Range.consoleGroupSignature = Range.groupDisplaySignature()
     -- Columns: [1] checkbox [2] group name+status [3] count [4] mode [5] armed
     --          [6..7] spacer [8] (unused — held for column width balance)
     local tableView = frame:addTable(8, { tabOrder = 1, x = tablePad, width = tableWidth })
@@ -3312,25 +3365,21 @@ function menu.display()
     end
     local actions = tableView:addRow("actions", {})
     if testLabCallbacks and testLabCallbacks.open then
-        -- 8 cols: [1-2] Auto-engage [3-4] Direct-control [5-6] Refresh [7] TestLab [8] GetUp
+        -- 8 cols: Auto-engage, Direct-control, Test Lab, Get Up.
         actions[1]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(68))
         actions[1].handlers.onClick = function() startAutoEngage(State.checkedGroups(session)) end
         actions[3]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(69))
         actions[3].handlers.onClick = function() startTargetSelection(State.checkedGroups(session)) end
-        actions[5]:setColSpan(2):createButton({}):setText(text(15))
-        actions[5].handlers.onClick = function() refresh(); menu.display() end
-        actions[7]:createButton({}):setText(text(32))
-        actions[7].handlers.onClick = openTestLab
+        actions[5]:setColSpan(3):createButton({}):setText(text(32))
+        actions[5].handlers.onClick = openTestLab
         actions[8]:createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[8].handlers.onClick = function() leaveSession("get up button") end
     else
-        -- 8 cols: [1-2] Auto-engage [3-4] Direct-control [5-6] Refresh [7-8] GetUp
+        -- 8 cols: Auto-engage, Direct-control, Get Up.
         actions[1]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(68))
         actions[1].handlers.onClick = function() startAutoEngage(State.checkedGroups(session)) end
         actions[3]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(69))
         actions[3].handlers.onClick = function() startTargetSelection(State.checkedGroups(session)) end
-        actions[5]:setColSpan(2):createButton({}):setText(text(15))
-        actions[5].handlers.onClick = function() refresh(); menu.display() end
-        actions[7]:setColSpan(2):createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[7].handlers.onClick = function() leaveSession("get up button") end
+        actions[5]:setColSpan(4):createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[5].handlers.onClick = function() leaveSession("get up button") end
     end
     -- "Update turret behavior" (id 83): permanent commit. Writes staged to the
     -- ship AND advances committedBaseline. Greyed while staged == committedBaseline;
@@ -3374,18 +3423,31 @@ local function updateSessionRuntime()
             browser.pinnedRefreshAt = now + 1
             local pinnedID = session.aimTargetID or session.targetObjectID
             browser.pinnedDistance = surfaceDistance(pinnedID)
-            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
-        end
-        if browser.autoRefresh and browser.nextAutoRefreshAt and now >= browser.nextAutoRefreshAt then
-            browser.nextAutoRefreshAt = now + 10
-            browser.pendingReason = "automatic"
-            log("event=surface_refresh action=fire reason=automatic root=" .. tostring(session.targetObjectID)
-                .. " page=" .. tostring(browser.page))
-            menu.display()
         end
     end
     if now > nextRefresh then
         nextRefresh = now + 0.25; refresh()
+        if #Range.order > 0 then
+            local targets = {}
+            for _, entry in ipairs(Range.order) do targets[#targets + 1] = entry.target end
+            Range.setRangeTargets(targets, Range.selectedKey and id(Range.selectedKey) or nil)
+        end
+        Range.runRangeSweep(now)
+        if session.phase == "console" then
+            local signature = Range.groupDisplaySignature()
+            if Range.consoleGroupSignature and signature ~= Range.consoleGroupSignature then menu.display() end
+            Range.consoleGroupSignature = signature
+        elseif session.phase == "target_select" and Range.nextBrowserMembershipAt
+                and now >= Range.nextBrowserMembershipAt then
+            Range.nextBrowserMembershipAt = now + 5
+            menu.display()
+        elseif session.phase == "engaged" and session.controlMode == "direct"
+                and session.surfaceBrowser and Range.nextSurfaceMembershipAt
+                and now >= Range.nextSurfaceMembershipAt then
+            Range.nextSurfaceMembershipAt = now + 10
+            session.surfaceBrowser.pendingReason = "automatic"
+            menu.display()
+        end
         -- Auto-retarget runs on the same tick as the data refresh.
         if session.phase == "engaged" then updateAimTarget() end
         -- The player's first Esc during a cinematic goes to the cutscene, not to
@@ -3825,6 +3887,7 @@ local function init()
     RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
+    RegisterEvent("X4GunneryControl.InRangeResult", Range.onRangeResult)
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary

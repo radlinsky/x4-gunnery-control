@@ -117,6 +117,54 @@
       </cues>
     </cue>
 
+    <!-- One cheap browser range target per commit. Lua bounds dispatch and owns
+         membership; this service never discovers aim points or traces lines. -->
+    <cue name="InRangeService">
+      <cues>
+        <cue name="InRangeBegin" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_begin'"/></conditions>
+          <actions>
+            <set_value name="InRangeService.$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="InRangeService.$target" exact="@event.param3.$target"/>
+            <set_value name="InRangeService.$targetid" exact="@event.param3.$targetid"/>
+            <set_value name="InRangeService.$moving" exact="@event.param3.$moving"/>
+            <set_value name="InRangeService.$expected" exact="@event.param3.$members"/>
+            <set_value name="InRangeService.$weapons" exact="[]"/>
+          </actions>
+        </cue>
+        <cue name="InRangeMember" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_member'"/></conditions>
+          <actions>
+            <do_if value="@event.param3.$nonce == InRangeService.$nonce and InRangeService.$weapons.count lt InRangeService.$expected">
+              <append_to_list name="InRangeService.$weapons" exact="@event.param3.$weapon"/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="InRangeCommit" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_commit'"/></conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <do_if value="$nonce == InRangeService.$nonce and InRangeService.$weapons.count == InRangeService.$expected">
+              <set_value name="$count" exact="0"/>
+              <do_for_each name="$weapon" in="InRangeService.$weapons">
+                <set_value name="$range" exact="$weapon.maxfirerange"/>
+                <do_if value="$range gt 0m">
+                  <set_value name="$extra" exact="0m"/>
+                  <do_if value="InRangeService.$moving == 1 and not $weapon.isbeam">
+                    <set_value name="$extra" exact="[$range * 1.1, 500m].min"/>
+                  </do_if>
+                  <do_if value="InRangeService.$target.bboxdistanceto.{$weapon} lt $range + $extra">
+                    <set_value name="$count" operation="add"/>
+                  </do_if>
+                </do_if>
+              </do_for_each>
+              <raise_lua_event name="'X4GunneryControl.InRangeResult'" param="'x4gcr1:' + $nonce + ':' + InRangeService.$targetid + ':' + $count + ':' + InRangeService.$expected"/>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
     <!-- Exact selected-turret engageability service. Lua owns checkbox membership
          and streams flat component ids; MD owns the per-turret range and
          line-of-fire checks. Each batch repeats its selected members once and
