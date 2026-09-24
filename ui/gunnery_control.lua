@@ -67,6 +67,7 @@ local seatLeaving = false
 local sessionEpoch = 0
 local engageabilityCache = {}
 local aimMaps = {}
+local browserQueue, browserActive, browserScope = {}, nil, nil
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local redirectDockedMenu
@@ -136,6 +137,7 @@ end
 local function newSession(ship, origin)
     engageabilityCache = {}
     aimMaps = {}
+    browserQueue, browserActive, browserScope = {}, nil, nil
     engageabilityRepaintPending = nil
     engagedOverlayRefreshPending = false
     surfacePinnedUpdatePending = false
@@ -790,6 +792,7 @@ local function discardSession(reason)
     sessionEpoch = sessionEpoch + 1
     engageabilityCache = {}
     aimMaps = {}
+    browserQueue, browserActive, browserScope = {}, nil, nil
     engageabilityRepaintPending = nil
     resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
@@ -1304,6 +1307,30 @@ end
 -- entry is current, so delayed MD work cannot complete a newer refresh.
 local aimMapSerial = 0
 local scheduleEngageabilityRepaint
+local function pumpBrowserQueue()
+    if browserActive then return end
+    while #browserQueue > 0 do
+        local work = table.remove(browserQueue, 1)
+        if work.scope == browserScope and work.cached.pending
+                and engageabilityCache[work.key] == work.cached then
+            browserActive = work
+            work.start()
+            return
+        end
+    end
+end
+
+local function setBrowserScope(scope)
+    if browserScope == scope then return end
+    browserScope = scope
+    for _, work in ipairs(browserQueue) do
+        if engageabilityCache[work.key] == work.cached then
+            engageabilityCache[work.key] = nil
+        end
+        work.cached.cancelled = true
+    end
+    browserQueue = {}
+end
 
 local function profileMs(seconds)
     return string.format("%.3f", seconds * 1000)
@@ -1344,6 +1371,10 @@ local function finishEngageability(request)
         profileMs(p.bearingWall), p.bearingRequests, profileMs(p.lineWall),
         p.linePairs, p.lineChecks, p.pendingReuses))
     aimMaps[request.token] = nil
+    if browserActive and browserActive.request == request then
+        browserActive = nil
+        pumpBrowserQueue()
+    end
     if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
         scheduleEngageabilityRepaint(request.purpose)
     end
@@ -1588,7 +1619,7 @@ local function onAimPointProbe(_, param)
     advanceAimMap(request)
 end
 
-local function requestEngageabilities(targets, purpose)
+local function requestEngageabilities(targets, purpose, scope)
     local results = {}
     if not session then return results end
     local members, signatureParts = checkedOperationalTurrets(), {}
@@ -1597,6 +1628,7 @@ local function requestEngageabilities(targets, purpose)
     end
     local signature = table.concat(signatureParts, ",")
     local now = getElapsedTime()
+    if scope then setBrowserScope(scope) end
     for position, target in ipairs(targets or {}) do
         if not State.isNullID(target) then
             local targetKey = State.normID(target)
@@ -1609,7 +1641,13 @@ local function requestEngageabilities(targets, purpose)
                 end
                 results[position] = cached
             else
-                if cached and cached.aimMap then aimMaps[cached.aimMap.token] = nil end
+                if cached and cached.aimMap then
+                    aimMaps[cached.aimMap.token] = nil
+                    if browserActive and browserActive.request == cached.aimMap then
+                        browserActive = nil
+                        pumpBrowserQueue()
+                    end
+                end
                 cached = cached and cached.signature == signature and cached or {}
                 cached.signature, cached.requestedAt, cached.total, cached.receivedAt =
                     signature, now, #members, nil
@@ -1630,37 +1668,52 @@ local function requestEngageabilities(targets, purpose)
                             bearingRequests = 0, lineWall = 0, linePairs = 0,
                             lineChecks = 0, pendingReuses = 0 } }
                     cached.aimMap = request
-                    aimMaps[token] = request
-                    local root = targetRoot(target)
-                    local eligible = (C.IsComponentClass(root, "ship") or C.IsComponentClass(root, "station"))
-                        and componentData(root, "isenemy") == true
-                    if not eligible then
-                        request.authorized = false
-                        for _, member in ipairs(members) do
-                            local row = { weapon = State.normID(member.componentID),
-                                range = "NOT_EVALUATED", points = {} }
-                            request.rows[#request.rows + 1] = row
-                        end
-                        finishEngageability(request)
-                    else
-                        request.authorized = true
-                        for _, member in ipairs(members) do
-                            local weapon = State.normID(member.componentID)
-                            local macro = tostring(member.macro or "")
-                            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
-                            local row = { weapon = weapon, macro = macro,
-                                range = "NOT_EVALUATED", points = {}, pointIndex = 1 }
-                            request.rows[#request.rows + 1] = row
-                            request.byWeapon[weapon] = row
-                            request.rangePending = request.rangePending + 1
-                            if not request.profile.rangeStarted then
-                                request.profile.rangeStarted = GetCurRealTime()
+                    local function startRequest()
+                        request.profile.started = GetCurRealTime()
+                        aimMaps[token] = request
+                        local root = targetRoot(target)
+                        local eligible = (C.IsComponentClass(root, "ship") or C.IsComponentClass(root, "station"))
+                            and componentData(root, "isenemy") == true
+                        if not eligible then
+                            request.authorized = false
+                            for _, member in ipairs(members) do
+                                local row = { weapon = State.normID(member.componentID),
+                                    range = "NOT_EVALUATED", points = {} }
+                                request.rows[#request.rows + 1] = row
                             end
-                            request.profile.rangeRequests = request.profile.rangeRequests + 1
-                            AddUITriggeredEvent("X4GunneryControl", "engageability_range", {
-                                token = token, target = request.target,
-                                weapon = id(member.componentID), weaponKey = weapon })
+                            finishEngageability(request)
+                        else
+                            request.authorized = true
+                            for _, member in ipairs(members) do
+                                local weapon = State.normID(member.componentID)
+                                local macro = tostring(member.macro or "")
+                                if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
+                                local row = { weapon = weapon, macro = macro,
+                                    range = "NOT_EVALUATED", points = {}, pointIndex = 1 }
+                                request.rows[#request.rows + 1] = row
+                                request.byWeapon[weapon] = row
+                                request.rangePending = request.rangePending + 1
+                                if not request.profile.rangeStarted then
+                                    request.profile.rangeStarted = GetCurRealTime()
+                                end
+                                request.profile.rangeRequests = request.profile.rangeRequests + 1
+                                AddUITriggeredEvent("X4GunneryControl", "engageability_range", {
+                                    token = token, target = request.target,
+                                    weapon = id(member.componentID), weaponKey = weapon })
+                            end
                         end
+                    end
+                    if scope then
+                        local work = { scope = scope, key = key, cached = cached,
+                            request = request, start = startRequest }
+                        if purpose == "surface_pinned" or purpose == "target_current" then
+                            table.insert(browserQueue, 1, work)
+                        else
+                            browserQueue[#browserQueue + 1] = work
+                        end
+                        pumpBrowserQueue()
+                    else
+                        startRequest()
                     end
                 end
             end
@@ -1669,8 +1722,8 @@ local function requestEngageabilities(targets, purpose)
     return results
 end
 
-local function requestEngageability(target, purpose)
-    return requestEngageabilities({ target }, purpose)[1]
+local function requestEngageability(target, purpose, scope)
+    return requestEngageabilities({ target }, purpose, scope)[1]
 end
 
 local function engageabilityText(result)
@@ -1689,9 +1742,8 @@ local function engageabilityAudit(result)
     return "complete", result.engageable or 0, result.known or 0, result.total or 0
 end
 
--- A target/surface render can issue dozens of independent MD requests. Their
--- replies commonly arrive in the same UI tick; rebuilding the complete menu
--- for every reply makes enumeration and audit logging quadratic in row count.
+-- Browser calculations finish one at a time. Rebuilding the complete menu
+-- for every reply still repeats enumeration and audit logging for each row.
 -- One tokenized callback repaints the accepted results. A token survives
 -- stale callbacks safely when session teardown resets the pending marker.
 scheduleEngageabilityRepaint = function(purpose)
@@ -2902,6 +2954,8 @@ function menu.display()
             local pendingReason = session.surfaceBrowser and session.surfaceBrowser.pendingReason
             if session.surfaceBrowser then session.surfaceBrowser.pendingReason = nil end
             local browser = rebuildSurfaceSnapshot(pendingReason)
+            setBrowserScope("surface:" .. State.normID(browser.rootID) .. ":"
+                .. tostring(browser.generation) .. ":" .. tostring(browser.page))
             local allSurfaces = browser.allSurfaces
             local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})
             autoRefreshRow[1]:createCheckBox(browser.autoRefresh == true,
@@ -2971,7 +3025,7 @@ function menu.display()
             local pinnedSurface = surfaceMetadata(browser, pinnedID)
             if not browser.pinnedResult then
                 browser.pinnedDistance = surfaceDistance(pinnedID)
-                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
+                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(browser.page))
             end
             local pinnedName = pinnedSurface and pinnedSurface.name or tgtName
             local pinnedKind = pinnedSurface and pinnedSurface.kind or text(92)
@@ -3004,6 +3058,10 @@ function menu.display()
             browser.page = page
             local pageKey = State.surfacePageKey(browser.generation, pageEntries)
             local pageCache = browser.pageResults[pageKey]
+            if pageCache and (function()
+                for _, result in ipairs(pageCache.results) do if result.cancelled then return true end end
+                return false
+            end)() then pageCache = nil end
             if not pageCache then
                 local pageIDs = {}
                 for _, surface in ipairs(pageEntries) do pageIDs[#pageIDs + 1] = surface.componentID end
@@ -3012,7 +3070,7 @@ function menu.display()
                     signatureParts[#signatureParts + 1] = State.normID(member.componentID)
                 end
                 pageCache = {
-                    results = requestEngageabilities(pageIDs, "surface_page"), audited = false,
+                    results = requestEngageabilities(pageIDs, "surface_page", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(page)), audited = false,
                     distances = {},
                     selectedTotal = #pageMembers, selectedSignature = table.concat(signatureParts, ","),
                 }
@@ -3142,7 +3200,11 @@ function menu.display()
         local classValues, typeValues = 0, 0
         local candidateIDs = {}
         for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
-        local candidateEngageabilities = requestEngageabilities(candidateIDs)
+        local currentID = current.softtargetID ~= 0 and isEligibleEngagementTarget(current.softtargetID)
+            and current.softtargetID or nil
+        local scope = "target:" .. tostring(currentID or 0) .. ":" .. table.concat(candidateIDs, ",")
+        if currentID then requestEngageability(currentID, "target_current", scope) end
+        local candidateEngageabilities = requestEngageabilities(candidateIDs, "target_page", scope)
         for index, candidate in ipairs(candidates) do candidate.engageability = candidateEngageabilities[index] end
         table.sort(candidates, function(a, b)
             local aEngageable = a.engageability and a.engageability.total > 0 and a.engageability.engageable == a.engageability.total or false
@@ -3395,7 +3457,7 @@ local function updateSessionRuntime()
             browser.pinnedRefreshAt = now + 1
             local pinnedID = session.aimTargetID or session.targetObjectID
             browser.pinnedDistance = surfaceDistance(pinnedID)
-            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
+            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned", "surface:" .. State.normID(browser.rootID) .. ":" .. tostring(browser.generation) .. ":" .. tostring(browser.page))
         end
         if browser.autoRefresh and browser.nextAutoRefreshAt and now >= browser.nextAutoRefreshAt then
             browser.nextAutoRefreshAt = now + 10

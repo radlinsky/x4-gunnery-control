@@ -154,6 +154,7 @@ end
 
 -- ── 59. surface browser pins health and lazily requests exact 20-row pages ──
 do
+    gcMenu.onShowMenu()
     local sess59 = API.getSession()
     sess59.phase, sess59.controlMode = "engaged", "direct"
     sess59.targetObjectID, sess59.aimTargetID = 10000, 10000
@@ -208,8 +209,8 @@ do
         savedAdd59(screen, control, params)
     end
     gcMenu.display()
-    assert(#targetEvents59 == 21,
-        "59: initial surface render must request pinned target plus exactly 20 alternatives; got "
+    assert(#targetEvents59 == 1 and targetEvents59[1] == "10000",
+        "59: initial surface render must start only the pinned target; got "
             .. tostring(#targetEvents59))
     local pageOneRows59 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
@@ -256,7 +257,7 @@ do
     local nextPage59 = fix.buttonByText(ReadText(20991, 95))
     assert(nextPage59 and nextPage59.active, "59: Next Page must be active for 41 alternatives")
     nextPage59.handlers.onClick()
-    assert(#targetEvents59 == 20, "59: opening page two must request only its 20 alternatives")
+    assert(#targetEvents59 <= 1, "59: opening page two must not start a batch of alternatives")
     local pageTwoRows59 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
         local row = tonumber(tostring(entry.row))
@@ -280,13 +281,13 @@ do
     targetEvents59 = {}
     local previousPage59 = fix.buttonByText(ReadText(20991, 94))
     previousPage59.handlers.onClick()
-    assert(#targetEvents59 == 0, "59: returning to cached page one must issue no solution requests")
+    assert(#targetEvents59 <= 1, "59: returning to page one must retain a single active calculation")
     local cachedPageDistance59
     for _, entry in ipairs(fix.getCreatedTexts()) do
         if tostring(entry.row) == "10022" and entry.column == 3 then cachedPageDistance59 = entry.text end
     end
-    assert(cachedPageDistance59 == "22.0 km",
-        "59: revisiting a cached page must retain the distance captured with its engageability batch")
+    assert(cachedPageDistance59 == "27.0 km",
+        "59: revisiting a cancelled page must capture a fresh distance with its new work")
     local autoRefresh59
     for _, checkbox in ipairs(fix.getCreatedCheckBoxes()) do
         if checkbox.row == "surface_auto_refresh" then autoRefresh59 = checkbox end
@@ -301,8 +302,8 @@ do
     C.GetPlayerOccupiedShipID = function() return sess59.shipID end
     clock = clock + 10
     fix.invokeOnUpdate()
-    assert(#targetEvents59 == 1 and targetEvents59[1] == "10000",
-        "59: automatic refresh must recalculate pinned and reuse the pending page batch; got "
+    assert(#targetEvents59 == 0 and sess59.surfaceBrowser.pinnedResult.pending,
+        "59: automatic refresh must queue the pinned calculation behind the active row; got "
             .. tostring(#targetEvents59) .. " phase=" .. tostring(sess59.phase)
             .. " next=" .. tostring(sess59.surfaceBrowser.nextAutoRefreshAt)
             .. " now=" .. tostring(clock))

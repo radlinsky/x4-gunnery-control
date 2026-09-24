@@ -403,6 +403,8 @@ do
     gcMenu.onShowMenu()
     local sess57 = API.getSession()
     sess57.phase = "target_select"
+    sess57.groups = { grp27 }
+    sess57.checkedGroupKeys = { grp27 = true }
     GetPlayerContextByClass = function() return 1 end
     GetContainedShips = function() return { 570, 572, 573, 574, 575, 576 } end
     GetContainedStations = function() return { 571 } end
@@ -414,6 +416,8 @@ do
     C.IsComponentClass = function(component, class)
         local comp = tonumber(tostring(component))
         return classByComponent57[comp] == class
+            or (class == "ship" and classByComponent57[comp] ~= nil
+                and classByComponent57[comp] ~= "station")
     end
     C.GetDistanceBetween = function(_, target) return tonumber(tostring(target)) == 570 and 2500 or 4000 end
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
@@ -517,6 +521,7 @@ do
         local evidence = 'event=target_browser action=row component=' .. component
             .. ' name="0" class="' .. expected.class .. '" type="' .. expected.typeName
             .. '" macro="' .. expected.macro .. '"'
+        if component == "570" then evidence = evidence .. ' position=1 engageability_state=pending' end
         assert(log57:find(evidence, 1, true),
             "57: rendered row audit needs exact " .. expected.class .. " component/class/macro evidence")
     end
