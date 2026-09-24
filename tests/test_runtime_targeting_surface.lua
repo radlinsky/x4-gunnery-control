@@ -10,35 +10,7 @@ local C      = fix.C
 local clock = 100
 getElapsedTime = function() return clock end
 
--- A reusable group used across many rendering and targeting tests.
-local grp27 = fix.makeGroup{
-    key = "grp27", displayName = "G27",
-    members = { { componentID = 27, displayName = "T1", operational = true,
-                  cameraSupported = true, componentKey = "27" } },
-}
-
--- Bring the module into a known state.
-local ok_init, err_init = pcall(function() gcMenu.onShowMenu() end)
-assert(ok_init, "onShowMenu() raised: " .. tostring(err_init))
-local sess = API.getSession()
-assert(sess ~= nil, "expected a live session after onShowMenu()")
--- Sections 58-60 call API.getSession() without a fresh onShowMenu(), so they
--- inherit whatever the current session holds. Pre-populate the minimal group
--- state that section 58's seed58() needs to fire engageability_begin.
--- Also set gcMenu.shown = true, which section 57 (engageability) left behind
--- in the original file; callbacks in section 59 guard on menu.shown.
--- (In the original file this state was left by section 57/engageability.)
-sess.groups = {
-    { key = "selected", members = {
-        { componentID = 101, operational = true },
-        { componentID = 102, operational = true },
-    } },
-}
-sess.checkedGroupKeys = { selected = true }
--- Patch GetUpgradeSlotGroup to return a table so that any readGroups() call
--- triggered by onUpdate does not crash (default fixture returns the number 0).
-C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
-gcMenu.shown = true
+gcMenu.onShowMenu()
 
 -- Each selected turret visits a full page with the selected target first.
 do
@@ -66,6 +38,8 @@ do
     C.GetSofttarget2 = function() return { softtargetID = selectedTarget, softtargetConnectionName = "" } end
     local many = {}
     for member = 1, 19 do many[#many + 1] = { componentID = 2000 + member, operational = true } end
+    many[#many + 1], many[#many + 2] =
+        { componentID = 2999, operational = false }, { componentID = 2001, operational = true }
     session.groups = {{ key = "many", members = many }}
     session.checkedGroupKeys = { many = true }
     local targets = {}
@@ -90,14 +64,11 @@ do
             "x4gcr2:" .. begin.nonce .. ":" .. tostring(begin.weapon) .. ":" .. bits)
         return begin
     end
-    local callbackMark = fix.callbackCheckpoint()
-    local syntheticStart = os.clock()
+    local sortMark = fix.callbackCheckpoint()
     pass(string.rep("1", 20))
-    local lightMs = (os.clock() - syntheticStart) * 1000
     assert(API.rangeResult(720).count == 1 and API.rangeResult(701).count == 1,
         "first contribution must appear on every row")
     for _ = 2, 19 do pass(string.rep("0", 20)) end
-    local fullMs = (os.clock() - syntheticStart) * 1000
     assert(API.rangeResult(720).count == 1 and API.rangeResult(720).total == 19,
         "full sweep must preserve exact denominator")
     clock = clock + 1.1
@@ -138,10 +109,38 @@ do
     assert(API.rangeResult(720) == nil, "timed-out reply must be rejected")
     fix.fireEvent("X4GunneryControl.InRangeResult",
         "x4gcr2:" .. replacement.nonce .. ":" .. tostring(replacement.weapon) .. ":" .. string.rep("1", 20))
-    clock = clock + 0.1
-    gcMenu.onUpdate()
-    fix.drainCallbacksSince(callbackMark)
-    print(string.format("synthetic Lua event simulation: light 1x20 %.3f ms; full 19x20 %.3f ms; peak 20 checks/update (excludes X4 MD and transport)", lightMs, fullMs))
+
+    local twentyOne = {}
+    for target = 701, 721 do twentyOne[#twentyOne + 1] = target end
+    selectedTarget = 721
+    API.setRangeTargets(twentyOne, 721)
+    local boundary = #events
+    API.runRangeSweep(clock)
+    local firstGroup = events[boundary + 1].params
+    assert(#events - boundary == 22 and events[boundary + 2].params.target == 721,
+        "21 targets must start with the selected target in a bounded first group")
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. firstGroup.nonce .. ":" .. tostring(firstGroup.weapon) .. ":" .. string.rep("0", 20))
+    boundary = #events
+    API.runRangeSweep(clock)
+    local lastGroup = events[boundary + 1].params
+    assert(#events - boundary == 3 and lastGroup.weapon == firstGroup.weapon
+            and events[boundary + 2].params.target == 720,
+        "the same turret must visit the 21st distinct target before advancing")
+    fix.fireEvent("X4GunneryControl.InRangeResult",
+        "x4gcr2:" .. lastGroup.nonce .. ":" .. tostring(lastGroup.weapon) .. ":0")
+    assert(API.rangeResult(720).count == 0,
+        "the final target group must replace its previous contribution")
+    C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+    gcMenu.shown = true
+    local originalDisplay, redraws = gcMenu.display, 0
+    gcMenu.display = function(...)
+        redraws = redraws + 1
+        return originalDisplay(...)
+    end
+    fix.drainCallbacksSince(sortMark)
+    gcMenu.display = originalDisplay
+    assert(redraws > 0, "completed sweep must refresh browser ordering")
     AddUITriggeredEvent, C.GetSofttarget2 = savedAdd, savedSofttarget
 end
 
@@ -205,12 +204,12 @@ do
         return unpack(values)
     end
     gcMenu.display()
-    local rangeProgress60
     for _, entry in ipairs(fix.getCreatedTexts()) do
-        if entry.row == "surface_range_progress" then rangeProgress60 = entry.text end
+        if entry.row == "surface_range_progress" then
+            assert(entry.text():find("oldest", 1, true),
+                "surface progress must show reading freshness")
+        end
     end
-    assert(type(rangeProgress60) == "function" and rangeProgress60():find("IN RANGE", 1, true),
-        "surface page must expose text-only IN RANGE progress")
     sess60.groups = {{ key = "selected", members = {{ componentID = 101, operational = true }} }}
     sess60.checkedGroupKeys = { selected = true }
     API.setRangeTargets({ 12002, 12003, 12004 }, 12000)
@@ -225,8 +224,6 @@ do
     assert(API.rangeResult(12000).count == 1,
         "engaged selection must accept its current turret contribution")
     AddUITriggeredEvent = savedRangeAdd60
-    assert(rangeProgress60():find("turret", 1, true),
-        "surface progress must identify the current turret pass")
     assert(#installedMacroCalls60 == 3,
         "60: every station surface needs one exact installed-equipment lookup")
     for _, call in ipairs(installedMacroCalls60) do

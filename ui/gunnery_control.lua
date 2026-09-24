@@ -288,7 +288,6 @@ local function newSession(ship, origin)
     Range.memberIndex, Range.targetIndex, Range.sweepStarted, Range.passStarted = 1, 1, nil, nil
     Range.totalWork, Range.peakWork = 0, 0
     Range.nextBrowserMembershipAt, Range.nextSurfaceMembershipAt = nil, nil
-    Range.repaintAt = nil
     engagedOverlayRefreshPending = false
     Range.consoleGroupSignature = nil
     local session = State.newSession(ship, "gunnercontrol", origin or "chair")
@@ -1545,7 +1544,7 @@ function Range.setRangeTargets(targets, selected)
     local selectedKey = not isNullID(selected) and State.normID(selected) or nil
     if signature ~= Range.signature or page ~= Range.page or selectedKey ~= Range.selectedKey then
         Range.active, Range.memberIndex, Range.targetIndex, Range.sweepStarted = nil, 1, 1, nil
-        Range.passStarted, Range.repaintAt = nil, nil
+        Range.passStarted = nil
         Range.nextSweepAt, Range.nextSortAt = nil, nil
         Range.totalWork, Range.peakWork = 0, 0
         if signature ~= Range.signature then Range.cache = {} end
@@ -1673,7 +1672,6 @@ function Range.onRangeResult(_, param)
             end
         end
     end
-    Range.repaintAt = now + 0.05
 end
 
 -- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
@@ -3438,13 +3436,6 @@ local function updateSessionRuntime()
         end
     end
     Range.runRangeSweep(now)
-    if Range.repaintAt and now >= Range.repaintAt then
-        Range.repaintAt = nil
-        if menu.frame and not suspendedOverlayRegistration then
-            menu.frame:update()
-            if menu.elementFrame then menu.elementFrame:update() end
-        end
-    end
     if now > nextRefresh then
         nextRefresh = now + 0.25; refresh()
         if #Range.order > 0 then
