@@ -126,6 +126,9 @@
           <actions>
             <set_value name="InRangeService.$nonce" exact="@event.param3.$nonce"/>
             <set_value name="InRangeService.$target" exact="@event.param3.$target"/>
+            <do_if value="typeof InRangeService.$target != datatype.component and InRangeService.$target">
+              <set_value name="InRangeService.$target" exact="component.{InRangeService.$target}"/>
+            </do_if>
             <set_value name="InRangeService.$targetid" exact="@event.param3.$targetid"/>
             <set_value name="InRangeService.$moving" exact="@event.param3.$moving"/>
             <set_value name="InRangeService.$expected" exact="@event.param3.$members"/>
@@ -135,8 +138,12 @@
         <cue name="InRangeMember" instantiate="true">
           <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_member'"/></conditions>
           <actions>
-            <do_if value="@event.param3.$nonce == InRangeService.$nonce and InRangeService.$weapons.count lt InRangeService.$expected">
-              <append_to_list name="InRangeService.$weapons" exact="@event.param3.$weapon"/>
+            <set_value name="$weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof $weapon != datatype.component and $weapon">
+              <set_value name="$weapon" exact="component.{$weapon}"/>
+            </do_if>
+            <do_if value="@event.param3.$nonce == InRangeService.$nonce and InRangeService.$weapons.count lt InRangeService.$expected and typeof $weapon == datatype.component">
+              <append_to_list name="InRangeService.$weapons" exact="$weapon"/>
             </do_if>
           </actions>
         </cue>
@@ -144,7 +151,7 @@
           <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_commit'"/></conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <do_if value="$nonce == InRangeService.$nonce and InRangeService.$weapons.count == InRangeService.$expected">
+            <do_if value="$nonce == InRangeService.$nonce and InRangeService.$weapons.count == InRangeService.$expected and typeof InRangeService.$target == datatype.component">
               <set_value name="$count" exact="0"/>
               <do_for_each name="$weapon" in="InRangeService.$weapons">
                 <set_value name="$range" exact="$weapon.maxfirerange"/>
