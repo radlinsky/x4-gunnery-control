@@ -1653,8 +1653,10 @@ local function requestEngageabilities(targets, purpose, scope, fresh)
             local targetKey = State.normID(target)
             local key = tostring(sessionEpoch) .. ":" .. targetKey
             local cached = engageabilityCache[key]
-            if cached and not fresh and cached.signature == signature and
-                    (cached.pending or (cached.receivedAt and now - cached.receivedAt < 1)) then
+            local reusePending = cached and cached.pending and (not fresh
+                or (scope and scope:sub(1, 7) == "target:" and cached.scope == scope))
+            if cached and cached.signature == signature and
+                    (reusePending or (not fresh and cached.receivedAt and now - cached.receivedAt < 1)) then
                 if cached.pending and cached.aimMap then
                     cached.aimMap.profile.pendingReuses = cached.aimMap.profile.pendingReuses + 1
                 end
@@ -1668,8 +1670,8 @@ local function requestEngageabilities(targets, purpose, scope, fresh)
                     end
                 end
                 cached = cached and cached.signature == signature and cached or {}
-                cached.signature, cached.requestedAt, cached.total, cached.receivedAt =
-                    signature, now, #members, nil
+                cached.signature, cached.scope, cached.requestedAt, cached.total, cached.receivedAt =
+                    signature, scope, now, #members, nil
                 cached.engageable, cached.known, cached.pending = nil, nil, #members > 0
                 engageabilityCache[key] = cached
                 results[position] = cached
@@ -3236,10 +3238,11 @@ function menu.display()
         end
         local signature = table.concat(signatureParts, ",")
         local viewKey = tostring(currentID or 0) .. ":" .. table.concat(candidateIDs, ",")
-        if not targetBrowserState.view or targetBrowserState.view.key ~= viewKey
-                or targetBrowserState.view.signature ~= signature or targetBrowserState.refresh then
+        local sameView = targetBrowserState.view and targetBrowserState.view.key == viewKey
+            and targetBrowserState.view.signature == signature
+        if not sameView or targetBrowserState.refresh then
             local fresh = targetBrowserState.refresh or targetBrowserState.view ~= nil
-            targetBrowserState.generation = targetBrowserState.generation + 1
+            if not sameView then targetBrowserState.generation = targetBrowserState.generation + 1 end
             targetBrowserState.view = { key = viewKey, signature = signature, fresh = fresh,
                 scope = "target:" .. tostring(targetBrowserState.generation) .. ":" .. viewKey,
                 results = {} }

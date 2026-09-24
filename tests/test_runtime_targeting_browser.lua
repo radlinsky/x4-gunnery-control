@@ -403,8 +403,17 @@ do
     gcMenu.onShowMenu()
     local sess57 = API.getSession()
     sess57.phase = "target_select"
-    sess57.groups = { grp27 }
-    sess57.checkedGroupKeys = { grp27 = true }
+    local group57 = fix.makeGroup{
+        key = "single:27", displayName = "T1",
+        members = { { componentID = 27, operational = true, componentKey = "member:27" } },
+    }
+    sess57.groups = { group57 }
+    sess57.checkedGroupKeys = { [group57.key] = true }
+    local savedSlots57, savedComponent57, savedSlotGroup57 =
+        C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent, C.GetUpgradeSlotGroup
+    C.GetNumUpgradeSlots = function() return 1 end
+    C.GetUpgradeSlotCurrentComponent = function() return 27 end
+    C.GetUpgradeSlotGroup = function() return { path = "", group = "" } end
     GetPlayerContextByClass = function() return 1 end
     GetContainedShips = function() return { 570, 572, 573, 574, 575, 576 } end
     GetContainedStations = function() return { 571 } end
@@ -478,6 +487,11 @@ do
     assert(currentStation57 and currentStation57.class == ReadText(20991, 45),
         "57: current soft-target station must retain localized Station class")
     C.GetSofttarget2 = function() return { softtargetID = 570, softtargetConnectionName = "" } end
+    local savedAdd57, started57 = AddUITriggeredEvent, {}
+    AddUITriggeredEvent = function(screen, control, params)
+        if control == "engageability_range" then started57[#started57 + 1] = params end
+        savedAdd57(screen, control, params)
+    end
     gcMenu.display()
     local rendered57 = {}
     for _, entry in ipairs(fix.getCreatedTexts()) do
@@ -498,17 +512,12 @@ do
         assert(rendered57[component][4] == expected.typeName,
             "57: " .. expected.class .. " localized type must be bound to rendered column 4")
     end
-    local savedAdd57, started57 = AddUITriggeredEvent, {}
-    AddUITriggeredEvent = function(screen, control, params)
-        if control == "engageability_range" then started57[#started57 + 1] = params end
-        savedAdd57(screen, control, params)
+    local function finishStarted57(entry)
+        fix.fireEvent("X4GunneryControl.EngageabilityRange",
+            "x4gcr:" .. entry.token .. ":" .. entry.weaponKey .. ":2")
     end
-    local driver57 = dofile("tests/support/engageability_driver.lua")
-    local currentResult57 = API.requestEngageability(570)
-    driver57.finish(fix, currentResult57, 0)
-    assert(not currentResult57.pending and currentResult57.engageable == 0 and #started57 == 1,
-        "57: completing the current target must start one visible browser entry")
-    local completed57 = { "570" }
+    assert(#started57 == 1, "57: current target must start before queued rows")
+    local completed57 = {}
     for step = 1, 3 do
         clock = clock + 2
         gcMenu.display()
@@ -522,31 +531,42 @@ do
         end
         assert(#started57 == step, "57: redraw must not restart completed targets")
         local nextTarget = tostring(started57[step].target)
-        local nextResult = API.requestEngageability(started57[step].target)
-        driver57.finish(fix, nextResult, 0)
-        assert(not nextResult.pending and nextResult.engageable == 0 and #started57 == step + 1,
+        finishStarted57(started57[step])
+        assert(#started57 == step + 1,
             "57: each completion must advance exactly one visible target")
         completed57[#completed57 + 1] = nextTarget
     end
     sess57.phase = "console"
-    local nextResult57 = API.requestEngageability(started57[4].target)
-    driver57.finish(fix, nextResult57, 0)
+    finishStarted57(started57[4])
     assert(#started57 == 4, "57: leaving the target browser must discard queued entries")
     gcMenu.display()
-    AddUITriggeredEvent = savedAdd57
     sess57.phase = "target_select"
     gcMenu.display()
+    assert(#started57 == 5, "57: returning to the browser starts the current target")
+    finishStarted57(started57[5])
+    assert(#started57 == 6, "57: completed current target advances the queue")
+    local activeToken57 = started57[6].token
     local refreshButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshButtons57[#refreshButtons57 + 1] = button end
     end
     assert(#refreshButtons57 >= 2, "57: target browser needs refresh controls at top and bottom")
     refreshButtons57[1].handlers.onClick()
+    assert(#started57 == 6, "57: Refresh must keep the active calculation and queued work")
     local refreshedButtons57 = {}
     for _, button in ipairs(fix.getCreatedButtons()) do
         if button.text == ReadText(20991, 15) then refreshedButtons57[#refreshedButtons57 + 1] = button end
     end
     refreshedButtons57[#refreshedButtons57].handlers.onClick()
+    assert(#started57 == 6 and started57[6].token == activeToken57,
+        "57: repeated Refresh must not restart unfinished work")
+    finishStarted57(started57[6])
+    assert(#started57 == 7 and tostring(started57[7].target) == "570",
+        "57: completed current target must recalculate with current-target priority; count="
+            .. #started57 .. " target=" .. tostring(started57[7] and started57[7].target))
+    AddUITriggeredEvent = savedAdd57
+    C.GetNumUpgradeSlots, C.GetUpgradeSlotCurrentComponent = savedSlots57, savedComponent57
+    C.GetUpgradeSlotGroup = savedSlotGroup57
     local log57 = table.concat(fix.getCapturedLog(), "\n")
     assert(log57:find("event=target_browser action=refresh location=top", 1, true),
         "57: top refresh click needs audit evidence")
