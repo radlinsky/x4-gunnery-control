@@ -216,6 +216,7 @@ local sessionEpoch = 0
 local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local Range = { serial = 0, cache = {}, targets = {}, order = {}, members = {},
     totalWork = 0, peakWork = 0, completed = 0 }
+local rangeMemberLimit = 8
 local redirectDockedMenu
 local completeReleasedOnboardHandoff
 local reopenPendingSession
@@ -1530,7 +1531,8 @@ function Range.setRangeTargets(targets, selected)
     local members, parts = checkedOperationalTurrets(), {}
     for _, member in ipairs(members) do parts[#parts + 1] = State.normID(member.componentID) end
     local signature = table.concat(parts, ",")
-    if signature ~= Range.signature then
+    local changedSignature = signature ~= Range.signature
+    if changedSignature then
         Range.signature, Range.members, Range.cache, Range.active = signature, members, {}, nil
         Range.nextSortAt = nil
     end
@@ -1541,6 +1543,10 @@ function Range.setRangeTargets(targets, selected)
         if wanted[key] then return end
         wanted[key] = previous[key] or { target = target, key = key }
         wanted[key].target = target
+        if changedSignature then
+            wanted[key].nextMember, wanted[key].partialCount = nil, nil
+            wanted[key].visitedAt, wanted[key].retryAt = nil, nil
+        end
         order[#order + 1] = wanted[key]
     end
     add(selected)
@@ -1566,45 +1572,53 @@ function Range.runRangeSweep(now)
         if timedOut then timedOut.retryAt = now + 5 end
         Range.active = nil
     end
+    local selectedInterval = #Range.members > rangeMemberLimit and 2 or 1
     local entry = Range.selectedKey and Range.targets[Range.selectedKey]
     if entry and ((entry.retryAt and now < entry.retryAt)
-            or (entry.visitedAt and now - entry.visitedAt < 1)) then entry = nil end
+            or (not entry.nextMember and entry.visitedAt
+                and now - entry.visitedAt < selectedInterval)) then entry = nil end
     local selectedDue = entry ~= nil
     for _, candidate in ipairs(Range.order) do
         if not selectedDue and (not candidate.retryAt or now >= candidate.retryAt) and (not entry or
-                (not candidate.visitedAt and entry.visitedAt) or
-                (candidate.visitedAt and entry.visitedAt and candidate.visitedAt < entry.visitedAt)) then
+                (candidate.nextMember and not entry.nextMember) or
+                (candidate.nextMember == entry.nextMember and
+                    ((not candidate.visitedAt and entry.visitedAt) or
+                     (candidate.visitedAt and entry.visitedAt and candidate.visitedAt < entry.visitedAt)))) then
             entry = candidate
         end
     end
     if not entry then return end
-    local interval = selectedDue and 1 or 2
-    if entry.visitedAt and now - entry.visitedAt < interval then
+    local interval = selectedDue and selectedInterval or 2
+    if not entry.nextMember and entry.visitedAt and now - entry.visitedAt < interval then
         return
     end
-    entry.visitedAt = now
     entry.retryAt = nil
     Range.serial = Range.serial + 1
     local nonce = tostring(sessionEpoch) .. "_" .. tostring(Range.serial)
+    local firstMember = entry.nextMember or 1
+    local memberCount = math.min(rangeMemberLimit, #Range.members - firstMember + 1)
     Range.active = { nonce = nonce, key = entry.key, signature = Range.signature,
-        started = now, total = #Range.members }
+        started = now, total = memberCount, firstMember = firstMember }
     if #Range.members == 0 then
         Range.cache[entry.key] = { count = 0, total = 0, receivedAt = now }
+        entry.visitedAt = now
         Range.active = nil
         return
     end
-    Range.totalWork = Range.totalWork + #Range.members
-    Range.peakWork = math.max(Range.peakWork, #Range.members)
+    Range.totalWork = Range.totalWork + memberCount
+    Range.peakWork = math.max(Range.peakWork, memberCount)
     AddUITriggeredEvent("X4GunneryControl", "in_range_begin", {
         nonce = nonce, target = id(entry.target), targetid = entry.key,
-        moving = Range.rangeMovingTarget(entry.target) and 1 or 0, members = #Range.members })
-    for _, member in ipairs(Range.members) do
+        moving = Range.rangeMovingTarget(entry.target) and 1 or 0, members = memberCount })
+    for index = firstMember, firstMember + memberCount - 1 do
+        local member = Range.members[index]
         AddUITriggeredEvent("X4GunneryControl", "in_range_member", {
             nonce = nonce, weapon = id(member.componentID) })
     end
     AddUITriggeredEvent("X4GunneryControl", "in_range_commit", { nonce = nonce })
     log("event=in_range action=request nonce=" .. nonce .. " target=" .. entry.key
-        .. " members=" .. tostring(#Range.members) .. " peak_targets_per_update=1")
+        .. " members=" .. tostring(memberCount) .. " member_offset=" .. tostring(firstMember)
+        .. " peak_targets_per_update=1")
 end
 
 function Range.onRangeResult(_, param)
@@ -1615,9 +1629,16 @@ function Range.onRangeResult(_, param)
     count, total = tonumber(count), tonumber(total)
     if total ~= active.total or count > total then return end
     local now = getElapsedTime()
-    Range.cache[key] = { count = count, total = total, receivedAt = now }
+    local entry = Range.targets[key]
+    entry.partialCount = (entry.partialCount or 0) + count
+    entry.nextMember = active.firstMember + total
+    local completedTarget = entry.nextMember > #Range.members
+    if completedTarget then
+        Range.cache[key] = { count = entry.partialCount, total = #Range.members, receivedAt = now }
+        entry.partialCount, entry.nextMember, entry.visitedAt = nil, nil, now
+        Range.completed = Range.completed + 1
+    end
     Range.active = nil
-    Range.completed = Range.completed + 1
     local visible, oldest = 0, 0
     for _, entry in ipairs(Range.order) do
         local result = Range.cache[entry.key]
@@ -1628,14 +1649,15 @@ function Range.onRangeResult(_, param)
     end
     log("event=in_range action=result target=" .. key .. " count=" .. tostring(count)
         .. " total=" .. tostring(total) .. " delay_ms=" .. tostring(math.floor((now - active.started) * 1000))
+        .. " target_complete=" .. tostring(completedTarget)
         .. " peak_work=" .. tostring(Range.peakWork) .. " total_work=" .. tostring(Range.totalWork)
         .. " completed=" .. tostring(Range.completed) .. " visible=" .. tostring(visible)
         .. "/" .. tostring(#Range.order) .. " oldest_ms=" .. tostring(math.floor(oldest * 1000)))
-    if menu.frame and not suspendedOverlayRegistration then
+    if completedTarget and menu.frame and not suspendedOverlayRegistration then
         menu.frame:update()
         if menu.elementFrame then menu.elementFrame:update() end
     end
-    if session.phase == "target_select" and visible == #Range.order
+    if completedTarget and session.phase == "target_select" and visible == #Range.order
             and (not Range.nextSortAt or now >= Range.nextSortAt) then
         Range.nextSortAt = now + 5
         local expectedSession, expectedEpoch = session, sessionEpoch

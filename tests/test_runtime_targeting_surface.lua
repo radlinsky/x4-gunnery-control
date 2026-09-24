@@ -127,6 +127,54 @@ do
     assert(API.rangeResult(900).count == 0 and API.rangeResult(900).total == 0,
         "no selected operational turret must settle as 0 / 0")
     API.runRangeSweep(clock + 0.25)
+    local many = {}
+    for member = 1, 19 do many[#many + 1] = { componentID = 2000 + member, operational = true } end
+    session.groups = {{ key = "many", members = many }}
+    session.checkedGroupKeys = { many = true }
+    API.setRangeTargets({ 950 }, 950)
+    local expectedChunks = { 8, 8, 3 }
+    for _, chunkSize in ipairs(expectedChunks) do
+        clock = clock + 0.25
+        local before = #events
+        API.runRangeSweep(clock)
+        assert(#events - before == chunkSize + 2 and events[before + 1].params.members == chunkSize,
+            "large turret selection must dispatch at most eight members per update")
+        local begin = events[before + 1].params
+        fix.fireEvent("X4GunneryControl.InRangeResult",
+            "x4gcr1:" .. begin.nonce .. ":950:" .. chunkSize .. ":" .. chunkSize)
+        if chunkSize ~= 3 then
+            assert(API.rangeResult(950) == nil, "partial target result must not publish")
+        end
+    end
+    assert(API.rangeResult(950).count == 19 and API.rangeResult(950).total == 19,
+        "completed chunks must publish one exact aggregate result")
+    local heavyTargets = {}
+    for target = 970, 989 do heavyTargets[#heavyTargets + 1] = target end
+    API.setRangeTargets(heavyTargets, 989)
+    local heavyStart, heavyComplete, heavyWork, heavyPeak = clock, nil, 0, 0
+    for _ = 1, 300 do
+        clock = clock + 0.25
+        local before = #events
+        API.runRangeSweep(clock)
+        if #events > before then
+            local begin = events[before + 1].params
+            local work = begin.members
+            heavyWork, heavyPeak = heavyWork + work, math.max(heavyPeak, work)
+            assert(work <= 8 and #events - before == work + 2,
+                "heavy page must keep each update within eight turret checks")
+            fix.fireEvent("X4GunneryControl.InRangeResult",
+                "x4gcr1:" .. begin.nonce .. ":" .. begin.targetid .. ":" .. work .. ":" .. work)
+        end
+        local complete = 0
+        for _, target in ipairs(heavyTargets) do
+            if API.rangeResult(target) then complete = complete + 1 end
+        end
+        if complete == 20 then heavyComplete = clock - heavyStart; break end
+    end
+    assert(heavyComplete and heavyPeak == 8 and heavyWork >= 380,
+        "heavy page must complete with bounded per-update work")
+    print(string.format("offline IN RANGE 20-row heavy sweep: peak %d checks/update; total %d checks; first complete %.2fs",
+        heavyPeak, heavyWork, heavyComplete))
     AddUITriggeredEvent = savedAdd
 end
 
