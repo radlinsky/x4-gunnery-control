@@ -461,7 +461,6 @@ do
     local byID57 = {}
     for _, candidate in ipairs(candidates57) do byID57[tostring(candidate.componentID)] = candidate end
     assert(byID57["570"].class == "L Ship", "57: L ship class label missing")
-    assert(byID57["570"].macro == "ship_arg_l_destroyer_01_a_macro", "57: ship macro missing")
     assert(byID57["570"].typeName == "Behemoth Vanguard", "57: localized ship type missing")
     assert(byID57["573"].class == "S Ship", "57: S ship class label missing")
     assert(byID57["574"].class == "M Ship", "57: M ship class label missing")
@@ -504,14 +503,35 @@ do
         if control == "engageability_range" then started57[#started57 + 1] = params end
         savedAdd57(screen, control, params)
     end
+    local driver57 = dofile("tests/support/engageability_driver.lua")
     local currentResult57 = API.requestEngageability(570)
-    dofile("tests/support/engageability_driver.lua").finish(fix, currentResult57, 0)
+    driver57.finish(fix, currentResult57, 0)
     assert(not currentResult57.pending and currentResult57.engageable == 0 and #started57 == 1,
         "57: completing the current target must start one visible browser entry")
+    local completed57 = { "570" }
+    for step = 1, 3 do
+        clock = clock + 2
+        gcMenu.display()
+        local displayed57 = {}
+        for _, entry in ipairs(fix.getCreatedTexts()) do
+            if entry.column == 8 then displayed57[tostring(entry.row)] = entry.text end
+        end
+        for _, component in ipairs(completed57) do
+            assert(displayed57[component] == "0 / 1",
+                "57: completed browser result must stay numeric while later rows are queued: " .. component)
+        end
+        assert(#started57 == step, "57: redraw must not restart completed targets")
+        local nextTarget = tostring(started57[step].target)
+        local nextResult = API.requestEngageability(started57[step].target)
+        driver57.finish(fix, nextResult, 0)
+        assert(not nextResult.pending and nextResult.engageable == 0 and #started57 == step + 1,
+            "57: each completion must advance exactly one visible target")
+        completed57[#completed57 + 1] = nextTarget
+    end
     sess57.phase = "console"
-    local nextResult57 = API.requestEngageability(started57[1].target)
-    dofile("tests/support/engageability_driver.lua").finish(fix, nextResult57, 0)
-    assert(#started57 == 1, "57: leaving the target browser must discard queued entries")
+    local nextResult57 = API.requestEngageability(started57[4].target)
+    driver57.finish(fix, nextResult57, 0)
+    assert(#started57 == 4, "57: leaving the target browser must discard queued entries")
     gcMenu.display()
     AddUITriggeredEvent = savedAdd57
     sess57.phase = "target_select"

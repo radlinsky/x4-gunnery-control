@@ -68,6 +68,7 @@ local sessionEpoch = 0
 local engageabilityCache = {}
 local aimMaps = {}
 local browserQueue, browserActive, browserScope = {}, nil, nil
+local targetBrowserState = { view = nil, generation = 0, refresh = false }
 local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
 local surfacePinnedUpdatePending = false
 local redirectDockedMenu
@@ -138,6 +139,7 @@ local function newSession(ship, origin)
     engageabilityCache = {}
     aimMaps = {}
     browserQueue, browserActive, browserScope = {}, nil, nil
+    targetBrowserState = { view = nil, generation = 0, refresh = false }
     engageabilityRepaintPending = nil
     engagedOverlayRefreshPending = false
     surfacePinnedUpdatePending = false
@@ -793,6 +795,7 @@ local function discardSession(reason)
     engageabilityCache = {}
     aimMaps = {}
     browserQueue, browserActive, browserScope = {}, nil, nil
+    targetBrowserState = { view = nil, generation = 0, refresh = false }
     engageabilityRepaintPending = nil
     resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
@@ -1379,6 +1382,14 @@ local function finishEngageability(request)
         profileMs(p.bearingWall), p.bearingRequests, profileMs(p.lineWall),
         p.linePairs, p.lineChecks, p.pendingReuses))
     aimMaps[request.token] = nil
+    if targetBrowserState.view and (request.purpose == "target_current" or request.purpose == "target_page") then
+        local targetKey = State.normID(request.target)
+        if targetBrowserState.view.results[targetKey] == cached then
+            targetBrowserState.view.results[targetKey] = {
+                engageable = engageable, known = known, total = cached.total, pending = false,
+            }
+        end
+    end
     if browserActive and browserActive.request == request then
         browserActive = nil
         pumpBrowserQueue()
@@ -1627,7 +1638,7 @@ local function onAimPointProbe(_, param)
     advanceAimMap(request)
 end
 
-local function requestEngageabilities(targets, purpose, scope)
+local function requestEngageabilities(targets, purpose, scope, fresh)
     local results = {}
     if not session then return results end
     local members, signatureParts = checkedOperationalTurrets(), {}
@@ -1642,7 +1653,7 @@ local function requestEngageabilities(targets, purpose, scope)
             local targetKey = State.normID(target)
             local key = tostring(sessionEpoch) .. ":" .. targetKey
             local cached = engageabilityCache[key]
-            if cached and cached.signature == signature and
+            if cached and not fresh and cached.signature == signature and
                     (cached.pending or (cached.receivedAt and now - cached.receivedAt < 1)) then
                 if cached.pending and cached.aimMap then
                     cached.aimMap.profile.pendingReuses = cached.aimMap.profile.pendingReuses + 1
@@ -1730,8 +1741,8 @@ local function requestEngageabilities(targets, purpose, scope)
     return results
 end
 
-local function requestEngageability(target, purpose, scope)
-    return requestEngageabilities({ target }, purpose, scope)[1]
+local function requestEngageability(target, purpose, scope, fresh)
+    return requestEngageabilities({ target }, purpose, scope, fresh)[1]
 end
 
 local function engageabilityText(result)
@@ -2741,6 +2752,7 @@ function menu.onShowMenu()
 end
 
 function menu.display()
+    if not session or session.phase ~= "target_select" then targetBrowserState.view = nil end
     if not session or (session.phase ~= "target_select"
             and not (session.phase == "engaged" and session.controlMode == "direct"
                 and session.targetObjectID)) then
@@ -3196,6 +3208,7 @@ function menu.display()
         topActions[1]:setColSpan(12):createButton({}):setText(text(15))
         topActions[1].handlers.onClick = function()
             log("event=target_browser action=refresh location=top")
+            targetBrowserState.refresh = true
             refresh(); menu.display()
         end
         local explanation = tableView:addRow(false, {})
@@ -3217,10 +3230,48 @@ function menu.display()
         for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
         local currentID = current.softtargetID ~= 0 and isEligibleEngagementTarget(current.softtargetID)
             and current.softtargetID or nil
-        local scope = "target:" .. tostring(currentID or 0) .. ":" .. table.concat(candidateIDs, ",")
-        if currentID then requestEngageability(currentID, "target_current", scope) end
-        local candidateEngageabilities = requestEngageabilities(candidateIDs, "target_page", scope)
-        for index, candidate in ipairs(candidates) do candidate.engageability = candidateEngageabilities[index] end
+        local signatureParts = {}
+        for _, member in ipairs(checkedOperationalTurrets()) do
+            signatureParts[#signatureParts + 1] = State.normID(member.componentID)
+        end
+        local signature = table.concat(signatureParts, ",")
+        local viewKey = tostring(currentID or 0) .. ":" .. table.concat(candidateIDs, ",")
+        if not targetBrowserState.view or targetBrowserState.view.key ~= viewKey
+                or targetBrowserState.view.signature ~= signature or targetBrowserState.refresh then
+            local fresh = targetBrowserState.refresh or targetBrowserState.view ~= nil
+            targetBrowserState.generation = targetBrowserState.generation + 1
+            targetBrowserState.view = { key = viewKey, signature = signature, fresh = fresh,
+                scope = "target:" .. tostring(targetBrowserState.generation) .. ":" .. viewKey,
+                results = {} }
+        end
+        targetBrowserState.refresh = false
+        local view = targetBrowserState.view
+        local scope = view.scope
+        if currentID then
+            local key = State.normID(currentID)
+            if not view.results[key] then
+                view.results[key] = requestEngageability(currentID, "target_current", scope, view.fresh)
+            end
+        end
+        local missingIDs, missingKeys = {}, {}
+        for _, candidate in ipairs(candidates) do
+            local key = State.normID(candidate.componentID)
+            if not view.results[key] then
+                missingIDs[#missingIDs + 1], missingKeys[#missingKeys + 1] = candidate.componentID, key
+            end
+        end
+        local newResults = requestEngageabilities(missingIDs, "target_page", scope, view.fresh)
+        for index, key in ipairs(missingKeys) do view.results[key] = newResults[index] end
+        for _, candidate in ipairs(candidates) do
+            local key = State.normID(candidate.componentID)
+            local result = view.results[key]
+            if result and not result.pending and result.engageable ~= nil and result.signature then
+                result = { engageable = result.engageable, known = result.known,
+                    total = result.total, pending = false }
+                view.results[key] = result
+            end
+            candidate.engageability = result
+        end
         table.sort(candidates, function(a, b)
             local aEngageable = a.engageability and a.engageability.total > 0 and a.engageability.engageable == a.engageability.total or false
             local bEngageable = b.engageability and b.engageability.total > 0 and b.engageability.engageable == b.engageability.total or false
@@ -3268,6 +3319,7 @@ function menu.display()
         actions[1]:setColSpan(3):createButton({}):setText(text(15))
         actions[1].handlers.onClick = function()
             log("event=target_browser action=refresh location=bottom")
+            targetBrowserState.refresh = true
             refresh(); menu.display()
         end
         if testLabCallbacks and testLabCallbacks.open then
