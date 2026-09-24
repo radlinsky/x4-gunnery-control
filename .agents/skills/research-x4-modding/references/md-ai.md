@@ -392,6 +392,13 @@
   did not stage a LINE OF FIRE BLOCKED condition, and it never established what
   `excludeself="true"` blocked results actually correspond to. Do not read
   "1803 blocked" as "1803 masked".
+- Mechanism, added 2026-09-24 (native inference, X4 9.00 build 611726): both
+  capture calls passed no `objectoffset`, so they started at the turret
+  component origin, not the muzzle. `excludeself="true"` removes the turret's
+  own meshes **and** the meshes tagged with its ancestors, including the firing
+  ship's hull, at the per-sub-shape filter. It therefore cannot detect own-hull
+  masking. `false` keeps both. See
+  [selected-target-line-of-fire.md](selected-target-line-of-fire.md).
 - WHY it behaves that way, added 2026-08-11 from shipped source (not live-tested):
   the schema contradicts itself about this attribute. `common.xsd:21722` declares
   `<xs:attribute name="excludeself" ... default="false" use="optional">`, while
