@@ -3,43 +3,46 @@
 OFFLINE research. No production change and no X4 launch.
 
 ```sh
-python3 research/issue202-line-of-fire/benchmark.py                # < 1 s, stdlib only
-python3 research/issue202-line-of-fire/benchmark.py --population   # + #184 aim points and endpoint layouts (~20 s, needs the ignored cache and numpy)
-lua research/issue202-line-of-fire/runtime.lua                     # real ui/gunnery_control.lua pass behavior
+python3 research/issue202-line-of-fire/settled.py            # physical benchmark, ~6 min, one process (run under nice)
+python3 research/issue202-line-of-fire/settled.py --report   # re-report the saved rows, ~1 min
+python3 research/issue202-line-of-fire/benchmark.py          # decision-rule regression tests, < 1 s (--population: #184 inputs)
+lua research/issue202-line-of-fire/runtime.lua               # real ui/gunnery_control.lua pass behavior
 ```
 
-`benchmark.py` does not model collision geometry. Each scene states the
-ordered first hits along each tested line (`|` marks the tested endpoint) and
-the evidence level for that arrangement. **Truth** applies the #202 membership
-rules to those hits directly. **Candidates** issue simulated
-`check_line_of_sight` calls:
+`settled.py` needs the ignored #176 corpus (`python3 research/issue176-a4x/corpus.py`), the
+official source sets and ANI resources under `.x4-research-cache/`, numpy, and read access to the
+installed X4 catalogs (it reads collision files straight from the `.cat`/`.dat` pairs and writes
+nothing into the game or the repository). Raw rows go to the ignored
+`.x4-research-cache/issue202-settled/rows.jsonl.gz`.
 
-- `current`: a model of the `LineOfFireTurret` cue at the checked-out head.
-  `production_signature()` compares the cue's rays, blocker, module cap,
-  reasons and statuses with the model and fails on drift. It does not verify
-  the branch order.
-- `seven`: the proposed surface scan. It runs the `useaimtarget` probe, then
-  the six #69 points, classifying each failed box point as it goes.
-- `lazy`: the same scan, but it classifies failed points only after all seven
-  miss.
-- `root_zone` and `root_ship`: station hull checks declared on the station
-  root, with the zone or the firing ship as blocker.
-- `legacy`: the #60 root `useaimtarget` probe.
+## Physical benchmark (`settled.py`, `geometry.py`)
 
-The script also checks:
+The source of truth is the shot a turret fires **after turning toward the selected target and
+settling**. The tested lines of the current and seven-point methods are predictions.
 
-- that deliberately broken candidates (`MUTANTS`) fail;
-- that the hand-written `expect` statements hold;
-- that `lazy` never changes a status.
+- **Scene**: the #202 LIVE ships. The Boron Ray with its 14 real mounts (12 M railguns, 2 L
+  disruptors) fires at an Osaka carrying a stated Terran loadout, with the second Osaka as the
+  shared obstacle, in three arrangements × four Osaka yaws.
+- **Geometry**: every layer-3 part's `-collision.xmf` triangle mesh (MESH) and its Jolt
+  `-hull.jcs` convex pieces (HULL). X4 loads both; which one the ray query uses is untraced, so
+  truth requires both to agree.
+- **Bearing and settling**: the accepted #176 scorer decides CAN BEAR. The #166 yaw gate plus the
+  starting yaw (parked at 0, or at rest astern) decides which rest the turret reaches. Traps, a
+  settled rest out of arc and scorer UNKNOWN are excluded as UNKNOWN.
+- **Truth**: every per-shot endpoint (`barrelposition` is element 0) fires along its own +Z at the
+  settled pose. The first hit, ignoring only the firing turret's own meshes, is scored with the
+  #202 membership rules. All barrels CLEAR is CLEAR, none is NOT, a mix is UNKNOWN.
+- **Candidates**: `benchmark.candidate()` fed with the physical first hit of each tested segment,
+  from the pre-turn muzzle and from the settled muzzle.
 
-It exits non-zero only on a benchmark-integrity failure. Candidate defects
-measured against the #202 rules are printed as `FAIL` rows.
+## Decision-rule regression tests (`benchmark.py`)
 
-`runtime.lua` runs the real selected-target pass code through
-`tests/support/runtime_fixture.lua`:
+Hand-stated first-hit arrangements for blockers, membership, points, weapon classes and
+uncertainty. They check the decision rules, the production drift signature and the mutants. They
+are not X4 physics and are outside the physical accuracy totals.
 
-- `CODE` rows check existing behavior;
-- `SPEC` rows check #202 task 3 display targets;
-- `NOTE` rows record observations that are not failures.
+`runtime.lua` runs the real selected-target pass code through `tests/support/runtime_fixture.lua`:
+`CODE` rows check existing behavior, `SPEC` rows #202 task 3 display targets, `NOTE` rows
+observations that are not failures.
 
 See [findings.md](findings.md).

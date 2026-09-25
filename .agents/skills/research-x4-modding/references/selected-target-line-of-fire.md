@@ -126,6 +126,16 @@ The remaining source-level explanations are:
 The raw log was not retained. The method below does not depend on the
 module-to-root link.
 
+Explanation 3 is geometrically real, though not proven for that run. The
+shipped `xen_defence` construction plan was assembled offline with the real
+module collision shapes (see the collision-shape record below). Its union-box
+centre is (0, −319, 0) in station space, in open space below the hub dock
+area and inside no module. Of 200 evenly spread lines from 4 km toward it,
+about 105 reach it without touching any module under either shape model, so
+a root `useaimtarget` probe from those directions is false regardless of the
+link. The #60 firing geometry was not retained. Source:
+`research/issue202-line-of-fire/settled.py` `station60()`.
+
 ## find_object_surface is not a cheaper line-of-fire primitive
 
 - X4: 9.00 build 611726
@@ -272,6 +282,48 @@ Known physical limits of these endpoints, all resolved conservatively as UNKNOWN
 If a muzzle lies inside its own ship's hull, the line reports BLOCKED or
 UNKNOWN, never CLEAR. Whether Jolt reports a hit for a segment starting inside a
 mesh was not traced.
+
+## Collision shapes offline
+
+### Layer-3 collision geometry is readable from the catalogs in two shape models
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: geometry loader `0x140F51360` (format strings `%s\%s-mesh`,
+  `%s\%s-hull` stored at geometry `+0x20`/`+0x28`, then `-collision`/`-collision1`
+  XMF at `+0x30`; "Missing collision mesh/hull shape file"); catalog files
+  `<part>-mesh.jcs`, `<part>-hull.jcs`, `<part>-collision.xmf`; reader
+  `research/issue202-line-of-fire/geometry.py`
+- Live test: no
+- Finding:
+  - Every collision part ships a Jolt triangle `MeshShape` (`-mesh.jcs`,
+    subtype 12) and a convex shape (`-hull.jcs`): one `ConvexHullShape`
+    (subtype 6) or, for large hulls, a `StaticCompoundShape` (7) of convex
+    pieces. The Boron Ray `part_main` has 128 pieces and the Osaka 256.
+  - `-collision.xmf` carries the same triangles as the mesh shape's source.
+    On the Ray hull, `-collision` and `-collision1` are the same 95,372
+    triangles; on turret parts `-collision1` is a reduced mesh.
+  - Which shape the layer-3 query body uses was **not traced**. Offline
+    physics should cast against both and treat disagreement as UNKNOWN.
+  - Hull `.jcs` points are stored about the shape's centre of mass. Compound
+    children are unrotated, and each is placed by its sub-shape centre-of-mass
+    position.
+
+### Turret moving parts carry no layer-3 collision
+
+- X4: 9.00 build 611726
+- Status: shipped-source
+- Source: component XML of `turret_bor_m_railgun_02_mk1` and
+  `turret_bor_l_disruptor_01_mk1` (connection tags); layer-3 part filter in
+  [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md)
+- Live test: no
+- Finding: the rotator, gun and barrel part connections are tagged
+  `nocollision`; only the fixed `part_socket` (and, on the railgun, an
+  untagged socket decal) is layer-3 geometry. Both ships' hulls collide only
+  through `part_main`. The firing turret's own layer-3 mesh, which MD
+  `excludeself="false"` sees, is its socket. A line from a parked barrel toward
+  a target behind it crosses that socket. Other turret families were not
+  censused.
 
 ## Remaining uncertainties
 
