@@ -117,14 +117,17 @@ author no aim connection, so a station's `useaimtarget` endpoint is its live
 union-box centre. That is a shipped-source census: no `class="station"`
 component in the official source sets has an `aimtarget` connection.
 
-The remaining source-level explanations are:
+The source-level explanations were:
 
 1. The ray crossed into another zone's physics world.
 2. A module hit's `+0x70` chain does not reach the station root.
 3. The segment toward the centre reached no geometry.
 
-The raw log was not retained. The method below does not depend on the
-module-to-root link.
+Explanation 2 is now contradicted by static evidence. A root-declared check
+accepts a module hit by the same `+0x70` walk that X4's pre-fire and shipped
+scripts' `.object`/`.container` rely on (see "A station-root check accepts a
+module hit, exactly as X4's pre-fire does"). It is not LIVE-excluded. The raw
+log was not retained.
 
 Explanation 3 is geometrically real, though not proven for that run. The
 shipped `xen_defence` construction plan was assembled offline with the real
@@ -145,7 +148,6 @@ hit it. The centre gap alone therefore cannot account for turrets that hit
 the station. Those hits need a path that meets a module. On such a path the
 muzzle root probe is true unless:
 
-- the module-to-root link fails;
 - the ray crosses into another zone's physics world;
 - the firing turret's own socket is first (see "Some launcher sockets
   enclose their own launch points").
@@ -153,6 +155,87 @@ muzzle root probe is true unless:
 The turret-origin `excludeself="true"` ray removes the turret's own meshes,
 so the socket cannot explain that ray's 0/14. This is inference from offline
 geometry; the #60 firing geometry is still unknown.
+
+### A station-root check accepts a module hit, exactly as X4's pre-fire does
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace, pinned executable above, with shipped-source uses. MD
+  and AI property names are real (`parent`, `object`, `station`,
+  `container`); so are the FFI export `GetParentComponent` and the RTTI class
+  names.
+- Live test: no
+- Finding: with the ray endpoint and physics world fixed, a root-declared
+  `check_line_of_sight` returns true for a closest hit on any module of that
+  station, or on anything below a module. X4's pre-fire classifier accepts the
+  same hits.
+
+What identifies the hit:
+
+- The collector stores the hit sub-shape's component (`0x000B65C0`). A
+  module owns its compound (`+0x1B50` = `0x006B4950` under a station), and
+  its own meshes are wrapped with its own id. So a module hit reports the
+  module, and a hit on a module's turret or shield reports that element.
+
+The MD acceptance test:
+
+- `CheckLineOfSightAction` reads that component (`[rbp+0xA8]`,
+  `0x00BCBBE3`). It walks `+0x70` until the component equals the declared
+  target (true, `0x00BCBBEF`–`0x00BCBBFF`) or the chain ends (false). There
+  is no class test and no depth limit.
+
+The native acceptance test:
+
+- The pre-fire classifier `0x007E6CB0` takes the hit, the target and the
+  target's zone. It walks the hit's `+0x70` chain until it meets the zone:
+  meeting the target first gives result 1, fire (`0x007E6D00`–`0x007E6D45`).
+- Otherwise it returns 2 in the alternate aim mode or for a wreck hit
+  (state 1, `0x007E6D1A`). It returns 0 when the hit shares the target's
+  first class-`object` ancestor, and 2 for anything else.
+- For a station-root target, a module hit meets the station before the zone,
+  so it is result 1. MD and native test the same predicate on the same
+  field; they differ only in where the walk stops (null or the zone), which
+  cannot change this answer.
+
+Why the station is on a module's `+0x70` chain:
+
+- `+0x70` is the engine's public parent link. MD `.parent` returns it
+  (keyword `0x3F3`, handler `0x00CF6972` → `0x000B3780`), and so does the FFI
+  export `GetParentComponent` (`0x001A30E0`).
+- `.object` (keyword `0x3CD` → `0x00487490`), `.station` (`0x4D0` →
+  `0x0012F520`) and `.container` (`0xDE` → `0x00487370`) each walk the same
+  `+0x70` chain to the first ancestor of their class. Keyword ids come from
+  the 16-byte keyword table at `0x022A6880`, checked against the known
+  `0x53`, `0x131` and `0x370`; handlers come from jump table `0x00D0BDF0`.
+- Shipped scripts depend on those walks reaching the station from a module:
+  - `aiscripts/build.shiptrader.xml` compares `$buildshipmodule.object ==
+    this.object`;
+  - `aiscripts/order.dock.xml` uses `$dockmodule.container` as the dock's
+    owner;
+  - `md/notifications.xml` compares `$module.container` with a station trade
+    partner.
+- Module physics ownership (`0x006B4950`) likewise expects the first
+  class-`object` ancestor on the chain to be a `station`.
+- Modules are never class `object`, `station` or `defensible` (class table of
+  `U::Module` and every module subclass: slots `+0x11E0` and `+0x11E8`, table
+  `0x02B45F10`). So the first `object` on a module's chain is its station,
+  never another module.
+
+Remaining uncertainty:
+
+- The code that writes a module's `+0x70` when a plan is built was not
+  traced, so whether a module's parent is the station itself or a
+  predecessor module is unknown. It does not change the answer: both walks
+  continue to the station.
+- Modules under construction were not traced separately; production
+  includes them.
+- A hit whose sub-shape id does not resolve (`0x000CD480` null) makes MD
+  false. Native then applies its no-hit rule, which permits fire for every
+  supported turret.
+- A docked craft's chain also passes through its dock module to the station,
+  so a hit on it counts for the root too. #202 has not decided whether that
+  should count.
+- Not LIVE-tested.
 
 ## Where a turret's shoot controller bears on a selected target
 
@@ -312,9 +395,11 @@ frame conversion at call time:
 | Station | the chosen **module** `M` | `M.macro.boundingbox.center`. Modules are ranked once per pass by distance from the firing ship. Try the nearest module, then the second-nearest only if the first line is not CLEAR. |
 | Turret/shield/engine element `T` | exactly `T` | `T.macro.boundingbox.center`. That box contains only collision-eligible parts. |
 
-Declaring the module rather than the station root keeps CLEAR independent of
-the unverified module-to-root link. The trade-off is that a hit on a different
-module is reported UNKNOWN rather than CLEAR.
+Declaring the module rather than the station root was chosen to keep CLEAR
+independent of the module-to-root link, which was then unverified. The
+trade-off is that a hit on a different module is reported UNKNOWN rather than
+CLEAR. That link is now statically traced (see "A station-root check accepts a
+module hit, exactly as X4's pre-fire does"). It is still not LIVE-tested.
 
 Per line, `W` is the firing turret, `S` the firing ship and `Z` `$weapon.zone`:
 
@@ -502,10 +587,10 @@ mesh was not traced.
 None of these blocks adopting the method, because each one resolves toward
 UNKNOWN:
 
-1. The cause of the station-root false negative above. Declaring the station
-   root, so that any module hit counts as CLEAR, would first need a controlled
-   LIVE check of root-declared versus module-declared rays on one explicit
-   module-centre endpoint.
+1. The cause of the station-root false negative above. Static tracing now says
+   a root-declared ray accepts a module hit. A controlled LIVE check of
+   root-declared versus module-declared rays on one explicit module-centre
+   endpoint would confirm that before production relies on it.
 2. How often the firing turret's own mesh is the first hit from its muzzle.
    Offline it is high for some launchers and one beam turret (see "Some
    launcher sockets enclose their own launch points"). Every such line is
