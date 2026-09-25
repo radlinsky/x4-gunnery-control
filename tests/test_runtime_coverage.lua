@@ -49,6 +49,46 @@ do
         "console onUpdate must not install the engaged independent updater")
 end
 
+-- The ordinary update tick refreshes range membership and console group
+-- information without a separate timer.
+do
+    local fix, _, session = fresh()
+    local now = 10
+    getElapsedTime = function() return now end
+    session.phase = "target_select"
+    fix.API.setRangeTargets({ 901 }, 901)
+    fix.gcMenu.onUpdate()
+    session.phase = "console"
+    fix.gcMenu.display()
+    now = now + 1
+    fix.gcMenu.onUpdate()
+    assert(fix.API.getSession() == session, "regular updater must retain the console session")
+end
+
+do
+    local fix, _, session = fresh()
+    local now = 1
+    getElapsedTime = function() return now end
+    session.phase = "target_select"
+    fix.gcMenu.display()
+    now = 7
+    fix.gcMenu.onUpdate()
+    assert(fix.API.getSession() == session, "target membership refresh must retain selection")
+end
+
+do
+    local fix, _, session = fresh()
+    local now = 1
+    getElapsedTime = function() return now end
+    session.phase, session.controlMode = "engaged", "direct"
+    session.targetObjectID, session.aimTargetID = 900, 900
+    session.selectedGroupKey, session.selectedMemberID = "g", 27
+    fix.gcMenu.display()
+    now = 12
+    fix.invokeOnUpdate()
+    assert(fix.API.getSession() == session, "surface membership refresh must retain engagement")
+end
+
 -- Once the session is legitimately parked, the independent updater has no owner
 -- left to serve and must relinquish its slot.
 do
@@ -185,7 +225,7 @@ do
         "a partial initial overlay registration must restore the real pre-Direct turret state")
     assert(overlayEntry(fix) == nil,
         "a partial initial overlay registration must not leak the custom Gunnery overlay")
-    assert(fix.gcMenu.frame and button(fix, 15),
+    assert(fix.gcMenu.frame and button(fix, 69),
         "a partial initial overlay registration must leave the normal console usable")
 end
 

@@ -185,8 +185,8 @@ for cycle = 1, 3 do
         .. tostring(fix.View.currentFrames))
 end
 local surfacePanelFound27 = false
-for _, button in ipairs(fix.getCreatedButtons()) do
-    if button.row == "surface_refresh" then surfacePanelFound27 = true end
+for _, entry in ipairs(fix.getCreatedTexts()) do
+    if entry.row == "surface_header" then surfacePanelFound27 = true end
 end
 assert(surfacePanelFound27,
     "engaged/direct with targetObjectID must render the surface-element panel in the layer-3 frame")
@@ -388,13 +388,11 @@ assert(sess39.phase == "engaged",
 
 -- ── 40. engaged/direct session toggles have independent defaults ────────────
 gcMenu.display()
-assert(#fix.getCreatedCheckBoxes() == 2,
-    "the engaged/direct panel must offer Auto-next and surface auto-refresh; got "
+assert(#fix.getCreatedCheckBoxes() == 1,
+    "the engaged/direct panel must offer Auto-next alone; got "
     .. tostring(#fix.getCreatedCheckBoxes()))
 assert(fix.getCreatedCheckBoxes()[1].checked == true,
     "the Auto-next Target checkbox must be checked while session.autoNextTarget is on")
-assert(fix.getCreatedCheckBoxes()[2].checked == false,
-    "surface auto-refresh must default unchecked")
 
 -- ── 41. Auto-next Target off: a dead target returns to the picker ────────────
 -- Reset the view first: one Esc's worth of state, so whatever cinematic was on

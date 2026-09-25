@@ -222,8 +222,11 @@ What the trace establishes about the mechanism:
 - the body filter excludes only the firing weapon component itself: the
   gate's descendant flag is 0, so `0x000BBB00` compares for an exact match.
   Turret and weapon components own no physics bodies, so this exclusion never
-  removes the firing ship's hull. No unguided-specific own-hull exemption exists
-  on this path;
+  removes the firing ship's hull. The same exact exclusion is also applied per
+  hit sub-shape by `XPhys::XShapeFilter`, so the firing turret's own collision
+  meshes are ignored (see
+  [selected-target-line-of-fire.md](selected-target-line-of-fire.md)). No
+  unguided-specific own-hull exemption exists on this path;
 - `XPhys` defines exactly five object layers. `XPhys::XBroadphaseLayer`
   (constructed at RVA `0x000C6913`) maps object layers 0..4 to broad-phase
   layers `0,1,2,2,1`, and `GetBroadPhaseLayer` at RVA `0x000B51D0` rejects any
@@ -423,9 +426,12 @@ Endpoint and query trace:
   two actions identical for unaudited object classes;
 - `excludeself=true` supplies the action's `object` as the excluded component
   at `0x00BCBB49`–`0x00BCBBA2` and sets the descendant flag to 1. The body
-  filter therefore removes that exact component and its descendants. It does
-  not remove ancestors, siblings, or the whole containing object merely because
-  the source is one of its children;
+  filter therefore removes bodies owned by that component or its descendants.
+  CORRECTED 2026-09-24: the per-sub-shape `XShapeFilter` walks the other
+  direction and also removes meshes tagged with the component's **ancestors**,
+  so `excludeself=true` from a mounted turret drops the firing ship's hull
+  while siblings stay visible (see
+  [selected-target-line-of-fire.md](selected-target-line-of-fire.md));
 - the closest-hit component is stored internally at collector `+0x28`. The
   action reads it at `0x00BCBBE3`–`0x00BCBC01`, walks `+0x70` parents, and sets
   the returned value true only if that chain reaches the declared target. A
@@ -452,10 +458,11 @@ The proposed reversed ray is not a safe workaround:
   its descendants, but the boolean is still target-hit rather than no-obstacle:
   a clear miss and an external blocker both return false, while a firing-ship
   hull hit can return true when the firing ship is the declared target;
-- for a selected surface element, only that element and its descendants are
-  excluded. Parent-hull/module and sibling geometry remains visible, so reversal
-  can reject geometry that the native target classifier or second-ray path may
-  accept;
+- for a selected surface element, that element's meshes and its ancestors'
+  meshes (the parent hull or module) are excluded at the sub-shape level, while
+  sibling geometry remains visible, so reversal can reject or accept geometry
+  differently from the native target classifier or second-ray path
+  (sub-shape rule corrected 2026-09-24);
 - forward plus reverse can identify some endpoint hits, but the pair of booleans
   still aliases clear misses, external blockers, and same-containing-object
   hits. It can therefore produce a false clear if promoted beyond UNKNOWN.
@@ -542,12 +549,17 @@ wrapper runs in the world returned by the querying component at vtable slot
 post-query parent comparison; after preserving world-space `P`, it does not
 change the physics world, segment, collector, filters, or closest hit.
 
-For exact native parity set `excludeself=false`. The native ray supplies the
-weapon as an exact-only exclusion, while MD false supplies no excluded
-component. Those are equivalent because weapon and turret components own no
-layer-3 body. MD true requests the broader weapon-and-descendants exclusion and
-is not the exact native setting, even though no supported descendant currently
-adds a relevant body.
+CORRECTED 2026-09-24: no MD `excludeself` value gives exact native parity. The
+native ray excludes the firing weapon exactly, and `XShapeFilter` applies that
+exclusion to the turret's own mesh sub-shapes. MD `false` keeps those meshes as
+candidates. MD `true` also removes meshes tagged with the weapon's ancestors,
+including the firing ship's hull. The earlier claim that `false` is equivalent
+because turrets own no body considered only the body filter. Use `false` to keep
+own-hull obstruction, and identify a first hit on the firing turret's own mesh
+with an additional call that declares the turret itself as the target; see
+[selected-target-line-of-fire.md](selected-target-line-of-fire.md). The
+decision table below was written for `false`; read its LINE OF FIRE BLOCKED rows
+as possibly caused by the firing turret's own mesh, which native ignores.
 
 ### The native second ray is reproducible for the supported target population
 

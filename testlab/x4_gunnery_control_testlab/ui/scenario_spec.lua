@@ -51,9 +51,8 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- The spawned ship only triggers the macro-property dump; no target,
-    -- weapon loadout, teleport, or firing measurement is required.
-    id      = "issue-171-origin-inside-box-r1",
+    -- Use the owner's existing, fully equipped Ray; Test Lab only creates targets.
+    id      = "issue-197-ray-two-osaka-range-v1",
     enabled = false,
 
     setup = {
@@ -66,20 +65,34 @@ X4GunneryTestLabScenarioSpec = {
 
     groups = {
         {
-            label     = "ISSUE171 BOX PROBE",
-            macro     = "ship_arg_s_fighter_01_a_macro",
-            faction   = "player",
-            count     = 1,
-            distance  = 2000,
-            x         = 0,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            yaw       = 0,
-            pitch     = 0,
-            roll      = 0,
-            preserveOrientation = true,
+            label             = "P1 LEFT OSAKA",
+            macro             = "ship_ter_l_destroyer_01_a_macro",
+            faction           = "xenon",
+            count             = 1,
+            distance          = 3500,
+            x                 = -900,
+            y                 = 0,
+            spread            = 0,
+            behaviour         = "wait",
+            hostile           = true,
+            holdFire          = true,
             stripDefenceUnits = true,
+            repairGuard       = true,
+        },
+        {
+            label             = "P1 RIGHT OSAKA",
+            macro             = "ship_ter_l_destroyer_01_a_macro",
+            faction           = "xenon",
+            count             = 1,
+            distance          = 3500,
+            x                 = 900,
+            y                 = 0,
+            spread            = 0,
+            behaviour         = "wait",
+            hostile           = true,
+            holdFire          = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
         },
     },
 }
