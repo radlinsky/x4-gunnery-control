@@ -109,7 +109,32 @@ local timed = last()
 clock = clock + 2.1
 API.runClearPass(clock)
 reply("C", 1, timed)
-check("CODE", "reply after the 2 s timeout is ignored", fix.logContains("event=line_of_fire action=timeout"), "")
+check("CODE", "reply after the 2 s timeout is ignored and publishes nothing",
+    fix.logContains("event=line_of_fire action=timeout") and not API.clearText(731):match("%d / %d"),
+    API.clearText(731))
+
+-- One turret that never answers times out and restarts the whole pass each time.
+for _ = 1, 3 do
+    clock = clock + 2.5
+    API.runClearPass(clock)
+    reply("C", 1)
+    API.runClearPass(clock)
+    clock = clock + 2.1
+    API.runClearPass(clock)
+end
+check("NOTE", "a result still publishes when one turret never answers",
+    API.clearText(731):match("%d / %d") ~= nil, API.clearText(731))
+
+-- Paused games and non-direct engaged sessions send no requests.
+local sent = #events
+C.IsGamePaused = function() return true end
+clock = clock + 2.5
+API.runClearPass(clock)
+C.IsGamePaused = function() return false end
+session.phase, session.controlMode = "engaged", "turret"
+API.runClearPass(clock)
+check("CODE", "no request while paused or engaged outside direct control", #events == sent, #events - sent)
+session.phase, session.controlMode = "target_select", nil
 clock = clock + 2.5
 API.runClearPass(clock)
 reply("C", 1)

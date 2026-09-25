@@ -1,11 +1,18 @@
 # Selected-target CLEAR LINE OF FIRE benchmark findings (#202)
 
-Status: **OFFLINE**. Production head `cf459d0`, X4 9.00 build 611726 evidence
-base. Simulated query counts and Python run time are not X4 frame cost. There
-is no new LIVE evidence.
+Status: **OFFLINE**. Production MD unchanged since `cf459d0`, X4 9.00 build
+611726 evidence base. Simulated query counts and Python run time are not X4
+frame cost. There is no new LIVE evidence.
 
-The model drift check against `md/x4_gunnery_control.xml` passes. All 8
+The model drift check against `md/x4_gunnery_control.xml` passes. All 9
 deliberately wrong candidates fail. Benchmark integrity is **PASS**.
+
+**Correction to `6daee59`.** MD loop counters are 1-based. Production's own
+six-point loop indexes 1-based lists with `counter="$surfacei"`, so the
+`$index gt 2` break keeps **two** station modules, not three. The cue comment
+and `selected-target-line-of-fire.md` (two lines, 6 calls) were right. The
+earlier "station cap drift" finding and the 9 / 126 station cost were wrong.
+The new `three_modules` mutant now fails the benchmark if that error returns.
 
 ## What the earlier benchmarks established and missed
 
@@ -43,24 +50,27 @@ It missed the following:
 - **Turret-element aim points.** Recomputed here from #184 `targets()`: 68 of 88
   authored turret-element aim points lie **outside** the element's
   collision-eligible box. Shield, engine and whole-ship points are all inside.
-- **Endpoint layouts.** Official turret components have these numbers of
-  `laser` endpoints: 1 (30 components), 2 (66), 3 (1), 4 (2), 5 (11) and 8 (1).
-  Missile turrets have 1, 2 or 4 `rocket` endpoints (2, 6 and 24 components).
+- **Endpoint layouts.** Official turret components, including mining and
+  other non-combat components, have these numbers of `laser` endpoints:
+  1 (30 components), 2 (66), 3 (1), 4 (2), 5 (11) and 8 (1). Missile turrets
+  have 1, 2 or 4 `rocket` endpoints (2, 6 and 24 components).
 - **#185 predicted muzzles are not used.** Production queries the current
   `barrelposition`.
 
 ## Coverage
 
-The benchmark has 88 scenes. Three are unscored:
+The benchmark has 94 scenes. Six are unscored:
 
 - a coincident-hit tie;
 - a blocker in another zone's physics world;
-- the membership of a wrecked module.
+- the membership of a wrecked module;
+- a craft docked on the target ship, and one docked on a target module;
+- a module destroyed after the pass fixed its module list.
 
 | Group | Scenes | Covers |
 |---|---:|---|
 | Blockers and order | 22 | firing hull; own turret mesh; sibling turret, shield and engine; friendly and hostile ships; target hull, shield and engine; neighbouring element; unrelated station module, turret and shield; asteroid; wreck; destroyed without wreck; target before blocker; genuine miss; hit beyond the endpoint; tie |
-| Membership | 22 | ship hull vs its elements; station nearest, other, non-nearest, construction and wrecked modules; firing ship; own mesh; external blocker; no modules; both module-link hypotheses; station element vs its parent module, sibling and another module |
+| Membership | 28 | ship hull vs its elements and a docked craft; station nearest, second, third (outside the two-module cap), other, non-nearest, construction, wrecked, destroyed-mid-pass and single modules; docked craft; firing ship; own mesh; external blocker; no modules; both module-link hypotheses; station element vs its parent module, sibling and another module |
 | Points | 18 | aim clear; first CLEAR at each of the six points; all seven blocked, self or miss; mixed; stop at first CLEAR; aim point outside box; hollow centre; only the centre clear; no authored aim; two aim points |
 | Origin | 9 | parked; turning; settled; retargeting away; two resting yaws; 2-, 5- and 4-endpoint weapons whose non-first barrel is clear |
 | Weapon | 10 | beam; projectile; flak; unguided own hull; cluster carrier; guided through the hull and past an external blocker; unloaded; missing guidance; unknown class |
@@ -68,12 +78,12 @@ The benchmark has 88 scenes. Three are unscored:
 | Negative controls | 4 | #69 NEAR all-blocked; parent not the selected element; own hull kept; guided is not a physical path |
 
 Evidence for the stated arrangements: 3 LIVE, 8 native inference,
-2 shipped-source and 75 hypothetical. The classification rules themselves are
+2 shipped-source and 81 hypothetical. The classification rules themselves are
 native inference plus the #202 design. Only the LIVE subset can support an X4
 accuracy claim, and it has 0 wrong answers.
 
 The historical witnesses cover 4 hypotheses × 14 turrets for #202 and
-3 hypotheses for #60. `runtime.lua` adds 15 checks on the real code: 12 CODE, 2 SPEC and 1 NOTE.
+3 hypotheses for #60. `runtime.lua` adds 17 checks on the real code: 13 CODE, 2 SPEC and 2 NOTE.
 
 ## Results
 
@@ -95,8 +105,8 @@ identical statuses in every scene.
 
 | Strategy | Correct CLEAR | Correct BLOCKED | Correct UNKNOWN | GUIDED | Excess UNKNOWN | Wrong CLEAR | Wrong BLOCKED |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| current | 15 | 43 | 19 | 3 | 4 | 1 (guidance) | 0 |
-| seven | 26 | 35 | 15 | 3 | 5 | 1 (guidance) | 0 |
+| current | 17 | 43 | 19 | 3 | 5 | 1 (guidance) | 0 |
+| seven | 28 | 35 | 15 | 3 | 6 | 1 (guidance) | 0 |
 
 The expected values differ per strategy because each strategy tests different
 lines. The runtime checks all pass:
@@ -105,6 +115,8 @@ lines. The runtime checks all pass:
 - it checks one turret per request and sends no IN RANGE traffic;
 - duplicated replies, replies after a timeout and replies after the session
   ends are ignored;
+- no request is sent while the game is paused or while an engaged session is
+  outside direct control;
 - a membership change drops the pass in flight;
 - the last complete result stays visible while the pass refreshes;
 - an old selection's result is discarded on the next update;
@@ -115,6 +127,12 @@ still current. Until the next `Clear.run` update, a caller that passes the old
 target id still receives the old result. Both displays pass the current
 selection id, so this is at most a one-update window. That is plausibly
 invisible, but it has not been checked LIVE.
+
+Second observation (NOTE, newly found): a timeout discards the whole pass and
+the next pass restarts at the first turret. One turret whose MD request never
+answers therefore keeps both displays on "scanning" indefinitely, although the
+other turrets answer. The #202 LIVE run recorded no timeouts, so this is
+OFFLINE only.
 
 ## How the seven-point scan differs from the current centre ray
 
@@ -166,11 +184,15 @@ The current model reproduces the observation under every hypothesis: **0/14 in
 | Hypothesis | seven | eager calls | lazy calls | Evidence |
 |---|---|---:|---:|---|
 | Centre occluded, aim point clear | 14/14 | 14 | 14 | hypothetical for 11 turrets |
-| Aim clear for the 3 LIVE turrets, y75 clear for the others | 14/14 | 124 | 58 | 3 LIVE, 11 hypothetical |
-| All seven occluded for the other 11 | 3/14 | 212 | 102 | 3 LIVE; the rest is an unexplained limitation |
+| Aim clear for the 3 Test Lab turrets, y75 clear for the others | 14/14 | 124 | 58 | 3 LIVE (see caveat), 11 hypothetical |
+| All seven occluded for the other 11 | 3/14 | 212 | 102 | 3 LIVE (see caveat); the rest is an unexplained limitation |
 | Alternate barrel | 0/14 | 266 | 126 | refuted for the 12 single-endpoint railguns, including the hitting weapon; possible for the 2 disruptors only |
 
-The first-probe LIVE fact recovers at least **3/14**. The remaining 11 turrets
+The first-probe LIVE fact recovers at least **3/14**, with one caveat. The
+issue records those Test Lab muzzle-to-aim-target checks as clear, but not
+their `excludeself` setting. If they used `true`, the firing hull was ignored,
+and the proposed `excludeself=false` probe could still be blocked. The remaining
+11 turrets
 need the compact per-turret logging planned in #202 task 2. The element's type
 (turret, shield or engine) was not recorded. `0x17c097` at 12/14 is not
 modelled.
@@ -192,8 +214,10 @@ module-centre endpoint, with `weapon.zone` and `target.zone` logged.
 **Station hull decision.**
 
 - **current (module-declared)** does not depend on the link. It returns UNKNOWN
-  for a hit on another module, for modules beyond the first three, and for
-  external blockers.
+  for a hit on another module, for modules beyond the nearest two to the
+  firing ship, and for external blockers. Modules are ranked from the firing
+  ship's position, not the turret's, so the tested pair can miss the module
+  nearest a given turret.
 - **root_ship** recovers other and non-nearest modules when the link works. It
   never returns a false answer.
 - **root_zone** additionally reports external blockers. However, it returns a
@@ -210,6 +234,7 @@ fail as intended:
 - `declare_parent` (parent or sibling mistaken for the selected element);
 - `excludeself` (own hull dropped);
 - `guided_clear` (guided launch treated as a straight path);
+- `three_modules` (the earlier cap mistake);
 - `unloaded_unguided`, `no_classify`, `no_self_query`, `first_blocked_stops`
   and `zone_skip`.
 
@@ -221,13 +246,10 @@ fail as intended:
 | All seven blocked | 3 / 42 | 19 / 266 | 9 / 126 |
 | All seven own-mesh | 3 / 42 | 19 / 266 | 19 / 266 |
 | All seven miss | 2 / 28 | 13 / 182 | 13 / 182 |
-| Station, worst case | 9 / 126 | same as current | same |
-| Median over ray-issuing scenes | 3 | 15 | 9 |
+| Station, no module line clear | 4 / 56 | same as current | same |
+| Station, worst case (both lines own ship or own mesh) | 6 / 84 | same as current | same |
+| Median over ray-issuing scenes | 3 | 13 | 7 |
 
-- **Station cap drift.** Production takes **three** modules (`$index gt 2`), so
-  a station costs up to 9 calls per turret. The cue comment and
-  `selected-target-line-of-fire.md` both say two lines and 6 calls. The code or
-  the documentation needs reconciling.
 - **LIVE context from the #202 record, not measured here.** A 42-call pass had
   a median of 184 ms and IN RANGE sweeps took 371–380 ms. The pass takes one
   frame per turret, so its elapsed time is not ray cost. A worst-case pass of
@@ -243,11 +265,15 @@ fail as intended:
 4. Whether a muzzle inside its own hull produces a hit, and in what order the
    engine reports near-coincident hits.
 5. Blockers in another zone's physics world.
-6. Whether a wrecked module still counts as a station member.
+6. Whether a wrecked module, or a craft docked on the target, counts as a
+   target member. Both are hull descendants. A hit on a docked craft reads
+   CLEAR, and #202 does not say whether it should.
 7. Whether MD can tell missing missile guidance from unguided.
 8. The effect of turret motion between its check and the display, and of
    multiple resting yaws.
 9. Frame cost of the worst-case seven-point pass.
+10. What MD does with a module that dies after the pass fixed its module list.
+11. The `excludeself` setting of the earlier Test Lab aim-target checks.
 
 **Already LIVE-backed:**
 
