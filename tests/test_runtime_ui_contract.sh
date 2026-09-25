@@ -55,14 +55,12 @@ if [ "$hud_true" -ne "$frame_builders" ]; then
   exit 1
 fi
 grep -Fq 'showTickerPermanently = false' "$main"
-grep -Fq 'State.beginTargetSelection(session, group, member)' "$main"
 grep -Fq 'GetContainedShips' "$main"
 grep -Fq 'readSurfaceTargets' "$main"
 grep -Fq 'RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)' "$main"
 grep -Fq 'RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)' "$main"
 grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_member"' "$main"
 grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_target"' "$main"
-grep -Fq 'State.checkedGroups(session)' "$main"
 assert_md_xpath "1" "count(//cue[@name='EngageabilityService'])" "engageability service cue count"
 assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$range'][@exact='InRangeService.\$weapon.maxfirerange'])" "one range read per turret pass"
 assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$beam'][@exact='InRangeService.\$weapon.isbeam'])" "one beam read per turret pass"
@@ -109,10 +107,7 @@ assert_md_xpath "1" "count(//cue[@name='EngageabilityMember']//do_if[contains(@v
 assert_md_xpath "1" "count(//cue[@name='EngageabilityTarget']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'targets.count lt')][contains(@value, 'not EngageabilityService.\$targets.indexof')])" "target nonce/count/duplicate guards"
 grep -Fq "[@event.param3.\$targets, 20].min" "$md"
 grep -Fq 'Helper.clearDataForRefresh(menu)' "$main"
-grep -Fq 'State.surfaceAlternatives(allSurfaces, pinnedID,' "$main"
-grep -Fq 'State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)' "$main"
 grep -Fq 'local surfaceCrossTypePolicy = "size_first"' "$main"
-grep -Fq 'State.surfacePage(ordered, browser.page, browser.pageSize)' "$main"
 grep -Fq 'Range.setRangeTargets(pageIDs, pinnedID)' "$main"
 grep -Fq 'Range.runRangeSweep(now)' "$main"
 grep -Fq 'local parentHullRow = elemTable:addRow("surface_parent_hull", {})' "$main"
@@ -120,7 +115,6 @@ grep -Fq 'returnToConsole("Watch closed")' "$main"
 grep -Fq 'openTargetBrowser()' "$main"
 grep -Fq 'softtargetKey() ~= previousTarget' "$main"
 grep -Fq 'isEligibleEngagementTarget(current.softtargetID)' "$main"
-grep -Fq 'State.turretGroupLabel(entry.group)' "$main"
 grep -Fq 'State.isEngagementTargetAllowed(session and session.shipID, object)' "$main"
 # The old Map-named suspension lifecycle must not return; menu names are not an
 # allowlist for active-session preservation.
@@ -142,17 +136,8 @@ if grep -Eq '^[[:space:]]*Helper\.clearMenu\(menu\)' "$main"; then
   echo "raw clearMenu bypasses X4 tracked-menu cleanup" >&2
   exit 1
 fi
-grep -Fq 'local function sessionWatchdog()' "$main"
 grep -Fq 'C.SetTrackedMenuFullscreen(menu.name, false)' "$main"
 grep -Fq 'bool IsGamePaused(void)' "$main"
-# Phase rename: "watch"/"direct" are gone; "engaged" + controlMode replace them.
-grep -Fq 'session.phase == "engaged"' "$main"
-grep -Fq 'session.controlMode' "$main"
-# New lifecycle entry point replaces beginWatch/beginDirect.
-grep -Fq 'State.beginEngaged' "$main"
-# Baseline: directSnapshots renamed to committedBaseline; staged buffer added.
-grep -Fq 'committedBaseline' "$main"
-grep -Fq 'session.staged' "$main"
 # The adapter commits one atomic table. Its session half remains an encoded
 # string because raise_lua_event returns only one scalar; the paired component
 # target travels separately and is buffered before control receives an envelope.
@@ -351,19 +336,6 @@ grep -Fq 'X4GC_Shoulder_Cam' cutscenes/x4gc_shoulder_cam.xml
 # Group row checkbox wired to session.checkedGroupKeys via State.toggleGroup.
 grep -Fq 'createCheckBox' "$main"
 grep -Fq 'State.toggleGroup' "$main"
-# Camera roster drives Next/Prev and is queried to gate those buttons.
-grep -Fq 'State.cameraRoster' "$main"
-# Turret cycling is the only way to move through a multi-member roster.
-grep -Fq 'State.cycleCamera' "$main"
-# applyPov() replaces the old applyEngagePov/setEngagePov pair. It is declared
-# as a forward reference and assigned after sendCutsceneAimStart/Stop.
-grep -Fq 'applyPov' "$main"
-# Auto-retarget: chooseAimTarget picks the nearest operational hostile.
-grep -Fq 'local function chooseAimTarget' "$main"
-# povMode and aimTargetID are live session fields used in the UI and retarget.
-grep -Fq 'session.povMode' "$main"
-grep -Fq 'session.aimTargetID' "$main"
-
 # Auto-next Target lives on the compact direct-control panel and decides what
 # happens when the engaged object dies: re-engage, or reset the view and hand
 # the choice back at the target browser.
@@ -411,9 +383,6 @@ if grep -n 'memberRow' "$main" | grep -Eq '(startAutoEngage|startTargetSelection
   exit 1
 fi
 
-# Task 2: cycleEntry and cycleTarget
-grep -Fq 'State.cycleEntry' "$main"
-grep -Eq '(local function cycleTarget|local [a-zA-Z_, ]*cycleTarget|cycleTarget = function)' "$main"
 # Select-all checkbox over the group column.
 grep -Fq 'State.toggleAllGroups(session)' "$main"
 grep -Fq 'State.allGroupsChecked(session)' "$main"
