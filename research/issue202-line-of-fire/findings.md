@@ -368,8 +368,11 @@ Settled, the probe has no false positives and 966 fewer false negatives. The six
 - **Scored rows: 116.**
   - probe: 0 FP, 26 FN (own turret);
   - current: 8 FP (own hull) and 32 FN.
-- **Assumption behind root CLEAR:** the module-to-root `+0x70` link. It is untested LIVE, like
-  cross-zone physics. Station-root results carry both caveats.
+- **Root CLEAR membership is statically traced.** The root probe counts a module or module-element
+  hit as CLEAR, and so does X4's pre-fire. Both walk the hit's `+0x70` parent chain to the station.
+  Shipped scripts' `.object` and `.container` rely on the same chain. See KB "A station-root check
+  accepts a module hit, exactly as X4's pre-fire does". This is inference, not LIVE-tested; cross-zone
+  physics also remains untested.
 
 ## Where truth is undefined
 
@@ -413,10 +416,13 @@ continuation says it would on 34 of 74 rows.
   its continuation (36/36), so rounds aimed through the gap do not hit a stationary station.
 - **So the centre gap alone does not explain the hits.** They need a path that meets a module. On
   such a path the muzzle root probe is true unless one of these holds:
-  - the module-to-root link fails;
   - the zones differ;
   - the firing turret's own socket is first. This cannot explain the `excludeself="true"` ray.
-- The #60 firing geometry was not retained. None of these is LIVE-proven, and none is excluded.
+- A failed module-to-root link, the earlier third candidate, is contradicted by the native trace: MD
+  accepts a module hit on a root-declared check by the same `+0x70` walk that X4 and shipped scripts
+  use. It is not LIVE-excluded.
+- The #60 firing geometry was not retained. Neither remaining cause is LIVE-proven, and neither is
+  excluded.
 
 ## Shape model
 
@@ -444,7 +450,9 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
 1. Which triangle source the layer-3 ray uses: geometry `+0x20` (`-mesh`), at a geometry slot from a
    member virtual (`+0x15D8`), with a `-collision` XMF fallback. 744 rows excluded where MESH and HULL
    disagree. The LargeTarget point-inside test is resolved: layer 0/1, `-hull` only (see below).
-2. The module-to-root `+0x70` link, and cross-zone rays (station-root CLEAR assumes the link).
+2. Cross-zone rays, and a LIVE check of root-declared versus module-declared rays. The module-to-root
+   `+0x70` membership is statically traced. The code that writes a module's parent, and modules under
+   construction, are not traced.
 3. The `U::Turret` slot `+0x1BF0` predicate (`0x005BF690`). It matters only for a turret element with
    no authored point; none was in the population.
 4. Whether any parameter file overrides the 500 m LargeTarget radius (no writer found besides the

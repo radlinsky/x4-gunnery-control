@@ -529,8 +529,12 @@ and same world-space `P`, with `useaimtarget=false`.
   the same first class-`object` hierarchy. This is native result 0. The native
   containing object is defined by the `+0x70` parent walk and class id `0x49`
   (`object`), not by `defensible`. Public `.object` is the matching relationship
-  for whole targets and the supported turret/shield/engine surfaces; on a
-  station it can identify the owning module rather than the station root.
+  for whole targets and the supported turret/shield/engine surfaces. Its
+  getter (`0x00487490`) walks `+0x70` to the first class-`object` ancestor,
+  and no module class is `object`. So on a station, `.object` of a module or
+  of a module's element is the station root, never the module. Corrected
+  2026-09-25; the earlier text said it could be the owning module. See
+  [selected-target-line-of-fire.md](selected-target-line-of-fire.md).
 - If both preceding calls are false and `Q(Z,P)=true`, some other relevant body
   was hit, which is native result 2 and LINE OF FIRE BLOCKED. The action's
   result walk at `0x00BCBBEF` continues to null, and every relevant outer-space
