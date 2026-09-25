@@ -1566,8 +1566,7 @@ function Range.rangeProgress(now)
         local result = Range.cache[entry.key]
         if result then age = math.max(age or 0, now - result.receivedAt) end
     end
-    return "IN RANGE turret " .. tostring(math.min(Range.memberIndex or 1, #Range.members))
-        .. "/" .. tostring(#Range.members) .. "; oldest "
+    return "IN RANGE oldest "
         .. (age and tostring(math.floor(age)) .. "s" or "pending")
 end
 

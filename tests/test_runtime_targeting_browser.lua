@@ -492,8 +492,8 @@ do
     end
     for _, entry in ipairs(fix.getCreatedTexts()) do
         if entry.row == "target_range_progress" then
-            assert(entry.text():find("turret", 1, true),
-                "57: browser progress must identify the current turret")
+            assert(entry.text():find("oldest", 1, true),
+                "57: browser progress must show result age")
         end
     end
 end
