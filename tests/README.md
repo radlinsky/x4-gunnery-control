@@ -17,7 +17,9 @@ Keep tests for stable behavior such as:
 
 A useful regression test should be explainable as: **if this realistic bug
 returns, this test fails.** Prefer the smallest behavioral test that proves that
-statement.
+statement. Check whether an existing test already protects it before adding a
+new one. Do not add tests just to increase line coverage, duplicate an existing
+case, or meet a test-per-change rule. Consolidate overlapping cases and setup.
 
 ## What does not belong here
 

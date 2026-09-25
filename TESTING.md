@@ -13,8 +13,7 @@ tests cannot settle.
 `./scripts/validate.sh` is the Linux validation gate — the main check while you
 work, and the first thing CI runs. It does, in order: whitespace/newline checks,
 `xmllint` on every XML file, Lua syntax (`luac -p`), the Lua unit tests, the
-executable-line coverage gate (`scripts/check-coverage.sh`), `shellcheck`, the
-shell tests, and the version/packaging contracts. The Lua and shell tests run in
+`shellcheck`, the shell tests, and the version/packaging contracts. The Lua and shell tests run in
 **parallel** (`xargs -P`/background jobs), so never rely on execution order or on
 a fixed temp path — use `mktemp`. Each test file is an independent process.
 
@@ -35,16 +34,14 @@ Run one Lua test on its own while iterating:
 lua5.1 tests/test_runtime_targeting.lua
 ```
 
-## The coverage gate is a canary
+## Test policy
 
-`ui/gunnery_state.lua` and `ui/gunnery_persistence.lua` must have **100%**
-executable-line coverage; changed lines in `ui/gunnery_control.lua` must be
-covered against the PR base. The pass line prints the denominators, e.g.
-`coverage passed: state 735/735, persistence 84/84`. Those numbers are a canary:
-after a refactor or a file split they must be **unchanged**. If `state`/`persistence`
-drops, a test lost a line it used to cover; if it rises, you duplicated a block.
+Add tests only for realistic behavior that existing tests do not already protect.
+Prefer the smallest useful check and remove overlapping cases. Line coverage is
+not a reason to add a test. See [tests/README.md](tests/README.md); behavior that
+requires X4 still needs a live test.
 
-## How to add a test (and keep files small)
+## How to add a useful test
 
 - **Use the shared fixture.** `local fix = dofile("tests/support/runtime_fixture.lua").load()`
   gives a fresh stubbed environment (ffi, Helper, events, the loaded module).
@@ -54,18 +51,9 @@ drops, a test lost a line it used to cover; if it rises, you duplicated a block.
 - **Match UI buttons by intent**, never by raw id: `fix.buttonByLabel("nextTurret")`
   or `fix.LABEL.<name>`. Do not write `text:20991:NN`; if you need a new label,
   add it to `LABEL_ID` in the fixture (ids come from `t/0001.xml`).
-- **End every file with a unique** `print("<area> tests passed")`.
-- **Keep each test file under ~600 lines.** A file the local tooling can't open is
-  a file that stops getting maintained. When one grows past that, split it by
-  concern into sibling files named `test_<area>_<concern>.lua` (e.g.
-  `test_runtime_targeting_pov.lua`, `test_gunnery_state_surface.lua`). Splits are
-  discovered automatically — `validate.sh` runs `tests/*.lua`, and the coverage
-  runner globs `tests/test_gunnery_state*.lua`, `tests/test_gunnery_persistence.lua`,
-  and `tests/test_runtime_*.lua`, so a new name matching those is picked up with no
-  script change. When splitting: never cut inside a `do ... end` block or a
-  function; copy the shared top-of-file preamble and any helpers into each part
-  (duplication across test files is fine); confirm each part runs standalone with
-  `lua5.1 tests/<file>.lua`; and confirm the coverage denominators are unchanged.
+- **Reuse existing tests and setup.** Before adding a file, remove redundant
+  cases and use the shared fixtures. Split a test only when the independent
+  behavior is clearer that way; do not duplicate setup to meet a line limit.
 
 ## Things that will bite you
 

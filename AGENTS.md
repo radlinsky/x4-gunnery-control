@@ -31,6 +31,8 @@ Tests protect stable behavior, not temporary experiment setup. See
 - Prefer the smallest behavioral contract that would fail if that regression
   returned. Do not snapshot implementation details or duplicate the code under
   test when a real behavior can be exercised instead.
+- Do not require a new test for each change or add tests to satisfy line-coverage
+  targets. Reuse existing tests first; consolidate or delete redundant cases.
 - `testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua` is mutable live-test
   input. Commit and push each PR-specific fixture with the work that used it,
   with the repository copy disabled, so the exact live-test setup remains in
