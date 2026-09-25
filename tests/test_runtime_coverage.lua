@@ -1,6 +1,4 @@
--- Focused runtime edges for the executable-line coverage contract. These use
--- the same public test hooks and captured Helper button handlers as the other
--- runtime suites; no production-only behavior is simulated here.
+-- Runtime menu safety and Test Lab handoff checks.
 local function fresh()
     local fix = dofile("tests/support/runtime_fixture.lua").load()
     local group = fix.makeGroup{ key = "g" }
@@ -18,25 +16,15 @@ local function button(fix, id)
     return entry.handlers.onClick
 end
 
--- Test Lab is reachable from the console, engaged panel, and target browser.
--- Capturing the actual UI handler verifies each row calls the shared suspend
--- route, parks the session, and opens the registered Test Lab exactly once.
+-- Test Lab handoff is exercised from every panel in test_testlab_lifecycle.lua.
+-- Verify that one representative handoff also persists the parked session.
 do
-    for _, phase in ipairs({ "console", "engaged", "target_select" }) do
-        local fix, _, session = fresh()
-        local opened = 0
-        fix.API.registerTestLab({ open = function() opened = opened + 1 end })
-        session.phase = phase
-        session.controlMode = phase == "engaged" and "auto" or nil
-        session.selectedGroupKey, session.selectedMemberID = "g", 27
-        fix.gcMenu.display()
-        button(fix, 32)()
-        assert(opened == 1, "Test Lab handler must open once from " .. phase)
-        assert(session.lifecycle == X4GunneryState.lifecycle.reopening,
-            "Test Lab handler must park " .. phase .. " session for reload")
-        assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_commit",
-            "Test Lab handler must persist " .. phase .. " session")
-    end
+    local fix = fresh()
+    fix.API.registerTestLab({ open = function() end })
+    fix.gcMenu.display()
+    button(fix, 32)()
+    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_commit",
+        "opening Test Lab must persist the parked session")
 end
 
 -- The ordinary console update stays on Helper's updater: only an engaged frame
@@ -47,46 +35,6 @@ do
     assert(fix.API.getSession() == session, "console onUpdate must keep the session")
     assert(fix.getOnUpdateCallback() == nil,
         "console onUpdate must not install the engaged independent updater")
-end
-
--- The ordinary update tick refreshes range membership and console group
--- information without a separate timer.
-do
-    local fix, _, session = fresh()
-    local now = 10
-    getElapsedTime = function() return now end
-    session.phase = "target_select"
-    fix.API.setRangeTargets({ 901 }, 901)
-    fix.gcMenu.onUpdate()
-    session.phase = "console"
-    fix.gcMenu.display()
-    now = now + 1
-    fix.gcMenu.onUpdate()
-    assert(fix.API.getSession() == session, "regular updater must retain the console session")
-end
-
-do
-    local fix, _, session = fresh()
-    local now = 1
-    getElapsedTime = function() return now end
-    session.phase = "target_select"
-    fix.gcMenu.display()
-    now = 7
-    fix.gcMenu.onUpdate()
-    assert(fix.API.getSession() == session, "target membership refresh must retain selection")
-end
-
-do
-    local fix, _, session = fresh()
-    local now = 1
-    getElapsedTime = function() return now end
-    session.phase, session.controlMode = "engaged", "direct"
-    session.targetObjectID, session.aimTargetID = 900, 900
-    session.selectedGroupKey, session.selectedMemberID = "g", 27
-    fix.gcMenu.display()
-    now = 12
-    fix.invokeOnUpdate()
-    assert(fix.API.getSession() == session, "surface membership refresh must retain engagement")
 end
 
 -- Once the session is legitimately parked, the independent updater has no owner

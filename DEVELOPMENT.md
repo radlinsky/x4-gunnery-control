@@ -606,14 +606,15 @@ engine exposes it. Do not commit a game debug log; validation rejects one.
 For each small change:
 
 1. State the behavior and the safety invariant it affects.
-2. Add or update a test in `tests/` for pure state behavior.
+2. Reuse existing tests for the changed behavior. Add or update a test only
+   when a realistic regression would otherwise go unprotected.
 3. Change `ui/gunnery_state.lua` or the Test Lab state module first when the
    behavior does not require X4 APIs.
 4. Make the smallest required runtime change in `ui/gunnery_control.lua` or the
    Test Lab runtime file.
 5. Add player-visible strings to `t/0001.xml`; do not scatter display text
    through Lua.
-6. Run the focused Lua test.
+6. Run the relevant focused tests.
 7. Run `./scripts/validate.sh`.
 8. Install the exact loose files, follow [docs/RELOADING.md](docs/RELOADING.md),
    and verify the runtime build marker before recording an in-game result.

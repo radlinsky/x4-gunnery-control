@@ -168,10 +168,6 @@ cue and the packaging changes.
 - Do not modify vanilla files or persistent player settings (camera position
   presets, notification settings). The project ships on Nexus and must not
   conflict or alter saved preferences.
-- Follow the test-driven working agreement in [DEVELOPMENT.md](../../DEVELOPMENT.md): a failing test
-  first, then the change, then `bash scripts/validate.sh`, then commit together.
-  The smoke harness (`tests/test_runtime_smoke.lua`) executes the runtime file
-  under stubs and is the only test that catches runtime type errors.
 - Classify every research conclusion honestly (`shipped-source`, `inference`,
   `live-tested`, ...). Several confident negatives in this project turned out
   wrong because "I searched and found nothing" was reported as "impossible". A

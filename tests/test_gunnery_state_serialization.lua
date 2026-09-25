@@ -208,9 +208,8 @@ do
     } } }), nil, "a turret that cannot host the camera is not a candidate")
 end
 
--- Reviewer branch matrix: these deliberately small cases document the edges
--- that are easy to lose in a persistence refactor.  The contract is named
--- cases plus executable-line coverage, rather than a misleading branch %.
+-- Reviewer branch matrix: these small cases protect persistence edge cases
+-- that are easy to lose in a refactor.
 do
     -- nil session/records and a payload without a session record are refusals.
     assert(not State.restoreState(nil, {}, {}), "matrix: nil session is refused")

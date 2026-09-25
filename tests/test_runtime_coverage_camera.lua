@@ -1,6 +1,5 @@
--- Keep this in its own process: the fixture's camera callback queue is part of
--- the behavior under test, and the coverage runner executes every suite that
--- way too.
+-- Keep camera retries independent: the fixture's callback queue is part of
+-- the behavior under test.
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local group = fix.makeGroup{
     key = "g",

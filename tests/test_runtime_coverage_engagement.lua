@@ -67,20 +67,8 @@ end
 assert(not fix.API.engageTarget(99), "Direct entry must refuse a player-owned target")
 GetComponentData = function() return nil end
 
--- Live test result, 2026-08-10 (conclusive): under Direct-control with the
--- player's pilot actively fighting (aicommandraw="attackobject"), weaponmode
--- "attackenemies" DOES honour the mod's supplied preferred target and fallback
--- list. The long-held fear that vanilla's fight script overwrites our list is
--- DISPROVEN by observation. Direct-control therefore always uses attackenemies
--- (State.TICK_MODE), regardless of the pilot's command state.
---
--- Behavioural invariant: engageTarget with an actively fighting pilot must
---   (a) succeed,
---   (b) leave checked mutable groups in mode "attackenemies" (State.TICK_MODE),
---   (c) raise the "direct_fallback" UI-triggered event.
--- (c) is load-bearing: under the old autoassist branch, emitDirectFallback
--- returned early for a fighting pilot, so no fallback list was ever issued and
--- a turret with no firing solution on the preferred target tracked in silence.
+-- Regression: with an attacking pilot, the attackenemies policy must still
+-- issue the preferred-target fallback list (observed live on 2026-08-10).
 do
     session.phase, session.controlMode = "target_select", nil
     session.staged = { g = { mode = "attack", armed = false } }
@@ -92,15 +80,8 @@ do
     local eventsBefore = #fix.uiTriggeredEvents
     assert(fix.API.engageTarget(99),
         "attacking pilot: engageTarget must succeed (live result 2026-08-10 disproves vanilla overwrite)")
-    -- The group must be in attackenemies: the mode is now a constant.
-    local s = fix.API.getSession()
-    local grpMode = fix.C.SetTurretMode and s.groups[1].mode
-        -- setMode calls the FFI; check via getSession group state.
-        -- The fixture stubs setMode effects through group.mode mutations.
-        -- The real assertion is that emitDirectFallback ran (see below).
-    -- A direct_fallback event must have been raised. Without attackenemies the
-    -- old emitDirectFallback guard would have returned false here, giving the
-    -- turret no fallback list at all.
+    -- The attackenemies policy must still issue its fallback list when the
+    -- player's pilot is already fighting.
     local sawFallback = false
     for i = eventsBefore + 1, #fix.uiTriggeredEvents do
         if fix.uiTriggeredEvents[i].control == "direct_fallback" then
