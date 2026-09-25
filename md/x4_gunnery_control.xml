@@ -182,6 +182,148 @@
       </cues>
     </cue>
 
+    <!-- Selected-target CLEAR LINE OF FIRE (R1b): one turret per request from its
+         current muzzle to an explicit target-local endpoint, useaimtarget=false,
+         excludeself=false. Each tested line declares the ship, station module or
+         exact surface element; on a miss, a same-segment zone (station: firing
+         ship) query separates BLOCKED from no geometry, and a same-segment
+         firing-turret query separates the turret's own mesh (UNKNOWN), which
+         X4's pre-fire gate ignores. At most 3 calls per line, two station lines. -->
+    <cue name="LineOfFireService">
+      <cues>
+        <cue name="LineOfFireBegin" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'line_of_fire_begin'"/></conditions>
+          <actions>
+            <set_value name="LineOfFireService.$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <set_value name="$ship" exact="@event.param3.$ship"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <set_value name="LineOfFireService.$target" exact="$target"/>
+            <set_value name="LineOfFireService.$ship" exact="$ship"/>
+            <set_value name="LineOfFireService.$modules" exact="[]"/>
+            <do_if value="typeof $target == datatype.component and typeof $ship == datatype.component and $target.isclass.station">
+              <set_value name="$modules" exact="$target.modules.operational.list"/>
+              <append_list_elements name="$modules" other="$target.modules.construction.list"/>
+              <sort_list list="$modules" sortbydistanceto="$ship"/>
+              <do_for_each name="$module" in="$modules" counter="$index">
+                <do_if value="$index gt 2">
+                  <break/>
+                </do_if>
+                <append_to_list name="LineOfFireService.$modules" exact="$module"/>
+              </do_for_each>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="LineOfFireTurret" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'line_of_fire_turret'"/></conditions>
+          <actions>
+            <set_value name="$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="$weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof $weapon != datatype.component and $weapon">
+              <set_value name="$weapon" exact="component.{$weapon}"/>
+            </do_if>
+            <set_value name="$target" exact="LineOfFireService.$target"/>
+            <set_value name="$status" exact="'U'"/>
+            <set_value name="$reason" exact="''"/>
+            <set_value name="$calls" exact="0"/>
+            <set_value name="$physical" exact="false"/>
+            <do_if value="$nonce != LineOfFireService.$nonce or typeof $weapon != datatype.component or typeof $target != datatype.component or typeof LineOfFireService.$ship != datatype.component">
+              <set_value name="$reason" exact="'frame'"/>
+            </do_if>
+            <do_elseif value="$weapon.class == class.missileturret">
+              <do_if value="not @$weapon.ammo.macro">
+                <set_value name="$reason" exact="'guidance'"/>
+              </do_if>
+              <do_elseif value="$weapon.ammo.macro.isguided">
+                <set_value name="$status" exact="'G'"/>
+              </do_elseif>
+              <do_else>
+                <set_value name="$physical" exact="true"/>
+              </do_else>
+            </do_elseif>
+            <do_elseif value="$weapon.isclass.turret">
+              <set_value name="$physical" exact="true"/>
+            </do_elseif>
+            <do_else>
+              <set_value name="$reason" exact="'class'"/>
+            </do_else>
+            <do_if value="$physical">
+              <do_if value="$weapon.zone != $target.zone">
+                <set_value name="$physical" exact="false"/>
+                <set_value name="$reason" exact="'zone'"/>
+              </do_if>
+            </do_if>
+            <do_if value="$physical">
+              <set_value name="$station" exact="$target.isclass.station"/>
+              <set_value name="$declareds" exact="if $station then LineOfFireService.$modules else [$target]"/>
+              <set_value name="$blocker" exact="if $station then LineOfFireService.$ship else $weapon.zone"/>
+              <set_value name="$blocked" exact="false"/>
+              <do_if value="$declareds.count == 0">
+                <set_value name="$reason" exact="'frame'"/>
+              </do_if>
+              <do_for_each name="$declared" in="$declareds">
+                <set_value name="$centre" exact="$declared.macro.boundingbox.center"/>
+                <create_position name="$endpoint" object="$declared" space="$declared" x="$centre.x" y="$centre.y" z="$centre.z"/>
+                <!-- A whole ship's endpoint moves away from the muzzle, staying
+                     inside its box (macro boundingbox.max is the half-extents),
+                     so a hollow centre can still reach hull behind it. -->
+                <do_if value="$declared.isclass.ship">
+                  <set_value name="$half" exact="$declared.macro.boundingbox.max"/>
+                  <set_value name="$push" exact="0.9 * [$half.x, $half.y, $half.z].min"/>
+                  <create_position name="$muzzle" object="$weapon" space="$declared" value="$weapon.barrelposition"/>
+                  <set_value name="$gap" exact="$endpoint.distanceto.{$muzzle}"/>
+                  <do_if value="$gap gt 0m and $push gt 0m">
+                    <create_position name="$endpoint" object="$declared" space="$declared"
+                                     x="$centre.x + ($centre.x - $muzzle.x) * $push / $gap"
+                                     y="$centre.y + ($centre.y - $muzzle.y) * $push / $gap"
+                                     z="$centre.z + ($centre.z - $muzzle.z) * $push / $gap"/>
+                  </do_if>
+                </do_if>
+                <check_line_of_sight name="$los" object="$weapon" objectoffset="$weapon.barrelposition" target="$declared" targetoffset="$endpoint" useaimtarget="false" excludeself="false"/>
+                <set_value name="$calls" operation="add"/>
+                <do_if value="$los">
+                  <set_value name="$status" exact="'C'"/>
+                  <break/>
+                </do_if>
+                <create_position name="$blockerpoint" object="$declared" space="$blocker" value="$endpoint"/>
+                <check_line_of_sight name="$los" object="$weapon" objectoffset="$weapon.barrelposition" target="$blocker" targetoffset="$blockerpoint" useaimtarget="false" excludeself="false"/>
+                <set_value name="$calls" operation="add"/>
+                <do_if value="not $los">
+                  <do_if value="$reason == ''">
+                    <set_value name="$reason" exact="if $station then 'module' else 'miss'"/>
+                  </do_if>
+                  <continue/>
+                </do_if>
+                <create_position name="$weaponpoint" object="$declared" space="$weapon" value="$endpoint"/>
+                <check_line_of_sight name="$los" object="$weapon" objectoffset="$weapon.barrelposition" target="$weapon" targetoffset="$weaponpoint" useaimtarget="false" excludeself="false"/>
+                <set_value name="$calls" operation="add"/>
+                <do_if value="$los">
+                  <do_if value="$reason == ''">
+                    <set_value name="$reason" exact="'self'"/>
+                  </do_if>
+                </do_if>
+                <do_else>
+                  <set_value name="$blocked" exact="true"/>
+                </do_else>
+              </do_for_each>
+              <do_if value="$status != 'C' and $blocked">
+                <set_value name="$status" exact="'B'"/>
+              </do_if>
+            </do_if>
+            <do_if value="$status != 'U'">
+              <set_value name="$reason" exact="''"/>
+            </do_if>
+            <raise_lua_event name="'X4GunneryControl.LineOfFireResult'" param="'x4gcl1:' + $nonce + ':' + @event.param3.$weaponid + ':' + $status + ':' + $reason + ':' + $calls"/>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+
     <!-- Exact selected-turret engageability service. Lua owns checkbox membership
          and streams flat component ids; MD owns the per-turret range and
          line-of-fire checks. Each batch repeats its selected members once and

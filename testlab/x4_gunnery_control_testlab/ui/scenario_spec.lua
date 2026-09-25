@@ -52,15 +52,18 @@
 
 X4GunneryTestLabScenarioSpec = {
     -- Use the owner's existing, fully equipped Ray; Test Lab only creates targets.
-    id      = "issue-197-ray-two-osaka-range-v1",
+    -- All 14 turrets measure the selected-target CLEAR LINE OF FIRE pass.
+    id      = "issue-197-ray-two-osaka-line-of-fire-v1",
     enabled = false,
 
     setup = {
         shipMacro       = "ship_bor_l_destroyer_01_a_macro",
         shipLabel       = "Ray",
+        -- The validator still requires a named group alongside selectAll.
         turretGroup     = "group_front_up_left",
-        turretLabel     = "Front Upper Left",
-        expectedTurrets = 2,
+        turretLabel     = "All mutable groups",
+        expectedTurrets = 14,
+        selectAll       = true,
     },
 
     groups = {

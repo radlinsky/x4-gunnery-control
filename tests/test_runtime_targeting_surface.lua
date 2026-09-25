@@ -150,6 +150,63 @@ do
     AddUITriggeredEvent, C.GetSofttarget2 = savedAdd, savedSofttarget
 end
 
+-- The selected-target CLEAR LINE OF FIRE pass never overlaps, publishes only
+-- complete passes, keeps the last result while refreshing and drops stale work.
+do
+    local session = API.getSession()
+    session.phase, session.controlMode = "target_select", nil
+    session.groups = {{ key = "pair", members = {
+        { componentID = 3001, operational = true }, { componentID = 3002, operational = true } } }}
+    session.checkedGroupKeys = { pair = true }
+    API.setRangeTargets({ 730 }, 730)
+    local events, savedAdd = {}, AddUITriggeredEvent
+    AddUITriggeredEvent = function(_, control, params)
+        if control:match("^line_of_fire") then events[#events + 1] = { control = control, params = params } end
+    end
+    local function reply(status, reason, calls, request)
+        request = request or events[#events].params
+        fix.fireEvent("X4GunneryControl.LineOfFireResult", "x4gcl1:" .. request.nonce .. ":"
+            .. request.weaponid .. ":" .. status .. ":" .. reason .. ":" .. calls)
+    end
+    API.runClearPass(clock)
+    API.runClearPass(clock)
+    assert(#events == 2 and events[1].control == "line_of_fire_begin"
+        and tostring(events[1].params.target) == "730" and events[2].params.weaponid == "3001",
+        "a pass must start on the selected target one turret at a time without overlap")
+    reply("C", "", 1)
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE — scanning", "a partial pass must not publish")
+    API.runClearPass(clock)
+    reply("U", "self", 3)
+    local text, paths = API.clearText(730)
+    assert(text == "CLEAR LINE OF FIRE — 1 / 2  (0 s ago)"
+        and paths == "BLOCKED PATH 0   UNKNOWN 1   GUIDED 0",
+        "UNKNOWN must be reported separately and never inflate CLEAR")
+    assert(API.clearText(731) == "CLEAR LINE OF FIRE — scanning", "only the scanned target shows the result")
+    API.runClearPass(clock + 1)
+    assert(#events == 3, "the next pass must wait for the refresh interval")
+    clock = clock + 2.5
+    API.runClearPass(clock)
+    reply("G", "", 0)
+    API.runClearPass(clock)
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE — 1 / 2  (2 s ago)",
+        "a refresh must keep the previous completed result and its age")
+    local stale = events[#events].params
+    API.setRangeTargets({ 731 }, 731)
+    reply("B", "", 3, stale)
+    API.runClearPass(clock)
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE — scanning"
+        and API.clearText(731) == "CLEAR LINE OF FIRE — scanning"
+        and tostring(events[#events - 1].params.target) == "731",
+        "a changed selection must discard the old result and restart on the new target")
+    local timedOut = events[#events].params
+    clock = clock + 2.1
+    API.runClearPass(clock)
+    reply("C", "", 1, timedOut)
+    reply("C", "", 1, timedOut)
+    assert(API.clearText(731) == "CLEAR LINE OF FIRE — scanning", "a timed-out pass must not publish")
+    AddUITriggeredEvent = savedAdd
+end
+
 -- ── 60. station surfaces resolve size from the exact installed module slot ─
 do
     local sess60 = API.getSession()
