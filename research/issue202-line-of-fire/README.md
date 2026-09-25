@@ -17,8 +17,9 @@ nothing into the game or the repository). Raw rows go to the ignored
 
 ## Physical benchmark (`settled.py`, `geometry.py`)
 
-The source of truth is the shot a turret fires **after turning toward the selected target and
-settling**. The tested lines of the current and seven-point methods are predictions.
+The source of truth is the straight path from a turret's **settled `barrelposition`** to the **X4
+aim point it bears toward**, after turning toward the selected target. The tested lines of the
+current and seven-point methods, and the first `useaimtarget` probe on its own, are predictions.
 
 - **Scene**: the #202 LIVE ships. The Boron Ray with its 14 real mounts (12 M railguns, 2 L
   disruptors) fires at an Osaka carrying a stated Terran loadout, with the second Osaka as the
@@ -29,9 +30,9 @@ settling**. The tested lines of the current and seven-point methods are predicti
 - **Bearing and settling**: the accepted #176 scorer decides CAN BEAR. The #166 yaw gate plus the
   starting yaw (parked at 0, or at rest astern) decides which rest the turret reaches. Traps, a
   settled rest out of arc and scorer UNKNOWN are excluded as UNKNOWN.
-- **Truth**: every per-shot endpoint (`barrelposition` is element 0) fires along its own +Z at the
-  settled pose. The first hit, ignoring only the firing turret's own meshes, is scored with the
-  #202 membership rules. All barrels CLEAR is CLEAR, none is NOT, a mix is UNKNOWN.
+- **Truth**: the segment from the settled `barrelposition` to that aim point, ignoring only the
+  firing turret's own meshes. Its first hit is scored with the #202 membership rules; a segment
+  with no hit is UNKNOWN. Each barrel's settled +Z projectile path is a separate diagnostic only.
 - **Candidates**: `benchmark.candidate()` fed with the physical first hit of each tested segment,
   from the pre-turn muzzle and from the settled muzzle.
 

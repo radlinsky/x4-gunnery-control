@@ -1,18 +1,21 @@
-"""Issue #202: settled-shot CLEAR LINE OF FIRE benchmark on real X4 9.00 collision geometry.
+"""Issue #202: settled CLEAR LINE OF FIRE benchmark on real X4 9.00 collision geometry.
 
-Truth is the shot a turret would fire AFTER turning toward the selected target and settling, not the
-line any method tests. For each test (turret, starting yaw, target, arrangement):
+Truth is the straight path from the turret's SETTLED `barrelposition` to the X4 aim point it is
+bearing toward, not the line any method tests. For each test (turret, starting yaw, target,
+arrangement):
 
-1. CAN BEAR by the accepted #176 scorer; otherwise UNKNOWN, excluded.
+1. CAN BEAR by the accepted #176 scorer on X4's selected aim point; otherwise UNKNOWN, excluded.
 2. Settling from the starting yaw (zero velocity) by the #166 yaw gate: the turret moves toward
    sign(g) to the nearest attractor that way. A trap there, or a settled yaw whose pitch is out of
    arc, is UNKNOWN (cannot be shown to settle), excluded. The favorable rest is never picked.
-3. Each firing endpoint (per-shot barrel, native hash order; element 0 is `barrelposition`) fires
-   along its own +Z at the settled pose. Its first hit, ignoring only the firing turret's own meshes
-   as X4's pre-fire gate does, is scored with the #202 membership rules. Every barrel hitting a
-   member is CLEAR, none is NOT CLEAR, a mix is UNKNOWN. MESH and HULL shape models must agree,
-   and so must the same barrel's line straight through the aim point (a grazing shot whose answer
-   depends on the barrel's sub-metre offset is not defensible under spread); otherwise UNKNOWN.
+3. The segment from the settled `barrelposition` (endpoint element 0) to that same aim point is cast,
+   ignoring only the firing turret's own meshes as X4's pre-fire gate does. Its first hit is scored
+   with the #202 membership rules: a member is CLEAR, anything else NOT CLEAR. A segment that
+   reaches the aim point without any hit has no first hit to classify (UNKNOWN), and the MESH and
+   HULL shape models must agree; otherwise UNKNOWN.
+
+Each barrel's settled +Z projectile path is kept as a diagnostic only; it never defines or excludes
+a row.
 
 Candidates are the `benchmark.py` decision code (current, seven, lazy, eight = seven + old centre),
 fed with the physical first hit of each tested segment from the pre-turn muzzle and from the
@@ -261,12 +264,13 @@ def _lines(scene, origin, turret, target_label, element, hull_target, models):
         o = _to_local(origin, frame)
         gap = np.linalg.norm(C - o)
         push = 0.9 * H.min()
-        ends = {"c": C + (C - o) * push / gap if gap > 0 and push > 0 else C}
+        ends = {"c": C + (C - o) * push / gap if gap > 0 and push > 0 else C,
+                "aim": C}                                  # no authored aim point: box centre
     else:
         C, H, aims = element_info(element["macro"])
         frame = element["frame"]
         o = _to_local(origin, frame)
-        aim = aims[_select(o, aims)] if aims else C
+        aim = aims[_select(o, aims)] if aims else C       # the useaimtarget endpoint from this origin
         ends = {"c": C, "aim": aim}
         for axis, name in enumerate("xyz"):
             for pct, sign in (("25", -0.5), ("75", 0.5)):
@@ -307,7 +311,6 @@ def _muzzles(ev, x, y, frame):
 def run_test(scene, turret, record, tur, ev, target, start, models=MODELS):
     hull_target = target is None
     target_label = "osaka:R" if hull_target else target["label"]
-    tsym = "P" if hull_target else "T"
     # aim point in world: the element's nearest authored point from the turret origin, else box centre
     if hull_target:
         C, _H = S.center_half(f"{TARGET}_a_macro")
@@ -317,7 +320,8 @@ def run_test(scene, turret, record, tur, ev, target, start, models=MODELS):
         turret_origin = _to_local(_frame(turret["frame"])[0], target["frame"])
         aim_world = _to_world(aims[_select(turret_origin, aims)] if aims else C, target["frame"])
     pt = tuple(float(v) for v in _to_local(aim_world, turret["frame"]))
-    row = dict(turret=turret["index"], macro=turret["macro"], target=target_label, start=start)
+    row = dict(turret=turret["index"], macro=turret["macro"], target=target_label, start=start,
+               aim_points=0 if hull_target else len(aims))
     state, y, x = settle(record, tur, pt, start)
     row["state"] = state
     # pre-turn muzzle: the starting yaw at rest pitch 0
@@ -328,37 +332,43 @@ def run_test(scene, turret, record, tur, ev, target, start, models=MODELS):
     settled = _muzzles(ev, x, y, turret["frame"])
     row["phases"]["settled"] = _lines(scene, settled[0][0], turret["index"], target_label, target, hull_target, models)
     row["yaw"], row["pitch"] = y, x
-    shots, lines = {}, {}
     own = {f"sock:{turret['index']}"}
-    for model in models:
-        hits = [Gm.first_hit(scene.instances, p, d=d, tmax=SHOT_RANGE, model=model, skip=own)[0] for p, d in settled]
-        shots[model] = [scene.symbol(h, turret["index"], target_label) for h in hits]
-        # the same barrel's line straight through the aim point (the native pre-fire ray's direction)
-        hits = [Gm.first_hit(scene.instances, p, d=(aim_world - p) / np.linalg.norm(aim_world - p),
-                             tmax=SHOT_RANGE, model=model, skip=own)[0] for p, _d in settled]
-        lines[model] = [scene.symbol(h, turret["index"], target_label) for h in hits]
-    row["shots"], row["aim_lines"] = shots, lines
+    # truth: settled barrelposition -> the aim point the turret bears toward
+    row["truth_hits"] = {m: scene.symbol(Gm.first_hit(scene.instances, settled[0][0], e=aim_world, model=m,
+                                                      skip=own)[0], turret["index"], target_label)
+                         for m in models}
+    # diagnostic only: each barrel's settled +Z projectile path
+    row["shots"] = {m: [scene.symbol(Gm.first_hit(scene.instances, p, d=d, tmax=SHOT_RANGE, model=m, skip=own)[0],
+                                     turret["index"], target_label) for p, d in settled] for m in models}
     row["barrels"] = len(settled)
-    row["truth_by_model"] = {m: [bool(s) and B.qualifies(tsym, s) for s in shots[m]] for m in models}
-    row["aim_line_by_model"] = {m: [bool(s) and B.qualifies(tsym, s) for s in lines[m]] for m in models}
     return row
 
 
+def _tsym(row):
+    return "P" if row["target"] == "osaka:R" else "T"
+
+
+def _cls(tsym, hit):
+    return None if hit is None else B.qualifies(tsym, hit)
+
+
 def truth(row):
-    """CLEAR / NOT / UNKNOWN reason for the whole turret."""
+    """CLEAR / NOT, or the UNKNOWN reason, for the settled barrelposition -> aim point path."""
     if row["state"] != "SETTLED":
         return row["state"]
-    per = row["truth_by_model"]
-    if len({tuple(v) for v in per.values()}) > 1:
+    classes = {_cls(_tsym(row), h) for h in row["truth_hits"].values()}
+    if len(classes) > 1:
         return "shape models disagree"
-    if per != row["aim_line_by_model"]:
-        return "grazing shot"      # the barrel's sub-metre offset from the aim line changes the answer
-    barrels = next(iter(per.values()))
-    if all(barrels):
-        return "CLEAR"
-    if not any(barrels):
-        return "NOT"
-    return "barrels disagree"
+    cls = classes.pop()
+    if cls is None:
+        return "aim path reaches no geometry"
+    return "CLEAR" if cls else "NOT"
+
+
+def aim_probe(row, phase, model):
+    """The first `useaimtarget=true` probe by itself: True iff its first hit is a target member."""
+    line = row["phases"][phase][model]["aim"]
+    return bool(line) and B.qualifies(_tsym(row), line[0])
 
 
 def candidates(row, model):
@@ -508,7 +518,7 @@ def report(rows):
     kinds = sorted({_kind(r) for r in rows})
     states = Counter((truth(r), _kind(r)) for r in rows)
     order = ["CLEAR", "NOT", "CANNOT BEAR", "scorer UNKNOWN", "trap", "start on a repeller",
-             "settled rest out of arc", "shape models disagree", "grazing shot", "barrels disagree"]
+             "settled rest out of arc", "shape models disagree", "aim path reaches no geometry"]
     say("## Truth and exclusions\n")
     say("| truth | " + " | ".join(kinds) + " | total |")
     say("|---|" + "---:|" * (len(kinds) + 1))
@@ -524,6 +534,31 @@ def report(rows):
                 c = table[method, phase]
                 say(f"| {method} | {phase} | {c['n']} | {c['TP']} | {c['FP']} | {c['TN']} | {c['FN']} | "
                     f"{c['UNKNOWN']} | {c['UNKNOWN on CLEAR truth']} | {c['calls'] / max(1, c['n']):.2f} |")
+        for phase in PHASES:
+            c = Counter()
+            for r in rows:
+                t = truth(r)
+                if t in ("CLEAR", "NOT"):
+                    said = aim_probe(r, phase, model)
+                    c["TP" if said and t == "CLEAR" else "FP" if said else "FN" if t == "CLEAR" else "TN"] += 1
+            say(f"| useaimtarget probe alone | {phase} | {sum(c.values())} | {c['TP']} | {c['FP']} | {c['TN']} | "
+                f"{c['FN']} | - | - | 1.00 |")
+    say("\n## useaimtarget probe versus truth, MESH: what explains each mismatch\n")
+    why = Counter()
+    for r in rows:
+        t = truth(r)
+        if t not in ("CLEAR", "NOT"):
+            continue
+        for phase in PHASES:
+            said = aim_probe(r, phase, "mesh")
+            if said == (t == "CLEAR"):
+                continue
+            line = r["phases"][phase]["mesh"]["aim"]
+            first = line[0] if line else "no hit before the endpoint"
+            origin = "same origin" if phase == "settled" else "parked origin"
+            multi = "; several aim points" if r["aim_points"] > 1 else ""
+            why[phase, t, f"probe first hit {first} ({origin}{multi})"] += 1
+    say("\n".join(f"- {p}: truth {t}, {w}: {n}" for (p, t, w), n in sorted(why.items())) or "- none")
     say("\n## Parked to settled, MESH (same rows, same truth)\n")
     say("| method | FN fixed | FN introduced | FP fixed | FP introduced |")
     say("|---|---:|---:|---:|---:|")
@@ -558,18 +593,18 @@ def report(rows):
         or "- none")
     lazy = sum(cand["lazy", p][0] != cand["seven", p][0] for _r, _t, cand in scored for p in PHASES)
     say(f"- lazy classification changed a status in {lazy} scored rows")
-    # barrelposition vs per-shot truth
+    # diagnostic only: settled +Z projectile paths against the line-of-fire truth
     b0 = Counter()
     for r in rows:
-        if r["state"] != "SETTLED" or r["barrels"] < 2:
+        t = truth(r)
+        if t not in ("CLEAR", "NOT"):
             continue
-        per = r["truth_by_model"]
-        agree = len({tuple(v) for v in per.values()}) == 1 and per == r["aim_line_by_model"]
-        if agree:
-            bar = next(iter(per.values()))
+        hits = [_cls(_tsym(r), h) for h in r["shots"]["mesh"]]
+        b0["scored rows"] += 1
+        b0["barrel 0 +Z path differs from truth"] += bool(hits[0]) != (t == "CLEAR")
+        if r["barrels"] > 1:
             b0["multi-barrel rows"] += 1
-            b0["barrel 0 CLEAR, another not"] += bar[0] and not all(bar)
-            b0["barrel 0 not, another CLEAR"] += (not bar[0]) and any(bar)
+            b0["another barrel's +Z path differs from barrel 0"] += any(bool(h) != bool(hits[0]) for h in hits[1:])
     starts = defaultdict(dict)
     for r in rows:
         if r["state"] == "SETTLED":
@@ -578,7 +613,7 @@ def report(rows):
              abs(math.remainder(v[0.0][0] - v[math.pi][0], 2 * math.pi)) > 1e-3]
     say(f"\n## Starting state\n\n- same turret and target, parked vs astern start settle at different yaws: "
         f"{len(split)} pairs; truth differs in {sum(v[0.0][1] != v[math.pi][1] for v in split)}")
-    say("\n## barrelposition (element 0) versus per-shot barrels (disruptor, 3 endpoints; robust rows)\n")
+    say("\n## Diagnostic only: settled +Z projectile paths (MESH; never defines or excludes a row)\n")
     say("\n".join(f"- {k}: {v}" for k, v in b0.items()))
     # query cost per 14-turret pass
     say("\n## Simulated check_line_of_sight calls (MESH), per turret and per 14-turret pass\n")
