@@ -136,6 +136,102 @@ a root `useaimtarget` probe from those directions is false regardless of the
 link. The #60 firing geometry was not retained. Source:
 `research/issue202-line-of-fire/settled.py` `station60()`.
 
+The union-box centre is also where the turrets bear (see "Where a turret's
+shoot controller bears on a selected target"). In the #202 benchmark, every
+settled `xen_defence` turret whose line to the centre met no module also met
+nothing when the line was continued past the centre (36 of 36 rows). A
+stationary station gives no lead, so rounds aimed along those lines do not
+hit it. The centre gap alone therefore cannot account for turrets that hit
+the station. Those hits need a path that meets a module. On such a path the
+muzzle root probe is true unless:
+
+- the module-to-root link fails;
+- the ray crosses into another zone's physics world;
+- the firing turret's own socket is first (see "Some launcher sockets
+  enclose their own launch points").
+
+The turret-origin `excludeself="true"` ray removes the turret's own meshes,
+so the socket cannot explain that ray's 0/14. This is inference from offline
+geometry; the #60 firing geometry is still unknown.
+
+## Where a turret's shoot controller bears on a selected target
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace, pinned executable above. Real RTTI names:
+  `LargeTargetShootController` (vtable `0x02B7D088`); `U::Station`
+  (`0x02B764D8`), `U::Ship` (`0x02B84A98`) and the element classes, for
+  vtable slot `+0x1BF0`. Shipped-source census of `class="station"`
+  components.
+- Live test: no
+- Finding: the point a turret bears on, which is also the far end of its
+  pre-fire ray, is:
+
+| Selected target | Bearing point |
+|---|---|
+| turret, shield or engine element | nearest authored aim point from the **turret component origin**, else the element box centre |
+| whole ship with authored aim points | nearest authored aim point from the turret component origin |
+| whole ship without one, box radius ≤ 500 m | box centre |
+| whole ship without one, box radius > 500 m | box centre plus the LargeTarget offset, if that point lies inside the ship's own body; else the box centre |
+| station root (modular station) | the live union-box centre; the offset is always rejected |
+
+The turret origin selects the aim point for both X4's firing and MD
+`useaimtarget`; see [macro-box-aimtargets.md](macro-box-aimtargets.md),
+"Which origin selects the aim point".
+
+The LargeTarget offset is set once, when the target is set
+(`0x007E8330`), and added after the Basic solve (`0x007E8288`–`0x007E8321`,
+rotated into the current target frame). The setter:
+
+1. clears the offset;
+2. requires a turret or guided weapon (slots `+0x1F48`/`+0x1F50`);
+3. takes the weapon's first `defensible` ancestor (`0x0059DED0`: `+0x70` walk
+   to class `0x23`), which is the firing ship for a ship-mounted turret;
+4. requires target slot `+0x1BF0`:
+   - `U::Station` returns constant true (`0x0009C980`);
+   - `U::Ship` returns box radius > global `+0x502C` (`0x006DF200`). The only
+     writer found by a full-image scan copies a parameter struct field that
+     `0x0063E5F0` initialises to 500.0 (`0x0063E687`);
+   - module, shield and engine classes return constant false (`0x000B38C0`);
+   - `U::Turret` and `U::MissileTurret` use an untraced lookup (`0x005BF690`).
+     It matters only for a turret element with no authored aim point;
+5. requires no authored aim-point collection (`+0x760` null);
+6. computes `offset = (turret origin in the firing ship frame − ship box
+   centre) / ship half-extents × target half-extents × (0.25, 0.25, 0.75)`
+   (constant `0x02CC11C0`);
+7. keeps it only if `0x0051BEB0(target, box centre + offset)` is true.
+
+`0x0051BEB0` resolves the target's physics owner (`0x007AD1E0`: the first
+self-or-ancestor with its own physics, predicate `0x00795E90`). It
+transforms the point into that owner's frame and runs the Jolt
+`CollidePoint` of the owner's layer-0/1 body shape (body `+0x260`, shape
+vtable `+0x88`, any-hit collector). A missing body, a compound in flux, or a
+placeholder sub-shape (wrapper byte `+0x40`) returns false.
+
+A station owns its own physics, but its modules own theirs (Module
+`+0x1B50`), so the station's own body contains only the station component's
+parts. None of the 40 ordinary `class="station"` components in the official
+source sets has a part. The only ones that do are 7 landmark components and
+a test asset. For every modular station the offset point is therefore never
+inside the body, and the turret bears on the live union-box centre (Station
+slot `+0x14B0`, instance box `+0xC90`). A station root has no authored aim
+point either (census above).
+
+Which layer-0/1 shape answers `CollidePoint` for a ship (the `-mesh` or
+`-hull` Jolt shape) was not traced. The #202 benchmark therefore tests the
+offset point against both, and treats disagreement as UNKNOWN.
+
+What this changes:
+
+- MD `useaimtarget` on a whole ship always ends at the box centre (it calls
+  only `0x00520FC0`). For a ship above 500 m with no authored point, it tests
+  a different endpoint from the one the turret bears on.
+- Pre-fire classification of a station-root ray (`0x007E6CB0`): a module hit
+  walks `+0x70` to the station, so it permits fire (result 1). A segment that
+  reaches the union-box centre with no hit is a genuine miss, and every
+  supported turret permits it. So X4 fires at a station root through the
+  centre gap whether or not the line touches a module.
+
 ## find_object_surface is not a cheaper line-of-fire primitive
 
 - X4: 9.00 build 611726
@@ -325,6 +421,32 @@ mesh was not traced.
   a target behind it crosses that socket. Other turret families were not
   censused.
 
+### Some launcher sockets enclose their own launch points
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: offline geometry from the shipped `-collision.xmf` and `-hull.jcs` of the socket parts;
+  `research/issue202-line-of-fire/settled.py` (#202 benchmark)
+- Live test: no
+- Finding:
+  - `turret_arg_m_dumbfire_02_mk1`'s only layer-3 part is a 12-triangle
+    socket box, 16 × 8 × 16 m, around the whole launcher. Its first launch
+    point lies inside that box in 368 of 400 sampled settled poses, under
+    both shape models.
+  - `turret_kha_m_beam_01_mk1`'s layer-3 socket (`anim_socket`) is about
+    34 × 21 × 36 m. `turret_par_l_dumbfire_01_mk1`'s socket is a 446-triangle
+    mesh.
+  - A `check_line_of_sight` from `barrelposition` with
+    `excludeself="false"` therefore first hits the firing turret itself for
+    these turrets, even when the turret has turned toward the target. X4's
+    pre-fire gate ignores those meshes, so this is not an obstruction.
+  - #202 benchmark counts of settled rows whose bearing path is clear but
+    whose probe first hit the firing turret:
+    - `arg_m_dumbfire_02`: 610 of 670;
+    - `par_l_dumbfire_01`: 48 of 276;
+    - `kha_m_beam_01`: 16 of 676;
+    - every other benchmark turret: 0.
+
 ## Remaining uncertainties
 
 None of these blocks adopting the method, because each one resolves toward
@@ -334,9 +456,10 @@ UNKNOWN:
    root, so that any module hit counts as CLEAR, would first need a controlled
    LIVE check of root-declared versus module-declared rays on one explicit
    module-centre endpoint.
-2. How often the firing turret's own mesh is the first hit from its muzzle. A
-   high rate, plausible for launcher-type missile turrets, would produce many
-   UNKNOWN results.
+2. How often the firing turret's own mesh is the first hit from its muzzle.
+   Offline it is high for some launchers and one beam turret (see "Some
+   launcher sockets enclose their own launch points"). Every such line is
+   UNKNOWN (`self`), however many points are tried.
 3. The cross-zone and pair-collision-filter caveats already recorded in
    [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md).
 4. Frame-time cost, which is not measured here.

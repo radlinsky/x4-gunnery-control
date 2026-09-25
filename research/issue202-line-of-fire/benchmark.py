@@ -30,9 +30,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PARENT = dict(
     S="Z", W="S", W2="S", SSH="S", SEN="S",
     P="Z", T="P", T2="P", PSH="P", PEN="P",
-    ST="Z", M1="ST", M2="ST", M3="ST", M4="ST", MC="ST", MT="M1", MT2="M1", MS="M2",
+    ST="Z", M1="ST", M2="ST", M3="ST", M4="ST", MC="ST", MT="M1", MT2="M1", MS="M2", MT3="M3",
     DK="P", DKS="M1",                      # craft docked on the target ship / module
-    F="Z", X="Z", A="Z", WR="Z", GONE="Z", K="Z", KM="K", KT="KM", KS="KM",
+    F="Z", X="Z", A="Z", WR="Z", GONE="Z", K="Z", KM="K", KT="KM", KS="KM", O="Z",   # O: small object
 )
 STATIONS, MODULES = {"ST", "K"}, {"M1", "M2", "M3", "M4", "MC", "KM"}
 SIX = ("x25", "x75", "y25", "y75", "z25", "z75")
