@@ -217,6 +217,9 @@ local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local Range = { serial = 0, cache = {}, targets = {}, order = {}, members = {},
     totalWork = 0, peakWork = 0 }
 local rangeTargetLimit = 20
+-- Selected-target CLEAR LINE OF FIRE detail pass; independent of the IN RANGE sweep.
+local Clear = { serial = 0, sweepCalls = 0 }
+local clearInterval = 2 -- ponytail: provisional gap between detail passes; tune from LIVE pass logs
 local redirectDockedMenu
 local completeReleasedOnboardHandoff
 local reopenPendingSession
@@ -1652,7 +1655,9 @@ function Range.onRangeResult(_, param)
             log("event=in_range action=sweep elapsed_ms="
                 .. tostring(math.floor((now - Range.sweepStarted) * 1000))
                 .. " checks=" .. tostring(Range.totalWork)
-                .. " peak_checks_per_update=" .. tostring(Range.peakWork))
+                .. " peak_checks_per_update=" .. tostring(Range.peakWork)
+                .. " line_of_fire_calls=" .. tostring(Clear.sweepCalls))
+            Clear.sweepCalls = 0
             Range.memberIndex, Range.sweepStarted = 1, nil
             Range.nextSweepAt = now + 1
             Range.totalWork, Range.peakWork = 0, 0
@@ -1666,6 +1671,86 @@ function Range.onRangeResult(_, param)
             end
         end
     end
+end
+
+-- The detail pass shares the IN RANGE selection and turret membership; a
+-- change to either, or to the session, discards its active and completed work.
+local function clearCurrent(entry)
+    return entry and session and entry.session == session and entry.key == Range.selectedKey
+        and entry.signature == Range.signature
+end
+
+-- One turret per request, one pass at a time; a result publishes only after
+-- every turret in the pass has reported.
+function Clear.run(now)
+    if Clear.result and not clearCurrent(Clear.result) then Clear.result = nil end
+    if Clear.active and not clearCurrent(Clear.active) then Clear.active, Clear.nextAt = nil, nil end
+    if C.IsGamePaused() or not session or (session.phase ~= "target_select"
+            and not (session.phase == "engaged" and session.controlMode == "direct")) then return end
+    local active = Clear.active
+    if active and active.requested then
+        if now - active.requested < 2 then return end
+        log("event=line_of_fire action=timeout turret=" .. active.memberKey)
+        Clear.active, Clear.nextAt = nil, now + clearInterval
+        return
+    end
+    if not active then
+        if not Range.selectedKey or #Range.members == 0 or (Clear.nextAt and now < Clear.nextAt) then return end
+        Clear.serial = Clear.serial + 1
+        active = { nonce = tostring(sessionEpoch) .. "_" .. tostring(Clear.serial), session = session,
+            key = Range.selectedKey, signature = Range.signature, members = Range.members,
+            index = 0, started = now, calls = 0, peak = 0,
+            clear = 0, blocked = 0, unknown = 0, guided = 0, reasons = {} }
+        Clear.active = active
+        AddUITriggeredEvent("X4GunneryControl", "line_of_fire_begin", {
+            nonce = active.nonce, target = id(active.key), ship = id(session.shipID) })
+    end
+    active.index = active.index + 1
+    local member = active.members[active.index]
+    active.memberKey, active.requested = State.normID(member.componentID), now
+    AddUITriggeredEvent("X4GunneryControl", "line_of_fire_turret", {
+        nonce = active.nonce, weapon = id(member.componentID), weaponid = active.memberKey })
+end
+
+local clearStates = { C = "clear", B = "blocked", U = "unknown", G = "guided" }
+function Clear.onResult(_, param)
+    local nonce, memberKey, status, reason, calls =
+        tostring(param or ""):match("^x4gcl1:([^:]+):([^:]+):([CBUG]):(%a*):(%d+)$")
+    local active = Clear.active
+    if not active or not active.requested or nonce ~= active.nonce or memberKey ~= active.memberKey
+            or not clearCurrent(active) then return end
+    local now = getElapsedTime()
+    calls = tonumber(calls)
+    active[clearStates[status]] = active[clearStates[status]] + 1
+    if status == "U" then active.reasons[reason] = (active.reasons[reason] or 0) + 1 end
+    active.calls, active.peak, active.requested = active.calls + calls, math.max(active.peak, calls), nil
+    Clear.sweepCalls = Clear.sweepCalls + calls
+    if active.index < #active.members then return end
+    active.total, active.completedAt = #active.members, now
+    Clear.result, Clear.active, Clear.nextAt = active, nil, now + clearInterval
+    local reasons = {}
+    for name, count in pairs(active.reasons) do reasons[#reasons + 1] = name .. ":" .. count end
+    table.sort(reasons)
+    log("event=line_of_fire action=pass elapsed_ms=" .. tostring(math.floor((now - active.started) * 1000))
+        .. " turrets=" .. active.total .. " clear=" .. active.clear .. " blocked=" .. active.blocked
+        .. " unknown=" .. active.unknown .. " guided=" .. active.guided .. " calls=" .. active.calls
+        .. " peak_calls_per_update=" .. active.peak .. " unknown_reasons=" .. table.concat(reasons, ","))
+end
+
+function Clear.text(target)
+    local result = Clear.result
+    if #Range.members == 0 then return "CLEAR LINE OF FIRE — 0 / 0" end
+    if not result or isNullID(target) or result.key ~= State.normID(target) then
+        return "CLEAR LINE OF FIRE — scanning"
+    end
+    return "CLEAR LINE OF FIRE — " .. result.clear .. " / " .. result.total
+        .. "  (" .. math.floor(getElapsedTime() - result.completedAt) .. " s ago)"
+end
+
+function Clear.breakdown(target)
+    local result = Clear.result
+    if not result or isNullID(target) or result.key ~= State.normID(target) then return "" end
+    return "BLOCKED PATH " .. result.blocked .. "   UNKNOWN " .. result.unknown .. "   GUIDED " .. result.guided
 end
 
 -- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
@@ -2691,6 +2776,8 @@ function TestAPI.rangeResult(target) return Range.rangeResult(target) end
 function TestAPI.runRangeSweep(now) return Range.runRangeSweep(now) end
 function TestAPI.rangeSpeedShip(target) return Range.rangeSpeedShip(target) end
 function TestAPI.rangeText(result) return Range.rangeText(result) end
+function TestAPI.runClearPass(now) return Clear.run(now) end
+function TestAPI.clearText(target) return Clear.text(target), Clear.breakdown(target) end
 function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
 
 function menu.onShowMenu()
@@ -3062,6 +3149,10 @@ function menu.display()
             pinnedRow[5]:createText(function() return surfaceShieldText(pinnedID) end)
             local pinnedHullRow = elemTable:addRow("surface_pinned_hull", {})
             pinnedHullRow[5]:createText(function() return surfaceHullText(pinnedID) end)
+            local pinnedClear = elemTable:addRow("surface_pinned_clear", {})
+            pinnedClear[1]:setColSpan(5):createText(function() return Clear.text(pinnedID) end)
+            local pinnedPaths = elemTable:addRow("surface_pinned_paths", {})
+            pinnedPaths[1]:setColSpan(5):createText(function() return Clear.breakdown(pinnedID) end)
             if not sameID(pinnedID, session.targetObjectID) then
                 local parentHullRow = elemTable:addRow("surface_parent_hull", {})
                 parentHullRow[1]:setColSpan(4):createText(text(57))
@@ -3163,6 +3254,12 @@ function menu.display()
             row[1]:setColSpan(9):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
             row[10]:setColSpan(3):createButton({}):setText(text(36))
             row[10].handlers.onClick = function() engageTarget(current.softtargetID) end
+            local selectedID = current.softtargetID
+            local detail = tableView:addRow("current_detail", { bgColor = Color["row_background_unselectable"] })
+            detail[1]:setColSpan(4):createText(function() return Range.rangeText(Range.rangeResult(selectedID)) end)
+            detail[5]:setColSpan(8):createText(function() return Clear.text(selectedID) end)
+            local paths = tableView:addRow("current_paths", { bgColor = Color["row_background_unselectable"] })
+            paths[5]:setColSpan(8):createText(function() return Clear.breakdown(selectedID) end)
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
@@ -3422,6 +3519,7 @@ local function updateSessionRuntime()
         end
     end
     Range.runRangeSweep(now)
+    Clear.run(now)
     if now > nextRefresh then
         nextRefresh = now + 0.25; refresh()
         if #Range.order > 0 then
@@ -3889,6 +3987,7 @@ local function init()
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
     RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
     RegisterEvent("X4GunneryControl.InRangeResult", Range.onRangeResult)
+    RegisterEvent("X4GunneryControl.LineOfFireResult", Clear.onResult)
     RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary

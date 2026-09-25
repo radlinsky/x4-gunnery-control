@@ -70,6 +70,9 @@ assert_md_xpath "1" "count(//cue[@name='InRangeCommit']//do_if[@value='not \$bea
 assert_md_xpath "1" "count(//cue[@name='InRangeService']//do_if[contains(@value, '\$target.bboxdistanceto.{InRangeService.\$weapon} lt \$range + \$extra')])" "target-box to turret-origin strict range gate"
 assert_md_xpath "3" "count(//cue[@name='InRangeBegin']//do_if[@value='typeof InRangeService.\$weapon != datatype.component and InRangeService.\$weapon'] | //cue[@name='InRangeTarget']//do_if[@value='typeof \$target != datatype.component and \$target'] | //cue[@name='InRangeTarget']//do_if[@value='typeof \$speedship != datatype.component and \$speedship'])" "in-range turret, target and speed-source conversion"
 assert_md_xpath "1" "count(//cue[@name='InRangeCommit']//do_if[contains(@value, 'InRangeService.\$targets.count == InRangeService.\$expected')][contains(@value, 'typeof InRangeService.\$weapon == datatype.component')]/raise_lua_event[@name=\"'X4GunneryControl.InRangeResult'\"])" "compact result requires complete target pass"
+assert_md_xpath "3" "count(//cue[@name='LineOfFireTurret']/actions/do_if[@value='\$physical']/do_for_each//check_line_of_sight[@objectoffset='\$weapon.barrelposition'][@useaimtarget='false'][@excludeself='false'][@targetoffset])" "line of fire: at most three current-muzzle explicit-endpoint calls per line, only on the physical path"
+assert_md_xpath "3" "count(//cue[@name='LineOfFireTurret']//check_line_of_sight)" "line of fire: no other ray (GUIDED and pre-ray UNKNOWN cast none)"
+assert_md_xpath "1" "count(//cue[@name='LineOfFireBegin']//do_for_each[@name='\$module']/do_if[@value='\$index gt 2']/break)" "line of fire: stations test at most the two nearest modules"
 # Guided missile turrets bypass the direct ray after bearing/range. Unguided
 # missile turrets cast it with own-hull exclusion; conventional turrets cast the
 # same expression as false and retain the existing own-hull-aware behaviour.
