@@ -34,10 +34,12 @@ MESH unless stated.
    - FP: the parked line reaches the target, but the settled path is blocked by a sibling turret (59),
      the firing ship's own hull (39) or the satellite (2).
 7. **After settling**, the only error left is the own-turret one: 676 FN and 0 FP over 15,828 rows.
-8. **The six box points never pay off.**
-   - Settled: they recover 0 false negatives and add 254 false CLEARs, mostly lines that reach the
-     element past its own parent hull or a sibling element.
-   - Parked: they recover 4 and add 205.
+8. **The six extra surface box points never pay off on scored cases.**
+   - Settled: on selected surfaces they recover 0 false negatives and add 236 false CLEARs (234 ship
+     surfaces, 2 station surfaces). The full seven-point strategy has 254 false CLEARs; the other 18
+     come from the unchanged whole-ship and station-root checks.
+   - Parked: on surfaces they recover 4 false negatives and add 205 false CLEARs. Across all target
+     classes, the full strategy has 200 more false CLEARs than the single probe (311 versus 111).
 9. **No physical mechanism needs them** among scoreable rows. They say CLEAR on rows whose aimed line
    reaches no geometry (the off-mesh shield and station centre gaps), but there the truth is undefined.
 10. **Smallest justified method: one `useaimtarget=true` probe from the settled `barrelposition`**,
@@ -458,7 +460,8 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
 Use **one `useaimtarget=true` probe from the turret's current `barrelposition`** as the CLEAR test for
 selected elements, whole ships and station roots. Read it once the turret has turned toward the
 selection. Do not add the six box points or the eighth point: on this population they never recover a
-settled false negative, and they add 254 false CLEARs.
+settled false negative on selected surfaces, where they add 236 false CLEARs. The full strategy's
+254 false CLEARs include 18 from the unchanged whole-target checks.
 
 The one remaining error is the firing turret's own collision. The options:
 
