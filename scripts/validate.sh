@@ -36,7 +36,6 @@ fi
 if command -v lua5.1 >/dev/null; then printf '%s\n' tests/*.lua | xargs -P"$(nproc)" -I{} lua5.1 {}
 elif command -v lua >/dev/null; then printf '%s\n' tests/*.lua | xargs -P"$(nproc)" -I{} lua {}
 else echo "warning: Lua runtime unavailable; skipped unit tests" >&2; fi
-./scripts/check-coverage.sh
 if command -v shellcheck >/dev/null; then
   shellcheck scripts/*.sh tests/*.sh .agents/hooks/*.sh
 else

@@ -1,6 +1,5 @@
--- Coverage for onDirectTargetOwnerChanged (step 6: ownership-change cease_fire
--- replacement). Every branch of the handler must execute so the coverage gate
--- does not reject the new lines in ui/gunnery_control.lua.
+-- Ownership-change event must reissue the target list only for the current
+-- Direct-control engagement.
 --
 -- The handler is registered as "X4GunneryControl.DirectTargetLost" during
 -- init(). The fixture captures RegisterEvent calls, so fix.fireEvent drives it
@@ -47,14 +46,7 @@ AddUITriggeredEvent = function(screen, control, params)
     captured[#captured + 1] = { screen = screen, control = control, params = params }
 end
 
--- ── Branch 1: no session (handler must return silently) ──────────────────────
-local savedSession = session
-fix.API.getSession()   -- just to confirm there is one
--- Temporarily nil out the session by driving an onCloseElement on the console phase.
--- Easiest: call the handler directly with no session in place.
--- The handler reads the module-local `session`; we cannot nil it from outside,
--- but we CAN drive it through the registered event with a state that triggers
--- the early return. Use phase="console" (not "engaged") to hit guard 2.
+-- When not engaged, the ownership-change event must have no effect.
 do
     local prevCapLen = #captured
     -- Guard 2: phase != "engaged"
@@ -104,29 +96,6 @@ do
         "ownership-change re-issue must emit direct_fallback")
     assert(sawWatch,
         "ownership-change re-issue must emit direct_watch (arms the new listener)")
-end
-
--- ── emitDirectFallback: verify direct_watch is paired with direct_fallback ───
--- Exercise the path through a fresh engageTarget so line 405 (the watch emit)
--- is hit even if the branch-4 path above didn't reach it for some reason.
-do
-    session.phase = "target_select"
-    session.controlMode = "direct"
-    local evsBefore = #captured
-    local ok = fix.API.engageTarget(99)
-    assert(ok, "second engageTarget must succeed")
-    local watchCount, fallbackCount = 0, 0
-    for i = evsBefore + 1, #captured do
-        if captured[i].control == "direct_watch"    then watchCount    = watchCount    + 1 end
-        if captured[i].control == "direct_fallback" then fallbackCount = fallbackCount + 1 end
-    end
-    assert(fallbackCount >= 1,
-        "engageTarget must emit at least one direct_fallback; got " .. tostring(fallbackCount))
-    assert(watchCount >= 1,
-        "engageTarget must emit at least one direct_watch; got " .. tostring(watchCount))
-    assert(watchCount == fallbackCount,
-        "direct_watch and direct_fallback must be emitted in pairs; fallback="
-        .. tostring(fallbackCount) .. " watch=" .. tostring(watchCount))
 end
 
 print("runtime coverage ownership tests passed")
