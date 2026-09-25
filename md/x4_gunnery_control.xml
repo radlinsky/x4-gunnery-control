@@ -268,7 +268,7 @@
               </do_if>
               <do_for_each name="$declared" in="$declareds">
                 <set_value name="$centre" exact="$declared.macro.boundingbox.center"/>
-                <create_position name="$endpoint" x="$centre.x" y="$centre.y" z="$centre.z"/>
+                <create_position name="$endpoint" object="$declared" space="$declared" x="$centre.x" y="$centre.y" z="$centre.z"/>
                 <!-- A whole ship's endpoint moves away from the muzzle, staying
                      inside its box (macro boundingbox.max is the half-extents),
                      so a hollow centre can still reach hull behind it. -->
@@ -278,7 +278,7 @@
                   <create_position name="$muzzle" object="$weapon" space="$declared" value="$weapon.barrelposition"/>
                   <set_value name="$gap" exact="$endpoint.distanceto.{$muzzle}"/>
                   <do_if value="$gap gt 0m and $push gt 0m">
-                    <create_position name="$endpoint"
+                    <create_position name="$endpoint" object="$declared" space="$declared"
                                      x="$centre.x + ($centre.x - $muzzle.x) * $push / $gap"
                                      y="$centre.y + ($centre.y - $muzzle.y) * $push / $gap"
                                      z="$centre.z + ($centre.z - $muzzle.z) * $push / $gap"/>
