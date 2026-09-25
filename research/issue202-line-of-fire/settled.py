@@ -7,8 +7,8 @@ bears on, never the line a candidate tests. Per test (scene, turret, target, sta
    - an element or a whole ship with authored aim points: the nearest one from the TURRET COMPONENT ORIGIN
      (the shoot controller passes the weapon component to `0x00520FC0`; the muzzle never selects);
    - an element or ship without one: its box centre; a ship whose box radius exceeds 500 m adds the
-     LargeTarget offset, kept only when the offset point lies inside the target's own body (both shape
-     models must agree, else UNKNOWN);
+     LargeTarget offset, kept only when the offset point lies inside the target's own layer-0/1 body,
+     which is the HULL model (see `bearing_point`);
    - a station root: its live union-box centre (station components own no geometry, so the offset is
      always rejected).
 2. CAN BEAR by the accepted #176 scorer on that point, else excluded.
@@ -83,6 +83,7 @@ START_YAWS = (0.0, math.pi)          # parked at yaw 0, and at rest after a targ
 SHOT_RANGE = 30000.0
 TIE = 0.01                           # m: two closest hits this close on different instances are a tie
 LT_SCALE = np.array([0.25, 0.25, 0.75])   # LargeTarget offset scale (0x02CC11C0)
+LT_UNRESOLVED = "large-target offset: layer-0/1 body not reconstructed (nocollision_jolt part)"
 MODELS = ("mesh", "hull")
 METHODS = ("current", "seven", "lazy", "eight")
 PHASES = ("parked", "settled")
@@ -419,8 +420,14 @@ def _select(o_local, points):
     return study.select(tuple(map(float, o_local)), [tuple(map(float, p)) for p in points])
 
 
-def bearing_point(scene, turret, target, models=MODELS):
-    """(world point or None, source, selected index or None) of the point X4's shoot controller bears on."""
+def bearing_point(scene, turret, target):
+    """(world point or None, source, selected index or None) of the point X4's shoot controller bears on.
+
+    The LargeTarget point-inside test (`0x0051BEB0`) runs Jolt CollidePoint on the target's layer-0/1 body
+    (`+0x260`). That body is built by the same member walk as the layer-3 body, but from each part's `-hull`
+    convex shape (geometry `+0x28`, getter `0x000B1D40`), and it also drops `nocollision_jolt` parts
+    (`0x00747AA2`). So the test is the HULL model on the same parts; a target with a `nocollision_jolt`
+    part is not reconstructed and its row stays UNKNOWN."""
     o = Sc.to_local(turret["frame"][0], target["frame"])
     if target["points"]:
         i = _select(o, target["points"])
@@ -431,12 +438,12 @@ def bearing_point(scene, turret, target, models=MODELS):
     Cf, Hf = Sc.box(scene.firing["ship"])
     offset = (turret["origin_ship"] - Cf) / Hf * target["H"] * LT_SCALE
     p = Sc.to_world(C + offset, target["frame"])
-    kept = {m: any(Gm.inside(b, Sc.to_local(p, f), m) for label, b, f in scene.instances
-                   if scene.meta[label]["group"] == "H") for m in models}
-    if len(set(kept.values())) > 1:
-        return None, "large-target offset: point-in-body depends on the shape model", None
-    return (p, "centre + large-target offset", None) if kept[models[0]] else \
-        (Sc.to_world(C, target["frame"]), "centre (large-target offset outside the body)", None)
+    body = [(b, f) for label, b, f in scene.instances if scene.meta[label]["group"] == "H"]
+    if any(b.jolt for b, _f in body):
+        return None, LT_UNRESOLVED, None
+    if any(Gm.inside(b, Sc.to_local(p, f), "hull") for b, f in body):
+        return p, "centre + large-target offset", None
+    return Sc.to_world(C, target["frame"]), "centre (large-target offset outside the body)", None
 
 
 def endpoints(scene, turret, target, origin, rank):
@@ -507,7 +514,7 @@ def run_test(scene, turret, target, start, ctx, models=MODELS):
     if record["weapon_behavior"] == "guided_missile":
         row["state"] = "GUIDED"
         return row
-    aim, source, index = bearing_point(scene, turret, target, models)
+    aim, source, index = bearing_point(scene, turret, target)
     row.update(aim_source=source, aim_index=index)
     if aim is None:
         row["state"] = source
@@ -873,7 +880,7 @@ def _q(values, p):
 
 
 ORDER = ["CLEAR", "NOT", "GUIDED", "CANNOT BEAR", "scorer UNKNOWN", "trap", "start on a repeller",
-         "settled rest out of arc", "large-target offset: point-in-body depends on the shape model",
+         "settled rest out of arc", LT_UNRESOLVED,
          "shape models disagree", "first-hit tie", "aim path reaches no geometry"]
 CLASSES = ("whole ship", "ship surface", "station surface", "station root")
 

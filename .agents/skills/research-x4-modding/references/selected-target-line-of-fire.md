@@ -217,9 +217,12 @@ inside the body, and the turret bears on the live union-box centre (Station
 slot `+0x14B0`, instance box `+0xC90`). A station root has no authored aim
 point either (census above).
 
-Which layer-0/1 shape answers `CollidePoint` for a ship (the `-mesh` or
-`-hull` Jolt shape) was not traced. The #202 benchmark therefore tests the
-offset point against both, and treats disagreement as UNKNOWN.
+The layer-0/1 body is the convex `-hull` shape of the same member parts,
+minus `nocollision_jolt` parts (see "The layer-0/1 and layer-3 bodies differ
+in shape, part filter and geometry slot" below). For a ship, the point-inside
+test is therefore "inside any `-hull` piece" of the hull and its attached
+turrets, shields, engines and other members that have no physics of their own
+(`U::Destructible` and `U::DockingBay` are such members).
 
 What this changes:
 
@@ -399,11 +402,58 @@ mesh was not traced.
   - `-collision.xmf` carries the same triangles as the mesh shape's source.
     On the Ray hull, `-collision` and `-collision1` are the same 95,372
     triangles; on turret parts `-collision1` is a reduced mesh.
-  - Which shape the layer-3 query body uses was **not traced**. Offline
-    physics should cast against both and treat disagreement as UNKNOWN.
+  - The layer-3 body takes its triangle shape from geometry `+0x20`; the
+    loader fills that field from `-mesh`. But the geometry slot comes from a
+    member virtual (`+0x15D8`), and a missing shape falls back to the
+    `-collision` XMF at `+0x30`, so the exact file is untraced (see below).
+    Offline physics should still cast against both and treat disagreement as
+    UNKNOWN.
   - Hull `.jcs` points are stored about the shape's centre of mass. Compound
     children are unrotated, and each is placed by its sub-shape centre-of-mass
     position.
+
+### The layer-0/1 and layer-3 bodies differ in shape, part filter and geometry slot
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace, pinned executable above
+- Live test: no
+- Finding: the generic builder `0x0051BB90` builds both bodies with
+  `0x0051B730`. The two calls differ only in two byte arguments: `(0,0)` for
+  layer 0/1 (`+0x260`, `0x0051BC2C`) and `(1,1)` for layer 3 (`+0x268`,
+  `0x0051BC60`). The second selects the object layer at body creation
+  (`0x000BE550`). The first, the layer-3 flag, reaches each member's
+  `+0x1B70` (`0x00747760`, `r13`), where it changes three things.
+  - **Shape.** `0x000C0240` gets the flag in `r9b`. It calls `0x000B2060` for
+    layer 3, which reads geometry `+0x20` (`-mesh`), and `0x000B1D40` for
+    layer 0/1, which reads `+0x28` (`-hull`). Both fall back to the
+    `-collision` XMF at `+0x30` when the handle is the null sentinel.
+  - **Part filter.** Both bodies exclude `nocollision` (`0x0395CD50`),
+    `triggerpart` (`0x0395CF54`) and `platformcollision` (`0x0395CDBC`).
+    Only layer 3 can keep `platformcollision` (the `[+0x1EC] >= 9` or
+    ancestor branch at `0x00747919`). Only layer 0/1 also drops
+    `nocollision_jolt` parts (`0x0395CD54`, check at `0x00747AA2`).
+  - **Geometry slot.** `0x000C1560` picks the part geometry by index. Layer
+    0/1 always uses slot 0. Layer 3 uses member `+0x15D8`
+    (`0x00747820`/`0x00747AF3`).
+  - Tag globals were paired with their names by the interning order, where
+    each store takes the tag interned from the string built just before
+    (`0x008D89A7`–`0x008D8A34`, `0x008D909D`–`0x008D90E8`,
+    `0x008DAB34`).
+- Membership is the same member walk for both bodies (`0x003383E0`, same
+  arguments). A member joins the owner's compound when slot `+0x1B40` is true
+  and `+0x1B50` is false. `U::Turret`, `U::ShieldGenerator`, `U::Engine`,
+  `U::Destructible`, `U::DockingBay` and `U::Cockpit` all do. `U::DockArea`
+  and `U::Module` use `0x006B4950`, which gives them their own physics only
+  under a station.
+- Catalog census: every part ships one `-hull.jcs` and one `-mesh.jcs`. No
+  indexed variant exists; the only indexed collision file is
+  `-collision1.xmf`, on 1,970 parts. So layer 0/1 reads the unindexed
+  `-hull.jcs`. Which file layer 3's slot selects is untraced.
+- Consequence: a point-inside test against layer 0/1 (for example the
+  LargeTarget offset test `0x0051BEB0`) is a convex-hull test on the parts
+  that are neither `nocollision_jolt` nor otherwise excluded. It is not a
+  test on the layer-3 line-of-fire geometry.
 
 ### Turret moving parts carry no layer-3 collision
 
@@ -443,7 +493,7 @@ mesh was not traced.
   - #202 benchmark counts of settled rows whose bearing path is clear but
     whose probe first hit the firing turret:
     - `arg_m_dumbfire_02`: 610 of 670;
-    - `par_l_dumbfire_01`: 48 of 276;
+    - `par_l_dumbfire_01`: 50 of 278;
     - `kha_m_beam_01`: 16 of 676;
     - every other benchmark turret: 0.
 

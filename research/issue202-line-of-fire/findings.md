@@ -14,8 +14,8 @@ MESH unless stated.
    CLEARs.
 2. **Station surface elements: the same.** On 764 rows, 0 FP and 56 FN, all own-turret. A Xenon
    shield whose aim point is off its mesh adds 74 UNKNOWN rows; see "Where truth is undefined".
-3. **Whole ships: the same.** On 1,550 rows, 0 FP and 296 FN, all own-turret. The LargeTarget offset
-   moves the bearing point off the box centre on 64 rows. The probe still tests the box centre, but
+3. **Whole ships: the same.** On 1,558 rows, 0 FP and 298 FN, all own-turret. The LargeTarget offset
+   moves the bearing point off the box centre on 72 scored rows. The probe still tests the box centre, but
    that caused no error here.
 4. **Multi-aim-point targets: no special handling needed.** X4 and MD `useaimtarget` both pick the
    aim point nearest the **turret component origin**; the muzzle never selects it (native trace). The
@@ -30,10 +30,10 @@ MESH unless stated.
    the firing ship's own hull, and 32 FN. They also read CLEAR on 78 of the 108 empty-path rows, where
    X4's aimed line reaches nothing.
 6. **Before settling**, the probe's errors come from where the barrel is parked:
-   - FN: the firing turret's own collision (1,526), the firing ship's own hull (92);
+   - FN: the firing turret's own collision (1,528), the firing ship's own hull (93);
    - FP: the parked line reaches the target, but the settled path is blocked by a sibling turret (59),
-     the firing ship's own hull (36) or the satellite (2).
-7. **After settling**, the only error left is the own-turret one: 674 FN and 0 FP over 15,820 rows.
+     the firing ship's own hull (39) or the satellite (2).
+7. **After settling**, the only error left is the own-turret one: 676 FN and 0 FP over 15,828 rows.
 8. **The six box points never pay off.**
    - Settled: they recover 0 false negatives and add 254 false CLEARs, mostly lines that reach the
      element past its own parent hull or a sibling element.
@@ -44,7 +44,7 @@ MESH unless stated.
     `excludeself="false"`, for every target class. The own-turret case needs its own handling:
     - Identify it with the existing `Q(W)` call and report UNKNOWN (`self`). This is what production
       does after its centre line.
-    - Or retry that one line with `excludeself="true"` ("probe+ex"). That recovers all 674 false
+    - Or retry that one line with `excludeself="true"` ("probe+ex"). That recovers all 676 false
       negatives but adds 78 false CLEARs where the firing ship's own hull blocks, because `true` drops
       it (settled: 0 FN, 78 FP, 1.76 mean calls).
 
@@ -148,21 +148,70 @@ replaced.
 
 | truth | whole ship | ship surface | station surface | station root | total |
 |---|---:|---:|---:|---:|---:|
-| **CLEAR** | 1,368 | 4,570 | 220 | 104 | **6,262** |
-| **NOT** | 182 | 8,820 | 544 | 12 | **9,558** |
+| **CLEAR** | 1,372 | 4,570 | 220 | 104 | **6,266** |
+| **NOT** | 186 | 8,820 | 544 | 12 | **9,562** |
 | GUIDED (no obstruction check) | 72 | 240 | 48 | 12 | 372 |
-| cannot bear the bearing point | 1,004 | 4,362 | 780 | 184 | 6,330 |
-| LargeTarget offset inside the body depends on the shape model | 32 | 0 | 0 | 0 | 32 |
-| shape models disagree | 22 | 704 | 14 | 0 | 740 |
+| cannot bear the bearing point | 1,024 | 4,362 | 780 | 184 | 6,350 |
+| LargeTarget body not reconstructable (`nocollision_jolt` part) | 0 | 0 | 0 | 0 | 0 |
+| shape models disagree | 26 | 704 | 14 | 0 | 744 |
 | first-hit tie | 0 | 72 | 0 | 0 | 72 |
 | path reaches no geometry | 0 | 0 | 74 | 108 | 182 |
 | trap / repeller start / rest out of arc / scorer UNKNOWN | 0 | 0 | 0 | 0 | 0 |
 
-- **Shape models disagree (740).** 398 are element-versus-parent-hull boundaries. 186 are hollow
-  engines: MESH reaches no geometry inside the nozzle, while the solid HULL is hit. 144 involve the
-  firing ship's own hull, and 12 are other. The HULL table gives the same conclusions as MESH.
+- **Shape models disagree (744).** 402 are element-versus-parent boundaries. 190 are paths where MESH
+  reaches the point with no hit while the solid HULL is hit: 186 hollow engine nozzles and 4
+  offset points inside the scavenger. 144 involve the firing ship's own hull, and 8 are other. The HULL table gives the same conclusions as MESH.
 - **No trap or multiple-rest case occurred.** Parked and astern starts always settled at the same yaw,
   including at 300 m.
+
+## LargeTarget point-inside test: the layer-0/1 body
+
+The LargeTarget offset is kept only when `0x0051BEB0` finds the offset point inside the target's
+layer-0/1 body (`+0x260`). Until `539fd05` the benchmark tested it against the layer-3 line-of-fire
+parts under both shape models, and excluded disagreement.
+
+**What the layer-0/1 body is (native, inference; KB "The layer-0/1 and layer-3 bodies differ in shape,
+part filter and geometry slot").** It uses the same member walk as layer 3, so it contains the hull,
+the attached elements and the `Destructible`/`DockingBay` children. The builder flag changes three
+things:
+
+- **shape:** the convex `-hull` shape (geometry `+0x28`) instead of the `-mesh` triangles;
+- **part filter:** `nocollision_jolt` parts are also dropped;
+- **geometry slot:** always slot 0.
+
+**Equivalence for this population.**
+
+- **Shape: not equivalent.** The MESH parity test is not what X4 does.
+- **Parts: equivalent.** No affected target has a `nocollision_jolt` part:
+  - checked on `pir_l_scavenger_01` and `spl_xl_ark_01`, their macro children and their stated
+    elements;
+  - and on all 36 official ships with no authored aim point and a radius over 500 m.
+
+  Every part ships exactly one `-hull.jcs`, so slot 0 is the file the benchmark already reads.
+
+**Correction.** `bearing_point` now tests the point with the HULL model only, over the target's
+hull, children and elements. The old disagreement exclusion is gone. A focused guard keeps any row
+UNKNOWN whose target body carries a `nocollision_jolt` part (`geometry.Body.jolt`), because that body
+is not reconstructed; no row triggers it.
+
+**Rows that changed: exactly the 32 previously excluded ones.** The row-by-row diff against `539fd05`
+changes no other record. In all 32 the offset point is inside the HULL body, so the offset is kept:
+
+| target | rows | now |
+|---|---:|---|
+| `pir_l_scavenger_01` | 4 | NOT (bearing path blocked by the firing ship's own hull) |
+| `pir_l_scavenger_01` | 4 | line of fire excluded: MESH reaches the offset point with no hit, HULL hits the hull |
+| `spl_xl_ark_01` | 20 | CANNOT BEAR the offset point |
+| `spl_xl_ark_01` | 4 | CLEAR |
+
+The 8 newly scored rows, settled:
+
+- probe: 2 TP, 4 TN, 2 FN (own-turret socket, `arg_m_dumbfire_02`);
+- probe+ex: 4 TP, 4 TN;
+- current and seven: 2 TP, 4 TN, 2 FN.
+
+Parked, the probe adds 3 FP (own hull) and 3 FN (2 own socket, 1 own hull). No conclusion changes: the settled
+probe still has 0 false CLEARs, and every settled error is still the firing turret's own collision.
 
 ## Accuracy against the settled line of fire
 
@@ -170,24 +219,24 @@ BLOCKED and UNKNOWN count as "not clear"; production UNKNOWN is also shown on it
 `probe` is the first `useaimtarget=true` probe alone. `probe+ex` is the probe plus, only when its first
 hit is the firing turret, the same line with `excludeself="true"`.
 
-**All 15,820 scored rows:**
+**All 15,828 scored rows:**
 
 | method | phase | TP | FP | TN | FN | UNKNOWN (on CLEAR) | mean calls |
 |---|---|---:|---:|---:|---:|---:|---:|
-| probe | parked | 4,622 | 108 | 9,450 | 1,640 | — | 1 |
-| **probe** | **settled** | **5,588** | **0** | **9,558** | **674** | — | **1** |
-| probe+ex | parked | 6,131 | 423 | 9,135 | 131 | — | 1.96 |
-| probe+ex | settled | 6,262 | 78 | 9,480 | 0 | — | 1.76 |
-| current | parked | 3,345 | 102 | 9,456 | 2,917 | 4,415 (1,843) | 2.55 |
-| current | settled | 4,076 | 38 | 9,520 | 2,186 | 2,088 (1,036) | 2.46 |
-| seven | parked | 4,464 | 308 | 9,250 | 1,798 | 4,242 (1,680) | 12.74 |
-| seven | settled | 5,386 | 254 | 9,304 | 876 | 1,912 (860) | 11.97 |
-| lazy | settled | 5,386 | 254 | 9,304 | 876 | 1,912 (860) | 6.78 |
-| eight | settled | 5,386 | 254 | 9,304 | 876 | 1,912 (860) | 13.77 |
+| probe | parked | 4,623 | 111 | 9,451 | 1,643 | — | 1 |
+| **probe** | **settled** | **5,590** | **0** | **9,562** | **676** | — | **1** |
+| probe+ex | parked | 6,134 | 426 | 9,136 | 132 | — | 1.96 |
+| probe+ex | settled | 6,266 | 78 | 9,484 | 0 | — | 1.76 |
+| current | parked | 3,346 | 105 | 9,457 | 2,920 | 4,417 (1,845) | 2.55 |
+| current | settled | 4,078 | 38 | 9,524 | 2,188 | 2,090 (1,038) | 2.46 |
+| seven | parked | 4,465 | 311 | 9,251 | 1,801 | 4,244 (1,682) | 12.73 |
+| seven | settled | 5,388 | 254 | 9,308 | 878 | 1,914 (862) | 11.97 |
+| lazy | settled | 5,388 | 254 | 9,308 | 878 | 1,914 (862) | 6.78 |
+| eight | settled | 5,388 | 254 | 9,308 | 878 | 1,914 (862) | 13.76 |
 
 - The anchor alone (9,836 rows) is unchanged: settled probe 0/0, seven 130 FP, current 1,182 FN.
-- The broad population alone (5,984 rows): settled probe 0 FP / 674 FN, seven 124 FP / 876 FN,
-  current 18 FP / 1,004 FN.
+- The broad population alone (5,992 rows): settled probe 0 FP / 676 FN, seven 124 FP / 878 FN,
+  current 18 FP / 1,006 FN.
 - Lazy never changed a status (integrity check). The eighth point (the old centre) gave totals
   identical to seven.
 
@@ -197,7 +246,7 @@ hit is the firing turret, the same line with `excludeself="true"`.
 |---|---:|---:|---:|---:|---:|---:|
 | ship surface | 13,390 | 4,570 | 0 / 296 | 54 / 0 | 20 / 1,606 | 234 / 296 |
 | station surface | 764 | 220 | 0 / 56 | 4 / 0 | 0 / 56 | 2 / 56 |
-| whole ship | 1,550 | 1,368 | 0 / 296 | 20 / 0 | 10 / 492 | 10 / 492 |
+| whole ship | 1,558 | 1,372 | 0 / 298 | 20 / 0 | 10 / 494 | 10 / 494 |
 | station root | 116 | 104 | 0 / 26 | 0 / 0 | 8 / 32 | 8 / 32 |
 
 For whole ships and station roots, "seven" is the current method: the scan applies only to elements.
@@ -216,7 +265,7 @@ For whole ships and station roots, "seven" is the current method: the scan appli
 
 | aim points | scored | probe | current | seven |
 |---|---:|---:|---:|---:|
-| 0 | 692 | 0 / 98 | 8 / 104 | 8 / 104 |
+| 0 | 700 | 0 / 100 | 8 / 106 | 8 / 106 |
 | 1 | 14,200 | 0 / 388 | 20 / 1,744 | 236 / 434 |
 | 2+, every origin picks the same point | 907 | 0 / 188 | 10 / 338 | 10 / 338 |
 | 2+, selector origin matters | 21 | 0 / 0 | 0 / 0 | 0 / 0 |
@@ -226,10 +275,10 @@ For whole ships and station roots, "seven" is the current method: the scan appli
 | turret category | scored | probe | seven |
 |---|---:|---:|---:|
 | M unguided missile, multi endpoint (`arg_m_dumbfire_02`) | 1,594 | 0 / 610 | 4 / 612 |
-| L unguided missile, multi endpoint (`par_l_dumbfire_01`) | 604 | 0 / 48 | 14 / 66 |
+| L unguided missile, multi endpoint (`par_l_dumbfire_01`) | 606 | 0 / 50 | 14 / 68 |
 | M beam (`kha_m_beam_01`) | 1,514 | 0 / 16 | 34 / 94 |
 | M unguided missile, single endpoint (`bor_m_dumbfire_01`) | 618 | 0 / 0 | 22 / 32 |
-| M/L projectile, single and multi endpoint | 1,654 | 0 / 0 | 50 / 72 |
+| M/L projectile, single and multi endpoint | 1,660 | 0 / 0 | 50 / 72 |
 
 ## What breaks `useaimtarget`
 
@@ -238,13 +287,13 @@ Blocker mechanisms by the first hit on the bearing path (all rows, settled, FP /
 | first hit on the bearing path | rows | probe | seven | current |
 |---|---:|---:|---:|---:|
 | the selected element (CLEAR) | 4,570 + 220 | 0 / 296 + 0 / 56 | 0 / 296 + 0 / 56 | 0 / 1,606 + 0 / 56 |
-| the target hull, whole ship (CLEAR) | 1,308 | 0 / 294 | 0 / 490 | 0 / 490 |
+| the target hull, whole ship (CLEAR) | 1,312 | 0 / 296 | 0 / 492 | 0 / 492 |
 | the target's own element, whole ship (CLEAR) | 60 | 0 / 2 | 0 / 2 | 0 / 2 |
 | a station module, root (CLEAR) | 104 | 0 / 26 | 0 / 32 | 0 / 32 |
 | parent hull of the selected element | 4,510 | 0 / 0 | 150 / 0 | 18 / 0 |
 | sibling turret / shield / engine on the target | 1,282 / 100 / 350 | 0 / 0 | 76 / 0 | 0 / 0 |
 | parent module / other module / sibling element, station | 210 / 250 / 74 | 0 / 0 | 2 / 0 | 0 / 0 |
-| firing ship's own hull | 2,046 | 0 / 0 | 16 / 0 | 12 / 0 |
+| firing ship's own hull | 2,050 | 0 / 0 | 16 / 0 | 12 / 0 |
 | sibling turret / shield on the firing ship | 590 / 8 | 0 / 0 | 8 / 0 | 6 / 0 |
 | other ship / station module / asteroid (external) | 16 / 34 / 84 | 0 / 0 | 0 / 0 | 0 / 0 |
 | satellite (external small object) | 4 | 0 / 0 | 2 / 0 | 2 / 0 |
@@ -257,7 +306,7 @@ points (KB, "Some launcher sockets enclose their own launch points"):
 | firing turret | probe first hits its own turret | truth-CLEAR settled rows |
 |---|---:|---:|
 | `turret_arg_m_dumbfire_02_mk1` | 610 | 670 |
-| `turret_par_l_dumbfire_01_mk1` | 48 | 276 |
+| `turret_par_l_dumbfire_01_mk1` | 50 | 278 |
 | `turret_kha_m_beam_01_mk1` | 16 | 676 |
 | every other benchmark turret | 0 | |
 
@@ -274,13 +323,13 @@ metres apart all passed around it.
 
 The probe's parked errors, by first hit on its own line:
 
-- **FN 1,640:**
-  - own turret collision: 1,526 (a parked barrel behind or inside its socket);
-  - the firing ship's own hull: 92;
+- **FN 1,643:**
+  - own turret collision: 1,528 (a parked barrel behind or inside its socket);
+  - the firing ship's own hull: 93;
   - other: 22.
-- **FP 108:** the parked line reaches the target while the settled path is blocked:
+- **FP 111:** the parked line reaches the target while the settled path is blocked:
   - by a sibling turret on the firing ship: 59;
-  - by the firing ship's own hull: 36;
+  - by the firing ship's own hull: 39;
   - by the satellite: 2;
   - other: 11.
 
@@ -370,8 +419,8 @@ continuation says it would on 34 of 74 rows.
 ## Shape model
 
 MESH and HULL are both still cast; which Jolt shape the layer-3 ray uses remains untraced. Every
-conclusion above holds under HULL: settled probe 0 FP / 676 FN, probe+ex 56 FP / 0 FN, seven 166 FP /
-852 FN. Disagreements are excluded, not resolved.
+conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP / 0 FN, seven 166 FP /
+854 FN. Disagreements are excluded, not resolved.
 
 ## Decision-rule tests and integrity
 
@@ -390,8 +439,9 @@ conclusion above holds under HULL: settled probe 0 FP / 676 FN, probe+ex 56 FP /
 
 ## Evidence gaps
 
-1. Which Jolt shape the layer-3 ray, and the LargeTarget point-inside test, use (740 and 32 rows
-   excluded).
+1. Which triangle source the layer-3 ray uses: geometry `+0x20` (`-mesh`), at a geometry slot from a
+   member virtual (`+0x15D8`), with a `-collision` XMF fallback. 744 rows excluded where MESH and HULL
+   disagree. The LargeTarget point-inside test is resolved: layer 0/1, `-hull` only (see below).
 2. The module-to-root `+0x70` link, and cross-zone rays (station-root CLEAR assumes the link).
 3. The `U::Turret` slot `+0x1BF0` predicate (`0x005BF690`). It matters only for a turret element with
    no authored point; none was in the population.
@@ -414,7 +464,7 @@ The one remaining error is the firing turret's own collision. The options:
 
 - Report it as UNKNOWN through the existing `Q(W)` identification (2 calls when it happens). This is
   honest and conservative, and costs launcher turrets like `arg_m_dumbfire_02` most of their CLEARs.
-- Or retry with `excludeself="true"` (3 calls). That recovers all 674 but can claim CLEAR through the
+- Or retry with `excludeself="true"` (3 calls). That recovers all 676 but can claim CLEAR through the
   firing ship's own hull (78 false CLEARs here). That is a product trade-off this benchmark measures
   but does not decide.
 
