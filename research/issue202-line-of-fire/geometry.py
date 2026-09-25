@@ -143,13 +143,13 @@ def _geometry_dir(comp):
 class Body:
     """Layer-3 collision parts of one component in its own frame, in both shape models."""
 
-    def __init__(self, triangles, hulls, parts):
+    def __init__(self, triangles, hulls, parts, part_of):
         self.tris, self.hulls, self.parts = triangles, hulls, parts
         self.planes = np.concatenate([planes for _points, planes in hulls])
         self.starts = np.cumsum([0] + [len(planes) for _points, planes in hulls])[:-1]
         self.lo, self.hi = triangles.reshape(-1, 3).min(0), triangles.reshape(-1, 3).max(0)
         order = _median_order(triangles.mean(1))
-        self.tris = triangles[order]
+        self.tris, self.part_of = triangles[order], part_of[order]
         leaves = self.tris.reshape(-1, 3)[:len(order) // LEAF * LEAF * 3].reshape(-1, LEAF * 3, 3)
         tail = self.tris[len(order) // LEAF * LEAF:].reshape(-1, 3)
         self.leaf_lo = np.array([leaf.min(0) for leaf in leaves] + ([tail.min(0)] if len(tail) else []))
@@ -179,7 +179,7 @@ def _median_order(points):
 def body(component):
     """Collision Body of an official component (static parts; connection frames as #167/#171)."""
     comp = S.component(component)
-    tris, hulls, parts = [], [], []
+    tris, hulls, parts, part_of = [], [], [], []
     for conn in S.connections(comp).values():
         for part in (p for g in conn.findall("parts") for p in g.findall("part")):
             owner, name, tags = comp, part.get("name"), S.tags(conn)
@@ -195,11 +195,12 @@ def body(component):
                 raise FileNotFoundError(f"{component}: {stem} lacks collision mesh or hull")
             t, R = (np.asarray(v) for v in S.conn_world(comp, conn))
             tris.append(xmf_triangles(mesh) @ R + t)
+            part_of.append(np.full(len(tris[-1]), len(parts)))
             for points, planes in jcs_hulls(hull):
                 normals = planes[:, :3] @ R                     # rigid: n' = n·R, c' = c - n'·t
                 hulls.append((points @ R + t, np.column_stack([normals, planes[:, 3] - normals @ t])))
             parts.append(name)
-    return Body(np.concatenate(tris), hulls, tuple(parts)) if tris else None
+    return Body(np.concatenate(tris), hulls, tuple(parts), np.concatenate(part_of)) if tris else None
 
 
 # ---------------------------------------------------------------- ray casting
@@ -267,8 +268,9 @@ def _world_boxes(instances):
     return _BOXES[key][1:]
 
 
-def first_hit(instances, o, e=None, d=None, tmax=None, model="mesh", skip=()):
+def first_hit(instances, o, e=None, d=None, tmax=None, model="mesh", skip=(), runner_up=False):
     """Closest hit (label, distance) on segment o->e (or ray o + t·d, t <= tmax), else (None, inf).
+    With runner_up, also the closest hit on any other instance: (label, t, label2, t2).
 
     instances: [(label, Body, (t, R))]; the list must not be mutated after its first use."""
     if e is not None:
@@ -279,12 +281,36 @@ def first_hit(instances, o, e=None, d=None, tmax=None, model="mesh", skip=()):
     with np.errstate(divide="ignore", invalid="ignore"):
         near, far = _slab(o, 1.0 / d, lo, hi)
     cast = cast_mesh if model == "mesh" else cast_hull
-    best = (None, np.inf)
+    best, second = (None, np.inf), (None, np.inf)
     for i in np.nonzero((near <= far) & (far >= 0) & (near <= tmax))[0]:
         label, b, (t, R) = instances[i]
         if label in skip:
             continue
         hit = cast(b, (o - t) @ R.T, d @ R.T, tmax)       # into the body frame; rigid, t is preserved
         if hit is not None and hit < best[1]:
-            best = (label, hit)
-    return best
+            best, second = (label, hit), best
+        elif hit is not None and hit < second[1]:
+            second = (label, hit)
+    return (*best, *second) if runner_up else best
+
+
+def inside(b, p, model):
+    """Is body-frame point p inside the body? HULL: inside any solid convex piece. MESH: odd crossings of
+    one part's two-sided triangles along +Y, as Jolt's closed-mesh CollidePoint (parity, per part)."""
+    if model == "hull":
+        on = b.planes[:, :3] @ p + b.planes[:, 3]
+        return bool(np.logical_and.reduceat(on <= 0, b.starts).any())
+    d = np.array([0.0, 1.0, 0.0])
+    tri = b.tris
+    e1, e2 = tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0]
+    q = np.cross(d, e2)
+    det = (e1 * q).sum(1)
+    ok = np.abs(det) > 1e-12
+    inv = np.where(ok, 1 / np.where(ok, det, 1), 0)
+    s = p - tri[:, 0]
+    u = (s * q).sum(1) * inv
+    r = np.cross(s, e1)
+    v = (r @ d) * inv
+    t = (e2 * r).sum(1) * inv
+    crossed = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 0)
+    return bool((np.bincount(b.part_of[crossed], minlength=len(b.parts)) % 2).any())

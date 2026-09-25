@@ -3,47 +3,54 @@
 OFFLINE research. No production change and no X4 launch.
 
 ```sh
-python3 research/issue202-line-of-fire/settled.py            # physical benchmark, ~6 min, one process (run under nice)
-python3 research/issue202-line-of-fire/settled.py --report   # re-report the saved rows, ~1 min
-python3 research/issue202-line-of-fire/benchmark.py          # decision-rule regression tests, < 1 s (--population: #184 inputs)
-lua research/issue202-line-of-fire/runtime.lua               # real ui/gunnery_control.lua pass behavior
+nice python3 research/issue202-line-of-fire/settled.py            # physical benchmark, ~12 min, one process
+python3 research/issue202-line-of-fire/settled.py --report        # re-report the saved rows, under a minute
+python3 research/issue202-line-of-fire/benchmark.py               # decision-rule regression tests, < 1 s
+lua research/issue202-line-of-fire/runtime.lua                    # real ui/gunnery_control.lua pass behavior
 ```
 
-`settled.py` needs the ignored #176 corpus (`python3 research/issue176-a4x/corpus.py`), the
-official source sets and ANI resources under `.x4-research-cache/`, numpy, and read access to the
-installed X4 catalogs (it reads collision files straight from the `.cat`/`.dat` pairs and writes
-nothing into the game or the repository). Raw rows go to the ignored
-`.x4-research-cache/issue202-settled/rows.jsonl.gz`.
+`settled.py` needs the ignored #176 corpus (`python3 research/issue176-a4x/corpus.py`), the official
+source sets, the ANI resources and the construction plans under `.x4-research-cache/`, numpy, and read
+access to the installed X4 catalogs. It reads collision files straight from the `.cat`/`.dat` pairs and
+writes nothing into the game or the repository. Raw rows go to the ignored
+`.x4-research-cache/issue202-settled/rows.jsonl.gz`. The report exits non-zero if an integrity check
+fails.
 
-## Physical benchmark (`settled.py`, `geometry.py`)
+## Physical benchmark
 
-The source of truth is the straight path from a turret's **settled `barrelposition`** to the **X4
-aim point it bears toward**, after turning toward the selected target. The tested lines of the
-current and seven-point methods, and the first `useaimtarget` probe on its own, are predictions.
+- `geometry.py`: catalog reader, the MESH (`-collision.xmf`, two-sided) and HULL (`-hull.jcs`, solid
+  convex) shape models, ray casts, first-hit ties and point-inside tests.
+- `scenes.py`: the stratified population, every rule fixed from source metadata before scoring:
+  - official A7.3 firing ships (M1, L1, L2, X1), with at most six extreme mounts each;
+  - the A7.3 two-extreme turret loadout per mount, with guided turrets ranked out;
+  - one extra variant for any missing turret category;
+  - whole-ship targets per authored aim-point count (smallest and largest, plus median and first above
+    500 m for none), their surface elements, and the Xenon mothership's four-point engine;
+  - three shipped construction-plan stations with their surface elements;
+  - ordinary and aim-point-switch views from #184, and one scene per external blocker class.
+- `settled.py`: truth, candidates, report and integrity checks. It also runs the #202 Ray/two-Osaka
+  anchor, which is reported separately.
 
-- **Scene**: the #202 LIVE ships. The Boron Ray with its 14 real mounts (12 M railguns, 2 L
-  disruptors) fires at an Osaka carrying a stated Terran loadout, with the second Osaka as the
-  shared obstacle, in three arrangements × four Osaka yaws.
-- **Geometry**: every layer-3 part's `-collision.xmf` triangle mesh (MESH) and its Jolt
-  `-hull.jcs` convex pieces (HULL). X4 loads both; which one the ray query uses is untraced, so
-  truth requires both to agree.
-- **Bearing and settling**: the accepted #176 scorer decides CAN BEAR. The #166 yaw gate plus the
-  starting yaw (parked at 0, or at rest astern) decides which rest the turret reaches. Traps, a
-  settled rest out of arc and scorer UNKNOWN are excluded as UNKNOWN.
-- **Truth**: the segment from the settled `barrelposition` to that aim point, ignoring only the
-  firing turret's own meshes. Its first hit is scored with the #202 membership rules; a segment
-  with no hit is UNKNOWN. Each barrel's settled +Z projectile path is a separate diagnostic only.
-- **Candidates**: `benchmark.candidate()` fed with the physical first hit of each tested segment,
-  from the pre-turn muzzle and from the settled muzzle.
+Truth is the straight path from the turret's **settled `barrelposition`** to the **point X4's shoot
+controller bears on**:
+
+- the nearest authored aim point from the turret component origin, else the box centre;
+- plus the LargeTarget offset on a ship over 500 m with no authored point;
+- the union-box centre for a station root.
+
+The first hit is traced through real collision geometry, ignoring only the firing turret's own meshes. It
+is UNKNOWN when the shape models disagree, the path hits nothing, or the first hit is a tie. Candidates
+are `benchmark.candidate()` fed the physical first hit of each tested line, from the pre-turn and the
+settled muzzle, plus the first `useaimtarget=true` probe alone.
 
 ## Decision-rule regression tests (`benchmark.py`)
 
-Hand-stated first-hit arrangements for blockers, membership, points, weapon classes and
-uncertainty. They check the decision rules, the production drift signature and the mutants. They
-are not X4 physics and are outside the physical accuracy totals.
+Hand-stated first-hit arrangements for blockers, membership, points, weapon classes and uncertainty. They
+check the decision rules, the production drift signature and the mutants. They are not X4 physics and are
+outside the physical accuracy totals.
 
-`runtime.lua` runs the real selected-target pass code through `tests/support/runtime_fixture.lua`:
-`CODE` rows check existing behavior, `SPEC` rows #202 task 3 display targets, `NOTE` rows
-observations that are not failures.
+`runtime.lua` runs the real selected-target pass code through `tests/support/runtime_fixture.lua`: `CODE`
+rows check existing behavior, `SPEC` rows #202 task 3 display targets, `NOTE` rows observations that are
+not failures.
 
 See [findings.md](findings.md).

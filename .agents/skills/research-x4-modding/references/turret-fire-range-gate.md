@@ -283,7 +283,10 @@ themselves.
     authored aim-target collection (`+0x760` null). It maps the turret's
     normalized position inside its own ship's box onto the target box, scaled
     by `(0.25, 0.25, 0.75)` of the target's half-extents. It is zeroed if the
-    point fails `0x0051BEB0`. The result stays inside the target box.
+    point fails `0x0051BEB0`, a point-inside test against the target's own
+    body. The result stays inside the target box. Its exact conditions, and
+    why a station root never keeps it, are in
+    [selected-target-line-of-fire.md](selected-target-line-of-fire.md).
   - **LargeTarget with a non-turret weapon.** Aims along the firing ship's
     forward axis at `0.99·R` and requires that segment to hit the target box.
     It never applies to turrets.
@@ -293,7 +296,9 @@ themselves.
     that. The chosen target becomes `ctrl+0xC0`, and slot `+0x90` makes the
     gate range-test that same target with both distances.
   - **Shared solver.** Starts from the selected target-local point:
-    - the nearest authored aim point relative to the weapon; or
+    - the nearest authored aim point relative to the weapon component's
+      origin (not its firing endpoint; see
+      [macro-box-aimtargets.md](macro-box-aimtargets.md)); or
     - the box centre when there is none (184 of 203 vanilla ship components
       have none), plus the LargeTarget offset.
   - **Lead.** Only when slot `+0x1F18` is true: non-beam conventional turrets

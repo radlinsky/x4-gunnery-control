@@ -74,8 +74,12 @@ the selector. `check_line_of_sight useaimtarget` reaches the same logic and
 the same fallback through a sibling selector: RTTI
 `.?AVCheckLineOfSightAction@Scripts@@`, vtable `0x02C0D738`, run method
 `0x00BCB4D0`, calling `0x00520FC0` at `0x00BCBAFF`. `0x00520FC0` differs from
-`0x005210E0` only by transforming the caller-supplied origin into the target
-frame first (`0x003DDE10`); its fallback at `0x005210B8` is identical. Target-local origin and selected point are transformed by
+`0x005210E0` only by computing its own origin first: the caller supplies a
+**component**, not a position, and `0x00520FC0` expresses that component's
+own origin (an identity local transform, constants `0x022C01D0`–`0x022C01F0`)
+in the target frame through `0x003DDE10`. Its fallback at `0x005210B8` is
+identical. See "Which origin selects the aim point" below for what each caller
+passes. Target-local origin and selected point are transformed by
 `0x003DB8A0` on either side. The loader writes raw authored translation at
 connection `+0x60`; parent-composed transforms use separate storage. For an
 unparented aim connection, the raw translation and the macro/component box
@@ -109,6 +113,36 @@ are in the same component frame. Do not invent a parent transform for it.
   `BasicShootController`, `MindlessShootController`, `MultipleShootController`,
   `LargeTargetShootController`, `PlayerShootController` and
   `PlayerBombLauncherShootController`.
+
+## Which origin selects the aim point
+
+- X4: 9.00 build 611726
+- Status: inference — native trace, same executable and SHA-256 as above,
+  traced 2026-09-25.
+- Live test: no.
+- Finding: both the turret shoot controller and MD `check_line_of_sight
+  useaimtarget="true"` select the nearest authored aim point from a
+  **component origin**, never from a muzzle or an offset.
+  - Turret firing: the pre-fire caller builds the controller's aim-point call
+    at `0x008140E3`–`0x008141C2`, passing the weapon component as argument 5.
+    It reaches the shared solver `0x007E7460` (through Basic `0x007E72B0`, or
+    LargeTarget `0x007E7DE0` → Basic), which calls `0x00520FC0(target,
+    weapon)` at `0x007E76AA`. For a turret the weapon component is the turret
+    component, whose frame is its mount. The current launch-point transform
+    (`0x0081CB80`, `[weapon+0x2F0]`/`+0x2E8`) is a separate argument and does
+    not reach the selector.
+  - MD: `CheckLineOfSightAction` calls `0x00520FC0(target, object)` at
+    `0x00BCBAFF`. `object` is the action's resolved `object` attribute
+    (`0x00BCB518` → `[rbp-0x50]` → `r15`). `objectoffset` only moves the ray
+    start (`0x00BCB7D1`–`0x00BCB813`).
+- Consequence: for a turret, the native bearing point and the first MD
+  `useaimtarget` probe from `object="$weapon"` choose the same authored point
+  whatever `objectoffset` is. The choice does not change as the turret turns.
+  A muzzle-origin selector disagrees with it only on multi-point targets, near
+  a switch boundary.
+  With lead enabled, the solver re-selects in the predicted target frame (see
+  [turret-fire-range-gate.md](turret-fire-range-gate.md)); the origin is
+  still the weapon component.
 
 ## No script surface exposes an aim connection
 

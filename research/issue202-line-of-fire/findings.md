@@ -1,287 +1,422 @@
 # Selected-target CLEAR LINE OF FIRE benchmark findings (#202)
 
-Status: **OFFLINE inference**. Production MD unchanged since `cf459d0`; X4 9.00 build 611726
-(`X4.exe` SHA-256 `19750a65…6ad6891` re-verified 2026-09-25). No new LIVE evidence. Simulated query
-counts are `check_line_of_sight` calls, not frame cost.
+Status: **OFFLINE inference**. Production MD unchanged since `cf459d0`. X4 9.00 build 611726, `X4.exe`
+SHA-256 `19750a65…6ad6891`, re-verified 2026-09-25. No new LIVE evidence. Call counts are simulated
+`check_line_of_sight` calls, not frame cost. The full report is `settled.py --report`; numbers below are
+MESH unless stated.
 
-## What the benchmark measures
+## Answers
 
-The question is CLEAR LINE OF FIRE for the selected target: once a turret has turned toward the
-target and settled, is the straight path from its firing origin to the point it is bearing on
-unobstructed up to the target?
+1. **Ship surface elements: yes, after settling, apart from one mechanism.** On 13,390 scored rows
+   the settled `useaimtarget` probe has 0 false positives and 296 false negatives. Every false negative
+   is a line whose first hit is the firing turret's own collision, which X4's pre-fire gate ignores. No
+   number of box points fixes that: the seven-point scan misses the same 296 rows and adds 234 false
+   CLEARs.
+2. **Station surface elements: the same.** On 764 rows, 0 FP and 56 FN, all own-turret. A Xenon
+   shield whose aim point is off its mesh adds 74 UNKNOWN rows; see "Where truth is undefined".
+3. **Whole ships: the same.** On 1,550 rows, 0 FP and 296 FN, all own-turret. The LargeTarget offset
+   moves the bearing point off the box centre on 64 rows. The probe still tests the box centre, but
+   that caused no error here.
+4. **Multi-aim-point targets: no special handling needed.** X4 and MD `useaimtarget` both pick the
+   aim point nearest the **turret component origin**; the muzzle never selects it (native trace). The
+   probe therefore tests the bearing point on every multi-point row. Across 928 scored multi-point rows
+   its only errors are the own-turret ones. On 23 settled rows a muzzle-origin selector would pick
+   another point; all are scored, and the probe is right on all 21 with defensible truth.
+5. **Station roots: the turret bears on the union-box centre, often empty space.** The LargeTarget
+   offset is never kept, because a modular station's own component has no collision geometry (native
+   trace). On 108 of 224 settled rows the path to the centre, and past it, meets no geometry: X4 still
+   fires, and the aimed line misses the station. Those rows are UNKNOWN. On the 116 scored rows the
+   root probe has 0 FP and 26 own-turret FN. The production two-module lines have 8 FP, all blocked by
+   the firing ship's own hull, and 32 FN. They also read CLEAR on 78 of the 108 empty-path rows, where
+   X4's aimed line reaches nothing.
+6. **Before settling**, the probe's errors come from where the barrel is parked:
+   - FN: the firing turret's own collision (1,526), the firing ship's own hull (92);
+   - FP: the parked line reaches the target, but the settled path is blocked by a sibling turret (59),
+     the firing ship's own hull (36) or the satellite (2).
+7. **After settling**, the only error left is the own-turret one: 674 FN and 0 FP over 15,820 rows.
+8. **The six box points never pay off.**
+   - Settled: they recover 0 false negatives and add 254 false CLEARs, mostly lines that reach the
+     element past its own parent hull or a sibling element.
+   - Parked: they recover 4 and add 205.
+9. **No physical mechanism needs them** among scoreable rows. They say CLEAR on rows whose aimed line
+   reaches no geometry (the off-mesh shield and station centre gaps), but there the truth is undefined.
+10. **Smallest justified method: one `useaimtarget=true` probe from the settled `barrelposition`**,
+    `excludeself="false"`, for every target class. The own-turret case needs its own handling:
+    - Identify it with the existing `Q(W)` call and report UNKNOWN (`self`). This is what production
+      does after its centre line.
+    - Or retry that one line with `excludeself="true"` ("probe+ex"). That recovers all 674 false
+      negatives but adds 78 false CLEARs where the firing ship's own hull blocks, because `true` drops
+      it (settled: 0 FN, 78 FP, 1.76 mean calls).
 
-- **Truth** is that path. It runs from the **settled `barrelposition`** to the **X4 aim point the
-  turret bears toward**, traced through real X4 collision geometry (`settled.py`, `geometry.py`).
-- **Predictions** are the current and seven-point methods, each run from the pre-turn ("parked")
-  muzzle and from the settled muzzle, and scored against that same truth.
-- **The hand-written scenes** stay in `benchmark.py` as **decision-rule regression tests**
-  (membership, blocker categories, guidance, zone, mutants). They are outside every accuracy total.
+    The three target types do not need different point sets. Station roots differ in what the bearing
+    point is, not in how to test it.
 
-This replaces the previous truth, which followed each barrel's +Z projectile line and excluded
-"grazing" and barrel-disagreement rows. That answered an impact-prediction question, not a line-of-
-fire one. The projectile lines are now only a diagnostic, and they never define or exclude a row.
+## What changed since the Ray/Osaka-only benchmark
 
-## Method
+- **Native: which origin selects the aim point.** The shoot controller passes the weapon component
+  to `0x00520FC0` (`0x007E76AA`); `CheckLineOfSightAction` passes its `object` (`0x00BCBAFF`). The
+  selector uses that component's own origin, so neither uses the muzzle or `objectoffset`. The old
+  code selected the probe's point from the muzzle. Truth and probe now both use the turret origin.
+  Recorded in `macro-box-aimtargets.md`.
+- **Native: where a turret bears on a whole ship or station.** Recorded in
+  `selected-target-line-of-fire.md`:
+  - a ship with no authored point and box radius > 500 m gets the LargeTarget offset;
+  - the offset is kept only if it lies inside the ship's own body (`0x0051BEB0`);
+  - a station root always falls back to its union-box centre.
+- **Population:**
+  - 4 official A7.3 firing ships, beside the Ray;
+  - 12 whole-ship targets chosen by aim-point count and size;
+  - 64 ship and 12 station surface elements;
+  - three shipped stations;
+  - external blockers.
+- **One bug found and fixed during the run.** The whole-ship probe must end at the authored point; it
+  had used the box centre.
 
-**Scene: the #202 LIVE ships.**
+## Population
 
-- Firing ship: the Boron Ray, `ship_bor_l_destroyer_01`, with its 14 real turret mounts. The 12 M
-  mounts carry `turret_bor_m_railgun_02_mk1` and the 2 L mounts `turret_bor_l_disruptor_01_mk1`, as
-  in the LIVE run.
-- Target: an Osaka, `ship_ter_l_destroyer_01`, with a **stated** Terran loadout on all 34 mounts:
-  M/L laser turrets, M/L standard shields, L all-round engines. The LIVE Osaka had a random
-  level-1.0 loadout that was not logged.
-- One shared obstacle per scene: the second Osaka.
-- Three arrangements (Ray frame): the LIVE fixture (±900 m, 3.5 km ahead), a screened one (the other
-  Osaka partly between), and high on the starboard beam. Four Osaka yaws each. Two starting yaws:
-  parked at 0, and at rest after a target astern.
-- 11,760 tests: 14 turrets × 35 targets (hull + 34 elements) × 3 arrangements × 4 yaws × 2 starts.
-  About 6 min, one niced process.
+Every rule reads source metadata only and is fixed before scoring (`scenes.py`). SWI is excluded
+because its collision geometry is not installed.
 
-**Geometry, from the installed catalogs.**
+**Firing ships:** the #184 A7.3 official rows.
 
-- X4's geometry loader (`0x140F51360`) loads a `-mesh` and a `-hull` Jolt shape per part (geometry
-  `+0x20`/`+0x28`) plus the `-collision` XMF. Which shape the layer-3 ray query uses was not traced,
-  so every path is cast against both:
-  - **MESH**: the `-collision.xmf` triangles, two-sided;
-  - **HULL**: the `-hull.jcs` convex pieces, solid. The Ray hull has 128 pieces and the Osaka 256.
-- Layer-3 part filter: skip `nocollision`, `triggerpart` and `platformcollision`. On both Boron
-  turrets **the rotator, gun and barrel are `nocollision`**, so a turret's only layer-3 mesh is its
-  fixed socket. The ships' only colliding hull part is `part_main`; the Ray's dock area adds 8
-  triangles.
+| | ship | mounts used | loadout variants |
+|---|---|---|---|
+| M1 | `ship_bor_m_trans_container_01` | 1 of 1 | A: `par_m_shotgun_01`; B: `bor_m_laser_01` |
+| L1 | `ship_bor_l_miner_liquid_01` | 4 of 4 | A: `bor_m_dumbfire_01`; B: `bor_m_laser_02` |
+| L2 | `ship_spl_l_destroyer_01` | 6 of 18 | A: `arg_m_dumbfire_02`, `par_l_dumbfire_01`; B: `kha_m_beam_01`, `spl_l_laser_01`; C: `arg_l_guided_01` |
+| X1 | `ship_spl_xl_carrier_01` | 6 of 101 | A: `arg_m_dumbfire_02`; B: `kha_m_beam_01` |
+| Ray | `ship_bor_l_destroyer_01` (anchor) | 14 of 14 | 12 `bor_m_railgun_02`, 2 `bor_l_disruptor_01` |
 
-**Truth, per test.**
+- Mounts are the extremes along ±x, ±y and ±z.
+- Loadouts use the A7.3 rule per mount: the shortest barrel with the broadest arc, and the longest with
+  the narrowest.
+- Guided turrets are ranked out, because they never run the obstruction check. One guided variant is
+  kept to count GUIDED (372 rows, no rays).
+- Non-firing mounts, shields and engines carry a stated compatible macro of the ship's faction, so
+  siblings exist.
+- Categories covered: M and L; beam and projectile; single- and multi-endpoint; unguided missiles.
 
-1. **Aim point.** X4's selected aim point for the target: the element's nearest authored aim target
-   from the turret origin (native selector), else the box centre. Every element in this loadout
-   authors exactly one aim point, and the Osaka hull none, so it uses its box centre.
-2. **CAN BEAR.** The accepted #176 scorer, on that aim point.
-3. **Settling.** The #166 yaw gate, from rest at the starting yaw. The mover moves toward sign(g) and
-   stops at the first attractor that way; the favorable rest is never picked. `check_settling()`
-   asserts this on the #166 KB's two-rest geometry: from yaw ±3.0 it reaches 0, and only a start at
-   π stays at −π.
-4. **The path.** The segment from the settled `barrelposition` (endpoint element 0) to that same aim
-   point. The firing turret's own meshes are ignored, as X4's pre-fire gate ignores them.
-5. **Classification.** The first hit is scored with the #202 membership rules: a target member is
-   CLEAR, anything else NOT CLEAR.
+**Targets:**
 
-**Candidates.** The unchanged `benchmark.candidate()` code is fed the physical first hit of each
-tested segment: `current`, `seven`, `lazy` and `eight` (seven plus the old centre, tried last).
-The first `useaimtarget=true` probe is also reported on its own.
+- **Whole ships (12).** For each aim-point count, the smallest and largest official ship with a
+  collision body. For no aim point, also the median and the smallest above 500 m.
 
-## Truth and exclusions
+  | aim points | ships |
+  |---|---|
+  | 0 | `arg_s_trans_container_02`, `ter_m_corvette_01`, `pir_l_scavenger_01` (578 m), `spl_xl_ark_01` (6 km) |
+  | 1 | `pir_s_fighter_01`, `kha_l_destroyer_01` |
+  | 2 | `pir_s_heavyfighter_01`, `bor_l_miner_solid_01` |
+  | 3 | `gen_s_fightingdrone_01`, `ter_xl_resupplier_01` |
+  | 4 | `arg_xl_carrier_02` |
 
-| truth | engine | hull | shield | turret | total |
+  The Osaka anchor is the twelfth.
+- **Ship surface (64).** On every L/XL host, per kind, the smallest and largest selectable element.
+  The Xenon mothership hosts the only multi-point element, `engine_xen_xl_mothership_01_allround_mk1`
+  (4 points), on its real hull of child structures. Stated equipment elsewhere.
+- **Stations (3 shipped plans).**
+  - `xen_defence`: compact, 5 modules (#60);
+  - `arg_tradestation`: 19 modules on long struts;
+  - `arg_shipyard`: 37 modules.
+  - Plus 12 station turret and shield elements. No station module has an engine slot.
+- **Views.** Two ordinary #184 bearings per host, plus two aim-point-switch bearings for multi-point
+  targets. Gaps are 1,500 m and 300 m. Every view uses all four firing ships and their variants.
+- **External blockers.** One scene each for another ship, a station module, an ice asteroid and a
+  satellite, on the `bor_l_miner_solid` host.
+  - Wrecks are not simulated. The accepted native rule gives a fresh, persistent or restored ship wreck
+    and a station-module wreck the same body, so the ship and module rows stand for them.
+  - A body destroyed without a wreck is not a blocker, which is the no-blocker scene.
+
+23,548 tests: 11,760 anchor and 11,788 broad. About 11 minutes, one niced process.
+
+## Truth
+
+1. **Bearing point.** See "Answers" 4 and 5 and the KB record for the full table.
+2. **CAN BEAR.** The #176 scorer on that point.
+3. **Settling.** The #166 rest reached from the starting yaw.
+4. **The path.** The segment from the settled `barrelposition` to the bearing point, ignoring only the
+   firing turret's own meshes.
+5. **Classification.** The first hit, by the #202 membership rules:
+   - a selected element counts only itself;
+   - a whole ship counts its hull and its elements;
+   - a station root counts any module or module element.
+
+   UNKNOWN when the MESH and HULL models disagree, the path hits nothing, or the two closest hits on
+   different bodies lie within 1 cm and differ in membership.
+
+No candidate line enters truth, and an integrity check re-derives truth with every candidate line
+replaced.
+
+| truth | whole ship | ship surface | station surface | station root | total |
 |---|---:|---:|---:|---:|---:|
-| **CLEAR** | 114 | 240 | 1,390 | 1,870 | **3,614** |
-| **NOT CLEAR** | 358 | 56 | 3,900 | 1,908 | **6,222** |
-| cannot bear the aim point (excluded) | 80 | 40 | 754 | 518 | 1,392 |
-| shape models disagree (excluded) | 120 | 0 | 340 | 72 | 532 |
-| settling not established: trap, repeller start, rest out of arc, scorer UNKNOWN | 0 | 0 | 0 | 0 | 0 |
-| aim path reaches no geometry (no first hit to classify) | 0 | 0 | 0 | 0 | 0 |
+| **CLEAR** | 1,368 | 4,570 | 220 | 104 | **6,262** |
+| **NOT** | 182 | 8,820 | 544 | 12 | **9,558** |
+| GUIDED (no obstruction check) | 72 | 240 | 48 | 12 | 372 |
+| cannot bear the bearing point | 1,004 | 4,362 | 780 | 184 | 6,330 |
+| LargeTarget offset inside the body depends on the shape model | 32 | 0 | 0 | 0 | 32 |
+| shape models disagree | 22 | 704 | 14 | 0 | 740 |
+| first-hit tie | 0 | 72 | 0 | 0 | 72 |
+| path reaches no geometry | 0 | 0 | 74 | 108 | 182 |
+| trap / repeller start / rest out of arc / scorer UNKNOWN | 0 | 0 | 0 | 0 | 0 |
 
-9,836 tests are scored. Each exclusion is a line-of-fire reason:
-
-- **Cannot bear the aim point (1,392).** The turret cannot point at X4's aim point, so no settled
-  path exists to test. These are mostly mounts facing away from the Osaka.
-- **Shape models disagree (532).** The answer depends on which X4 collision shape the ray query
-  uses, which was not traced:
-  - 350 are element-versus-parent boundaries, where a convex hull piece of the Osaka or the Ray
-    bulges over, or falls short of, a shield or turret mounted flush on the hull;
-  - 116 are engines, where the MESH path ends inside the hollow nozzle with no hit and the solid
-    HULL engine is hit;
-  - 66 involve the firing Ray's own hull.
-- **Settling not established (0).** Every turret that could bear settled at a single state-
-  independent rest.
-- **No geometry (0).** Every aim path hit something before the aim point.
-
-What the 6,222 NOT CLEAR paths hit first:
-
-- the target Osaka's hull (2,494) or a sibling element (1,690);
-- the firing Ray's own hull (1,730);
-- a sibling Ray turret socket (308).
+- **Shape models disagree (740).** 398 are element-versus-parent-hull boundaries. 186 are hollow
+  engines: MESH reaches no geometry inside the nozzle, while the solid HULL is hit. 144 involve the
+  firing ship's own hull, and 12 are other. The HULL table gives the same conclusions as MESH.
+- **No trap or multiple-rest case occurred.** Parked and astern starts always settled at the same yaw,
+  including at 300 m.
 
 ## Accuracy against the settled line of fire
 
-MESH shape model. BLOCKED and UNKNOWN count as "not clear"; UNKNOWN is also shown on its own.
+BLOCKED and UNKNOWN count as "not clear"; production UNKNOWN is also shown on its own.
+`probe` is the first `useaimtarget=true` probe alone. `probe+ex` is the probe plus, only when its first
+hit is the firing turret, the same line with `excludeself="true"`.
 
-| method | phase | TP | FP | TN | FN | UNKNOWN (of which truth CLEAR) | mean calls |
+**All 15,820 scored rows:**
+
+| method | phase | TP | FP | TN | FN | UNKNOWN (on CLEAR) | mean calls |
 |---|---|---:|---:|---:|---:|---:|---:|
-| current | parked | 2,144 | 39 | 6,183 | 1,470 | 1,578 (548) | 2.54 |
-| current | settled | 2,432 | 20 | 6,202 | **1,182** | 176 (176) | 2.48 |
-| seven | parked | 3,178 | 160 | 6,062 | 436 | 1,407 (385) | 12.82 |
-| **seven** | **settled** | **3,614** | **130** | **6,092** | **0** | **0** | 12.15 |
-| lazy | parked | 3,178 | 160 | 6,062 | 436 | 1,407 (385) | 7.65 |
-| **lazy** | **settled** | 3,614 | 130 | 6,092 | 0 | 0 | **5.96** |
-| eight | settled | 3,614 | 130 | 6,092 | 0 | 0 | 13.99 |
-| `useaimtarget` probe alone | parked | 3,177 | 49 | 6,173 | 437 | — | 1 |
-| **`useaimtarget` probe alone** | **settled** | **3,614** | **0** | **6,222** | **0** | — | **1** |
+| probe | parked | 4,622 | 108 | 9,450 | 1,640 | — | 1 |
+| **probe** | **settled** | **5,588** | **0** | **9,558** | **674** | — | **1** |
+| probe+ex | parked | 6,131 | 423 | 9,135 | 131 | — | 1.96 |
+| probe+ex | settled | 6,262 | 78 | 9,480 | 0 | — | 1.76 |
+| current | parked | 3,345 | 102 | 9,456 | 2,917 | 4,415 (1,843) | 2.55 |
+| current | settled | 4,076 | 38 | 9,520 | 2,186 | 2,088 (1,036) | 2.46 |
+| seven | parked | 4,464 | 308 | 9,250 | 1,798 | 4,242 (1,680) | 12.74 |
+| seven | settled | 5,386 | 254 | 9,304 | 876 | 1,912 (860) | 11.97 |
+| lazy | settled | 5,386 | 254 | 9,304 | 876 | 1,912 (860) | 6.78 |
+| eight | settled | 5,386 | 254 | 9,304 | 876 | 1,912 (860) | 13.77 |
 
-- **HULL model sensitivity.** The HULL table gives:
-  - seven settled: TP 3,614, FP 72, FN 0;
-  - current settled: FN 1,372;
-  - probe settled: exact again.
+- The anchor alone (9,836 rows) is unchanged: settled probe 0/0, seven 130 FP, current 1,182 FN.
+- The broad population alone (5,984 rows): settled probe 0 FP / 674 FN, seven 124 FP / 876 FN,
+  current 18 FP / 1,004 FN.
+- Lazy never changed a status (integrity check). The eighth point (the old centre) gave totals
+  identical to seven.
 
-  The conclusions do not depend on the shape model.
-- **Hull targets (240 CLEAR / 56 NOT).** current and seven are the same method, and both score
-  every hull row correctly from the settled muzzle. All the difference is on element targets
-  (9,540 scored rows).
+**Settled, by target class (FP / FN):**
 
-**The `useaimtarget` probe.** After the turret has settled, the probe traces nearly the same segment
-as the truth: the same origin to the same aim point. It matches the truth on all 9,836 rows, under
-both shape models. The two differ in only two ways, and neither occurred:
+| target class | scored | truth CLEAR | probe | probe+ex | current | seven |
+|---|---:|---:|---:|---:|---:|---:|
+| ship surface | 13,390 | 4,570 | 0 / 296 | 54 / 0 | 20 / 1,606 | 234 / 296 |
+| station surface | 764 | 220 | 0 / 56 | 4 / 0 | 0 / 56 | 2 / 56 |
+| whole ship | 1,550 | 1,368 | 0 / 296 | 20 / 0 | 10 / 492 | 10 / 492 |
+| station root | 116 | 104 | 0 / 26 | 0 / 0 | 8 / 32 | 8 / 32 |
 
-- the probe also sees the firing turret's own socket;
-- the probe selects its aim point from the muzzle rather than the turret origin, which matters only
-  for targets with several aim points (none here).
+For whole ships and station roots, "seven" is the current method: the scan applies only to elements.
 
-From the parked muzzle, the probe's 486 mismatches all come from the different origin:
+**Settled, by surface type (FP / FN):**
 
-- 385 truly CLEAR rows where the path crosses the turret's own socket;
-- 47 rows where it crosses the Ray's hull, 3 a sibling socket, and 2 the Osaka hull;
-- 49 truly NOT CLEAR rows that reach the element only from the parked position.
+| surface | probe | seven |
+|---|---:|---:|
+| ship turret (4,966) | 0 / 146 | 90 / 146 |
+| ship shield (6,684) | 0 / 110 | 66 / 110 |
+| ship engine (1,740) | 0 / 40 | 78 / 40 |
+| station turret (420) | 0 / 44 | 0 / 44 |
+| station shield (344) | 0 / 12 | 2 / 12 |
 
-**Errors of the methods (settled muzzle).**
+**Settled, by aim-point count (FP / FN):**
 
-- **current FN (1,182).** The box-centre line is blocked, or misses, while the aim-point path is
-  clear:
-  - 624 turret and 194 shield rows: the centre line hits the Osaka hull first;
-  - 130 turret and 58 shield rows: it hits a sibling element first;
-  - 176 turret rows: it misses (UNKNOWN).
-- **seven FP (130).** The aim probe fails, but one of the six box points is reachable while the path
-  to X4's aim point is blocked. The blocker is:
-  - the Osaka hull (54);
-  - a sibling element (72);
-  - the Ray's hull (2);
-  - a sibling socket (2).
-
-  The six points answer "part of this element is straight-line reachable", which is broader than
-  the aim-point line of fire.
-- **seven FN: none.** When the aim-point path is clear, the first probe finds it.
-
-## Parked versus settled muzzle
-
-Same rows, same truth, MESH:
-
-| method | FN eliminated by settling | FN introduced | FP eliminated | FP introduced |
+| aim points | scored | probe | current | seven |
 |---|---:|---:|---:|---:|
-| current | 290 | 2 | 21 | 2 |
-| seven / lazy / eight | 436 | 0 | 53 | 23 |
+| 0 | 692 | 0 / 98 | 8 / 104 | 8 / 104 |
+| 1 | 14,200 | 0 / 388 | 20 / 1,744 | 236 / 434 |
+| 2+, every origin picks the same point | 907 | 0 / 188 | 10 / 338 | 10 / 338 |
+| 2+, selector origin matters | 21 | 0 / 0 | 0 / 0 | 0 / 0 |
 
-From the parked muzzle, the seven-point scan reads UNKNOWN on 1,407 rows, 385 of them truly CLEAR.
-All 1,407 have reason `self`: the line from the parked barrel crosses the turret's own socket. That
-clears once the turret has turned. A result taken before the turret has turned toward the selection
-is the only remaining source of seven-point false negatives.
+**Settled, by firing turret, broad (probe FP / FN):**
 
-## Starting state and multiple rests
+| turret category | scored | probe | seven |
+|---|---:|---:|---:|
+| M unguided missile, multi endpoint (`arg_m_dumbfire_02`) | 1,594 | 0 / 610 | 4 / 612 |
+| L unguided missile, multi endpoint (`par_l_dumbfire_01`) | 604 | 0 / 48 | 14 / 66 |
+| M beam (`kha_m_beam_01`) | 1,514 | 0 / 16 | 34 / 94 |
+| M unguided missile, single endpoint (`bor_m_dumbfire_01`) | 618 | 0 / 0 | 22 / 32 |
+| M/L projectile, single and multi endpoint | 1,654 | 0 / 0 | 50 / 72 |
 
-At these ranges (≥ 2 km), every settled yaw was state-independent. Parked and astern starts settled
-at the same yaw in all pairs, so the starting yaw changed only the parked-phase origin. No trap or
-several-rest case occurred. The rule for choosing between rests is implemented and checked
-(`check_settling`), but this population never exercises it.
+## What breaks `useaimtarget`
 
-## Diagnostic only: settled +Z projectile paths
+Blocker mechanisms by the first hit on the bearing path (all rows, settled, FP / FN):
 
-This is a different question (where a round flies), and it neither defines nor excludes any row.
+| first hit on the bearing path | rows | probe | seven | current |
+|---|---:|---:|---:|---:|
+| the selected element (CLEAR) | 4,570 + 220 | 0 / 296 + 0 / 56 | 0 / 296 + 0 / 56 | 0 / 1,606 + 0 / 56 |
+| the target hull, whole ship (CLEAR) | 1,308 | 0 / 294 | 0 / 490 | 0 / 490 |
+| the target's own element, whole ship (CLEAR) | 60 | 0 / 2 | 0 / 2 | 0 / 2 |
+| a station module, root (CLEAR) | 104 | 0 / 26 | 0 / 32 | 0 / 32 |
+| parent hull of the selected element | 4,510 | 0 / 0 | 150 / 0 | 18 / 0 |
+| sibling turret / shield / engine on the target | 1,282 / 100 / 350 | 0 / 0 | 76 / 0 | 0 / 0 |
+| parent module / other module / sibling element, station | 210 / 250 / 74 | 0 / 0 | 2 / 0 | 0 / 0 |
+| firing ship's own hull | 2,046 | 0 / 0 | 16 / 0 | 12 / 0 |
+| sibling turret / shield on the firing ship | 590 / 8 | 0 / 0 | 8 / 0 | 6 / 0 |
+| other ship / station module / asteroid (external) | 16 / 34 / 84 | 0 / 0 | 0 / 0 | 0 / 0 |
+| satellite (external small object) | 4 | 0 / 0 | 2 / 0 | 2 / 0 |
 
-- On the 9,836 scored rows, barrel 0's +Z path disagrees with the line-of-fire truth in 530 (5.4%).
-  These are mostly shots that pass the aim point by the barrel's ~0.3 m offset from the bore.
-- On the 1,318 disruptor rows, another barrel's +Z path disagrees with barrel 0 in 132.
+Every settled probe error is on a truly CLEAR path (the first four rows), and every one has the same cause: **the firing
+turret's own collision is the first hit on the probe line**. X4 ignores it; MD `excludeself="false"`
+does not. It is concentrated on three turrets whose sockets enclose, or nearly enclose, their launch
+points (KB, "Some launcher sockets enclose their own launch points"):
 
-Spread, lead and barrel cycling are outside this benchmark.
+| firing turret | probe first hits its own turret | truth-CLEAR settled rows |
+|---|---:|---:|
+| `turret_arg_m_dumbfire_02_mk1` | 610 | 670 |
+| `turret_par_l_dumbfire_01_mk1` | 48 | 276 |
+| `turret_kha_m_beam_01_mk1` | 16 | 676 |
+| every other benchmark turret | 0 | |
 
-## Eighth point (the old centre)
+All lines share the barrel origin, so every candidate fails on these rows; the seven-point and current
+methods report them as UNKNOWN (`self`).
 
-Adding the centre after the seven points changed **no status** in either phase, and costs 3 more
-calls (median 22 against 19). Do not add it.
+No external blocker, sibling, parent hull or parent module ever produced a settled probe error.
+Mechanisms never the first hit on a scored bearing path: a sibling engine on the firing ship (engines
+sat aft of every view), and an element on another station module. The satellite blocks only when it
+sits on one turret's own bearing path: placed 50 m short of the target, lines from turrets tens of
+metres apart all passed around it.
 
-## Query cost (simulated calls, settled turrets)
+## Before settling (parked muzzle)
 
-| method | per turret median / p90 / max | 14-turret pass median / max |
-|---|---|---|
-| current | 3 / 3 / 3 | 27 / 42 |
-| seven (eager) | 19 / 19 / 19 | 171 / 266 |
-| **seven (lazy)** | **9 / 9 / 9** (settled), 9 / 19 / 19 (parked) | **81 / 126** (settled), 81 / 186 (parked) |
-| eight | 22 / 22 / 22 | 198 / 308 |
+The probe's parked errors, by first hit on its own line:
 
-The median is high because most selected elements are genuinely NOT CLEAR, and those pay for every
-point. A CLEAR aim probe costs 1 call. Lazy classification never changed a status. The #202 LIVE
-figure of a 42-call pass taking a 184 ms median (one turret per frame) is not ray cost. The frame
-cost of a 126-call pass remains unmeasured.
+- **FN 1,640:**
+  - own turret collision: 1,526 (a parked barrel behind or inside its socket);
+  - the firing ship's own hull: 92;
+  - other: 22.
+- **FP 108:** the parked line reaches the target while the settled path is blocked:
+  - by a sibling turret on the firing ship: 59;
+  - by the firing ship's own hull: 36;
+  - by the satellite: 2;
+  - other: 11.
 
-## Reassessments
+Settled, the probe has no false positives and 966 fewer false negatives. The six box points parked:
++4 recovered, +205 false CLEARs.
 
-**#202 Osaka 0/14.** In the fixture arrangement, **18 element/orientation pairs** reproduce the LIVE
-signature:
+## Multi-aim-point targets
 
-- current reads 0–2/14;
-- the centre line's first hit is the Osaka hull or a neighbouring element, giving Q(T) false,
-  Q(Z) true, Q(W) false, i.e. BLOCKED, exactly as logged. On the L turret, the line misses instead;
-- 7–13 turrets have a truly clear settled line of fire;
-- seven reads 10–13/14 there.
+- Scored multi-point rows: 928, from 1,728 multi-point tests (1,022 settled).
+- Settled rows where the turret origin, parked muzzle and settled muzzle all pick the same point: 999.
+  Rows where the origin matters: 23.
+  - 18 differ between the turret origin and the parked muzzle, 10 between the turret origin and the
+    settled muzzle.
+  - Of the 21 with defensible truth, 19 are `bor_l_miner_solid_01` views on the aim-point switch
+    plane, and one each are on the fighting drone and the Xenon engine.
+- The selector origin is resolved natively (turret component origin, for X4 and for MD), so all of
+  them are scored. The probe is correct on all 21 with defensible truth.
+- If a future build changed MD to select from `objectoffset`, only rows like these 23 would move.
 
-On the Terran M laser turret element:
+## Station roots
 
-- the box contains only the socket, since the rotator and gun are `nocollision`;
-- its centre is 1.5 m above the mount;
-- from the Ray the line to it meets hull structure 44–58 m short;
-- the authored aim point 5.4 m up is visible.
+- **Bearing point:** the live union-box centre. It lies:
+  - inside no module for `xen_defence` (0, −319, 0) and `arg_shipyard`;
+  - inside a module for `arg_tradestation`.
+- **Lines from outside toward the centre (200 per plan) that meet no module first:**
+  - `xen_defence`: 106;
+  - `arg_shipyard`: 165;
+  - `arg_tradestation`: 0.
+- **Settled rows whose path reaches no geometry: 108** (72 `arg_shipyard`, 36 `xen_defence`).
+  - Continued past the centre to 30 km, every one still hits nothing.
+  - Natively the ray is a genuine miss, which every supported turret permits. The turret fires along
+    an aimed line that misses the station.
+  - The truth is undefined and the rows are excluded. The two-module lines read CLEAR on 78 of them.
+- **Scored rows: 116.**
+  - probe: 0 FP, 26 FN (own turret);
+  - current: 8 FP (own hull) and 32 FN.
+- **Assumption behind root CLEAR:** the module-to-root `+0x70` link. It is untested LIVE, like
+  cross-zone physics. Station-root results carry both caveats.
 
-This supports the witness hypothesis "centre occluded, aim point clear" with source geometry. It is
-**not LIVE-proven**: the LIVE loadout, Osaka orientation and the type of `0x17c090` were not logged.
+## Where truth is undefined
 
-**#60 Xenon Defence Platform 0/14.** Built from the shipped `xen_defence` plan with the real module
-meshes. The root `useaimtarget` endpoint, the live union-box centre, is at (0, −319, 0): in open
-space below the hub, inside no module under either model. Of 200 lines from 4 km toward it, 106
-(MESH) or 105 (HULL) reach it without touching any module, and read false whatever the
-module-to-root link does. The other half read CLEAR only if that link works.
+182 rows reach no geometry at the bearing point. They are where extra points could claim a CLEAR, and
+they cannot be scored:
 
-The "centre gap" is physically real for about half of all directions. It is not LIVE-proven for #60,
-whose firing geometry was not retained, and link-null and cross-zone are not excluded.
+| target | rows | probe CLEAR | seven CLEAR | first hit past the aim point |
+|---|---:|---:|---:|---|
+| station root `arg_shipyard` | 72 | 0 | 52 | none |
+| station root `xen_defence` | 36 | 0 | 26 | none |
+| `shield_xen_m_standard_02_mk1` on Xenon modules | 74 | 0 | 56 | selected shield 34, parent module 40 |
 
-## Decision-rule regression tests (`benchmark.py`, `runtime.lua`)
+The Xenon shield's authored aim point lies off its collision mesh. Whether X4's round, flying through
+that point, then strikes the shield is a hit-prediction question, not the line of fire. The
+continuation says it would on 34 of 74 rows.
 
-Unchanged.
+## Historical witnesses
 
-- The drift signature against `md/x4_gunnery_control.xml` passes, all 9 mutants are killed, and
-  integrity is PASS.
-- The standing rule FAIL remains: **missing missile guidance becomes unguided**.
-- `runtime.lua`: 13 CODE checks pass. The 2 SPEC rows (#202 task 3: GUIDED in the count, ASCII
-  colon) fail as expected. There are 2 NOTEs.
-- **GUIDED** stays separate. The Ray carries no missile turret, so the physical set has 0 GUIDED
-  rows. GUIDED behavior is covered only by the decision-rule tests.
+**#202 Ray/two-Osaka (anchor, unchanged).**
+
+- **Reproduced (geometry and signature).** In the fixture arrangement, 18 element/orientation pairs
+  match the LIVE pattern: current reads 0–2/14 while 7–13 turrets have a truly clear settled line. The
+  centre line's first hit is the Osaka hull or a neighbouring element; on the L turret element it
+  misses. The probe matches the truth on every anchor row.
+- **Retained LIVE facts (#202 issue):**
+  - 0/14 BLOCKED on element `0x17c090` over 28 passes (42 calls each);
+  - 11 confirmed railgun hits on that exact element;
+  - three turrets that hit it read clear on an earlier aim-target check.
+- **Unlogged, stated here:**
+  - the Osaka loadout (stated Terran);
+  - Osaka orientation (four yaws);
+  - the component type of `0x17c090`.
+
+  "Centre occluded, aim point clear" therefore stays a source-geometry explanation, **not LIVE-proven**.
+
+**#60 Xenon Defence Platform.**
+
+- **Retained:** 0/14 from the muzzle `excludeself="false"` root ray and from the turret-origin
+  `excludeself="true"` root ray, while the same turrets hit the station.
+- **New offline evidence.** The turrets bear on the union-box centre. Where that path is empty, so is
+  its continuation (36/36), so rounds aimed through the gap do not hit a stationary station.
+- **So the centre gap alone does not explain the hits.** They need a path that meets a module. On
+  such a path the muzzle root probe is true unless one of these holds:
+  - the module-to-root link fails;
+  - the zones differ;
+  - the firing turret's own socket is first. This cannot explain the `excludeself="true"` ray.
+- The #60 firing geometry was not retained. None of these is LIVE-proven, and none is excluded.
+
+## Shape model
+
+MESH and HULL are both still cast; which Jolt shape the layer-3 ray uses remains untraced. Every
+conclusion above holds under HULL: settled probe 0 FP / 676 FN, probe+ex 56 FP / 0 FN, seven 166 FP /
+852 FN. Disagreements are excluded, not resolved.
+
+## Decision-rule tests and integrity
+
+- `benchmark.py` is unchanged in substance. The drift signature passes, all 9 mutants are killed, and
+  integrity is PASS. The standing rule FAIL remains: **missing missile guidance becomes unguided**.
+- `runtime.lua`: 13 CODE checks pass. The 2 SPEC rows (#202 task 3) fail as expected. There are 2
+  NOTEs.
+- `settled.py` integrity checks, all PASS. They would catch:
+  - truth depending on any candidate line;
+  - an UNKNOWN candidate counted as CLEAR;
+  - an UNKNOWN truth entering the matrix;
+  - a station element CLEAR on its parent module, a sibling or another module;
+  - a multi-point row without its three-origin selector record;
+  - an alternate box point turning a blocked bearing path into a correct CLEAR;
+  - lazy differing from seven.
 
 ## Evidence gaps
 
-1. Which Jolt shape (`-mesh.jcs` or `-hull.jcs`) the layer-3 query uses, and XPhys's back-face and
-   solid-convex settings. Handled by requiring agreement; 532 rows are excluded.
-2. The shoot controller's aim point for elements (`LargeTargetShootController`) and the selector's
-   origin. This benchmark assumes the #184 nearest-authored-point selector.
-3. The LIVE Osaka loadout and orientation, and the type of `0x17c090`.
-4. Part offsets are ignored (the #167 box rule) and animated parts stay in their default pose.
-5. Station plan identity and firing geometry for #60.
-6. Frame cost of a 126-call pass.
-7. Earlier rule gaps still open: missing guidance, docked craft membership, wrecked modules, a
-   module dying mid-pass.
+1. Which Jolt shape the layer-3 ray, and the LargeTarget point-inside test, use (740 and 32 rows
+   excluded).
+2. The module-to-root `+0x70` link, and cross-zone rays (station-root CLEAR assumes the link).
+3. The `U::Turret` slot `+0x1BF0` predicate (`0x005BF690`). It matters only for a turret element with
+   no authored point; none was in the population.
+4. Whether any parameter file overrides the 500 m LargeTarget radius (no writer found besides the
+   defaults).
+5. A sibling engine on the firing ship, and an element on another station module, were never the
+   first hit. Wrecks and removed bodies are covered by the accepted native rule, not simulated.
+6. Hit prediction on off-mesh aim points and station-centre gaps (outside line of fire).
+7. Frame cost of any method (not measured).
+8. Earlier open rules: missing guidance, docked craft membership, a module dying mid-pass.
 
-## Recommendation for the mod
+## Recommendation
 
-The lazy seven-point scan is the right method, read from a turret that is aimed at the selection.
-On 9,836 settled rows on real geometry it produced:
+Use **one `useaimtarget=true` probe from the turret's current `barrelposition`** as the CLEAR test for
+selected elements, whole ships and station roots. Read it once the turret has turned toward the
+selection. Do not add the six box points or the eighth point: on this population they never recover a
+settled false negative, and they add 254 false CLEARs.
 
-- 0 false negatives and 0 UNKNOWN;
-- 2.1% false CLEAR (130 of 6,222 truly NOT CLEAR rows), all from the six box points;
-- 81 calls per 14-turret pass at the median.
+The one remaining error is the firing turret's own collision. The options:
 
-The current centre ray missed 33% of truly CLEAR turrets (1,182 of 3,614). After settling, the first
-`useaimtarget` probe matched the truth exactly, in one call.
+- Report it as UNKNOWN through the existing `Q(W)` identification (2 calls when it happens). This is
+  honest and conservative, and costs launcher turrets like `arg_m_dumbfire_02` most of their CLEARs.
+- Or retry with `excludeself="true"` (3 calls). That recovers all 674 but can claim CLEAR through the
+  firing ship's own hull (78 false CLEARs here). That is a product trade-off this benchmark measures
+  but does not decide.
 
-On this population the six box points added only false CLEARs:
-
-- 130 settled;
-- 111 more than the probe alone when parked, where they recovered a single false negative.
-
-They would matter only where the aim-point path reaches no geometry (a hidden or off-mesh aim
-point), and this population had none. Keeping them is therefore a product choice this benchmark
-cannot settle. Parked results remain provisional because the turret's own socket blocks many of
-their lines. Do not add the eighth point.
+For station roots the probe tests the right point. The current two-module lines do not. Note that X4
+itself fires at a station root through an empty centre.
