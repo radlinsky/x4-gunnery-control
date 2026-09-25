@@ -1,11 +1,13 @@
-"""Issue #202: offline selected-target CLEAR LINE OF FIRE benchmark.
+"""Issue #202: selected-target CLEAR LINE OF FIRE decision-rule regression tests.
 
-Scenes state the ordered first hits along each tested line instead of inventing
-collision meshes. Truth applies #202's membership rules to those hits directly.
-Candidates are a model of the production MD cue (structurally checked against
-md/x4_gunnery_control.xml so it cannot drift silently) and the proposed
-seven-point surface scan. Query counts are simulated `check_line_of_sight`
-calls, not X4 frame cost.
+Scenes state the ordered first hits along each tested line; they are hand-written
+arrangements, not X4 physics, so they check decision rules and are outside the
+physical accuracy totals (those come from `settled.py` on real collision geometry,
+which reuses `candidate()` below). Truth here applies #202's membership rules to
+the stated hits on each tested line. Candidates are a model of the production MD
+cue (structurally checked against md/x4_gunnery_control.xml so it cannot drift
+silently), the proposed seven-point surface scan, and `eight` (seven plus the old
+centre). Query counts are simulated `check_line_of_sight` calls, not X4 frame cost.
 
     python3 research/issue202-line-of-fire/benchmark.py [--population]
 """
@@ -136,8 +138,9 @@ def plan_for(sc, strategy, mut=frozenset()):
         root = strategy.startswith("root")
         return dict(endpoints=[(m, t if root else m) for m in modules],
                     blocker="Z" if strategy == "root_zone" else "S")
-    if strategy in ("seven", "lazy") and t in ("T", "MT"):
-        return dict(endpoints=[("aim", declared)] + [(p, declared) for p in SIX], blocker="Z")
+    if strategy in ("seven", "lazy", "eight") and t in ("T", "MT"):
+        centre = [("c", declared)] if strategy == "eight" else []   # eight: the old centre after the seven
+        return dict(endpoints=[("aim", declared)] + [(p, declared) for p in SIX] + centre, blocker="Z")
     return dict(endpoints=[("c", declared)], blocker="Z")
 
 
@@ -497,8 +500,9 @@ def main():
         c = Counter((r["verdict"], r["obs"]) for r in rows if r["st"] == st and r["sc"].get("scored", True))
         print(f"- {st}: " + ", ".join(f"{v}/{o}={n}" for (v, o), n in sorted(c.items())))
     live = [r for r in rows if r["sc"]["level"] == "live"]
-    print(f"- X4-accuracy subset (live first-hit conditions): {len(live) // 3} scenes, "
-          f"{sum(r['verdict'] != 'ok' and r['verdict'] != 'excess UNKNOWN' for r in live)} wrong")
+    print(f"- rules on LIVE-recorded first-hit arrangements: {len(live) // 3} scenes, "
+          f"{sum(r['verdict'] != 'ok' and r['verdict'] != 'excess UNKNOWN' for r in live)} wrong "
+          "(decision rules only; physical accuracy is settled.py)")
 
     print("\n## Target-level reachability versus tested-path answer\n")
     for sc in SCENES:
