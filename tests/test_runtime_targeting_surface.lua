@@ -21,17 +21,23 @@ do
     local oldClass, oldContext, oldData = C.IsComponentClass, C.GetContextByClass, GetComponentData
     C.IsComponentClass = function(object, class)
         local value = tonumber(tostring(object))
-        return (value == 801 and class == "ship") or (value == 802 and class == "engine")
+        return (value == 801 and class == "ship")
+            or ((value == 802 or value == 804) and class == "engine")
     end
     C.GetContextByClass = function(object)
-        return tonumber(tostring(object)) == 802 and 801 or 0
+        local value = tonumber(tostring(object))
+        if value == 802 then return 801 end
+        if value == 804 then return 803 end
+        return 0
     end
-    GetComponentData = function(_, key) return key == "maxspeed" and 100 or false end
-    assert(API.rangeMovingTarget(801) and API.rangeMovingTarget(802)
-        and not API.rangeMovingTarget(803), "only moving ships and their engines get the range allowance")
-    GetComponentData = function(_, key) return key == "maxspeed" and 0 or false end
-    assert(not API.rangeMovingTarget(801) and not API.rangeMovingTarget(802),
-        "stationary-capability ships and engines get no allowance")
+    GetComponentData = function(_, key)
+        assert(key ~= "maxspeed", "X4 Lua component data does not support maxspeed")
+        return false
+    end
+    assert(X4GunneryState.normID(API.rangeSpeedShip(801)) == "801"
+        and X4GunneryState.normID(API.rangeSpeedShip(802)) == "801"
+        and API.rangeSpeedShip(803) == nil and API.rangeSpeedShip(804) == nil,
+        "only ships and their engines pass a ship ID to MD for speed lookup")
     C.IsComponentClass, C.GetContextByClass, GetComponentData = oldClass, oldContext, oldData
     session.phase, session.controlMode = "target_select", nil
     local savedSofttarget, selectedTarget = C.GetSofttarget2, 720

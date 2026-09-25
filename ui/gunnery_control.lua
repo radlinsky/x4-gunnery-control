@@ -1512,16 +1512,15 @@ function Range.rangeText(result)
     return tostring(result and result.count or 0) .. " / " .. tostring(total) .. " IN RANGE"
 end
 
-function Range.rangeMovingTarget(target)
+-- Pass the eligible ship to MD, where maxspeed is a supported property.
+-- A stationary ship with working engines still receives the native allowance.
+function Range.rangeSpeedShip(target)
     local object = id(target)
-    local root = C.GetContextByClass(object, "container", true)
-    if C.IsComponentClass(object, "ship") then
-        return (tonumber(componentData(object, "maxspeed")) or 0) > 0
+    if C.IsComponentClass(object, "ship") then return object end
+    if C.IsComponentClass(object, "engine") then
+        local ship = C.GetContextByClass(object, "container", true)
+        if ship ~= 0 and C.IsComponentClass(ship, "ship") then return ship end
     end
-    if C.IsComponentClass(object, "engine") and root ~= 0 and C.IsComponentClass(root, "ship") then
-        return (tonumber(componentData(root, "maxspeed")) or 0) > 0
-    end
-    return false
 end
 
 function Range.setRangeTargets(targets, selected)
@@ -1547,7 +1546,10 @@ function Range.setRangeTargets(targets, selected)
         Range.passStarted = nil
         Range.nextSweepAt, Range.nextSortAt = nil, nil
         Range.totalWork, Range.peakWork = 0, 0
-        if signature ~= Range.signature then Range.cache = {} end
+        if signature ~= Range.signature then
+            if Range.signature ~= nil then log("event=in_range action=cache_reset reason=turret_membership") end
+            Range.cache = {}
+        end
         for key in pairs(Range.cache) do if not wanted[key] then Range.cache[key] = nil end end
     end
     Range.signature, Range.page, Range.selectedKey = signature, page, selectedKey
@@ -1605,7 +1607,7 @@ function Range.runRangeSweep(now)
         local entry = Range.order[index]
         AddUITriggeredEvent("X4GunneryControl", "in_range_target", {
             nonce = nonce, target = id(entry.target),
-            moving = Range.rangeMovingTarget(entry.target) and 1 or 0 })
+            speedship = Range.rangeSpeedShip(entry.target) or 0 })
     end
     AddUITriggeredEvent("X4GunneryControl", "in_range_commit", { nonce = nonce })
 end
@@ -1649,10 +1651,13 @@ function Range.onRangeResult(_, param)
     if Range.targetIndex > #Range.order then
         Range.targetIndex = 1
         Range.memberIndex = Range.memberIndex + 1
+        local selectedResult = Range.selectedKey and Range.cache[Range.selectedKey]
         log("event=in_range action=turret_pass member=" .. memberKey
             .. " elapsed_ms=" .. tostring(math.floor((now - Range.passStarted) * 1000))
             .. " roundtrip_ms=" .. tostring(math.floor((now - active.started) * 1000))
-            .. " checks=" .. tostring(#Range.order))
+            .. " checks=" .. tostring(#Range.order)
+            .. " selected_count=" .. tostring(selectedResult and selectedResult.count or "pending")
+            .. " selected_bit=" .. tostring(selectedResult and selectedResult.contributions[memberKey] or 0))
         Range.passStarted = nil
         if Range.memberIndex > #Range.members then
             log("event=in_range action=sweep elapsed_ms="
@@ -2695,7 +2700,7 @@ function TestAPI.requestEngageability(target) return requestEngageability(target
 function TestAPI.setRangeTargets(targets, selected) return Range.setRangeTargets(targets, selected) end
 function TestAPI.rangeResult(target) return Range.rangeResult(target) end
 function TestAPI.runRangeSweep(now) return Range.runRangeSweep(now) end
-function TestAPI.rangeMovingTarget(target) return Range.rangeMovingTarget(target) end
+function TestAPI.rangeSpeedShip(target) return Range.rangeSpeedShip(target) end
 function TestAPI.rangeText(result) return Range.rangeText(result) end
 function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
 

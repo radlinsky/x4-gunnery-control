@@ -131,7 +131,7 @@
             <set_value name="InRangeService.$weaponid" exact="@event.param3.$weaponid"/>
             <set_value name="InRangeService.$expected" exact="@event.param3.$targets"/>
             <set_value name="InRangeService.$targets" exact="[]"/>
-            <set_value name="InRangeService.$moving" exact="[]"/>
+            <set_value name="InRangeService.$speedships" exact="[]"/>
           </actions>
         </cue>
         <cue name="InRangeTarget" instantiate="true">
@@ -141,9 +141,13 @@
             <do_if value="typeof $target != datatype.component and $target">
               <set_value name="$target" exact="component.{$target}"/>
             </do_if>
+            <set_value name="$speedship" exact="@event.param3.$speedship"/>
+            <do_if value="typeof $speedship != datatype.component and $speedship">
+              <set_value name="$speedship" exact="component.{$speedship}"/>
+            </do_if>
             <do_if value="@event.param3.$nonce == InRangeService.$nonce and InRangeService.$targets.count lt InRangeService.$expected and typeof $target == datatype.component">
               <append_to_list name="InRangeService.$targets" exact="$target"/>
-              <append_to_list name="InRangeService.$moving" exact="@event.param3.$moving"/>
+              <append_to_list name="InRangeService.$speedships" exact="$speedship"/>
             </do_if>
           </actions>
         </cue>
@@ -159,8 +163,11 @@
                 <set_value name="$hit" exact="'0'"/>
                 <do_if value="$range gt 0m">
                   <set_value name="$extra" exact="0m"/>
-                  <do_if value="InRangeService.$moving.{$index} == 1 and not $beam">
-                    <set_value name="$extra" exact="[$range * 1.1, 500m].min"/>
+                  <set_value name="$speedship" exact="InRangeService.$speedships.{$index}"/>
+                  <do_if value="not $beam and typeof $speedship == datatype.component">
+                    <do_if value="$speedship.maxspeed gt 0">
+                      <set_value name="$extra" exact="[$range * 1.1, 500m].min"/>
+                    </do_if>
                   </do_if>
                   <do_if value="$target.bboxdistanceto.{InRangeService.$weapon} lt $range + $extra">
                     <set_value name="$hit" exact="'1'"/>
