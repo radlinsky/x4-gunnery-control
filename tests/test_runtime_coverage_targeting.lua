@@ -10,8 +10,8 @@ assert(session.aimTargetID == nil and session.targetObjectID == nil,
 assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_commit",
     "Auto target loss must persist explicit no-target state")
 
--- Cover both developer sweep views. The read-only variant must freshly inspect
--- hardware without relying on session reconciliation.
+-- The read-only developer sweep must inspect fresh hardware without changing
+-- the active session. The normal sweep must still reconcile that hardware.
 local groupBuffer = { [0] = { path = "p", group = "g", contextid = 5 } }
 fix.ffiStub.new = function() return groupBuffer end
 fix.C.GetNumUpgradeGroups = function() return 1 end

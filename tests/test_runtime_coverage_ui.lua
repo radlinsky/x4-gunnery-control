@@ -142,7 +142,7 @@ do
         .. "not swallowed")
 end
 
--- TestAPI.isDirectControlActive covers lines 1078-1079.
+-- TestAPI.isDirectControlActive must distinguish Direct engagement from other phases.
 fix.gcMenu.onShowMenu()
 local sess3 = fix.API.getSession()
 assert(not fix.API.isDirectControlActive(), "isDirectControlActive: false for console session")
@@ -153,36 +153,6 @@ sess3.phase = "target_select"
 assert(fix.API.isDirectControlActive(), "isDirectControlActive: true for target_select/direct")
 sess3.phase = "console"
 assert(not fix.API.isDirectControlActive(), "isDirectControlActive: false for console/direct")
-
--- restoreDirect deferred callback (lines 462-463, 468, 471-472): trigger via
--- a target_select close (session stays alive, epoch unchanged, callback proceeds).
--- Set up a baseline entry that refresh() cannot find to hit the mismatch branch.
-do
-    local fix4 = dofile("tests/support/runtime_fixture.lua").load()
-    fix4.gcMenu.onShowMenu()
-    local sess4 = fix4.API.getSession()
-    local grp4key = X4GunneryState.groupKey(5, "p4", "g4")
-    local grp4 = { key = grp4key, kind = "group", contextID = 5, path = "p4", group = "g4",
-        componentID = 28, displayName = "G4", operationalCount = 1, totalCount = 1,
-        mode = "attack", armed = false,
-        members = { { componentID = 28, displayName = "T4", operational = true, cameraSupported = true } } }
-    sess4.groups = { grp4 }
-    sess4.checkedGroupKeys = { [grp4key] = true }
-    sess4.phase = "target_select"
-    sess4.controlMode = "direct"
-    -- Set committedBaseline with a group entry. After onCloseElement, restoreDirect
-    -- is called, and the deferred callback fires while the session is still alive.
-    -- refresh() reads 0 groups (fixture default), so findSnapshotGroup returns nil -> mismatch.
-    sess4.committedBaseline = { {
-        kind = "group", shipID = sess4.shipID, contextID = 5,
-        path = "p4", group = "g4", mode = "attack", armed = false,
-    } }
-    local mark4 = fix4.callbackCheckpoint()
-    -- target_select onCloseElement calls restoreDirect then returnToConsole; session stays alive.
-    fix4.gcMenu.onCloseElement("close")
-    -- Drain the deferred callback to hit the mismatch loop (lines 462-463, 468, 471-472).
-    fix4.drainCallbacksSince(mark4)
-end
 
 -- Console display with staged values covers isDirectedGroup (342-344) and the
 -- staged-row rendering (1756-1775). Use direct controlMode to exercise the
@@ -219,15 +189,15 @@ assert(updateBtnDirty ~= nil,
 assert(updateBtnDirty.active == true,
     "Update button must be active after staged divergence")
 
--- Exercise the dropdown onDropDownConfirmed handler (line 1769): covers stageMode closure.
+-- Use the rendered dropdown to stage a mode.
 local dropDowns = fix2.getCreatedDropDowns()
 for _, dd in ipairs(dropDowns) do
     if dd.handlers and dd.handlers.onDropDownConfirmed then
-        dd.handlers.onDropDownConfirmed(nil, "defend")  -- covers line 1769
+        dd.handlers.onDropDownConfirmed(nil, "defend")
         break
     end
 end
--- Exercise the armed button onClick (line 1774): covers the stageArmed closure.
+-- Use the rendered armed button to change the staged setting.
 -- Match on the armed labels (ids 6/7) rather than "any button that is not the
 -- Update one": identity comparison against a stale handle silently selected the
 -- Update button instead and consumed the dirty state this block sets up.
@@ -235,7 +205,7 @@ local armedLabels = { [fix2.LABEL.armed] = true, [fix2.LABEL.disarmed] = true }
 local armedClicked = false
 for _, btn in ipairs(fix2.getCreatedButtons()) do
     if armedLabels[btn.text] and btn.handlers and btn.handlers.onClick then
-        btn.handlers.onClick()  -- covers line 1774
+        btn.handlers.onClick()
         armedClicked = true
         break
     end

@@ -12,22 +12,28 @@ local State = X4GunneryState
 -- A single synthetic group is returned by each independent resume fixture.
 local groupBuffer = { [0] = { path = "p", group = "g", contextid = 5 } }
 
--- Auto resume must not re-point its target ──────────────────────
-do
-    local fix3 = dofile("tests/support/runtime_fixture.lua").load()
-    fix3.ffiStub.new = function() return groupBuffer end
-    fix3.C.GetNumUpgradeGroups = function() return 1 end
-    fix3.C.GetUpgradeGroups2 = function() return 1 end
-    fix3.C.GetUpgradeGroupInfo2 = function()
+-- Each resume check uses an independent fixture with one camera-capable turret.
+local function freshFix()
+    local f = dofile("tests/support/runtime_fixture.lua").load()
+    f.ffiStub.new = function() return groupBuffer end
+    f.C.GetNumUpgradeGroups = function() return 1 end
+    f.C.GetUpgradeGroups2 = function() return 1 end
+    f.C.GetUpgradeGroupInfo2 = function()
         return { count = 1, currentcomponent = 27, currentmacro = "", slotsize = "",
                  total = 1, operational = 1 }
     end
-    fix3.C.GetNumUpgradeSlots = function() return 1 end
-    fix3.C.GetUpgradeSlotCurrentComponent = function() return 27 end
-    fix3.C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
-    fix3.C.IsComponentOperational = function() return true end
-    fix3.C.IsPlayerCameraTargetViewPossible = function() return true end
-    fix3.C.GetExternalTargetViewComponent = function() return 27 end
+    f.C.GetNumUpgradeSlots = function() return 1 end
+    f.C.GetUpgradeSlotCurrentComponent = function() return 27 end
+    f.C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
+    f.C.IsComponentOperational = function() return true end
+    f.C.IsPlayerCameraTargetViewPossible = function() return true end
+    f.C.GetExternalTargetViewComponent = function() return 27 end
+    return f
+end
+
+-- Auto resume must not re-point its target ──────────────────────
+do
+    local fix3 = freshFix()
     fix3.gcMenu.onShowMenu()
     local session = fix3.API.getSession()
     session.phase, session.controlMode = "engaged", "auto"
@@ -45,27 +51,6 @@ do
     assert(fix3.API.getSession() == session, "auto resume must keep session object")
     assert(session.repointTargetID == nil,
         "Auto resume must NOT set repointTargetID; Auto never shows a soft target")
-end
-
--- ── helpers for the watchdog-driven retry scenarios ────────────────────────
--- Fresh fixture with the shared group stubs applied (readGroups must find a
--- camera-capable member for the resume camera route).
-local function freshFix()
-    local f = dofile("tests/support/runtime_fixture.lua").load()
-    f.ffiStub.new = function() return groupBuffer end
-    f.C.GetNumUpgradeGroups = function() return 1 end
-    f.C.GetUpgradeGroups2 = function() return 1 end
-    f.C.GetUpgradeGroupInfo2 = function()
-        return { count = 1, currentcomponent = 27, currentmacro = "", slotsize = "",
-                 total = 1, operational = 1 }
-    end
-    f.C.GetNumUpgradeSlots = function() return 1 end
-    f.C.GetUpgradeSlotCurrentComponent = function() return 27 end
-    f.C.GetUpgradeSlotGroup = function() return { path = "p", group = "g" } end
-    f.C.IsComponentOperational = function() return true end
-    f.C.IsPlayerCameraTargetViewPossible = function() return true end
-    f.C.GetExternalTargetViewComponent = function() return 27 end
-    return f
 end
 
 -- Drives a Direct engaged Test Lab resume (park + reopen) through the real
