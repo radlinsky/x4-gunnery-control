@@ -1519,7 +1519,7 @@ function Range.rangeSpeedShip(target)
     if C.IsComponentClass(object, "ship") then return object end
     if C.IsComponentClass(object, "engine") then
         local ship = C.GetContextByClass(object, "container", true)
-        if ship ~= 0 and C.IsComponentClass(ship, "ship") then return ship end
+        if ship ~= 0 and C.IsComponentClass(ship, "ship") then return id(ship) end
     end
 end
 
