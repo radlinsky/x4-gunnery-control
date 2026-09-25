@@ -143,8 +143,8 @@ def _geometry_dir(comp):
 class Body:
     """Layer-3 collision parts of one component in its own frame, in both shape models."""
 
-    def __init__(self, triangles, hulls, parts, part_of):
-        self.tris, self.hulls, self.parts = triangles, hulls, parts
+    def __init__(self, triangles, hulls, parts, part_of, jolt=()):
+        self.tris, self.hulls, self.parts, self.jolt = triangles, hulls, parts, jolt
         self.planes = np.concatenate([planes for _points, planes in hulls])
         self.starts = np.cumsum([0] + [len(planes) for _points, planes in hulls])[:-1]
         self.lo, self.hi = triangles.reshape(-1, 3).min(0), triangles.reshape(-1, 3).max(0)
@@ -179,7 +179,7 @@ def _median_order(points):
 def body(component):
     """Collision Body of an official component (static parts; connection frames as #167/#171)."""
     comp = S.component(component)
-    tris, hulls, parts, part_of = [], [], [], []
+    tris, hulls, parts, part_of, jolt = [], [], [], [], []
     for conn in S.connections(comp).values():
         for part in (p for g in conn.findall("parts") for p in g.findall("part")):
             owner, name, tags = comp, part.get("name"), S.tags(conn)
@@ -199,8 +199,10 @@ def body(component):
             for points, planes in jcs_hulls(hull):
                 normals = planes[:, :3] @ R                     # rigid: n' = n·R, c' = c - n'·t
                 hulls.append((points @ R + t, np.column_stack([normals, planes[:, 3] - normals @ t])))
+            if "nocollision_jolt" in tags:        # in the layer-3 body, not in the layer-0/1 one
+                jolt.append(name)
             parts.append(name)
-    return Body(np.concatenate(tris), hulls, tuple(parts), np.concatenate(part_of)) if tris else None
+    return Body(np.concatenate(tris), hulls, tuple(parts), np.concatenate(part_of), tuple(jolt)) if tris else None
 
 
 # ---------------------------------------------------------------- ray casting

@@ -750,7 +750,10 @@ normally `platformcollision`; `nocollision_jolt` parts are **included**
 interning writers at `0x008D89F2`, `0x008DAB34`, `0x008D90E8` and
 `0x008D8A34`. The layer-3 geometry is therefore the collision meshes, not
 `macro.boundingbox`, which excludes `nocollision`, `nocollision_jolt` and
-`platformcollision` parts and is only a box.
+`platformcollision` parts and is only a box. The layer-0/1 body at `+0x260`
+uses a different shape, filter and geometry slot; see
+[selected-target-line-of-fire.md](selected-target-line-of-fire.md), "The
+layer-0/1 and layer-3 bodies differ in shape, part filter and geometry slot".
 
 Unresolved: when `0x000CD480` returns null the hit fraction is still stored
 with a null `+0x28`; MD then returns false, but the pre-fire classifier's
