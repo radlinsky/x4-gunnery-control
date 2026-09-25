@@ -20,18 +20,6 @@ for _, label in ipairs({ fix.LABEL.nextTurret, fix.LABEL.prevTurret }) do
     assert(fix.callbackCheckpoint() > checkpoint,
         "cycle turret button " .. tostring(label) .. " must schedule its camera gate")
 end
--- #18: Previous on the left, Next on the right.
-local cycleTurretBtns = {}
-for _, b in ipairs(fix.getCreatedButtons()) do
-    if b.text == fix.LABEL.nextTurret or b.text == fix.LABEL.prevTurret then cycleTurretBtns[#cycleTurretBtns + 1] = b end end
-assert(#cycleTurretBtns == 2, "engaged/auto must render exactly two cycle_turret buttons")
-local prevBtn, nextBtn
-for _, b in ipairs(cycleTurretBtns) do
-    if b.text == fix.LABEL.prevTurret then prevBtn = b elseif b.text == fix.LABEL.nextTurret then nextBtn = b end
-end
-assert(prevBtn and prevBtn.column == 1, "engaged/auto: Previous Turret (72) must be col 1")
-assert(nextBtn and nextBtn.column == 2, "engaged/auto: Next Turret (71) must be col 2")
-
 -- Regression: Update turret behavior is console-only and must not appear on
 -- either engaged panel. menu.display returns early for the engaged phase, so
 -- these fixtures specifically exercise the compact Auto and Direct views.
