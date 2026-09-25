@@ -210,12 +210,6 @@ do
         return unpack(values)
     end
     gcMenu.display()
-    for _, entry in ipairs(fix.getCreatedTexts()) do
-        if entry.row == "surface_range_progress" then
-            assert(entry.text():find("oldest", 1, true),
-                "surface progress must show reading freshness")
-        end
-    end
     sess60.groups = {{ key = "selected", members = {{ componentID = 101, operational = true }} }}
     sess60.checkedGroupKeys = { selected = true }
     API.setRangeTargets({ 12002, 12003, 12004 }, 12000)

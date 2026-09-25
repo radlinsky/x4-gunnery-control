@@ -1560,16 +1560,6 @@ function Range.rangeResult(target)
     return Range.cache[State.normID(target)]
 end
 
-function Range.rangeProgress(now)
-    local age
-    for _, entry in ipairs(Range.order) do
-        local result = Range.cache[entry.key]
-        if result then age = math.max(age or 0, now - result.receivedAt) end
-    end
-    return "IN RANGE oldest "
-        .. (age and tostring(math.floor(age)) .. "s" or "pending")
-end
-
 function Range.runRangeSweep(now)
     if C.IsGamePaused() or not session or (session.phase ~= "target_select"
             and not (session.phase == "engaged" and session.controlMode == "direct")) then return end
@@ -3092,10 +3082,6 @@ function menu.display()
                 pageDistances[position] = surfaceDistance(surface.componentID)
             end
             Range.setRangeTargets(pageIDs, pinnedID)
-            local progress = elemTable:addRow("surface_range_progress", {})
-            progress[1]:setColSpan(5):createText(function()
-                return Range.rangeProgress(getElapsedTime())
-            end)
             local pageControls = elemTable:addRow("surface_page_controls", {})
             pageControls[1]:createButton({ active = page > 1 }):setText(text(94))
             pageControls[1].handlers.onClick = function()
@@ -3210,10 +3196,6 @@ function menu.display()
         log("event=target_browser action=rendered candidates=" .. tostring(#candidates)
             .. " class_values=" .. tostring(classValues)
             .. " type_values=" .. tostring(typeValues))
-        local progress = tableView:addRow("target_range_progress", {})
-        progress[1]:setColSpan(12):createText(function()
-            return Range.rangeProgress(getElapsedTime())
-        end)
         for position, candidate in ipairs(candidates) do
             log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d",
                 tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName,

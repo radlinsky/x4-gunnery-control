@@ -490,12 +490,6 @@ do
     for _, button in ipairs(fix.getCreatedButtons()) do
         assert(button.text ~= ReadText(20991, 15), "57: target browser must not expose Refresh")
     end
-    for _, entry in ipairs(fix.getCreatedTexts()) do
-        if entry.row == "target_range_progress" then
-            assert(entry.text():find("oldest", 1, true),
-                "57: browser progress must show result age")
-        end
-    end
 end
 
 -- ── 58. surface type/macro filters use live operational component macros ────
