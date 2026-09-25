@@ -51,9 +51,14 @@ requires X4 still needs a live test.
 - **Match UI buttons by intent**, never by raw id: `fix.buttonByLabel("nextTurret")`
   or `fix.LABEL.<name>`. Do not write `text:20991:NN`; if you need a new label,
   add it to `LABEL_ID` in the fixture (ids come from `t/0001.xml`).
-- **Reuse existing tests and setup.** Before adding a file, remove redundant
-  cases and use the shared fixtures. Split a test only when the independent
-  behavior is clearer that way; do not duplicate setup to meet a line limit.
+- **Before adding a new test case**, check whether an existing case already
+  protects the same behavior. Delete overlapping or obsolete cases.
+- **End every file with a unique** `print("<area> tests passed")`.
+- **Keep each test file under ~600 lines.** Split large tests by concern into
+  sibling `test_<area>_<concern>.lua` files. `validate.sh` automatically runs
+  every `tests/*.lua` file. Keep each split file independently runnable; repeat
+  the minimal setup it needs when necessary. Splitting files is organization,
+  not a reason to add new test cases.
 
 ## Things that will bite you
 
