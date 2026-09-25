@@ -1580,7 +1580,7 @@ function Range.runRangeSweep(now)
         Range.nextSweepAt = now + 1
         return
     end
-    if not Range.sweepStarted then Range.sweepStarted = now end
+    if not Range.sweepStarted then Range.sweepStarted, Clear.sweepCalls = now, 0 end
     local member = Range.members[Range.memberIndex]
     if not Range.passStarted then Range.passStarted = now end
     local memberKey = State.normID(member.componentID)
@@ -1724,7 +1724,7 @@ function Clear.onResult(_, param)
     active[clearStates[status]] = active[clearStates[status]] + 1
     if status == "U" then active.reasons[reason] = (active.reasons[reason] or 0) + 1 end
     active.calls, active.peak, active.requested = active.calls + calls, math.max(active.peak, calls), nil
-    Clear.sweepCalls = Clear.sweepCalls + calls
+    if Range.sweepStarted then Clear.sweepCalls = Clear.sweepCalls + calls end
     if active.index < #active.members then return end
     active.total, active.completedAt = #active.members, now
     Clear.result, Clear.active, Clear.nextAt = active, nil, now + clearInterval
