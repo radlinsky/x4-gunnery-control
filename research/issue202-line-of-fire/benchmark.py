@@ -29,12 +29,11 @@ PARENT = dict(
     S="Z", W="S", W2="S", SSH="S", SEN="S",
     P="Z", T="P", T2="P", PSH="P", PEN="P",
     ST="Z", M1="ST", M2="ST", M3="ST", M4="ST", MC="ST", MT="M1", MT2="M1", MS="M2",
+    DK="P", DKS="M1",                      # craft docked on the target ship / module
     F="Z", X="Z", A="Z", WR="Z", GONE="Z", K="Z", KM="K", KT="KM", KS="KM",
 )
 STATIONS, MODULES = {"ST", "K"}, {"M1", "M2", "M3", "M4", "MC", "KM"}
 SIX = ("x25", "x75", "y25", "y75", "z25", "z75")
-FRACS = dict(x25=(.25, .5, .5), x75=(.75, .5, .5), y25=(.5, .25, .5), y75=(.5, .75, .5),
-             z25=(.5, .5, .25), z75=(.5, .5, .75))
 END = "|"          # hits after this marker lie beyond the tested endpoint
 
 
@@ -128,7 +127,8 @@ def los(sc, e, declared, mut):
 
 def plan_for(sc, strategy, mut=frozenset()):
     t, station = sc["target"], sc["target"] in STATIONS
-    modules = sc.get("modules", ["M1", "M2", "M3", "M4"])[:3]      # production: `$index gt 2` break
+    # Production breaks on `$index gt 2`; MD loop counters are 1-based, so two modules.
+    modules = sc.get("modules", ["M1", "M2", "M3", "M4"])[:3 if "three_modules" in mut else 2]
     declared = PARENT[t] if "declare_parent" in mut and t in ("T", "MT") else t
     if strategy == "legacy":                                        # #60 ENGAGEABLE root probe
         return dict(endpoints=[("aim", t)], blocker=None)
@@ -243,10 +243,21 @@ SCENES = [
     S("hull:blocker", "membership", "P", on_all("X", "P")),
     S("hull:own-turret-mesh", "membership", "P", on_all("W", "P")),
     S("hull:hollow-centre", "membership", "P", on_all(END, "P")),
+    S("hull:docked-ship", "membership", "P", on_all("DK", "P"), scored=False,
+      note="a docked craft is a hull descendant; #202 does not say whether it counts"),
     S("station:nearest-module", "membership", "ST", {"M1": ["M1"], "*": []}, expect=dict(current="C")),
     S("station:module-turret", "membership", "ST", {"M1": ["MT"], "*": []}),
     S("station:other-module", "membership", "ST", {"M1": ["M2"], "*": ["X"]}, expect=dict(current="U")),
     S("station:non-nearest-module", "membership", "ST", on_all("M4")),
+    S("station:third-module", "membership", "ST", on_all("M3"), expect=dict(current="U"),
+      note="the third-nearest module is outside the two-module cap"),
+    S("station:second-module-clear", "membership", "ST", {"M1": ["X", "M1"], "M2": ["M2"]},
+      expect=dict(current="C"), note="modules are ranked from the firing ship, not the turret"),
+    S("station:single-module", "membership", "ST", on_all("M1"), modules=["M1"]),
+    S("station:module-destroyed-mid-pass", "membership", "ST", {"M1": [], "M2": ["M2"]}, absent={"M1"},
+      scored=False, note="the module list is fixed at pass start; a dead entry's MD behavior is unestablished"),
+    S("station:docked-ship", "membership", "ST", on_all("DKS"), scored=False,
+      note="a docked craft is a module descendant; #202 does not say whether it counts"),
     S("station:construction-module", "membership", "ST", {"MC": ["MC"], "*": []},
       modules=["MC", "M1", "M2", "M3"]),
     S("station:module-wreck", "membership", "ST", {"M1": ["M2"], "*": ["X"]}, scored=False,
@@ -423,7 +434,7 @@ def population():
 # ---------------------------------------------------------------- scoring and report
 
 MUTANTS = ("no_classify", "excludeself", "declare_parent", "guided_clear", "unloaded_unguided",
-           "first_blocked_stops", "no_self_query", "zone_skip")
+           "first_blocked_stops", "no_self_query", "zone_skip", "three_modules")
 
 
 def score(obs, exp):
