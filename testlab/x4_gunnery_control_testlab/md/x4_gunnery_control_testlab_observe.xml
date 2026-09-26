@@ -342,6 +342,9 @@
                     + ' fwd=' + $StepFwd
                     + ' back=' + $StepBack
                     + ' rescue=' + (not $MuzzleLosSelf and $StepQW and $StepFwd and $StepBack)
+                    + ' ready=' + $Weapon.isreadytofire
+                    + ' ammo=' + $Weapon.ammo.macro
+                    + ' missiles=' + player.ship.ammostorage.missile.count
                     + ' tgt_bbox=' + $TgtBbox
                     + ' wpn_bbox=' + $Weapon.bboxdistanceto.{$Target}
                     + ' step_len=' + $StepLen

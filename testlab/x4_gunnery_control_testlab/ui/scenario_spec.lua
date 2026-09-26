@@ -58,7 +58,7 @@ X4GunneryTestLabScenarioSpec = {
     --   TARGET CLEAR   (above): socket, then target  -> rescue CLEAR, X4 fires.
     --   TARGET BLOCKED (astern): socket, then own hull -> rescue not CLEAR,
     --                            X4 refuses; an excludeself=true retry reads CLEAR.
-    id      = "issue-202-step-look-back-dumbfire-r1",
+    id      = "issue-202-step-look-back-dumbfire-r2",
     enabled = false,
 
     location = {
@@ -99,8 +99,14 @@ X4GunneryTestLabScenarioSpec = {
 
             role      = "shooter",
             loadout   = "x4gc_testlab_arg_xl_carrier_02_dumbfire",
-            expectedWeapons        = 0,
-            expectedTurrets        = 0,
+            -- Missile turrets count in all three lists (native trace, not yet
+            -- LIVE): missileturrets.<state> is the turrets.<state> query
+            -- narrowed by IsClass(missileturret), and weapons.<state> filters
+            -- IsClass(weapon), which a missile turret passes. If READY reports
+            -- other counts, correct only these numbers, install, Reload UI and
+            -- Create again before teleporting; no restart is needed.
+            expectedWeapons        = 2,
+            expectedTurrets        = 2,
             expectedMissileTurrets = 2,
         },
 
