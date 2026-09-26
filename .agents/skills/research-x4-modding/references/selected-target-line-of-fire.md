@@ -630,13 +630,24 @@ mesh was not traced.
     socket: offline, it recovers 6 of 676 own-turret rows. Stepping past the
     collision-mesh bounds recovers all 676 with no false CLEAR, but those bounds
     are not script-visible.
-  - A script-only rescue matches that result offline. Step from the
-    barrelposition toward the aim point, then check forward to the aim point
-    and back to the barrelposition (declared target = the firing turret). It is
-    CLEAR only if the target is first forward and the turret is first back.
-    Anything the step skipped is then seen first by the back check. Stepping
-    from the turret component origin instead left 12 false CLEARs, because the
-    step point was off the muzzle line. This is inference, not LIVE. See
+  - A rescue built from script actions matches that result offline:
+    - step from the barrelposition toward the aim point by half of
+      `$target.bboxdistanceto.{$weapon}`;
+    - check `Q(W)` from the barrelposition to the step point, then forward to
+      the aim point, then back to the barrelposition (declared target = the
+      firing turret).
+
+    It is CLEAR only if the turret is first, then the target, then the turret.
+    - An exact `Q(W)` on the probe's own line is not possible for targets with
+      authored aim points, whose endpoint is not script-visible. The
+      first-stretch `Q(W)` matched the probe's actual first hit on every
+      settled row.
+    - The reversed `$weapon.bboxdistanceto.{$target}` is a different measure.
+    - Stepping from the turret component origin instead left 12 false CLEARs.
+
+    This is inference: `create_orientation useaimtarget` from an offset origin,
+    the ship and station box used by `bboxdistanceto`, and X4's
+    inside-start/back-face ray behaviour are not LIVE-checked. See
     `research/issue202-line-of-fire/findings.md`, "Rescue probes for the
     own-turret case".
 
