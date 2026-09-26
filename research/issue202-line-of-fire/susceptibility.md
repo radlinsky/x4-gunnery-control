@@ -140,18 +140,66 @@ All fixes are scored on the same rows. Costs are `check_line_of_sight` rays per 
 **Origin-point metadata** (a table of 51 models, Lua-side): nothing gained in the sample, so it is not
 justified yet.
 
+## 3a. Dual check only when the guarded check returns UNKNOWN
+
+`susceptibility.py compare` scores three strategies on the same saved rows: the large-target whole-ship
+rows of the sample, plus a 16-scene beam supplement (`susceptibility.py beams`). That is L2's beam
+loadout, `kha_m_beam_01`, against the same four vanilla hosts, because the sample's loadout A carried no
+beam. There are 175 scored turret results, 27 of them beams. MESH model.
+
+- **Guarded check:** production. The direction is ambiguous, so it runs only the probe, and a beam's
+  probe counts only when the aim point is surely within R.
+- **Conditional dual:** the guarded check first; the dual check runs only if that returns UNKNOWN. A
+  non-beam dual reuses the probe already cast as its centre chain's first ray.
+
+| strategy | turrets | TP | FP | TN | FN | U on PERMIT | U on NOT | mean rays | observed max | theoretical max |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| production | non-beam (148) | 62 | 0 | 0 | 0 | 80 | 6 | 1.00 | 1 | 1 |
+| | beam (27) | 11 | 0 | 0 | 0 | 14 | 2 | 0.96 | 1 | 1 |
+| always dual | non-beam | 141 | 0 | 6 | 0 | 1 | 0 | 6.13 | 11 | 12 |
+| | beam | 19 | 0 | 1 | 0 | 6 | 1 | 4.63 | 6 | 6 |
+| **conditional dual** | non-beam | 141 | 0 | 6 | 0 | 1 | 0 | **5.24** | 11 | 12 |
+| | beam | 19 | 0 | 1 | 0 | 6 | 1 | **3.96** | 7 | 7 |
+
+- **Accuracy is identical.** Accepting the first probe's CLEAR never disagrees with always-dual: every
+  first-probe CLEAR is also the always-dual answer. No row gains a false CLEAR or a false BLOCKED.
+- **Coverage.** The conditional dual recovers 79 of 80 non-beam and 8 of 14 beam false UNKNOWNs.
+  - The 6 remaining beam UNKNOWNs are cases where the centre and offset lines disagree along the barrel.
+  - The 1 remaining non-beam UNKNOWN is the same kind of disagreement.
+- **Cost:**
+  - The dual runs on 102 of 175 turret results; the other 73 end at the first probe.
+  - Mean rays fall by 0.9 (non-beam) and 0.7 (beam) against always-dual.
+  - A beam's worst case is one ray more (7 against 6), because the conditional casts the probe first.
+- **Theoretical maximum** is 12 rays for a non-beam turret: the shared probe, then the rest of both
+  chains (the centre chain's 5 remaining rays plus the offset chain's 6). For a beam it is 7: the probe,
+  then two chains of 3. The sample's observed maxima are 11 and 7.
+- **Other work.** Rays are not the whole cost.
+  - Only the 4-orientation collection test tells a script that a target is a large-target one.
+    Production and the conditional run it (and need the recovered target box) for 113 of 175 turrets:
+    beams, and non-beams after a failed probe.
+    Always-dual must run it for all 175 before it can choose its method.
+  - Box recovery stays once per target per pass, 19 property reads.
+  - Only when the dual runs, the offset adds: the turret's position in the firing ship's frame (one
+    position conversion), the firing ship's box (its macro box, or one more 19-read recovery per pass)
+    and a few position conversions. There are no extra orientations.
+
+**Evidence supports the conditional dual.** It matches always-dual's accuracy on every sampled row. It
+costs fewer rays on average and skips the orientation and box work wherever the first probe already
+decides. Its only cost above always-dual is one extra ray in a beam's worst case.
+
 ## 4. Recommendation
 
 The next implementation experiment:
 
 1. **Exact endpoint for the miss check.** It is zero-cost and recovers essentially all off-mesh and
    no-collision element UNKNOWNs in both games.
-2. **The large-target dual check,** only for whole-ship targets that fail the collection test and have a
-   recovered box radius over 500 m. That covers 36 vanilla models, among them 29 of the 31 XL, and
+2. **The large-target dual check, run conditionally** (section 3a): only when the guarded check returns
+   UNKNOWN, for whole-ship targets that fail the collection test and have a recovered box radius over
+   500 m. That covers 36 vanilla models, among them 29 of the 31 XL, and
    `mandator`.
    - It recovers about half of permitted shots at nearly every vanilla XL ship.
-   - It costs up to about 11 rays for those turrets.
-   - An early exit when both probes agree on CLEAR keeps the common case at 2 rays.
+   - It costs up to 12 rays (non-beam) or 7 (beam) for those turrets, theoretically; the observed maxima
+     are 11 and 7.
    - The owner must accept exceeding the 6-ray cap for these targets.
 
 **Smallest LIVE test.** Stationary shooter and target, with the per-turret log (`event=line_of_fire`)

@@ -262,8 +262,9 @@ def census():
 # ---------------------------------------------------------------- targeted sample
 
 OUT = CACHE / "sample.jsonl.gz"
-METHODS = ("production", "origin metadata", "large-target metadata", "large-target dual check", "both",
-           "ideal")
+BEAM_OUT = CACHE / "beams.jsonl.gz"
+METHODS = ("production", "origin metadata", "large-target metadata", "large-target dual check",
+           "large-target conditional dual", "both", "ideal")
 
 
 def _aim_points(macro):
@@ -357,6 +358,14 @@ def md_status(row, model, method):
                                                                         aim=row["probe_offset"][model])})),
                           model, "production")
         return (a if a == b else "U"), na + nb
+    if method == "large-target conditional dual" and row["large"]:
+        # the guarded check first (probe only); the dual check only when it leaves UNKNOWN. A non-beam
+        # dual's centre chain starts with that same probe, so the probe is not cast twice.
+        a, na = md_status(row, model, "production")
+        if a != "U":
+            return a, na
+        b, nb = md_status(row, model, "large-target dual check")
+        return b, na + nb - (0 if row["beam"] else 1)
     member = lambda sym: P._member(row, sym)                          # noqa: E731
     fixed_lt = method in ("large-target metadata", "both", "ideal") and row["large"]
     fixed_origin = method in ("origin metadata", "both", "ideal") and row["origin_point"]
@@ -365,9 +374,9 @@ def md_status(row, model, method):
     ln = (row["lines_true"] if true_lines else row["lines_prod"])[model]
     probe = (row["probe_true"][model] if fixed_lt else row["lines"][model]["aim"])
     bound, R, beam, rays = row["bound"], row["R"], row["beam"], 0
-    if amb:
-        ok = member(probe) and (not beam or bound <= R)
-        return ("C" if ok else "U"), 1
+    if amb:                         # a beam casts the probe only when its aim point is surely within R
+        cast = not beam or bound <= R
+        return ("C" if cast and member(probe) else "U"), int(cast)
     own = ln["qw"] == "W"
     if beam:
         if own and ln["back"] != "W":
@@ -515,5 +524,81 @@ def report():
     print(text)
 
 
+def beams():
+    """Supplement: the benchmark's only beam turret (L2 loadout carrying `kha_m_beam_01`) against the four
+    vanilla large-target hosts, whole-ship targets only. 16 scenes."""
+    import gzip
+    ships, ctx = St.context()
+    l2 = next(s for s in ships if s["tag"] == "L2")
+    l2["variants"] = [v for v in l2["variants"] if any(P.BEAMS & {ctx["records"][k]["macro"] for k in v[1].values()})][:1]
+    n = 0
+    with gzip.open(BEAM_OUT, "wt") as out:
+        for h, (game, name, why) in enumerate(hosts()[:4]):
+            for gap in ("ordinary", "boundary"):
+                saved = Sc.GAPS["ordinary"]
+                Sc.GAPS["ordinary"] = Sc.GAPS[gap]
+                for v, view in enumerate(Sc.views(None)):
+                    for scene in St._view_scenes(name, "ship", True, h, v, view, None, [l2], ctx, why):
+                        scene.info.update(game=game, gap=gap)
+                        for turret in scene.turrets:
+                            if turret["macro"] not in P.BEAMS:
+                                continue
+                            row = sample_test(scene, turret, scene.targets[0], ctx, St.MODELS)
+                            row.update(game=game, host=name, why=why, gap=gap, view=scene.info["view"])
+                            out.write(json.dumps(row, separators=(",", ":"), default=float) + "\n")
+                            n += 1
+                Sc.GAPS["ordinary"] = saved
+    print(f"{n} beam tests")
+
+
+def compare():
+    """Large-target whole-ship rows of the saved sample: production, always-dual and conditional dual."""
+    import gzip
+    rows = [json.loads(x) for x in gzip.open(OUT, "rt")]
+    rows += [json.loads(x) for x in gzip.open(BEAM_OUT, "rt")] if BEAM_OUT.exists() else []
+    rows = [r for r in rows if r["state"] == "SETTLED" and r.get("large") and P.truth(r) in ("PERMIT", "NOT")]
+    methods = ("production", "large-target dual check", "large-target conditional dual")
+    lines = [f"Large-target whole-ship rows, sample, MESH: {len(rows)} scored "
+             f"({sum(r['beam'] for r in rows)} beam)\n",
+             "| method | turrets | " + " | ".join(OUTCOMES) + " | mean rays | observed max | theoretical max |",
+             "|---|---|" + "---:|" * (len(OUTCOMES) + 3)]
+    theory = {"production": (1, 1), "large-target dual check": (12, 6), "large-target conditional dual": (12, 7)}
+    for method in methods:
+        for label, beam in (("non-beam", False), ("beam", True)):
+            sub = [r for r in rows if r["beam"] == beam]
+            if not sub:
+                continue
+            res = [md_status(r, "mesh", method) for r in sub]
+            c = Counter(outcome(st, P.truth(r)) for (st, _n), r in zip(res, sub))
+            n = [x for _s, x in res]
+            say_max = theory[method][beam]
+            lines.append(f"| {method} | {label} | " + " | ".join(str(c[o]) for o in OUTCOMES)
+                         + f" | {sum(n) / len(n):.2f} | {max(n)} | {say_max} |")
+    # where the conditional accepts the first-probe CLEAR, does always-dual say otherwise?
+    diff = Counter()
+    for r in rows:
+        first = md_status(r, "mesh", "production")[0]
+        dual = md_status(r, "mesh", "large-target dual check")[0]
+        if first == "C" and dual != "C":
+            diff[r["host"], "beam" if r["beam"] else "non-beam", dual, P.truth(r)] += 1
+    lines.append("\nFirst-probe CLEAR where always-dual disagrees: "
+                 + ("; ".join(f"{k}: {v}" for k, v in sorted(diff.items())) or "none"))
+    runs = Counter()
+    for r in rows:
+        probe_decides = md_status(r, "mesh", "production")[0] != "U"
+        runs["turrets"] += 1
+        runs["dual runs (conditional)"] += not probe_decides
+    lines.append(f"Dual evaluation needed by the conditional variant: {runs['dual runs (conditional)']} of "
+                 f"{runs['turrets']} turret results")
+    # non-ray work: the 4-orientation collection test runs for a beam, or after a non-beam probe fails;
+    # the always-dual variant must run it for every turret to know the target is a large-target one
+    guarded = sum(r["beam"] or md_status(r, "mesh", "production")[0] == "U" for r in rows)
+    lines.append(f"Turrets running the 4-orientation test and needing the target box: production and "
+                 f"conditional {guarded} of {len(rows)}; always-dual {len(rows)} of {len(rows)}")
+    text = "\n".join(lines)
+    print(text)
+    return text
+
+
 if __name__ == "__main__":
-    {"census": census, "sample": sample, "report": report}[sys.argv[1]]()
+    {"census": census, "sample": sample, "beams": beams, "report": report, "compare": compare}[sys.argv[1]]()
