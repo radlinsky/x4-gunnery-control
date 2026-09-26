@@ -25,6 +25,9 @@
 --     expectedMemberMacros list Optional exact sorted member-macro multiset.
 --     selectAll       boolean Optional; select every mutable turret group and
 --                             verify the aggregate member count.
+--     strictMissilePhases boolean Optional bounded blocked-first/clear-second
+--                             diagnostic; requires shooter, clear, blocked order,
+--                             one ship each and exactly two missile turrets.
 --   groups    list     One entry per batch of identical ships.
 --     label     string   Spawned name prefix and log label.
 --     macro     string   Ship macro name, without the "macro." prefix.
@@ -58,7 +61,18 @@ X4GunneryTestLabScenarioSpec = {
     --   TARGET CLEAR   (above): socket, then target  -> rescue CLEAR, X4 fires.
     --   TARGET BLOCKED (astern): socket, then own hull -> rescue not CLEAR,
     --                            X4 refuses; an excludeself=true retry reads CLEAR.
-    id      = "issue-202-step-look-back-dumbfire-r2",
+    -- r3 procedure: Create once from a safe launcher, wait for READY, teleport
+    -- to the shooter, sit at its gunnery console and open Test Lab once.
+    -- Activation stages Attack my current enemy; MD independently checks both
+    -- actual missile-turret modes and >=20 missiles before allowing fire.
+    -- Select TARGET BLOCKED in Direct-control first. Wait for the phase-ended
+    -- notification, then select TARGET CLEAR. Stay on each target for 25 active
+    -- seconds even if firing stops earlier, to retain the settled STEP snapshot.
+    -- MD inhibits missile systems from spawn, between phases, after 4 blocked /
+    -- 8 clear launch events, on mode/count/reserve/target failure, or at 25s.
+    -- Stop after the clear settled snapshot and upload debug.log. Never change
+    -- turret modes, press Create again, or manually replenish ammunition.
+    id      = "issue-202-step-look-back-dumbfire-r3",
     enabled = false,
 
     location = {
@@ -70,6 +84,7 @@ X4GunneryTestLabScenarioSpec = {
 
     setup = {
         remote            = true,
+        strictMissilePhases = true,
         shipMacro         = "ship_arg_xl_carrier_02_a_macro",
         shipLabel         = "ISSUE202 STEP SHOOTER 1",
         turretGroup       = "group_front_left_up",
