@@ -533,6 +533,10 @@ def _rescue_lines(scene, origin, turret, target, rank, aim, models):
       the create_orientation useaimtarget route) leaves the turret's collision-eligible macro box
       (`macro.boundingbox`), to the aim point; and the skipped muzzle-to-start segment ignoring the turret;
     - adv_col: the same from where it leaves the bounds of the turret's collision mesh (prebuilt data);
+    - fwd_<s> / back_<s>: step s from the muzzle toward the aim point nearest the muzzle (create_orientation
+      useaimtarget from the barrelposition), s = half the turret-origin-to-target-box distance
+      (`bboxdistanceto`), or 50 m capped by it; then forward from the step to the aim point, and back from the
+      step to the muzzle (declared target = the firing turret);
     - rev: from the aim point back to the muzzle, object = target with excludeself=true (drops the target and
       its ancestors' meshes; a whole ship's or station's own bodies entirely)."""
     C, H = Sc.box(turret["macro"])
@@ -540,6 +544,12 @@ def _rescue_lines(scene, origin, turret, target, rank, aim, models):
     own = next(((b.lo, b.hi, f) for label, b, f in scene.instances if label == turret["label"]), None)
     start = _past_box(origin, d, C - H, C + H, turret["frame"])
     start_col = _past_box(origin, d, *own) if own else origin    # no collision mesh: nothing to step past
+    t = Sc.to_local(turret["frame"][0], target["frame"])
+    half = 0.5 * float(np.linalg.norm(t - np.clip(t, target["C"] - target["H"], target["C"] + target["H"])))
+    ahead = Sc.to_world(target["points"][_select(Sc.to_local(origin, target["frame"]), target["points"])],
+                        target["frame"]) if target["points"] else aim
+    u = (ahead - origin) / np.linalg.norm(ahead - origin)
+    steps = {"half": origin + half * u, "50m": origin + min(50.0, half) * u}
     meta, cls = scene.meta, target["cls"]
     if cls in ("whole ship", "station root"):
         rev = {label for label in meta if meta[label]["group"] == "H"}
@@ -549,6 +559,8 @@ def _rescue_lines(scene, origin, turret, target, rank, aim, models):
         rev = {target["label"], target["module"]}
     lines = dict(aim_own=(origin, aim, {turret["label"]}), adv=(start, aim, ()), adv_col=(start_col, aim, ()),
                  adv_skip=(origin, start, {turret["label"]}), rev=(aim, origin, rev))
+    for k, p in steps.items():
+        lines[f"fwd_{k}"], lines[f"back_{k}"] = (p, aim, ()), (p, origin, ())
     out = {}
     for model in models:
         out[model] = {}
@@ -1373,7 +1385,7 @@ def mech_sym(sym):
 
 RESCUES = ("conservative", "probe+ex", "restart past own hit (ideal)", "advance past own box",
            "advance past own collision (prebuilt)", "reverse, aim point known", "reverse (mod)", "ex + advance",
-           "ex + reverse (mod)")
+           "ex + reverse (mod)", "step half + look back", "step 50 m + look back")
 
 
 def rescue_status(row, phase, model, method):
@@ -1388,6 +1400,10 @@ def rescue_status(row, phase, model, method):
     ok = {m: bool(lines.get(k)) and B.qualifies(t, lines[k][0]) for m, k in
           (("ex", "aim_ex"), ("own", "aim_own"), ("adv", "adv"), ("col", "adv_col"))}
     rev = lines.get("rev") == ["W"]
+    if method.startswith("step"):   # forward from the step (3rd call), then back to the muzzle (4th) only if it clears
+        k = "half" if "half" in method else "50m"
+        fwd = bool(lines[f"fwd_{k}"]) and B.qualifies(t, lines[f"fwd_{k}"][0])
+        return ("C" if fwd and lines[f"back_{k}"] == ["W"] else "U"), (4 if fwd else 3)
     # the mod can place the aim point (macro box centre) and excludeself=true drops only target geometry
     known = row["aim_points"] == 0 and row["target_cls"] == "whole ship"
     said, calls = {

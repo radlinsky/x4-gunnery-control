@@ -552,6 +552,7 @@ Results, settled phase (cells MESH / HULL):
 | reverse from the aim point to the muzzle, target `excludeself=true`, aim point assumed known | no | 676 / 678 | 546 / 550 | 0 / 0 | 1.76 / 3 |
 | reverse, whole ships whose aim point is the box centre | partly | 74 / 74 | 0 / 0 | 602 / 604 | 1.65 / 3 |
 | `excludeself=true` retry guarded by the advance or the whole-ship reverse | as its guard | same as its guard | 0 / 0 | same | +1 call |
+| **step and look back**: step toward the aim point, check forward and back (below) | yes | 676 / 678 | 0 / 0 | 0 / 0 | 1.81 / 4 |
 
 Parked (MESH):
 
@@ -559,7 +560,8 @@ Parked (MESH):
 - `excludeself=true` retry 426 / 132;
 - restart past the hit 136 / 141;
 - advance past the collision bounds 138 / 140;
-- advance past `macro.boundingbox` 111 / 1,622.
+- advance past `macro.boundingbox` 111 / 1,622;
+- step and look back 136 / 143 (HULL 112 / 243), within 2 rows of the ideal restart.
 
 Parked FPs are mostly sibling turrets and the firing hull, which the parked line crosses but the
 settled line does not.
@@ -604,6 +606,53 @@ script-visible box does not.
   - A mod can detect "no authored point" only by comparing the `create_orientation useaimtarget`
     direction with the direction to the box centre. That is inference.
 
+**5. Step and look back.** This is implementable and matches the ideal restart. The method, after the probe
+and a `Q(W)` showing the firing turret is first:
+
+1. Take the direction from the barrelposition to the aim point: `create_orientation useaimtarget` with
+   the barrelposition as origin.
+2. Step along it by half of `bboxdistanceto` (turret to target box), so the step point is always short
+   of the target's box.
+3. **Forward:** from the step point to the aim point, `useaimtarget=true`, `excludeself=false`. The
+   target must be first.
+4. **Back:** from the step point to the barrelposition, `object=$weapon`, declared target `$weapon`,
+   `excludeself=false`. The firing turret must be the first thing seen.
+
+CLEAR only when both hold. Why this works:
+
+- The two checks cover the whole line except the inside of the socket.
+- Anything skipped (hull, sibling, external) is the first thing the back check sees, so it gives
+  UNKNOWN, never a false CLEAR.
+- A step still inside the socket just gives UNKNOWN.
+
+Results:
+
+- **Settled:** 676 / 678 recovered, 0 / 0 FP, under both models. A fixed 50 m step (capped at the half
+  distance) gives the same settled result, so the step length barely matters.
+- **Parked:** 136 / 143 MESH FP / FN, within 2 rows of the ideal restart.
+- **Cost:** 1.81 mean and 4 worst-case `check_line_of_sight` calls, plus one `create_orientation` and
+  the position conversions.
+
+The step direction must start at the muzzle.
+
+- A first version stepped along the direction from the turret component origin. Its step point sat
+  beside the muzzle-to-target line by up to half the muzzle's offset from the mount.
+- Objects on the true line then slipped between the two checks: 12 MESH / 12 HULL settled false CLEARs.
+  They were sibling shields and turrets at `par_l_dumbfire_01` mounts, a satellite, and a station
+  module.
+- Stepping from the muzzle removed all of them.
+
+Limitations:
+
+- **The socket-interior blind spot.** Geometry inside the socket's own volume between the muzzle and the
+  socket face is unseen. It never produced an error in this population.
+- **`create_orientation useaimtarget` with a barrelposition origin is not LIVE-checked.** It is assumed
+  to return the direction to the aim point nearest that origin (KB inference). That nearest point differs
+  from X4's turret-origin choice only on multi-point targets near a switch boundary, and the forward check
+  still ends at X4's point.
+- **A ray starting inside a body** is assumed to report that body. Both offline shape models do, but
+  Jolt's behavior is untraced.
+
 **4. Other routes.**
 
 - `event_weapon_fired` with `bullet.launcher` and `.rotation` shows that X4 permitted a shot and its
@@ -615,13 +664,17 @@ script-visible box does not.
 
 Conclusion:
 
-- Without prebuilt data, no available rescue removes the own-turret UNKNOWNs safely at scale.
-- The whole-ship reverse probe safely recovers 74 of 676 (MESH).
-- An advance past per-macro collision bounds would recover all of them with no incorrect CLEAR here,
-  at the cost of a prebuilt extent table.
-- The unguarded `excludeself=true` retry recovers all of them but claims CLEAR through the firing hull
-  (78 MESH / 56 HULL).
-- Everything above is offline inference; none of it is LIVE.
+- **Step and look back** is the best implementable rescue. It uses no prebuilt data and no
+  `excludeself=true`. It recovers every settled own-turret row (676 MESH / 678 HULL) with no incorrect
+  CLEAR, matching the ideal restart, at up to 4 calls.
+- The alternatives are weaker:
+  - the unguarded `excludeself=true` retry recovers the same rows but claims CLEAR through the firing
+    hull (78 / 56);
+  - an advance past `macro.boundingbox` recovers 6;
+  - the whole-ship reverse probe recovers 74.
+- Everything above is offline inference, not LIVE. The first LIVE check should be
+  `create_orientation useaimtarget` from the barrelposition, then one own-socket case such as
+  `arg_m_dumbfire_02`.
 
 ## Evidence gaps
 
