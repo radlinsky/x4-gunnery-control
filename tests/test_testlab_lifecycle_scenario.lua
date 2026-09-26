@@ -818,4 +818,53 @@ do
         "current and stale remote handlers must re-check occupied-shooter safety")
 end
 
+-- A strict missile diagnostic must stage autoassist itself, even when the
+-- parked session inherited the default attackenemies policy.
+do
+    local harness = loadHarness({
+        id = "strict-missile-lifecycle", enabled = false,
+        location = { sectorMacro = "synthetic_sector_macro", x = 0, y = 0, z = 0 },
+        setup = { remote = true, strictMissilePhases = true,
+            shipMacro = "remote_ship_macro", shipLabel = "Remote Ship",
+            turretGroup = "g", turretLabel = "Remote Group", expectedTurrets = 2 },
+        groups = {
+            group({ role = "shooter", loadout = "synthetic_missiles",
+                expectedWeapons = 2, expectedTurrets = 2, expectedMissileTurrets = 2 }),
+            group({ holdFire = true }), group({ holdFire = true }),
+        },
+    })
+    harness.openFromGunnery({ label = "safe launcher", phase = "console" })
+    local events, requestId = requestScenario(harness)
+    assert(events[1].params.strictMissilePhases == true,
+        "the ship-level firing inhibit must be requested with scenario creation")
+    harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
+        ready9(requestId, "strict-missile-lifecycle", { spawned = 3,
+            safeFixtures = 2, safeWeapons = 2, shooters = 1,
+            shooterWeapons = 2, shooterTurrets = 2, shooterMissileTurrets = 2 }))
+    harness.fix.C.GetNumUpgradeSlots = function() return 2 end
+    harness.fix.C.GetUpgradeSlotCurrentComponent = function(_, _, slot) return 27 + slot end
+    harness.fix.C.GetUpgradeGroupInfo2 = function()
+        return { count = 2, currentcomponent = 27, currentmacro = "", slotsize = "",
+            total = 2, operational = 2 }
+    end
+    GetComponentData = function(_, field)
+        if field == "macro" then return "remote_ship_macro" end
+        if field == "isplayerowned" then return true end
+    end
+    harness.fix.C.GetComponentName = function() return "Remote Ship" end
+    harness.fix.gcMenu.onShowMenu()
+    harness.fix.gcMenu.display()
+    harness.fix.buttonByText(ReadText(20991, 32)).handlers.onClick()
+    harness.testMenu.onShowMenu()
+    local session = X4GunneryControlAPI.getSession()
+    assert(session.directMode == "autoassist",
+        "Test Lab must choose strict targeting without an owner menu selection")
+    for key in pairs(session.checkedGroupKeys) do
+        assert(session.staged[key].mode == "autoassist",
+            "every selected group must retain strict mode through menu handoff")
+    end
+    assert(harness.fix.logContains("event=scenario_activate"),
+        "strict activation must complete the exact-group census")
+end
+
 print("testlab lifecycle scenario tests passed")

@@ -46,6 +46,9 @@
               <set_value name="ScenarioRoot.$PendingAnchorX" exact="if @event.param3.$anchorX then event.param3.$anchorX else 0"/>
               <set_value name="ScenarioRoot.$PendingAnchorY" exact="if @event.param3.$anchorY then event.param3.$anchorY else 0"/>
               <set_value name="ScenarioRoot.$PendingAnchorZ" exact="if @event.param3.$anchorZ then event.param3.$anchorZ else 0"/>
+              <set_value name="ScenarioRoot.$StrictMissilePhases" exact="@event.param3.$strictMissilePhases == true"/>
+              <set_value name="ScenarioRoot.$MissilePhase" exact="0"/>
+              <set_value name="ScenarioRoot.$MissilePhaseActive" exact="false"/>
               <set_value name="ScenarioRoot.$Pending" exact="[]"/>
               <debug_text text="'[X4GC TEST SCENARIO] accepting spec id=' + $SpecId + ' force=' + $Force"/>
             </do_else>
@@ -259,6 +262,9 @@
                   <set_value name="$ShooterWeapons" operation="add" exact="$Ship.weapons.operational.count"/>
                   <set_value name="$ShooterTurrets" operation="add" exact="$Ship.turrets.operational.count"/>
                   <set_value name="$ShooterMissileTurrets" operation="add" exact="$Ship.missileturrets.operational.count"/>
+                  <do_if value="ScenarioRoot.$StrictMissilePhases">
+                    <set_allowed_weapon_systems object="$Ship" disallow="turret_missile" immediate="true"/>
+                  </do_if>
                   <!-- Keep a remote shooter dormant while the owner teleports. -->
                   <cease_fire object="$Ship"/>
                   <do_for_each name="$Weapon" in="$Ship.turrets.operational.list">
@@ -427,6 +433,121 @@
                 </do_for_each>
               </do_if>
             </do_for_each>
+          </actions>
+        </cue>
+
+
+        <!-- Bounded selected-target missile diagnostic. The ship-level inhibit
+             is independent of Gunnery's group arming. Never enable from a menu
+             label: read BOTH live missile weapon modes and ammunition first. -->
+        <cue name="MissilePhaseStart" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_state'"/>
+            <check_value value="ScenarioRoot.$StrictMissilePhases? and ScenarioRoot.$StrictMissilePhases and ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.count == 3"/>
+            <check_value value="player.ship == ScenarioRoot.$Spawned.{1} and not ScenarioRoot.$MissilePhaseActive and ScenarioRoot.$MissilePhase lt 2"/>
+            <check_value value="@event.param3.$aimtgt == (if ScenarioRoot.$MissilePhase == 0 then ScenarioRoot.$Spawned.{3} else ScenarioRoot.$Spawned.{2})"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="player.ship"/>
+            <set_allowed_weapon_systems object="$Ship" disallow="turret_missile" immediate="true"/>
+            <set_value name="$Valid" exact="$Ship.missileturrets.operational.count == 2 and $Ship.ammostorage.missile.count ge 20"/>
+            <set_value name="$Modes" exact="''"/>
+            <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
+              <set_value name="$Modes" exact="$Modes + $Weapon + '=' + $Weapon.mode + ','"/>
+              <do_if value="$Weapon.mode != weaponmode.autoassist or $Weapon.ammo.macro != macro.missile_gen_m_dumbfire_01_mk1_macro">
+                <set_value name="$Valid" exact="false"/>
+              </do_if>
+            </do_for_each>
+            <set_value name="ScenarioRoot.$MissilePhase" operation="add"/>
+            <debug_text text="'[X4GC TEST PHASE] spec=' + ScenarioRoot.$SpawnedSpecId + ' request=' + ScenarioRoot.$PendingRequestId + ' phase=' + ScenarioRoot.$MissilePhase + ' valid=' + $Valid + ' missiles=' + $Ship.ammostorage.missile.count + ' modes=' + $Modes"/>
+            <do_if value="$Valid">
+              <set_value name="ScenarioRoot.$MissilePhaseTarget" exact="event.param3.$aimtgt"/>
+              <set_value name="ScenarioRoot.$MissilePhaseShots" exact="0"/>
+              <set_value name="ScenarioRoot.$MissilePhaseFailed" exact="false"/>
+              <set_value name="ScenarioRoot.$MissileStopReason" exact="'deadline'"/>
+              <set_value name="ScenarioRoot.$MissilePhaseDeadline" exact="player.age + 25s"/>
+              <set_value name="ScenarioRoot.$MissilePhaseActive" exact="true"/>
+              <show_notification text="'Test Lab: phase ' + ScenarioRoot.$MissilePhase + ' verified (both autoassist), missiles=' + $Ship.ammostorage.missile.count"/>
+              <set_allowed_weapon_systems object="$Ship" allow="turret_missile"/>
+            </do_if>
+            <do_else>
+              <set_value name="ScenarioRoot.$MissilePhase" exact="2"/>
+              <show_notification text="'Test Lab FAILED: missile mode, loadout or ammunition check failed; firing inhibited. Stop and upload debug.log.'"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <cue name="MissilePhaseListeners" checkinterval="1s">
+          <conditions>
+            <check_value value="ScenarioRoot.$StrictMissilePhases? and ScenarioRoot.$StrictMissilePhases and ScenarioRoot.$Spawned? and ScenarioRoot.$Spawned.count == 3"/>
+          </conditions>
+          <actions>
+            <create_group groupname="$MissileWeapons"/>
+            <do_for_each name="$Weapon" in="ScenarioRoot.$Spawned.{1}.missileturrets.operational.list">
+              <add_to_group groupname="$MissileWeapons" object="$Weapon"/>
+            </do_for_each>
+          </actions>
+          <cues>
+            <cue name="MissilePhaseShot" instantiate="true">
+              <conditions>
+                <event_weapon_fired group="MissilePhaseListeners.$MissileWeapons"/>
+                <check_value value="ScenarioRoot.$MissilePhaseActive? and ScenarioRoot.$MissilePhaseActive and event.object.container == ScenarioRoot.$Spawned.{1}"/>
+              </conditions>
+              <actions>
+                <set_value name="ScenarioRoot.$MissilePhaseShots" operation="add"/>
+                <do_if value="ScenarioRoot.$MissilePhaseShots ge (if ScenarioRoot.$MissilePhase == 1 then 4 else 8)">
+                  <set_value name="ScenarioRoot.$MissileStopReason" exact="'shot_budget'"/>
+                  <signal_cue_instantly cue="MissilePhaseStop"/>
+                </do_if>
+              </actions>
+            </cue>
+
+          </cues>
+        </cue>
+
+        <!-- Silent safety checks; only start/stop transitions are logged. -->
+        <cue name="MissilePhaseGuard" instantiate="true" checkinterval="100ms">
+          <conditions>
+            <check_value value="ScenarioRoot.$MissilePhaseActive? and ScenarioRoot.$MissilePhaseActive"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="ScenarioRoot.$Spawned.{1}"/>
+            <set_value name="$Stop" exact="player.ship != $Ship or $Ship.ammostorage.missile.count lt 20 or $Ship.missileturrets.operational.count != 2"/>
+            <do_for_each name="$Weapon" in="$Ship.missileturrets.operational.list">
+              <do_if value="$Weapon.mode != weaponmode.autoassist">
+                <set_value name="$Stop" exact="true"/>
+              </do_if>
+            </do_for_each>
+            <do_if value="$Stop">
+              <set_value name="ScenarioRoot.$MissilePhaseFailed" exact="true"/>
+              <set_value name="ScenarioRoot.$MissileStopReason" exact="'live_safety_check'"/>
+            </do_if>
+            <do_if value="$Stop or player.age ge ScenarioRoot.$MissilePhaseDeadline"><signal_cue_instantly cue="MissilePhaseStop"/></do_if>
+          </actions>
+        </cue>
+
+        <cue name="MissilePhaseTargetChange" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'observe_state'"/>
+            <check_value value="ScenarioRoot.$MissilePhaseActive? and ScenarioRoot.$MissilePhaseActive and @event.param3.$aimtgt != ScenarioRoot.$MissilePhaseTarget"/>
+          </conditions>
+          <actions>
+            <set_value name="ScenarioRoot.$MissilePhaseFailed" exact="true"/>
+            <set_value name="ScenarioRoot.$MissileStopReason" exact="'target_changed_early'"/>
+            <signal_cue_instantly cue="MissilePhaseStop"/>
+          </actions>
+        </cue>
+
+        <cue name="MissilePhaseStop" instantiate="true">
+          <conditions><event_cue_signalled/></conditions>
+          <actions>
+            <set_allowed_weapon_systems object="ScenarioRoot.$Spawned.{1}" disallow="turret_missile" immediate="true"/>
+            <set_value name="ScenarioRoot.$MissilePhaseActive" exact="false"/>
+            <debug_text text="'[X4GC TEST PHASE STOP] spec=' + ScenarioRoot.$SpawnedSpecId + ' phase=' + ScenarioRoot.$MissilePhase + ' reason=' + ScenarioRoot.$MissileStopReason + ' failed=' + ScenarioRoot.$MissilePhaseFailed + ' shots=' + ScenarioRoot.$MissilePhaseShots + ' missiles=' + ScenarioRoot.$Spawned.{1}.ammostorage.missile.count"/>
+            <do_if value="ScenarioRoot.$MissilePhaseFailed">
+              <set_value name="ScenarioRoot.$MissilePhase" exact="2"/>
+            </do_if>
+            <show_notification text="if ScenarioRoot.$MissilePhaseFailed then 'Test Lab FAILED: firing inhibited. Stop and upload debug.log.' else if ScenarioRoot.$MissilePhase == 1 then 'Test Lab: blocked phase ended. Select TARGET CLEAR next.' else 'Test Lab: clear phase ended. Stop and upload debug.log.'"/>
           </actions>
         </cue>
 
