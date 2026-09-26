@@ -51,51 +51,107 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- Use the owner's existing, fully equipped Ray; Test Lab only creates targets.
-    -- All 14 turrets measure the selected-target CLEAR LINE OF FIRE pass.
-    id      = "issue-197-ray-two-osaka-line-of-fire-v1",
+    -- Issue #202 step-and-look-back LIVE check. Colossus E with two
+    -- arg_m_dumbfire_02 turrets (both con_turret_m_06/m_14 in the group),
+    -- whose muzzle probe first hits the turret's own socket. Offline, for both
+    -- mounts and both shape models, within +-100 m of each placement:
+    --   TARGET CLEAR   (above): socket, then target  -> rescue CLEAR, X4 fires.
+    --   TARGET BLOCKED (astern): socket, then own hull -> rescue not CLEAR,
+    --                            X4 refuses; an excludeself=true retry reads CLEAR.
+    id      = "issue-202-step-look-back-dumbfire-r1",
     enabled = false,
 
+    location = {
+        sectorMacro = "Cluster_29_Sector001_macro",
+        x = 500000,
+        y = 0,
+        z = 0,
+    },
+
     setup = {
-        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
-        shipLabel       = "Ray",
-        -- The validator still requires a named group alongside selectAll.
-        turretGroup     = "group_front_up_left",
-        turretLabel     = "All mutable groups",
-        expectedTurrets = 14,
-        selectAll       = true,
+        remote            = true,
+        shipMacro         = "ship_arg_xl_carrier_02_a_macro",
+        shipLabel         = "ISSUE202 STEP SHOOTER 1",
+        turretGroup       = "group_front_left_up",
+        turretLabel       = "Front Left Up Dumbfire",
+        expectedTurrets   = 2,
+        expectedMemberMacros = {
+            "turret_arg_m_dumbfire_02_mk1_macro",
+            "turret_arg_m_dumbfire_02_mk1_macro",
+        },
     },
 
     groups = {
         {
-            label             = "P1 LEFT OSAKA",
-            macro             = "ship_ter_l_destroyer_01_a_macro",
-            faction           = "xenon",
-            count             = 1,
-            distance          = 3500,
-            x                 = -900,
-            y                 = 0,
-            spread            = 0,
-            behaviour         = "wait",
-            hostile           = true,
-            holdFire          = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
+            label     = "ISSUE202 STEP SHOOTER",
+            macro     = "ship_arg_xl_carrier_02_a_macro",
+            faction   = "player",
+            count     = 1,
+            distance  = 0,
+            x         = 0,
+            y         = 0,
+            spread    = 0,
+            behaviour = "wait",
+            yaw       = 0,
+            pitch     = 0,
+            roll      = 0,
+            preserveOrientation = true,
+
+            role      = "shooter",
+            loadout   = "x4gc_testlab_arg_xl_carrier_02_dumbfire",
+            expectedWeapons        = 0,
+            expectedTurrets        = 0,
+            expectedMissileTurrets = 2,
         },
+
         {
-            label             = "P1 RIGHT OSAKA",
-            macro             = "ship_ter_l_destroyer_01_a_macro",
-            faction           = "xenon",
-            count             = 1,
-            distance          = 3500,
-            x                 = 900,
-            y                 = 0,
-            spread            = 0,
-            behaviour         = "wait",
-            hostile           = true,
-            holdFire          = true,
+            label     = "ISSUE202 STEP TARGET CLEAR",
+            macro     = "ship_par_m_trans_container_01_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = 0,
+            x         = 322,
+            y         = 2479,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
             stripDefenceUnits = true,
             repairGuard       = true,
+            yaw   = 0,
+            pitch = 0,
+            roll  = 0,
+            preserveOrientation = true,
+
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
+            expectedMissileTurrets = 0,
+        },
+
+        {
+            label     = "ISSUE202 STEP TARGET BLOCKED",
+            macro     = "ship_par_m_trans_container_01_a_macro",
+            faction   = "xenon",
+            count     = 1,
+            distance  = -2474,
+            x         = 345,
+            y         = 104,
+            spread    = 0,
+            behaviour = "wait",
+            hostile   = true,
+            holdFire  = true,
+            stripDefenceUnits = true,
+            repairGuard       = true,
+            yaw   = 0,
+            pitch = 0,
+            roll  = 0,
+            preserveOrientation = true,
+
+            loadout   = "timelines_scenario_assassination_target_trader",
+            expectedWeapons        = 1,
+            expectedTurrets        = 1,
+            expectedMissileTurrets = 0,
         },
     },
 }
