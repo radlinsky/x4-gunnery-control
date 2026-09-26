@@ -3163,6 +3163,9 @@ function menu.display()
             row[1]:setColSpan(9):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
             row[10]:setColSpan(3):createButton({}):setText(text(36))
             row[10].handlers.onClick = function() engageTarget(current.softtargetID) end
+            local selectedID = current.softtargetID
+            local detail = tableView:addRow("current_detail", { bgColor = Color["row_background_unselectable"] })
+            detail[1]:setColSpan(12):createText(function() return Range.rangeText(Range.rangeResult(selectedID)) end)
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
