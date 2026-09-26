@@ -511,6 +511,50 @@ def _lines(scene, origin, turret, target, rank, models):
             label, _t = Gm.first_hit(scene.instances, origin, e=p, model=model, skip=exself if e == "aim_ex" else ())
             sym = symbol(scene, label, turret, target, rank)
             out[model][e] = [sym] if sym else []
+    for model, rescue in _rescue_lines(scene, origin, turret, target, rank, ends["aim"], models).items():
+        out[model].update(rescue)
+    return out
+
+
+def _past_box(origin, d, lo, hi, frame):
+    """1 cm past where the ray origin + t*d leaves the frame-local box [lo, hi], else 1 cm along d."""
+    o = Sc.to_local(origin, frame)
+    dl = Sc.to_local(origin + d, frame) - o
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t1, t2 = (lo - o) / dl, (hi - o) / dl
+    near, far = float(np.nanmax(np.minimum(t1, t2))), float(np.nanmin(np.maximum(t1, t2)))
+    return origin + ((far if far >= max(near, 0.0) else 0.0) + 0.01) * d
+
+
+def _rescue_lines(scene, origin, turret, target, rank, aim, models):
+    """Rescue candidates for a probe whose first hit is the firing turret (see findings, "Rescue probes"):
+    - aim_own: the probe line ignoring only the firing turret (ideal restart past its own hit);
+    - adv / adv_skip: from where the ray toward the aim point (direction from the turret component origin,
+      the create_orientation useaimtarget route) leaves the turret's collision-eligible macro box
+      (`macro.boundingbox`), to the aim point; and the skipped muzzle-to-start segment ignoring the turret;
+    - adv_col: the same from where it leaves the bounds of the turret's collision mesh (prebuilt data);
+    - rev: from the aim point back to the muzzle, object = target with excludeself=true (drops the target and
+      its ancestors' meshes; a whole ship's or station's own bodies entirely)."""
+    C, H = Sc.box(turret["macro"])
+    d = (aim - turret["frame"][0]) / np.linalg.norm(aim - turret["frame"][0])
+    own = next(((b.lo, b.hi, f) for label, b, f in scene.instances if label == turret["label"]), None)
+    start = _past_box(origin, d, C - H, C + H, turret["frame"])
+    start_col = _past_box(origin, d, *own) if own else origin    # no collision mesh: nothing to step past
+    meta, cls = scene.meta, target["cls"]
+    if cls in ("whole ship", "station root"):
+        rev = {label for label in meta if meta[label]["group"] == "H"}
+    elif cls == "ship surface":
+        rev = {target["label"]} | {label for label in meta if meta[label]["group"] == "H" and meta[label]["role"] == "hull"}
+    else:
+        rev = {target["label"], target["module"]}
+    lines = dict(aim_own=(origin, aim, {turret["label"]}), adv=(start, aim, ()), adv_col=(start_col, aim, ()),
+                 adv_skip=(origin, start, {turret["label"]}), rev=(aim, origin, rev))
+    out = {}
+    for model in models:
+        out[model] = {}
+        for name, (a, b, skip) in lines.items():
+            sym = symbol(scene, Gm.first_hit(scene.instances, a, e=b, model=model, skip=skip)[0], turret, target, rank)
+            out[model][name] = [sym] if sym else []
     return out
 
 
@@ -1314,6 +1358,7 @@ def report(rows):
         st = station60(plan)
         say(f"- {plan} ({st['modules']} modules): centre {st['centre']}, inside a module: MESH {st['inside']['mesh']}, "
             f"HULL {st['inside']['hull']}; first hit on 200 lines toward it from outside: {st['lines']}")
+    rescue_report(rows, say)
     bad = integrity(rows, items_all)
     say("\n## Integrity\n")
     say("PASS" if not bad else "FAIL\n" + "\n".join(f"- {b}" for b in bad[:30]))
@@ -1322,6 +1367,82 @@ def report(rows):
 
 def mech_sym(sym):
     return sym or "no hit"
+
+
+# ---------------------------------------------------------------- rescue probes (after the probe hits its own turret)
+
+RESCUES = ("conservative", "probe+ex", "restart past own hit (ideal)", "advance past own box",
+           "advance past own collision (prebuilt)", "reverse, aim point known", "reverse (mod)", "ex + advance",
+           "ex + reverse (mod)")
+
+
+def rescue_status(row, phase, model, method):
+    """-> (status, calls). Every method starts with the probe (1 call); a false probe spends a Q(W) call; only a
+    probe whose first hit is the firing turret is retried, else it stays NOT, and an unrescued self is UNKNOWN."""
+    lines, t = row["phases"][phase][model], tsym(row)
+    first = lines["aim"][:1]
+    if first and B.qualifies(t, first[0]):
+        return "C", 1
+    if first != ["W"]:
+        return "N", 2
+    ok = {m: bool(lines.get(k)) and B.qualifies(t, lines[k][0]) for m, k in
+          (("ex", "aim_ex"), ("own", "aim_own"), ("adv", "adv"), ("col", "adv_col"))}
+    rev = lines.get("rev") == ["W"]
+    # the mod can place the aim point (macro box centre) and excludeself=true drops only target geometry
+    known = row["aim_points"] == 0 and row["target_cls"] == "whole ship"
+    said, calls = {
+        "conservative": (False, 2), "probe+ex": (ok["ex"], 3), "restart past own hit (ideal)": (ok["own"], 3),
+        "advance past own box": (ok["adv"], 3), "advance past own collision (prebuilt)": (ok["col"], 3),
+        "reverse, aim point known": (rev, 3), "reverse (mod)": (known and rev, 3 if known else 2),
+        "ex + advance": (ok["ex"] and ok["adv"], 4), "ex + reverse (mod)": (known and ok["ex"] and rev, 4 if known else 2),
+    }[method]
+    return ("C" if said else "U"), calls
+
+
+def rescue_report(rows, say):
+    items = {m: [(r, truth(r)) for r in rows if truth(r) in ("CLEAR", "NOT") and "settled" in r.get("phases", {})]
+             for m in MODELS}
+    say("\n## Rescue probes after the probe hits its own turret\n")
+    say("Scored rows; `self U` = UNKNOWN left after the retry; `recovered` = TP gained over conservative.\n")
+    say("| model | phase | method | TP | recovered | FP | FN | self U | self U on CLEAR | mean calls | max |")
+    say("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    fps = defaultdict(Counter)
+    for model in MODELS:
+        for phase in PHASES:
+            base = None
+            for method in RESCUES:
+                c, calls = Counter(), []
+                for r, t in items[model]:
+                    s, n = rescue_status(r, phase, model, method)
+                    calls.append(n)
+                    c[("TP" if t == "CLEAR" else "FP") if s == "C" else ("FN" if t == "CLEAR" else "TN")] += 1
+                    c["U"] += s == "U"
+                    c["UC"] += s == "U" and t == "CLEAR"
+                    if s == "C" and t == "NOT" and model == "mesh":
+                        fps[method, phase][r["target_cls"], r["macro"], mech(r, r["truth_hits"]["mesh"][0])] += 1
+                base = c["TP"] if base is None else base
+                say(f"| {model} | {phase} | {method} | {c['TP']} | {c['TP'] - base} | {c['FP']} | {c['FN']} | {c['U']} "
+                    f"| {c['UC']} | {sum(calls) / len(calls):.2f} | {max(calls)} |")
+    say("\nIncorrect CLEARs by target class, firing turret and the true first hit (MESH):\n")
+    for (method, phase), c in fps.items():
+        say(f"- {method}, {phase}: " + "; ".join(f"{n} {k[0]} / {k[1]} / {k[2]}" for k, n in c.most_common(6)))
+    say("\nSelf rows still UNKNOWN after the retry, by target class (MESH, settled):\n")
+    for method in RESCUES[2:]:
+        c = Counter(r["target_cls"] for r, t in items["mesh"] if rescue_status(r, "settled", "mesh", method)[0] == "U")
+        say(f"- {method}: {dict(c.most_common())}")
+    for phase in PHASES:
+        skipped = Counter()
+        for r, t in items["mesh"]:
+            lines = r["phases"][phase]["mesh"]
+            if lines["aim"] == ["W"] and lines["adv_skip"]:
+                said = rescue_status(r, phase, "mesh", "advance past own box")[0] == "C"
+                skipped[mech(r, lines["adv_skip"][0]), "FP" if said and t == "NOT" else "C" if said else "U"] += 1
+        say(f"\nAdvance past own box, {phase}: obstructions on the skipped segment (MESH), by mechanism and outcome: "
+            + (", ".join(f"{k[0]} -> {k[1]}: {n}" for k, n in sorted(skipped.items())) or "none"))
+        still = Counter(mech(r, (r["phases"][phase]["mesh"]["adv"] or [None])[0]) for r, t in items["mesh"]
+                        if r["phases"][phase]["mesh"]["aim"] == ["W"]
+                        and rescue_status(r, phase, "mesh", "advance past own box")[0] == "U")
+        say(f"Advance past own box, {phase}: first hit of an unsuccessful advanced probe (MESH): {dict(still.most_common())}")
 
 
 def witness202(rows):

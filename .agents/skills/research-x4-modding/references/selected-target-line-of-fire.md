@@ -622,6 +622,15 @@ mesh was not traced.
     - `par_l_dumbfire_01`: 50 of 278;
     - `kha_m_beam_01`: 16 of 676;
     - every other benchmark turret: 0.
+  - The script-visible `macro.boundingbox` of these turrets is the union of
+    authored part sizes and does not enclose the socket's collision mesh. For
+    `arg_m_dumbfire_02` the box reaches 3.0 m above the mount and the socket
+    8.1 m, and the `par_l_dumbfire_01` and `kha_m_beam_01` sockets overhang too.
+    Starting a second probe just outside that box does not step past the
+    socket: offline, it recovers 6 of 676 own-turret rows. Stepping past the
+    collision-mesh bounds recovers all 676 with no false CLEAR, but those bounds
+    are not script-visible. See `research/issue202-line-of-fire/findings.md`,
+    "Rescue probes for the own-turret case".
 
 ## Remaining uncertainties
 
