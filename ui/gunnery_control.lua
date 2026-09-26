@@ -1700,7 +1700,7 @@ function Clear.run(now)
         active = { nonce = tostring(sessionEpoch) .. "_" .. tostring(Clear.serial), session = session,
             key = Range.selectedKey, signature = Range.signature, members = Range.members,
             index = 0, started = now, calls = 0, peak = 0,
-            clear = 0, blocked = 0, unknown = 0, guided = 0, reasons = {} }
+            clear = 0, blocked = 0, unknown = 0, guided = 0, results = {} }
         Clear.active = active
         AddUITriggeredEvent("X4GunneryControl", "line_of_fire_begin", {
             nonce = active.nonce, target = id(active.key), ship = id(session.shipID) })
@@ -1722,24 +1722,32 @@ function Clear.onResult(_, param)
     local now = getElapsedTime()
     calls = tonumber(calls)
     active[clearStates[status]] = active[clearStates[status]] + 1
-    if status == "U" then active.reasons[reason] = (active.reasons[reason] or 0) + 1 end
+    active.results[memberKey] = status == "U" and "U/" .. reason or status
     active.calls, active.peak, active.requested = active.calls + calls, math.max(active.peak, calls), nil
     if Range.sweepStarted then Clear.sweepCalls = Clear.sweepCalls + calls end
     if active.index < #active.members then return end
     active.total, active.completedAt = #active.members, now
     Clear.result, Clear.active, Clear.nextAt = active, nil, now + clearInterval
-    local reasons = {}
-    for name, count in pairs(active.reasons) do reasons[#reasons + 1] = name .. ":" .. count end
-    table.sort(reasons)
-    local summary = active.key .. " clear=" .. active.clear .. " blocked=" .. active.blocked
-        .. " unknown=" .. active.unknown .. " guided=" .. active.guided
-        .. " unknown_reasons=" .. table.concat(reasons, ",")
-    -- First pass, any change, and a periodic cost sample; never every pass.
-    if summary ~= Clear.loggedSummary or now >= (Clear.nextLogAt or 0) then
-        Clear.loggedSummary, Clear.nextLogAt = summary, now + 30
-        log("event=line_of_fire action=pass target=" .. summary .. " turrets=" .. active.total
+    -- Every turret on the first pass of a target, then only turrets whose result
+    -- changed, plus a cost sample every 30 s; never every pass or every ray.
+    local logged = Clear.logged
+    local first = not logged or logged.key ~= active.key
+    local changed = {}
+    for _, member in ipairs(active.members) do
+        local key = State.normID(member.componentID)
+        local before = not first and logged.results[key]
+        if before ~= active.results[key] then
+            changed[#changed + 1] = key .. "=" .. (before and before .. ">" or "") .. active.results[key]
+        end
+    end
+    if first or #changed > 0 or now >= logged.sampleAt then
+        Clear.logged = { key = active.key, results = active.results, sampleAt = now + 30 }
+        log("event=line_of_fire action=" .. (first and "first" or #changed > 0 and "change" or "sample")
+            .. " target=" .. active.key .. " turrets=" .. active.total .. " clear=" .. active.clear
+            .. " blocked=" .. active.blocked .. " unknown=" .. active.unknown .. " guided=" .. active.guided
             .. " elapsed_ms=" .. tostring(math.floor((now - active.started) * 1000))
-            .. " calls=" .. active.calls .. " peak_calls_per_turret=" .. active.peak)
+            .. " calls=" .. active.calls .. " peak_calls_per_turret=" .. active.peak
+            .. (#changed > 0 and " results=" .. table.concat(changed, ",") or ""))
     end
 end
 

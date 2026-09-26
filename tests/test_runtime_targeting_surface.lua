@@ -185,6 +185,15 @@ do
     API.runClearPass(clock)
     reply("U", "self", 3)
     assert(API.clearText(730) == "CLEAR LINE OF FIRE: 1 / 2  (0 s)", "UNKNOWN must never count as CLEAR")
+    local function lastPassLog()
+        local lines = fix.getCapturedLog()
+        for index = #lines, 1, -1 do
+            if lines[index]:find("event=line_of_fire action=", 1, true) then return lines[index] end
+        end
+    end
+    assert(lastPassLog():find("action=first target=730 ", 1, true)
+        and lastPassLog():find(" results=3001=C,3002=U/self", 1, true),
+        "the first pass logs every turret's result, with the UNKNOWN reason")
     assert(API.clearText(731) == "CLEAR LINE OF FIRE: scanning", "only the scanned target shows the result")
     API.runClearPass(clock + 1)
     assert(#events == 3, "the next pass must wait for the refresh interval")
@@ -196,9 +205,14 @@ do
     API.runClearPass(clock)
     reply("B", "", 3)
     assert(API.clearText(730) == "CLEAR LINE OF FIRE: 1 / 2  (0 s)", "GUIDED counts; BLOCKED does not")
+    assert(lastPassLog():find("action=change", 1, true)
+        and lastPassLog():find(" results=3001=C>G,3002=U/self>B", 1, true),
+        "a later pass logs each turret whose result changed")
     clock = clock + 2.5
     pass("G", "C")
     assert(API.clearText(730) == "CLEAR LINE OF FIRE: 2 / 2  (0 s)", "CLEAR and GUIDED both count")
+    assert(lastPassLog():find(" results=3002=B>C", 1, true) and not lastPassLog():find("3001=", 1, true),
+        "an unchanged turret is not repeated")
     clock = clock + 2.5
     API.runClearPass(clock)
     API.runClearPass(clock)
