@@ -61,18 +61,20 @@ X4GunneryTestLabScenarioSpec = {
     --   TARGET CLEAR   (above): socket, then target  -> rescue CLEAR, X4 fires.
     --   TARGET BLOCKED (astern): socket, then own hull -> rescue not CLEAR,
     --                            X4 refuses; an excludeself=true retry reads CLEAR.
-    -- r3 procedure: Create once from a safe launcher, wait for READY, teleport
+    -- r4 procedure: Create once from a safe launcher, wait for READY, teleport
     -- to the shooter, sit at its gunnery console and open Test Lab once.
     -- Activation stages Attack my current enemy; MD independently checks both
     -- actual missile-turret modes and >=20 missiles before allowing fire.
     -- Select TARGET BLOCKED in Direct-control first. Wait for the phase-ended
     -- notification, then select TARGET CLEAR. Stay on each target for 25 active
     -- seconds even if firing stops earlier, to retain the settled STEP snapshot.
+    -- Also wait 15 active seconds after each stop notification before switching
+    -- targets or uploading, so FIRED evidence can verify the stop itself.
     -- MD inhibits missile systems from spawn, between phases, after 4 blocked /
     -- 8 clear launch events, on mode/count/reserve/target failure, or at 25s.
     -- Stop after the clear settled snapshot and upload debug.log. Never change
     -- turret modes, press Create again, or manually replenish ammunition.
-    id      = "issue-202-step-look-back-dumbfire-r3",
+    id      = "issue-202-step-look-back-dumbfire-r4",
     enabled = false,
 
     location = {

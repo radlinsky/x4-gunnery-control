@@ -54,10 +54,15 @@ For selected-target missile tests, inhibit firing from spawn; automatically stag
 **Attack my current enemy** and verify every actual missile-turret mode and loaded
 ammo type before enabling each phase. Fail closed on mismatch; owner menu choices
 are not proof. Check remaining ammunition before every phase and enforce launch
-budgets/time limits that reserve enough for later controls. Reuse
-`setup.strictMissilePhases = true` for its supported two-turret, shooter/clear/blocked
-layout; otherwise provide equivalent guards. Keep blocked-first when safe, preserve
-shot/hit evidence, and report these guards as OFFLINE until reviewed LIVE.
+budgets/time limits that reserve enough for later controls. Keep blocked-first
+when safe, preserve shot/hit evidence, and report guards as OFFLINE until reviewed
+LIVE; do not recommend reusing a guard solely because it passed offline tests.
+Verify the chosen firing-stop control against shipped sources before installation.
+Require correlated launch counts and an unpaused post-stop observation window
+covering the launch/reload cycle: no new
+FIRED projectile IDs after the stop marker. In-flight impacts are not new launches.
+A stop notification or zero counter alone is not proof; post-stop launches fail
+the guard even if geometry passes.
 
 ## 3. Validate and load
 
