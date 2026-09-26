@@ -263,7 +263,7 @@ def census():
 
 OUT = CACHE / "sample.jsonl.gz"
 BEAM_OUT = CACHE / "beams.jsonl.gz"
-METHODS = ("production", "origin metadata", "large-target metadata", "large-target dual check",
+METHODS = ("production", "exact endpoint", "origin metadata", "large-target metadata", "large-target dual check",
            "large-target conditional dual", "both", "ideal")
 
 
@@ -346,6 +346,18 @@ def sample_test(scene, turret, target, ctx, models):
     return row
 
 
+def known_endpoint(row):
+    """Distance from the muzzle to X4's aim point as the production MD can know it, or None. MD takes it as
+    the dot product of the muzzle-to-point offset with the unit `rotation.forward` it already builds
+    (`.length` and `distanceto` are approximate, about 7e-4). It needs an
+    established direction (not ambiguous) toward the point X4 bears on: a no-collection target's live box
+    centre, or an authored point both orientations select. A single authored point at the origin is read
+    as no collection and aimed at the box centre, so its endpoint is not knowable."""
+    if row["amb"] or row.get("origin_point"):
+        return None
+    return row["reach"]
+
+
 def md_status(row, model, method):
     """(status, rays) of the production MD (guarded full), with the method's direction and ambiguity."""
     if row["state"] == "GUIDED":
@@ -400,7 +412,14 @@ def md_status(row, model, method):
         return ("U" if member(ln["qw"]) or P._same_object(row, ln["qw"]) else "B"), rays
     else:
         rays += 1
-    length = (1 + min(1.1 * R, 500.0) / R) * bound * 1.001 + 1.0 - (row["step"] if own else 0.0)
+    known = known_endpoint(row) if method == "exact endpoint" else None
+    if known is None:
+        length = (1 + min(1.1 * R, 500.0) / R) * bound * 1.001 + 1.0 - (row["step"] if own else 0.0)
+    else:                           # X4's own endpoint: f is 1 unless the target can move
+        f = 1 + min(1.1 * R, 500.0) / R if row["moving"] else 1.0
+        # in-game positions and MD arithmetic are lower precision than this model; the margin is
+        # conservative (a longer line sees more) and, in every cached row, far below the 5.5 m gap
+        length = f * known * 1.0001 + 1.0 - (row["step"] if own else 0.0)
     sym, t = ln["ext_s"] if own else ln["ext"]
     if t is not None and t > length:
         sym, t = None, None
@@ -600,5 +619,62 @@ def compare():
     return text
 
 
+def _as_sample(r):
+    """A saved permission.py row in md_status's shape; its benchmark direction is production's."""
+    ln = {m: dict(qw=v["qw_half"], back=v["back_half"], fwd=v["fwd_half"], ext=v["ext"], ext_s=v["ext_s"])
+          for m, v in r["lines"].items()}
+    return dict(r, lines_prod=ln, lines_true=ln, probe_true={m: v["aim"] for m, v in r["lines"].items()},
+                amb=bool(r.get("ambiguous")) and r["target_cls"] != "station root", large=False,
+                origin_point=False, game="vanilla", source="saved")
+
+
+def shot(row):
+    """'off-mesh' when X4's own line reaches the aim point without meeting the target, else 'ordinary'."""
+    why = P.why(row)
+    return "off-mesh" if why.startswith("no hit") or "past the bearing point" in why else "ordinary"
+
+
+def endpoint():
+    """The exact-endpoint miss check against production on every cached row (MESH)."""
+    import gzip
+    saved = [json.loads(x) for x in gzip.open(P.OUT, "rt")]
+    P.mark_ambiguous(saved)
+    rows = [_as_sample(r) for r in saved if r["state"] == "SETTLED"]
+    rows += [dict(json.loads(x), source="sample") for x in gzip.open(OUT, "rt")]
+    rows += [dict(json.loads(x), source="beam supplement") for x in gzip.open(BEAM_OUT, "rt")]
+    rows = [r for r in rows if r["state"] == "SETTLED" and P.truth(r) in ("PERMIT", "NOT")]
+    cells, rays, changes, exceptions = Counter(), defaultdict(list), Counter(), Counter()
+    for r in rows:
+        key = (r["source"], r["game"], r["target_cls"], shot(r), "beam" if r["beam"] else "non-beam")
+        t = P.truth(r)
+        a, na = md_status(r, "mesh", "production")
+        b, nb = md_status(r, "mesh", "exact endpoint")
+        cells[key + ("production", outcome(a, t))] += 1
+        cells[key + ("exact", outcome(b, t))] += 1
+        rays[key + ("production",)].append(na)
+        rays[key + ("exact",)].append(nb)
+        if a != b:
+            changes[key + (outcome(a, t), outcome(b, t))] += 1
+        if a == "U" and not r["beam"] and known_endpoint(r) is None:
+            exceptions[r["source"], r["game"], r["target_cls"], "large target" if r.get("large") else
+                       "authored point at origin" if r.get("origin_point") else "ambiguous direction",
+                       outcome(a, t)] += 1
+    lines = ["| source | game | target | X4 shot | turret | method | " + " | ".join(OUTCOMES)
+             + " | mean / max rays |", "|---|---|---|---|---|---|" + "---:|" * (len(OUTCOMES) + 1)]
+    for key in sorted({k[:5] for k in cells}):
+        for m in ("production", "exact"):
+            n = rays[key + (m,)]
+            lines.append("| " + " | ".join(key) + f" | {m} | "
+                         + " | ".join(str(cells[key + (m, o)]) for o in OUTCOMES)
+                         + f" | {sum(n) / len(n):.2f} / {max(n)} |")
+    lines.append("\nChanged results: " + ("; ".join(f"{k}: {v}" for k, v in sorted(changes.items())) or "none"))
+    lines.append("\nProduction UNKNOWN whose endpoint the mod cannot know (kept on the bound): "
+                 + ("; ".join(f"{k}: {v}" for k, v in sorted(exceptions.items())) or "none"))
+    text = "\n".join(lines)
+    print(text)
+    return text
+
+
 if __name__ == "__main__":
-    {"census": census, "sample": sample, "beams": beams, "report": report, "compare": compare}[sys.argv[1]]()
+    {"census": census, "sample": sample, "beams": beams, "report": report, "compare": compare,
+     "endpoint": endpoint}[sys.argv[1]]()

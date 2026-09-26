@@ -108,7 +108,7 @@ All fixes are scored on the same rows. Costs are `check_line_of_sight` rays per 
 
 | method | what it fixes | result on its rows | new false CLEAR / BLOCKED | rays |
 |---|---|---|---|---|
-| **exact endpoint for the miss check** | off-mesh aim points; the length bound overshooting the aim point | vanilla surfaces 36 → 0 false UNKNOWN; SWI surfaces 25 → 3 | 0 / 0 | unchanged (max 6 / 3) |
+| **exact endpoint for the miss check** (section 3b) | off-mesh aim points; the length bound overshooting the aim point | vanilla surfaces 36 → 0 false UNKNOWN; SWI surfaces 25 → 3 | 0 / 0 | max unchanged (6 / 3); mean up to +0.5 on off-mesh rows |
 | **large-target dual check** | large-target whole ships | sample 80 → 1 false UNKNOWN (141 of 142 permitted CLEAR) | 0 / 0 | only on those targets: mean ≈ 6, max 11 (was 1) |
 | large-target metadata (ideal known offset) | same | 80 → 0 | 0 / 0 | mean ≈ 2.7, max 5 |
 | origin-point metadata | SWI origin-point ships | no change in the sample | 0 / 0 | 0 |
@@ -139,6 +139,65 @@ All fixes are scored on the same rows. Costs are `check_line_of_sight` rays per 
 
 **Origin-point metadata** (a table of 51 models, Lua-side): nothing gained in the sample, so it is not
 justified yet.
+
+## 3b. Exact endpoint for the miss check
+
+`susceptibility.py endpoint` scores the variant on every cached row: the saved vanilla benchmark
+(re-scored through the production MD model), the vanilla and SWI sample, and the beam supplement. MESH
+model.
+
+**Only information the mod has.**
+
+- **Where it applies.** Only where production has already established the aim direction, and only for
+  the non-beam extended line. There the aim point is known: a no-collection target's recovered box
+  centre, or the authored point both orientations select.
+- **Distance.** The dot product of the muzzle-to-point offset with the unit `rotation.forward` the MD
+  already builds. `.length` and `distanceto` are approximate.
+- **Factor `f`.** 1 unless the target can move, which only a whole ship or a ship engine can; then the
+  conservative maximum.
+- **Line length:** `f × distance × (1 + 1e-4) + 1 m`.
+
+**Precision.** In-game positions and MD arithmetic are lower precision than this model, and X4 computes
+its own endpoint independently.
+
+- The margin must be positive and exceed that error. A larger margin is only more conservative: the
+  line sees more.
+- In every recovered row the blocking hit lies 5.5 m or more past X4's endpoint (median 9 m).
+- All 58 recoveries survive any margin up to 5 m absolute or 1e-4 relative; a 0.1 % relative margin
+  loses 2.
+- 1 m + 1e-4 is chosen as far above plausible in-game rounding while staying inside that gap. This is
+  an offline population result, not a guarantee.
+
+| rows (MESH) | production U on PERMIT | exact endpoint U on PERMIT | recovered as correct CLEAR | new false CLEAR / BLOCKED |
+|---|---:|---:|---:|---:|
+| vanilla station surface, non-beam | 30 | 0 | 30 | 0 / 0 |
+| vanilla ship surface, non-beam | 6 | 0 | 6 | 0 / 0 |
+| SWI ship surface, non-beam | 25 | 3 | 22 | 0 / 0 |
+| all other classes, and every beam row | unchanged | unchanged | 0 | 0 / 0 |
+
+- **Every recovery is an off-mesh shot:** X4's line reaches the aim point without touching the element,
+  and the old line went on to hit the parent module or hull just past it.
+- **Ordinary shots, where X4's line meets the element, are unchanged in every class.**
+- **Beams are untouched.** Their line is X4's own barrel line to R: 302 / 2 / 636 on vanilla ship
+  surfaces, 277 / 0 / 20 with 16 U on vanilla whole ships, all identical.
+- **Rays.** No new ray type, and the worst case stays 6. The mean rises slightly where a shorter line no
+  longer meets a target member past the aim point and so also needs the sector check: vanilla ship
+  surface off-mesh 4.14 → 4.42, station root off-mesh 4.54 → 5.06, other groups unchanged.
+- **The 3 remaining SWI UNKNOWNs** (`nebulonc`, 2 missile-turret types) are shots X4 permits through its
+  result-0 second ray: the parent hull is hit first, then the re-cast to the element's origin hits the
+  element. The vanilla benchmark never showed this. The mod cannot see which way that second ray goes, so
+  UNKNOWN is correct here.
+
+**Exceptions: the endpoint cannot safely be known** (these rows keep the conservative bound or the
+probe):
+
+- **Large-target whole ships:** vanilla 38 saved and 80 sample U on PERMIT. X4 may aim at the LargeTarget
+  offset (section 3a).
+- **SWI whole ships with an ambiguous direction** (outside-box family): 4 U on PERMIT, 3 U on NOT.
+- **SWI single aim point at the origin:** 3 U on NOT. The mod reads these as no collection and would aim
+  at the box centre, while X4 aims at the origin.
+- **No-collision elements:** not in any cached row, because the benchmark selects only elements with a
+  body. X4 can only miss them, so the exact endpoint is exactly the case they need; it is unmeasured.
 
 ## 3a. Dual check only when the guarded check returns UNKNOWN
 
@@ -191,8 +250,9 @@ decides. Its only cost above always-dual is one extra ray in a beam's worst case
 
 The next implementation experiment:
 
-1. **Exact endpoint for the miss check.** It is zero-cost and recovers essentially all off-mesh and
-   no-collision element UNKNOWNs in both games.
+1. **Exact endpoint for the miss check** (section 3b). It needs no new ray and recovers every measured
+   off-mesh element UNKNOWN in vanilla and 22 of 25 in SWI, with no false result. Use a positive margin
+   of about 1 m + 1e-4 × distance for in-game precision.
 2. **The large-target dual check, run conditionally** (section 3a): only when the guarded check returns
    UNKNOWN, for whole-ship targets that fail the collection test and have a recovered box radius over
    500 m. That covers 36 vanilla models, among them 29 of the 31 XL, and
