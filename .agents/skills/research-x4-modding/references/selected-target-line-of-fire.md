@@ -141,8 +141,10 @@ Candidate explanations, as of 2026-09-25:
    open space below the hub dock area, inside no module. When the segment to
    it meets nothing:
    - both probes return false, because a miss is false;
-   - X4's own pre-fire ray is a genuine miss, which every supported turret
-     permits;
+   - X4's own pre-fire ray is a genuine miss, which every supported non-beam
+     turret permits (a beam fires only if its barrel line meets the station
+     within max fire range; see weapon-path-obstruction-groups.md, "Beam
+     ammunition casts along the barrel");
    - the projectile path, the settled barrel's +Z, can continue past the
      centre into a module behind it.
 
@@ -258,7 +260,7 @@ Remaining uncertainty:
   includes them.
 - A hit whose sub-shape id does not resolve (`0x000CD480` null) makes MD
   false. Native then applies its no-hit rule, which permits fire for every
-  supported turret.
+  supported non-beam turret.
 - A docked craft's chain also passes through its dock module to the station,
   so a hit on it counts for the root too. Owner decision (#202): with the
   station hull selected, a docked-ship first hit counts as CLEAR. That matches
@@ -344,8 +346,10 @@ What this changes:
 - Pre-fire classification of a station-root ray (`0x007E6CB0`): a module hit
   walks `+0x70` to the station, so it permits fire (result 1). A segment that
   reaches the union-box centre with no hit is a genuine miss, and every
-  supported turret permits it. So X4 permits fire at a station root through the
-  centre gap whether or not the line touches a module.
+  supported non-beam turret permits it. So X4 permits non-beam fire at a
+  station root through the centre gap whether or not the line touches a
+  module. A beam turret fires there only if its barrel line reaches a station
+  member within max fire range.
 
 ## find_object_surface is not a cheaper line-of-fire primitive
 
@@ -650,6 +654,44 @@ mesh was not traced.
     inside-start/back-face ray behaviour are not LIVE-checked. See
     `research/issue202-line-of-fire/findings.md`, "Rescue probes for the
     own-turret case".
+
+## An extended aimed line reproduces X4's pre-fire permission without the aim point
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: the pre-fire rule in
+  [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md)
+  ("Beam ammunition casts along the barrel", "Blocker categories"); the
+  sector-declared trace there; offline benchmark
+  `research/issue202-line-of-fire/permission.py`
+- Live test: no. `create_orientation useaimtarget` from an offset origin and a
+  sector-declared `check_line_of_sight` have never been run.
+- Finding: let `u` be the direction from the muzzle toward the aim point and
+  `X` a point along `u` far past it. A script cannot read the aim point of a
+  station root or of a target with authored aim points, but it can still decide
+  X4's non-beam permission on the aimed line:
+  - `Q(T)` true on muzzle→`X`: the first hit is a target member. If it lies
+    before X4's endpoint, X4 sees result 1; if past it, X4 sees a genuine miss.
+    X4 fires either way, whatever the length of `X`.
+  - a sector-declared check false on muzzle→`X`: nothing lies on the line. X4
+    sees a genuine miss and fires, provided `X` is past X4's own endpoint
+    (`f ×` the aim-point distance).
+  - anything else: the first hit may lie before or past the endpoint. The line
+    alone cannot say, so the answer stays UNKNOWN.
+
+  For a beam, muzzle→muzzle + `R·u` with `Q(T)` is X4's own test (barrel ≈ `u`
+  once settled), so `Q(T)` true is fire and false is no fire. The
+  `useaimtarget` probe is not a substitute for a beam: its endpoint can lie past
+  `R`, where X4's barrel ray stops.
+
+  When the firing turret's own socket is the first hit, the same lines start at
+  the step point after the look-back proves the stretch clear (see "Some
+  launcher sockets enclose their own launch points").
+
+Offline, on X4 9.00 geometry, this recovers every station-root case, including
+the empty-centre ones: 0 false CLEAR, 0 false BLOCKED and 0 UNKNOWN on 224
+broad and 796 `#60`-pose settled rows. See
+`research/issue202-line-of-fire/findings.md`, "X4 pre-fire permission".
 
 ## Remaining uncertainties
 

@@ -272,9 +272,47 @@ How a hit becomes a fire/no-fire decision:
   (`+0x85` on the controller) and clears permission (`+0x84`);
 - no hit with the default aim mode: `+0xF0` is constant-true for every
   controller except U::LargeTargetShootController. Its no-hit method at
-  `0x007E5970` is resolved below; for every supported Gunnery Control turret
-  that later trace also permits a genuine miss. In the alternate aim mode (flag
-  set at `0x00817A7F`) any non-target hit, and also a miss, withholds fire.
+  `0x007E5970` is resolved below; for every supported non-beam turret that
+  later trace also permits a genuine miss. In the alternate aim mode (flag
+  set at `0x00817A7F`), which is beam ammunition (next record), any non-target
+  hit, and also a miss, withholds fire, and result 0 is never returned.
+
+### Beam ammunition casts along the barrel; other rays overshoot the aim point
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pre-fire gate `0x00816D20` (pinned executable
+  above), the classifier `0x007E6CB0`, the bullet-macro loader `0x00D53B40`
+  and the XML token table (row `id * 16` from `0x022C87F0`; `bullet` `0x59`,
+  `weapon` `0x320`, `lenientfireallowance` `0x159`, `tug` `0x2F4`); shipped
+  bullet macros in the official source sets
+- Live test: no
+- Finding: the first pre-fire ray (`0x00817B09`) starts at the current launch
+  point (`[rbp-0x10]`, world space) and has one of two shapes.
+  - **Alternate (beam) mode**, `r13b = 1` at `0x00817A7F`, needs all of:
+    - the loaded ammunition is a beam: `0x00D4B460(weapon+0x2E0)` byte
+      `+0x50`, the same `isbeam` byte the range gate reads at `0x0081785B`;
+    - the target is not class `missile` (`0x42`);
+    - the bullet does not set `<weapon lenientfireallowance="1">` (byte
+      `+0x620` of `0x0081F380(weapon+0x2E0)`, written only by the bullet loader
+      at `0x00D54532`, default false). Only one official bullet sets it:
+      `bullet_xen_turret_xl_beam_01_mk1` (`ego_dlc_timelines`).
+
+    The ray is `R × forward`: the launch point's third axis (`[rbp+0x20]`)
+    times max fire range `R` (`xmm7`, weapon slot `+0x1EF0`). The classifier
+    then permits only the target or a descendant (result 1); a miss or any
+    other hit returns 2 (`0x007E6CCD`, `0x007E6D13`). So a beam fires only when
+    its barrel line, within `R`, first meets the target.
+  - **Default mode**: the ray is `f × (aim point − launch point)`, where `f` is
+    `xmm8`: 1.0, or the shot-range allowance factor `1 + min(1.1 R, 500) / R`
+    when the range gate applied it (non-beam ammunition, target slot `+0x1A88`
+    non-zero; see [turret-fire-range-gate.md](turret-fire-range-gate.md)).
+    Against a whole ship or a ship engine the segment therefore runs past the
+    aim point; against a station, a station element, a ship turret or a ship
+    shield it ends there. The result-0 second ray (`0x00817BDE`) is scaled by
+    the same `f` toward the target origin.
+- Consequence: a non-beam turret fires through a genuine miss; a beam turret
+  does not. The benchmark's only beam turret is `kha_m_beam_01`.
 
 Why the candidate set is exactly these categories:
 
@@ -620,9 +658,13 @@ The action's public `object` target type accepts a zone. Explicit
 the endpoint. Use the firing/query zone, not blindly `target.zone`: the action
 converts both endpoints into the `object`'s zone and casts in that zone's sector
 world (Zone vtable `+0x1D78`). Declaring the sector instead of `weapon.zone`
-would, by the same `+0x70` walk, also accept other-zone bodies. That is
-inference only; no MD call declaring a sector has been checked, so it is not
-adopted. Changing only the declared target changes the endpoint transform and
+would, by the same `+0x70` walk, also accept other-zone bodies. Re-traced
+2026-09-26: the action resolves only the `object`'s zone (`0x00BCB58B`–
+`0x00BCB5DA`) and has no class test on `target`; only `useaimtarget` is gated,
+on class `destructible` (`0x24`, `0x00BCBAE7`), which ships, stations,
+modules, turrets, shields and engines pass. So a sector-declared call with an
+explicit `targetoffset` is true for any resolved hit in the active sector.
+This is inference: no MD call declaring a sector has been run LIVE. Changing only the declared target changes the endpoint transform and
 post-query parent comparison; after preserving world-space `P`, it does not
 change the physics world, segment, collector, filters, or closest hit.
 
@@ -664,7 +706,11 @@ accepts it only as this internal same-containing-object classifier: it keeps the
 same #185 firing origin, does not replace the #184 aim point being evaluated,
 and is not a general fallback target or aim-point substitution.
 
-### Every supported turret accepts a genuine miss
+### Every supported non-beam turret accepts a genuine miss
+
+Corrected 2026-09-26: beam ammunition runs the alternate mode, where a miss
+withholds fire (see "Beam ammunition casts along the barrel"). The trace below
+concerns the default-mode no-hit method only.
 
 - X4: 9.00 build 611726
 - Status: inference
@@ -851,8 +897,9 @@ Supported guided missiles remain clear without a ray query.
 | `Q(T,P)` false; `Q(O,P)` true; second-ray contract accepted; target-origin query true | result 0, then exact supported surface hit | clear |
 | same branch; target-origin query false | native second ray rejects | LINE OF FIRE BLOCKED |
 | `Q(T,P)` and `Q(O,P)` false; `Q(Z,P)` true | unrelated closest hit, result 2 | LINE OF FIRE BLOCKED |
-| all three false, genuine miss; non-large controller | constant-true ordinary no-hit policy | clear |
-| all three false, genuine miss; any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
+| all three false, genuine miss; non-beam, non-large controller | constant-true ordinary no-hit policy | clear |
+| all three false, genuine miss; non-beam, any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
+| beam ammunition (alternate mode) | only a target or descendant hit along the barrel within `R` fires; a miss or other hit withholds fire; no result 0 | clear only on a target hit |
 | all three false when the line may reach a body under another zone of the same sector | a miss and an other-zone hit both leave `Q(Z,P)` false | UNKNOWN |
 | unresolved turret type or missile guidance, hierarchy/frame, target in another zone, or material pair-filter uncertainty | outside proved boundary (X4 itself refuses only another sector) | UNKNOWN |
 

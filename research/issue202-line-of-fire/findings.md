@@ -5,6 +5,162 @@ SHA-256 `19750a65…6ad6891`, re-verified 2026-09-25. No new LIVE evidence. Call
 `check_line_of_sight` calls, not frame cost. The full report is `settled.py --report`; numbers below are
 MESH unless stated.
 
+**2026-09-26:** "X4 pre-fire permission" below is the current truth and comparison
+(`permission.py`, `X4.exe` SHA-256 re-verified). Every later section scores the older truth, the first
+hit on the settled path by membership. It treated a path that reaches no geometry as undefined, and it
+treated a beam like any other turret.
+
+## X4 pre-fire permission
+
+**Truth** is X4's own pre-fire obstruction decision for the settled turret, with every other firing
+requirement assumed met. It is permission, not a launch or a hit. It comes from the native trace in the KB
+(`weapon-path-obstruction-groups.md`, "Blocker categories" and "Beam ammunition casts along the barrel"),
+and the firing turret's own meshes are ignored, as X4 does.
+
+- **Non-beam turrets** cast from the muzzle to `muzzle + f × (bearing point − muzzle)`.
+  - `f = 1 + min(1.1 R, 500) / R` against a whole ship or a ship engine; `f = 1` otherwise.
+  - The turret fires when the ray hits nothing, the target, or one of its descendants.
+  - A first hit on the element's own parent or sibling (result 0, surface elements only) sends a second
+    ray to the element's origin. That ray must hit exactly the element.
+  - Any other first hit withholds fire.
+- **Beam turrets** (`kha_m_beam_01`, the only beam here) cast along the barrel for max fire range
+  `R`. They fire only when the first hit is the target or a descendant. **A miss withholds fire.**
+- **Guided** missile turrets skip the check.
+- `R` per turret is the bullet's `range`, else speed × lifetime, or the missile's `range`. This is a
+  source census, not the native getter. It only sets the beam length and `f`.
+
+**Candidates** see what `check_line_of_sight` sees, including the firing turret's own socket:
+
+- **current**: production at `cf459d0`. It tests box-centre endpoints, and for a station root the two
+  nearest modules.
+- **base**: the fresh-muzzle `useaimtarget=true` probe, then step and look back.
+  - BLOCKED is claimed only when `Q(Z)` is true and `Q(W)` false on the muzzle-to-step stretch, and that
+    first hit is neither a target member nor the element's own parent or sibling.
+- **base+modules**: base, then current's module lines whenever base is undecided on a station root. This
+  is the owner's hypothesis.
+- **base+ext**: base, then the aimed line continued along the `create_orientation useaimtarget` direction
+  `u` to 30 km. It starts from the muzzle, or from the step point when the look-back proved the socket.
+  - CLEAR when `Q(T)` finds a target member on it.
+  - CLEAR when a sector-declared check finds nothing at all (a genuine miss).
+  - Otherwise UNKNOWN.
+  - A beam skips the probe. `Q(W)` (plus the look-back), then `Q(T)` on the line to `R`, decide CLEAR or
+    BLOCKED.
+
+The bare `useaimtarget` probe alone is no longer compared.
+
+Predicted CLEAR = TP + FP; predicted BLOCKED = TN + FN; UNKNOWN is split by truth and is never counted as
+correct. Excluded = cannot bear; uncertain = no defensible truth (below).
+
+**Station roots, broad population** (420 tests: 224 scored, 12 GUIDED, 184 cannot bear; MESH = HULL
+except current):
+
+| method | TP | FP | TN | FN | U on PERMIT | U on NOT | mean / max calls |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| current | 108 | 50 (HULL 52) | 10 | 0 | 54 | 2 (HULL 0) | 2.49 / 6 |
+| base | 84 | 20 | 12 | 0 | 78 | 30 | 2.54 / 4 |
+| base+modules | 134 | 48 | 12 | 0 | 28 | 2 | 3.75 / 10 |
+| **base+ext** | **162** | **0** | **62** | **0** | **0** | **0** | 3.22 / 6 |
+
+**The 108 previously excluded empty-path rows** (72 `arg_shipyard`, 36 `xen_defence`). Truth: 78 PERMIT
+(non-beam: a genuine miss) and 30 NOT (the beam: no station hit along its barrel within `R`).
+
+| method | TP | FP | TN | FN | U on PERMIT | U on NOT | mean / max calls |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| current | 50 | 28 | 2 | 0 | 28 | 0 | 2.50 / 6 |
+| base | 0 | 0 | 0 | 0 | 78 | 30 | 3.26 / 4 |
+| base+modules | 50 | 28 | 0 | 0 | 28 | 2 | 5.76 / 10 |
+| **base+ext** | **78** | **0** | **30** | **0** | **0** | **0** | 4.43 / 6 |
+
+- current and base+modules read CLEAR on 28 of the 30 beam rows, from a module line that is not the
+  line X4 tests. Their U on PERMIT is `arg_m_dumbfire_02`, whose socket is the module lines' first hit.
+- base+ext: 28 `arg_m_dumbfire_02` rows are CLEAR from the step point, and the other 50 non-beam rows
+  from the muzzle. All 30 beam rows are BLOCKED.
+
+**#60 representative `xen_defence` poses** (1,344 tests: 796 scored, 548 cannot bear; truth 728 PERMIT,
+of which 140 are genuine misses and 238 hit a module past the centre, and 68 NOT):
+
+| method | TP | FP | TN | FN | U on PERMIT | mean / max calls |
+|---|---:|---:|---:|---:|---:|---:|
+| current | 702 (HULL 706) | 10 (14) | 58 (54) | 26 (22) | 0 | 1.57 / 6 |
+| base | 350 | 0 | 68 | 0 | 378 | 2.12 / 3 |
+| base+modules | 716 | 0 | 68 | 0 | 12 | 2.69 / 9 |
+| **base+ext** | **728** | **0** | **68** | **0** | **0** | 2.77 / 5 |
+
+**Other target classes, broad population, MESH** (station surfaces are exact-element targets; they are not
+part of the station-root membership):
+
+| class (scored) | method | TP | FP | TN | FN | U on PERMIT | U on NOT | mean / max |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| station surface (840) | current | 106 | 60 | 398 | 0 | 112 | 164 | 2.54 / 3 |
+| | base | 162 | 62 | 2 | 0 | 56 | 558 | 2.86 / 4 |
+| | base+ext | 188 | 0 | 220 | 0 | 30 | 402 | 3.68 / 6 |
+| whole ship (1,560) | current | 860 | 30 | 128 | 12 | 482 | 48 | 1.74 / 3 |
+| | base | 1,354 | 20 | 132 | 0 | 0 | 54 | 1.84 / 4 |
+| | base+ext | 1,354 | 0 | 154 | 0 | 0 | 52 | 2.01 / 6 |
+| ship surface (13,578) | current | 3,002 | 24 | 7,960 | 1,130 | 606 | 856 | 2.53 / 3 |
+| | base | 4,558 | 14 | 2,264 | 0 | 180 | 6,562 | 2.46 / 4 |
+| | base+ext | 4,732 | 2 | 2,818 | 0 | 6 | 6,020 | 3.27 / 6 |
+
+base+modules equals base off station roots.
+
+**What the numbers say:**
+
+1. **Every remaining false CLEAR of base, and of base+modules outside the empty path, is the beam.** The
+   `useaimtarget` endpoint can lie past `R`, where X4's barrel ray stops. base+ext tests the beam's
+   own line and removes all of them except 2 grazing ship-surface rows. Examples of such endpoints: a
+   module behind the empty centre, a whole ship's box centre, or a station element beyond `R`. There the probe line reaches the
+   element while the barrel reaches its parent hull first.
+2. **The module fallback is not justified.** Off the empty path it adds no correct answer that base+ext
+   lacks. On the empty path it is right for a different reason than X4's: it finds another line to a
+   module, so it reads CLEAR on 28 beam rows that X4 refuses.
+3. **The genuine-miss check matters.** 78 broad and 140 `#60` PERMIT rows reach no geometry on X4's
+   line. Only base+ext's sector-declared check proves them. Another 238 `#60` rows are permitted through
+   the empty centre by a module past it. The extended `Q(T)` proves those; the probe, which stops at the
+   centre, cannot.
+4. **The result-0 second ray never permits in this population.** Every surface row whose first hit is
+   the element's own parent or sibling is refused by X4's second ray: 5,706 ship-surface and 394
+   station-surface rows. base+ext leaves them UNKNOWN, never CLEAR; they are nearly all of its U on NOT.
+   That the second ray never permits is a population result, not a rule, so the method still must not
+   call such a hit BLOCKED.
+5. The 30 station-surface U on PERMIT are the off-mesh Xenon shield aim points. X4's line misses the
+   aim point and its continuation meets the parent module, so X4 permits a miss. From the extended line
+   alone this reads as a module hit.
+
+**Uncertain truth, not scored** (shown per class above as "uncertain"):
+
+- shape models disagree: 528 ship-surface, 24 whole-ship and 12 station-surface rows;
+- first-hit ties within 1 cm: 58 ship-surface rows;
+- the answer changes between `f = 1` and the census `R`: 2 ship-surface rows.
+
+No station-root row is uncertain.
+
+**Beyond the model:** these hold for the benchmark's geometry only.
+
+- Other-zone bodies, wrecks, docked craft, construction modules, pair collision filters and the Timelines
+  `lenientfireallowance` beam are not simulated.
+- `R` is a census value; `f` changed the truth on 2 rows.
+
+**Cost.** Worst case per turret per pass:
+
+- base+ext: 6 `check_line_of_sight` calls (the own-socket branch: probe, `Q(W)`, forward, back, `Q(T)`,
+  sector), a beam 3, a guided turret 0;
+- current: 3, or 6 for a station root;
+- base: 4.
+
+base+ext also needs one `create_orientation` and one `bboxdistanceto` read. It makes those only when
+the probe fails, and before any probe for a beam. Calls per scored settled row: 1 call 5,594; 2 calls
+1,588; 3 calls 2,536; 4 calls 1,404; 5 calls 5,766; 6 calls 734. The 30 km lines are longer than
+current's, so each ray's broad-phase cost may be higher. None of this is measured frame time.
+
+**Soundness conditions, all offline:**
+
+- the extension must reach past X4's endpoint wherever a miss is claimed. The largest such endpoint here
+  is 10.75 km; the integrity check enforces it per row;
+- `u` is taken toward the aim point nearest the muzzle, which differs from X4's point only near an
+  aim-point switch on multi-point targets;
+- a sector-declared call and `create_orientation useaimtarget` from an offset origin are statically
+  traced but never run LIVE.
+
 ## Answers
 
 1. **Ship surface elements: yes, after settling, apart from one mechanism.** On 13,390 scored rows

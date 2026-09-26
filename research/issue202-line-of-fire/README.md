@@ -6,6 +6,7 @@ OFFLINE research. No production change and no X4 launch.
 nice python3 research/issue202-line-of-fire/settled.py            # physical benchmark + #60 reconstruction, ~13 min, one process
 nice python3 research/issue202-line-of-fire/settled.py --sixty    # the #60 reconstruction only, ~1 min
 python3 research/issue202-line-of-fire/settled.py --report        # re-report the saved rows, under a minute
+nice python3 research/issue202-line-of-fire/permission.py         # scored against X4's pre-fire permission, ~13 min
 python3 research/issue202-line-of-fire/benchmark.py               # decision-rule regression tests, < 1 s
 lua research/issue202-line-of-fire/runtime.lua                    # real ui/gunnery_control.lua pass behavior
 ```
@@ -16,6 +17,14 @@ access to the installed X4 catalogs. It reads collision files straight from the 
 writes nothing into the game or the repository. Raw rows go to the ignored
 `.x4-research-cache/issue202-settled/rows.jsonl.gz` and `sixty.jsonl.gz`. The report exits non-zero if an
 integrity check fails.
+
+## Pre-fire permission benchmark (`permission.py`)
+
+The current truth. It scores the candidates against X4's own pre-fire decision for the settled turret, as
+traced natively: the default ray to `f ×` the bearing point, the result-0 second ray for surface elements,
+and the barrel ray to max fire range for beams. It reuses `settled.py`'s scenes, settling and geometry, and
+also runs the #60 poses. Rows go to the ignored `.x4-research-cache/issue202-settled/permission.jsonl.gz`.
+The report exits non-zero if an integrity check fails. See findings, "X4 pre-fire permission".
 
 ## Physical benchmark
 
