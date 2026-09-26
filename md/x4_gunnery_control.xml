@@ -338,6 +338,7 @@
                   <position object="$weapon" space="$weapon"/>
                 </create_orientation>
                 <set_value name="$aim" exact="null"/>
+                <set_value name="$aimdistance" exact="null"/>
                 <do_if value="$muzzleaim.yaw == $muzzleorigin.yaw and $muzzleaim.pitch == $muzzleorigin.pitch
                               and $turretaim.yaw == $turretorigin.yaw and $turretaim.pitch == $turretorigin.pitch">
                   <run_actions ref="LineOfFireBound" result="$box">
@@ -347,6 +348,7 @@
                   </run_actions>
                   <do_if value="$box and not LineOfFireService.$ambiguous">
                     <set_value name="$aim" exact="position.[$box.{1}.x - $muzzle.x, $box.{1}.y - $muzzle.y, $box.{1}.z - $muzzle.z].rotation.forward"/>
+                    <set_value name="$aimdistance" exact="($box.{1}.x - $muzzle.x) * $aim.x + ($box.{1}.y - $muzzle.y) * $aim.y + ($box.{1}.z - $muzzle.z) * $aim.z"/>
                   </do_if>
                 </do_if>
                 <do_else>
@@ -360,6 +362,7 @@
                     <set_value name="$s" exact="($vo - $uv * $uo) / (1 - $uv * $uv)"/>
                     <do_if value="$t gt 0 and position.[$muzzle.x + $t * $u.x - $s * $v.x, $muzzle.y + $t * $u.y - $s * $v.y, $muzzle.z + $t * $u.z - $s * $v.z].length le 1m">
                       <set_value name="$aim" exact="$u"/>
+                      <set_value name="$aimdistance" exact="$t"/>
                     </do_if>
                   </do_if>
                 </do_else>
@@ -425,9 +428,11 @@
                   <do_if value="$status == 'U' and $reason == ''">
                     <!-- The aimed line continued past the aim point: a target hit
                          anywhere on it is X4's result 1 or a genuine miss short of
-                         it; no hit at all is a genuine miss. Its length covers
-                         X4's endpoint, f times the aim-point distance. -->
-                    <do_if value="not $beam">
+                         it; no hit at all is a genuine miss. Its length reaches X4's
+                         endpoint, f times the aim-point distance (f is 1 unless the
+                         target can move), plus a margin for in-game precision; with
+                         no known aim point, a bound that covers it. -->
+                    <do_if value="not $beam and not $aimdistance">
                       <run_actions ref="LineOfFireBound" result="$box">
                         <param name="target" value="$target"/>
                         <param name="weapon" value="$weapon"/>
@@ -437,12 +442,14 @@
                     <do_if value="$range le 0m">
                       <set_value name="$reason" exact="'range'"/>
                     </do_if>
-                    <do_elseif value="not $beam and not $box">
+                    <do_elseif value="not $beam and not $aimdistance and not $box">
                       <set_value name="$reason" exact="'box'"/>
                     </do_elseif>
                     <do_else>
                       <set_value name="$length" exact="if $beam then $range
-                          else (1 + [1.1 * $range, 500m].min / $range) * $box.{2} * 1.001 + 1m"/>
+                          else (if $aimdistance
+                                then (if $target.isclass.ship or $target.isclass.engine then 1 + [1.1 * $range, 500m].min / $range else 1) * $aimdistance * 1.0001
+                                else (1 + [1.1 * $range, 500m].min / $range) * $box.{2} * 1.001) + 1m"/>
                       <set_value name="$far" exact="position.[$muzzle.x + $length * $aim.x, $muzzle.y + $length * $aim.y, $muzzle.z + $length * $aim.z]"/>
                       <create_position name="$end" object="$weapon" space="$target" value="$far"/>
                       <check_line_of_sight name="$los" object="$weapon" objectoffset="$start" target="$target" targetoffset="$end" useaimtarget="false" excludeself="false"/>
