@@ -609,8 +609,10 @@
   the player-controlled ship or ship context. No general-target equivalent has
   been verified.
 - Note on list choice: `weapons.operational.list` (used here) and
-  `turrets.operational.list` are different enumerations, and neither includes
-  missile turrets (see the `missileturrets` record below). Pick deliberately.
+  `turrets.operational.list` are different enumerations. CORRECTED 2026-09-25:
+  both appear to include missile turrets (native inference; see the corrected
+  list record below). Pick deliberately and do not add a `missileturrets` list
+  to either without de-duplicating.
 
 ### `bullet.launcher` is the surviving route to a turret's real bore direction
 - X4: 9.00
@@ -752,22 +754,38 @@
   Corroborating this entry from the other direction: no shipped aiscript reads
   rotation off a turret either (record above).
 
-### `turrets.<state>.list` silently excludes missile turrets
-- X4: 9.00
-- Status: shipped-source
-- Source: `props-9.00/libraries/scriptproperties.xml:539` (`turrets.<state>.list`)
-  versus `:542-545` (`missileturrets.<state>.count/list/indexof/random`);
-  `missileturret` is its own datatype deriving from `turret` at `:1463`
-- Live test: surfaced as a measurement gap in the 2026-08-11 Test Lab capture
-- Finding: `<ship>.turrets.<state>.list` and `<ship>.missileturrets.<state>.list`
-  are separate property lists. A sweep or measurement loop written over
-  `turrets.operational.list` therefore omits an entire class of weapon emitter
-  with no error and no log line.
-- Why it is recorded: the 2026-08-11 fire-control capture enumerated only
-  `turrets.operational.list`, which left missile turrets as an unmeasured firing
-  source that could account for observed hits the instrumented turrets did not
-  explain. Any per-turret census, LOS sweep, or attribution attempt must
-  enumerate both lists or state explicitly that missile turrets are out of scope.
+### Missile turrets appear in `turrets` and, by inference, in `weapons` lists
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned `X4.exe` (see
+  [native-analysis.md](native-analysis.md)). The MD keyword table at
+  `0x022A6880` maps `turrets` = `0x527`, `weapons` = `0x55C` and
+  `missileturrets` = `0x39A`; the handlers come from jump table `0x00D0BDF0`,
+  anchored on the recorded `bboxdistanceto`/`distanceto` entry `0x00CF2409`.
+  Datatypes are in `libraries/scriptproperties.xml:539-550` and `:1463`.
+- Live test: no. The 2026-08-11 capture that prompted the old record had no
+  missile turrets, so it never observed the claimed exclusion.
+- Finding:
+  - `turrets.<state>` queries the object's equipment manager (`+0xB0`,
+    `0x0059A210`): category 7 ∩ `IsClass(turret)` ∩ state. That is the
+    static `ComponentFilterByRealClass` `0x031B7B18`, class `0x68` with exact
+    flag 0, which tests inheritance (`0x00991DA0`).
+  - `missileturrets.<state>` is the same query (`0x004D30C0`) further narrowed
+    by `IsClass(missileturret)`: filter `0x031B7380`, class `0x44`, exact 0.
+    So missile turrets are in the `turrets` result.
+  - `weapons.<state>` queries a different registry (`+0xA8`, `0x0047DC40`),
+    category 6 ∩ `IsClass(weapon)`: filter `0x031B7BA8`, class `0x6B`,
+    exact 0. The `MissileTurret` class table sets both `turret` and `weapon`.
+    Ordinary turrets are LIVE-proven members of `weapons`; missile-turret
+    membership in that registry is not traced.
+- Consequences:
+  - A ship's `turrets.operational.count` includes its missile turrets.
+  - Test Lab's shooter census should expect them in `weapons` and `turrets`
+    as well as in `missileturrets`.
+  - Loops over both `turrets` and `missileturrets` visit a missile turret
+    twice.
+  - The earlier record ("`turrets.<state>.list` silently excludes missile
+    turrets") was a reading of the property descriptions only, and is withdrawn.
 
 ### Searching only the Lua FFI produces false negatives on targeting capability
 - X4: 9.00
