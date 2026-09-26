@@ -151,7 +151,8 @@ do
 end
 
 -- The selected-target CLEAR LINE OF FIRE pass never overlaps, publishes only
--- complete passes, keeps the last result while refreshing and drops stale work.
+-- complete passes, counts CLEAR and GUIDED but not UNKNOWN or BLOCKED, keeps the
+-- last result while refreshing and never shows another target's result.
 do
     local session = API.getSession()
     session.phase, session.controlMode = "target_select", nil
@@ -168,34 +169,45 @@ do
         fix.fireEvent("X4GunneryControl.LineOfFireResult", "x4gcl1:" .. request.nonce .. ":"
             .. request.weaponid .. ":" .. status .. ":" .. reason .. ":" .. calls)
     end
+    local function pass(first, second)
+        API.runClearPass(clock)
+        reply(first, first == "U" and "aim" or "", 1)
+        API.runClearPass(clock)
+        reply(second, second == "U" and "aim" or "", 1)
+    end
     API.runClearPass(clock)
     API.runClearPass(clock)
     assert(#events == 2 and events[1].control == "line_of_fire_begin"
         and tostring(events[1].params.target) == "730" and events[2].params.weaponid == "3001",
         "a pass must start on the selected target one turret at a time without overlap")
     reply("C", "", 1)
-    assert(API.clearText(730) == "CLEAR LINE OF FIRE — scanning", "a partial pass must not publish")
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE: scanning", "a partial pass must not publish")
     API.runClearPass(clock)
     reply("U", "self", 3)
-    local text, paths = API.clearText(730)
-    assert(text == "CLEAR LINE OF FIRE — 1 / 2  (0 s ago)"
-        and paths == "BLOCKED PATH 0   UNKNOWN 1   GUIDED 0",
-        "UNKNOWN must be reported separately and never inflate CLEAR")
-    assert(API.clearText(731) == "CLEAR LINE OF FIRE — scanning", "only the scanned target shows the result")
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE: 1 / 2  (0 s)", "UNKNOWN must never count as CLEAR")
+    assert(API.clearText(731) == "CLEAR LINE OF FIRE: scanning", "only the scanned target shows the result")
     API.runClearPass(clock + 1)
     assert(#events == 3, "the next pass must wait for the refresh interval")
     clock = clock + 2.5
     API.runClearPass(clock)
     reply("G", "", 0)
-    API.runClearPass(clock)
-    assert(API.clearText(730) == "CLEAR LINE OF FIRE — 1 / 2  (2 s ago)",
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE: 1 / 2  (2 s)",
         "a refresh must keep the previous completed result and its age")
+    API.runClearPass(clock)
+    reply("B", "", 3)
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE: 1 / 2  (0 s)", "GUIDED counts; BLOCKED does not")
+    clock = clock + 2.5
+    pass("G", "C")
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE: 2 / 2  (0 s)", "CLEAR and GUIDED both count")
+    clock = clock + 2.5
+    API.runClearPass(clock)
+    API.runClearPass(clock)
     local stale = events[#events].params
     API.setRangeTargets({ 731 }, 731)
-    reply("B", "", 3, stale)
+    reply("C", "", 1, stale)
     API.runClearPass(clock)
-    assert(API.clearText(730) == "CLEAR LINE OF FIRE — scanning"
-        and API.clearText(731) == "CLEAR LINE OF FIRE — scanning"
+    assert(API.clearText(730) == "CLEAR LINE OF FIRE: scanning"
+        and API.clearText(731) == "CLEAR LINE OF FIRE: scanning"
         and tostring(events[#events - 1].params.target) == "731",
         "a changed selection must discard the old result and restart on the new target")
     local timedOut = events[#events].params
@@ -203,7 +215,7 @@ do
     API.runClearPass(clock)
     reply("C", "", 1, timedOut)
     reply("C", "", 1, timedOut)
-    assert(API.clearText(731) == "CLEAR LINE OF FIRE — scanning", "a timed-out pass must not publish")
+    assert(API.clearText(731) == "CLEAR LINE OF FIRE: scanning", "a timed-out pass must not publish")
     AddUITriggeredEvent = savedAdd
 end
 

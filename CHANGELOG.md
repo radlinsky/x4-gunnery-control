@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+- Add **CLEAR LINE OF FIRE: N / total** to the target browser and the engaged
+  panel (#202). For the current selection only, each selected turret is checked
+  in turn against X4's own pre-fire rule. N counts turrets that X4 would permit
+  to fire (CLEAR) and guided missile turrets; blocked and unresolved turrets are
+  logged, not counted. The result shows its age and clears on a target change.
+
 - Add onboard Map ingress for Gunnery Control (#68). While on foot aboard the
   exact player-owned ship, Map → right-click that ship → **Gunnery Control**
   opens the existing console without requiring a gunner chair. The chair path

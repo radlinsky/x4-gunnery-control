@@ -1731,26 +1731,27 @@ function Clear.onResult(_, param)
     local reasons = {}
     for name, count in pairs(active.reasons) do reasons[#reasons + 1] = name .. ":" .. count end
     table.sort(reasons)
-    log("event=line_of_fire action=pass elapsed_ms=" .. tostring(math.floor((now - active.started) * 1000))
-        .. " turrets=" .. active.total .. " clear=" .. active.clear .. " blocked=" .. active.blocked
-        .. " unknown=" .. active.unknown .. " guided=" .. active.guided .. " calls=" .. active.calls
-        .. " peak_calls_per_update=" .. active.peak .. " unknown_reasons=" .. table.concat(reasons, ","))
+    local summary = active.key .. " clear=" .. active.clear .. " blocked=" .. active.blocked
+        .. " unknown=" .. active.unknown .. " guided=" .. active.guided
+        .. " unknown_reasons=" .. table.concat(reasons, ",")
+    -- First pass, any change, and a periodic cost sample; never every pass.
+    if summary ~= Clear.loggedSummary or now >= (Clear.nextLogAt or 0) then
+        Clear.loggedSummary, Clear.nextLogAt = summary, now + 30
+        log("event=line_of_fire action=pass target=" .. summary .. " turrets=" .. active.total
+            .. " elapsed_ms=" .. tostring(math.floor((now - active.started) * 1000))
+            .. " calls=" .. active.calls .. " peak_calls_per_turret=" .. active.peak)
+    end
 end
 
+-- CLEAR and GUIDED count; BLOCKED and UNKNOWN stay in the log.
 function Clear.text(target)
     local result = Clear.result
-    if #Range.members == 0 then return "CLEAR LINE OF FIRE — 0 / 0" end
+    if #Range.members == 0 then return "CLEAR LINE OF FIRE: 0 / 0" end
     if not result or isNullID(target) or result.key ~= State.normID(target) then
-        return "CLEAR LINE OF FIRE — scanning"
+        return "CLEAR LINE OF FIRE: scanning"
     end
-    return "CLEAR LINE OF FIRE — " .. result.clear .. " / " .. result.total
-        .. "  (" .. math.floor(getElapsedTime() - result.completedAt) .. " s ago)"
-end
-
-function Clear.breakdown(target)
-    local result = Clear.result
-    if not result or isNullID(target) or result.key ~= State.normID(target) then return "" end
-    return "BLOCKED PATH " .. result.blocked .. "   UNKNOWN " .. result.unknown .. "   GUIDED " .. result.guided
+    return "CLEAR LINE OF FIRE: " .. (result.clear + result.guided) .. " / " .. result.total
+        .. "  (" .. math.floor(getElapsedTime() - result.completedAt) .. " s)"
 end
 
 -- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
@@ -2777,7 +2778,7 @@ function TestAPI.runRangeSweep(now) return Range.runRangeSweep(now) end
 function TestAPI.rangeSpeedShip(target) return Range.rangeSpeedShip(target) end
 function TestAPI.rangeText(result) return Range.rangeText(result) end
 function TestAPI.runClearPass(now) return Clear.run(now) end
-function TestAPI.clearText(target) return Clear.text(target), Clear.breakdown(target) end
+function TestAPI.clearText(target) return Clear.text(target) end
 function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
 
 function menu.onShowMenu()
@@ -3151,8 +3152,6 @@ function menu.display()
             pinnedHullRow[5]:createText(function() return surfaceHullText(pinnedID) end)
             local pinnedClear = elemTable:addRow("surface_pinned_clear", {})
             pinnedClear[1]:setColSpan(5):createText(function() return Clear.text(pinnedID) end)
-            local pinnedPaths = elemTable:addRow("surface_pinned_paths", {})
-            pinnedPaths[1]:setColSpan(5):createText(function() return Clear.breakdown(pinnedID) end)
             if not sameID(pinnedID, session.targetObjectID) then
                 local parentHullRow = elemTable:addRow("surface_parent_hull", {})
                 parentHullRow[1]:setColSpan(4):createText(text(57))
@@ -3258,8 +3257,6 @@ function menu.display()
             local detail = tableView:addRow("current_detail", { bgColor = Color["row_background_unselectable"] })
             detail[1]:setColSpan(4):createText(function() return Range.rangeText(Range.rangeResult(selectedID)) end)
             detail[5]:setColSpan(8):createText(function() return Clear.text(selectedID) end)
-            local paths = tableView:addRow("current_paths", { bgColor = Color["row_background_unselectable"] })
-            paths[5]:setColSpan(8):createText(function() return Clear.breakdown(selectedID) end)
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
