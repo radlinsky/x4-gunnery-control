@@ -544,7 +544,7 @@ def _rescue_lines(scene, origin, turret, target, rank, aim, models):
     own = next(((b.lo, b.hi, f) for label, b, f in scene.instances if label == turret["label"]), None)
     start = _past_box(origin, d, C - H, C + H, turret["frame"])
     start_col = _past_box(origin, d, *own) if own else origin    # no collision mesh: nothing to step past
-    t = Sc.to_local(turret["frame"][0], target["frame"])
+    t = Sc.to_local(turret["frame"][0], target["frame"])   # $target.bboxdistanceto.{$turret}, exact square root
     half = 0.5 * float(np.linalg.norm(t - np.clip(t, target["C"] - target["H"], target["C"] + target["H"])))
     ahead = Sc.to_world(target["points"][_select(Sc.to_local(origin, target["frame"]), target["points"])],
                         target["frame"]) if target["points"] else aim
@@ -559,14 +559,26 @@ def _rescue_lines(scene, origin, turret, target, rank, aim, models):
         rev = {target["label"], target["module"]}
     lines = dict(aim_own=(origin, aim, {turret["label"]}), adv=(start, aim, ()), adv_col=(start_col, aim, ()),
                  adv_skip=(origin, start, {turret["label"]}), rev=(aim, origin, rev))
-    for k, p in steps.items():
-        lines[f"fwd_{k}"], lines[f"back_{k}"] = (p, aim, ()), (p, origin, ())
+    for k, p in steps.items():   # qw_: the implementable Q(W), barrelposition to the step point, declared $weapon
+        lines[f"fwd_{k}"], lines[f"back_{k}"], lines[f"qw_{k}"] = (p, aim, ()), (p, origin, ()), (origin, p, ())
+        lines[f"skip_{k}"] = (origin, p, {turret["label"]})
+    member = {label for label in meta if B.qualifies(TARGET_SYMBOL[cls], symbol(scene, label, turret, target, rank))}
+    own_body = next(((b, f) for label, b, f in scene.instances if label == turret["label"]), None)
     out = {}
     for model in models:
         out[model] = {}
         for name, (a, b, skip) in lines.items():
             sym = symbol(scene, Gm.first_hit(scene.instances, a, e=b, model=model, skip=skip)[0], turret, target, rank)
             out[model][name] = [sym] if sym else []
+        # where each step point lands: inside the target box, past the first target hit, inside the own collision
+        t_hit = Gm.first_hit(scene.instances, origin, e=aim, model=model, skip=set(meta) - member)[1]
+        for k, p in steps.items():
+            q = Sc.to_local(p, target["frame"])
+            out[model][f"diag_{k}"] = [n for n, flag in (
+                ("in target box", bool(np.all(np.abs(q - target["C"]) <= target["H"]))),
+                ("past target", float(np.linalg.norm(p - origin)) >= t_hit),
+                ("in own collision", own_body is not None
+                 and Gm.inside(own_body[0], Sc.to_local(p, own_body[1]), model))) if flag]
     return out
 
 
@@ -1395,15 +1407,18 @@ def rescue_status(row, phase, model, method):
     first = lines["aim"][:1]
     if first and B.qualifies(t, first[0]):
         return "C", 1
+    if method.startswith("step"):
+        # Q(W) from the barrelposition to the step point (2nd call), forward (3rd), back (4th)
+        k = "half" if "half" in method else "50m"
+        if lines[f"qw_{k}"] != ["W"]:
+            return "N", 2
+        fwd = bool(lines[f"fwd_{k}"]) and B.qualifies(t, lines[f"fwd_{k}"][0])
+        return ("C" if fwd and lines[f"back_{k}"] == ["W"] else "U"), (4 if fwd else 3)
     if first != ["W"]:
         return "N", 2
     ok = {m: bool(lines.get(k)) and B.qualifies(t, lines[k][0]) for m, k in
           (("ex", "aim_ex"), ("own", "aim_own"), ("adv", "adv"), ("col", "adv_col"))}
     rev = lines.get("rev") == ["W"]
-    if method.startswith("step"):   # forward from the step (3rd call), then back to the muzzle (4th) only if it clears
-        k = "half" if "half" in method else "50m"
-        fwd = bool(lines[f"fwd_{k}"]) and B.qualifies(t, lines[f"fwd_{k}"][0])
-        return ("C" if fwd and lines[f"back_{k}"] == ["W"] else "U"), (4 if fwd else 3)
     # the mod can place the aim point (macro box centre) and excludeself=true drops only target geometry
     known = row["aim_points"] == 0 and row["target_cls"] == "whole ship"
     said, calls = {
@@ -1446,6 +1461,39 @@ def rescue_report(rows, say):
     for method in RESCUES[2:]:
         c = Counter(r["target_cls"] for r, t in items["mesh"] if rescue_status(r, "settled", "mesh", method)[0] == "U")
         say(f"- {method}: {dict(c.most_common())}")
+    say("\nStep and look back: the implementable Q(W) (barrelposition to the half step, declared $weapon) against "
+        "the probe's actual first hit, rows where the probe is not CLEAR:\n")
+    say("| model | phase | probe's first hit | Q(W) true | Q(W) false |")
+    say("|---|---|---|---:|---:|")
+    for model in MODELS:
+        for phase in PHASES:
+            c = Counter()
+            for r, t in items[model]:
+                lines = r["phases"][phase][model]
+                first = lines["aim"][:1]
+                if first and B.qualifies(tsym(r), first[0]):
+                    continue
+                c[mech(r, first[0]) if first else "no hit", lines["qw_half"] == ["W"]] += 1
+            for k in sorted({k for k, _q in c}, key=lambda k: -(c[k, True] + c[k, False])):
+                say(f"| {model} | {phase} | {k} | {c[k, True]} | {c[k, False]} |")
+    say("\nWhere the step point lands, rows where the probe is not CLEAR (outcome after the rescue):\n")
+    say("| model | phase | step | landing | rows | CLEAR (FP) |")
+    say("|---|---|---|---|---:|---:|")
+    for model in MODELS:
+        for phase in PHASES:
+            for k, method in (("half", "step half + look back"), ("50m", "step 50 m + look back")):
+                c = Counter()
+                for r, t in items[model]:
+                    lines = r["phases"][phase][model]
+                    if lines["aim"][:1] and B.qualifies(tsym(r), lines["aim"][0]):
+                        continue
+                    said = rescue_status(r, phase, model, method)[0] == "C"
+                    for n in lines[f"diag_{k}"] + (["skipped an obstruction"] if lines[f"skip_{k}"] else []):
+                        c[n, "all"] += 1
+                        c[n, "C"] += said
+                        c[n, "FP"] += said and t == "NOT"
+                for n in sorted({n for n, _x in c}):
+                    say(f"| {model} | {phase} | {k} | {n} | {c[n, 'all']} | {c[n, 'C']} ({c[n, 'FP']}) |")
     for phase in PHASES:
         skipped = Counter()
         for r, t in items["mesh"]:

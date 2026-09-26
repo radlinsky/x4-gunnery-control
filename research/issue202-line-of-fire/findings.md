@@ -552,7 +552,7 @@ Results, settled phase (cells MESH / HULL):
 | reverse from the aim point to the muzzle, target `excludeself=true`, aim point assumed known | no | 676 / 678 | 546 / 550 | 0 / 0 | 1.76 / 3 |
 | reverse, whole ships whose aim point is the box centre | partly | 74 / 74 | 0 / 0 | 602 / 604 | 1.65 / 3 |
 | `excludeself=true` retry guarded by the advance or the whole-ship reverse | as its guard | same as its guard | 0 / 0 | same | +1 call |
-| **step and look back**: step toward the aim point, check forward and back (below) | yes | 676 / 678 | 0 / 0 | 0 / 0 | 1.81 / 4 |
+| **step and look back**: `Q(W)` to a step toward the aim point, then forward and back (below) | script actions only; not LIVE-checked | 676 / 678 | 0 / 0 | 0 / 0 | 1.81 / 4 |
 
 Parked (MESH):
 
@@ -606,52 +606,99 @@ script-visible box does not.
   - A mod can detect "no authored point" only by comparing the `create_orientation useaimtarget`
     direction with the direction to the box centre. That is inference.
 
-**5. Step and look back.** This is implementable and matches the ideal restart. The method, after the probe
-and a `Q(W)` showing the firing turret is first:
+**5. Step and look back.** In the benchmark it matches the ideal restart, using only script actions. It
+is inference: none of the four calls has been run LIVE in this combination. After a probe that is not
+CLEAR:
 
-1. Take the direction from the barrelposition to the aim point: `create_orientation useaimtarget` with
-   the barrelposition as origin.
-2. Step along it by half of `bboxdistanceto` (turret to target box), so the step point is always short
-   of the target's box.
-3. **Forward:** from the step point to the aim point, `useaimtarget=true`, `excludeself=false`. The
+1. **Direction:** from the barrelposition toward the aim point, via `create_orientation useaimtarget`
+   with the barrelposition as origin.
+2. **Step:** along that direction by half of `$target.bboxdistanceto.{$weapon}`.
+3. **`Q(W)`:** from the barrelposition to the step point, `object=$weapon`, declared target `$weapon`,
+   explicit `targetoffset`, `excludeself=false`. The firing turret must be first; otherwise the row stays
+   NOT.
+4. **Forward:** from the step point to the aim point, `useaimtarget=true`, `excludeself=false`. The
    target must be first.
-4. **Back:** from the step point to the barrelposition, `object=$weapon`, declared target `$weapon`,
-   `excludeself=false`. The firing turret must be the first thing seen.
+5. **Back:** from the step point to the barrelposition, declared target `$weapon`. The firing turret
+   must be the first thing seen.
 
-CLEAR only when both hold. Why this works:
+It is CLEAR only when steps 3–5 all hold.
 
-- The two checks cover the whole line except the inside of the socket.
-- Anything skipped (hull, sibling, external) is the first thing the back check sees, so it gives
-  UNKNOWN, never a false CLEAR.
-- A step still inside the socket just gives UNKNOWN.
+- The checks cover the whole line except the stretch between the first and last own-turret hits, which
+  is inside the socket.
+- Anything the step skipped (hull, sibling, external) is the first thing the back check sees, so the
+  row stays UNKNOWN.
+- A step that stays inside the socket fails `Q(W)` or the back check.
 
-Results:
+**Identifying the own-turret case.**
 
-- **Settled:** 676 / 678 recovered, 0 / 0 FP, under both models. A fixed 50 m step (capped at the half
-  distance) gives the same settled result, so the step length barely matters.
-- **Parked:** 136 / 143 MESH FP / FN, within 2 rows of the ideal restart.
+- An exact `Q(W)` on the probe's own line needs the probe's endpoint as an explicit `targetoffset`. That
+  endpoint is X4's selected aim point, which scripts cannot read for a target with authored aim points.
+- It can be computed only when the aim point is the target's box centre (`macro.boundingbox.center`) on
+  a ship or surface element. It cannot be computed on a station root, whose live union box centre is
+  not script-visible.
+- So the method uses `Q(W)` on the probe line's first stretch, from the barrelposition to the step
+  point, which it can place.
+- Benchmarked against the probe's actual first hit, over every row where the probe is not CLEAR:
+  - `Q(W)` is true on all 1,726 / 1,688 settled own-socket rows and false on every settled row blocked
+    by anything else: the firing hull, siblings, the target's parent or elements, other modules,
+    asteroids, other ships and satellites.
+  - Parked, at the half step, it misses 1 MESH own-socket row and never reads true on another
+    obstruction. That confusion table covers the half step only.
+  - At the 50 m step, 4 parked MESH rows lose the own-turret label; the step stays inside the socket
+    on 19 parked rows.
+  - A miss leaves the row NOT, never CLEAR.
+- `Q(W)` and the probe share their first stretch exactly when the aim point nearest the barrelposition
+  (what `create_orientation` returns) is X4's point, chosen from the turret origin. They differ only on
+  multi-point targets near a switch boundary.
+
+**Step distance.**
+
+- The benchmark's step distance is the turret component origin to the target's own oriented box. That is
+  `$target.bboxdistanceto.{$weapon}` (KB "MD `bboxdistanceto` geometry"), apart from its approximate
+  square root (±7e-4 relative).
+- The reverse form `$weapon.bboxdistanceto.{$target}` is different. It measures the turret box to the
+  target's centre, minus the half-diagonal on ships and stations, and to an element's origin on surface
+  elements. Use the target-first form.
+- Where the step lands, over every row where the probe is not CLEAR, at either step length and under
+  both models:
+  - it never lands inside the target box or past the first target hit;
+  - at 50 m it stays inside the firing turret's collision on 19 parked rows, and none became CLEAR;
+  - it skipped a real obstruction on 2,091–3,088 rows, depending on step, phase and model, and none of
+    those became CLEAR.
+
+**Results with the actual identification and step distance.**
+
+- **Settled:** 676 / 678 recovered, 0 / 0 FP, and no UNKNOWN left on a CLEAR row, at either step length.
+  This is unchanged from the simulated-identity run: `Q(W)` agrees on every settled row.
+- **Parked:**
+  - half step: 136 / 143 MESH FP / FN (HULL 112 / 243), 1,500 / 1,393 recovered;
+  - 50 m step: 136 / 151 (HULL 112 / 251).
+- **What changed from the previous run:** only labels. The few parked rows where `Q(W)` misses the socket
+  now read NOT instead of UNKNOWN (UNKNOWN 2,565 → 2,564 at the half step, 2,573 → 2,569 at 50 m, MESH).
+  TP, FP and FN are unchanged.
 - **Cost:** 1.81 mean and 4 worst-case `check_line_of_sight` calls, plus one `create_orientation` and
   the position conversions.
 
 The step direction must start at the muzzle.
 
 - A first version stepped along the direction from the turret component origin. Its step point sat
-  beside the muzzle-to-target line by up to half the muzzle's offset from the mount.
-- Objects on the true line then slipped between the two checks: 12 MESH / 12 HULL settled false CLEARs.
-  They were sibling shields and turrets at `par_l_dumbfire_01` mounts, a satellite, and a station
-  module.
+  beside the muzzle-to-target line.
+- Objects on the true line then slipped between the checks: 12 MESH / 12 HULL settled false CLEARs.
 - Stepping from the muzzle removed all of them.
 
-Limitations:
+Evidence that is still missing (LIVE):
 
-- **The socket-interior blind spot.** Geometry inside the socket's own volume between the muzzle and the
-  socket face is unseen. It never produced an error in this population.
-- **`create_orientation useaimtarget` with a barrelposition origin is not LIVE-checked.** It is assumed
-  to return the direction to the aim point nearest that origin (KB inference). That nearest point differs
-  from X4's turret-origin choice only on multi-point targets near a switch boundary, and the forward check
-  still ends at X4's point.
-- **A ray starting inside a body** is assumed to report that body. Both offline shape models do, but
-  Jolt's behavior is untraced.
+1. **`create_orientation useaimtarget` from an offset origin.** It is assumed to return the direction to
+   the aim point nearest that origin (KB inference, never run).
+2. **`$target.bboxdistanceto.{$weapon}` on real targets.** The ship box override families and the live
+   station union box are native inference; the benchmark uses macro boxes and module-box unions.
+3. **How X4's ray treats a start inside a body, and back faces.** Both offline models report the body
+   (MESH two-sided, HULL solid). Jolt's default ray settings ignore triangle back faces, and X4's
+   settings are untraced.
+   - If X4 ignores back faces, a muzzle inside its socket may not see the socket at all, and the
+     own-turret case itself looks different.
+   - The step method's back check meets the socket's outer face either way.
+4. **The socket-interior blind spot.** It produced no error in this population.
 
 **4. Other routes.**
 
@@ -664,17 +711,18 @@ Limitations:
 
 Conclusion:
 
-- **Step and look back** is the best implementable rescue. It uses no prebuilt data and no
-  `excludeself=true`. It recovers every settled own-turret row (676 MESH / 678 HULL) with no incorrect
-  CLEAR, matching the ideal restart, at up to 4 calls.
+- **Step and look back** is the best rescue built from script actions. It uses no prebuilt data and no
+  `excludeself=true`. With its own `Q(W)` identification, it recovers every settled own-turret row
+  (676 MESH / 678 HULL) with no incorrect CLEAR offline, matching the ideal restart, at up to 4 calls.
+  Whether it holds in X4 depends on the three LIVE questions above.
 - The alternatives are weaker:
   - the unguarded `excludeself=true` retry recovers the same rows but claims CLEAR through the firing
     hull (78 / 56);
   - an advance past `macro.boundingbox` recovers 6;
   - the whole-ship reverse probe recovers 74.
 - Everything above is offline inference, not LIVE. The first LIVE check should be
-  `create_orientation useaimtarget` from the barrelposition, then one own-socket case such as
-  `arg_m_dumbfire_02`.
+  `create_orientation useaimtarget` from the barrelposition. Then compare `$target.bboxdistanceto.{$weapon}`
+  with a known geometry, and test one own-socket case such as `arg_m_dumbfire_02`.
 
 ## Evidence gaps
 
