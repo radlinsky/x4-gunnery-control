@@ -25,12 +25,12 @@ MESH unless stated.
 5. **Station roots: the turret bears on the union-box centre, often empty space.** The LargeTarget
    offset is never kept, because a modular station's own component has no collision geometry (native
    trace). On 108 of 224 settled rows the path to the centre, and past it, meets no geometry: X4 still
-   fires, and the aimed line misses the station. Those rows are UNKNOWN. On the 116 scored rows the
+   permits fire, and the aimed line misses the station. Those rows are UNKNOWN. On the 116 scored rows the
    root probe has 0 FP and 26 own-turret FN. The production two-module lines have 8 FP, all blocked by
    the firing ship's own hull, and 32 FN. They also read CLEAR on 78 of the 108 empty-path rows, where
    X4's aimed line reaches nothing. That the continuation misses is true of these views, not in general.
-   In the #60 reconstruction, a round aimed through the empty `xen_defence` centre often strikes a
-   module behind it (see "Historical witnesses").
+   In the #60 reconstruction, the settled barrel's projectile path through the empty `xen_defence`
+   centre often reaches a module behind it (see "Historical witnesses").
 6. **Before settling**, the probe's errors come from where the barrel is parked:
    - FN: the firing turret's own collision (1,528), the firing ship's own hull (93);
    - FP: the parked line reaches the target, but the settled path is blocked by a sibling turret (59),
@@ -364,8 +364,8 @@ Settled, the probe has no false positives and 966 fewer false negatives. The six
   - `arg_tradestation`: 0.
 - **Settled rows whose path reaches no geometry: 108** (72 `arg_shipyard`, 36 `xen_defence`).
   - Continued past the centre to 30 km, every one still hits nothing.
-  - Natively the ray is a genuine miss, which every supported turret permits. The turret fires along
-    an aimed line that misses the station.
+  - Natively the ray is a genuine miss, which every supported turret permits. The permitted aimed line
+    misses the station.
   - The truth is undefined and the rows are excluded. The two-module lines read CLEAR on 78 of them.
 - **Scored rows: 116.**
   - probe: 0 FP, 26 FN (own turret);
@@ -421,36 +421,66 @@ continuation says it would on 34 of 74 rows.
   component.
 - **Ruled out (static):** separate zone physics worlds. **Contradicted (static):** a module whose
   `+0x70` chain misses the station root.
-- **Reconstruction (`settled.py --sixty`).** The owner's Boron Ray, the #202 anchor, stands in for the
-  unlogged firing ship. So the 14 mounts, macros and settling are real, but all 96 station poses are a
-  representative grid: 24 bearings × 4 station yaws, the Ray 1,500 m outside the station box. Turrets
-  that cannot bear are probed from the parked barrel. Both shape models agree on every pose class:
+- **Reconstruction (`settled.py --sixty`).**
+  - **Setup.** The owner's Boron Ray, the #202 anchor, stands in for the unlogged firing ship. The 14
+    mounts, macros and settling are real. All 96 station poses are a representative grid: 24 bearings ×
+    4 station yaws, with the Ray 1,500 m outside the station box.
+  - **Lines.** Both original probes and X4's pre-fire segment end at the union-box centre. The
+    projectile path is a separate line along the settled barrel's +Z. It is geometry only: not actual
+    firing, weapon readiness, spread, lead or post-launch behavior.
+  - **Turrets that cannot bear** are probed from the parked barrel, and no firing path is evaluated for
+    them.
+
+  Per turret placement, by primary mechanism. The primary mechanism is the muzzle probe's first hit.
+  X4 permission and the projectile are observations within that row, never a second mechanism.
+  Denominator 1,344 per model; cells are MESH / HULL.
+
+  | primary mechanism | turrets | X4 permits | projectile path hits station |
+  |---|---:|---:|---:|
+  | unobstructed line through the empty centre | 378 / 378 | 378 / 378 | 234 / 238 |
+  | station module before the centre | 350 / 350 | 350 / 350 | 350 / 350 |
+  | firing turret's own collision | 0 / 0 | – | – |
+  | firing ship hull | 64 / 64 | 0 / 0 | 0 / 0 |
+  | other obstruction (sibling turret) | 4 / 4 | 0 / 0 | 0 / 0 |
+  | cannot bear | 548 / 548 | – | – |
+
+  - **The two probes separately:** the muzzle probe is CLEAR on 356 / 366 placements and the origin
+    probe on 638 / 642.
+    - The origin probe's CLEARs are the 350 station-first rows, plus 26 / 30 of the 64 hull-first rows
+      (it drops the firing hull), plus 262 of the 548 turrets that cannot bear.
+    - It starts at the turret component origin, so it reads the same whether or not the barrel has
+      turned.
+  - **Projectile paths where X4 permits:** 728 / 728. Of those, 584 / 588 hit the station and
+    144 / 140 miss.
+  - **The settled barrel's +Z lies within 0.008° of the muzzle-to-centre line** (median 0.005°). Casting
+    the projectile along the barrel rather than the line therefore changes only 4 MESH rows.
+  - **The own-socket mechanism never occurs here.** These Ray railguns and disruptors never hit their
+    own socket from the settled muzzle.
+
+  Per station arrangement (denominator 96 poses; both models agree on every pose):
 
   | pose class | poses |
   |---|---:|
-  | both probes 0/14, X4 fires, some aimed round hits the station | 34 |
-  | both probes 0/14, X4 fires, every aimed round misses | 14 |
+  | both probes 0/14, X4 permits, some projectile path hits the station | 34 |
+  | both probes 0/14, X4 permits, every projectile path misses | 14 |
   | some probe CLEAR | 48 |
 
-  In the 34, the segment to the union-box centre meets nothing. Both probes are false and X4's own ray
-  is a genuine miss, so it fires. The round flies past the centre into a module behind it. First such
-  pose: `sixty:b0:y0`, the station above the Ray. There, 7 turrets bear and all 7 aimed rounds hit, and
-  the other 7 cannot bear.
-
-  All 14 turrets bear at 8 poses, all horizontal. Four of them have both probes at 0/14, and there
-  every aimed round misses, matching the broad-population result below. The 34 therefore depend on the
-  parked-barrel assumption for the turrets that cannot bear.
-- **Correction.** The earlier "where the centre path is empty, so is its continuation (36/36)" holds
-  only for the broad population's views. **The centre gap alone can reproduce the whole recorded
-  pattern** in representative geometry.
-- Over 796 settled turret rows (MESH), X4 fires with both probes false on 378. Of those 378, the aimed
-  round hits the station on 238.
-- The positive control, the settled muzzle to the nearest module's box centre, hits that module on 692
+  - **The 34 poses.** Every permitted turret's segment to the centre meets nothing, and the projectile
+    path continues past the centre into a module behind it. The first such pose is `sixty:b0:y0`, the
+    station above the Ray: 7 turrets bear and all 7 projectile paths hit.
+  - **Poses where all 14 bear.** There are 8, all on horizontal bearings. The 4 with both probes at 0/14
+    have every projectile path missing, matching the broad-population result below. The 34 therefore
+    depend on the parked-barrel assumption for the turrets that cannot bear.
+  - The per-mount table is in the `--report` output.
+- **Correction.** The earlier "where the centre path is empty, so is its continuation (36/36)" holds only
+  for the broad population's views. In representative geometry, **the recorded pattern is geometrically
+  possible**: both probes 0/14 while X4 permits and projectile paths reach station modules.
+- **Positive control:** the settled muzzle to the nearest module's box centre hits that module on 692
   MESH / 704 HULL rows. There the root-declared and module-declared checks both read CLEAR and X4
-  fires.
-- **Unresolved.** This is a sufficient mechanism, not the established cause. The historical hits stay
-  unexplained until a LIVE run logs, per FIRED shot, the muzzle, barrel direction, union-box centre,
-  struck component and probes.
+  permits.
+- **Unresolved.** The reconstruction does not show what happened in #60 and does not explain its
+  recorded hits. That needs a LIVE run logging, per FIRED shot, the muzzle, barrel direction, union-box
+  centre, struck component and both probes.
 - `benchmark.py` states the same arrangements by hand:
   - centre gap with a module behind or with nothing behind;
   - own socket, then the gap;
@@ -482,8 +512,12 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
   - a multi-point row without its three-origin selector record;
   - an alternate box point turning a blocked bearing path into a correct CLEAR;
   - lazy differing from seven;
-  - (#60 reconstruction) a muzzle probe CLEAR where X4 refuses, an aimed round disagreeing with its own
-    first segment, and a missing positive control.
+  - (#60 reconstruction) a saved reconstruction that is missing, empty or incomplete (all 96 poses × 14
+    turrets, every line under both models), including under `--report`;
+  - X4's segment disagreeing with the muzzle probe where only the firing turret differs;
+  - a barrel direction that is not a unit vector;
+  - stored first hits that differ from a re-cast of their stored lines (every 6th pose, both models);
+  - a missing positive control.
 
 ## Evidence gaps
 
@@ -503,7 +537,9 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
    first hit. Wrecks and removed bodies are covered by the accepted native rule, not simulated.
 6. Hit prediction on off-mesh aim points and station-centre gaps (outside line of fire).
 7. Frame cost of any method (not measured).
-8. Earlier open rules: missing guidance, docked craft membership, a module dying mid-pass.
+8. Earlier open rules: missing guidance, a module dying mid-pass. Docked craft on a selected station
+   hull are decided: a docked-ship first hit counts as CLEAR for firing permission, not as a hit on
+   station geometry (owner decision, #202).
 
 ## Recommendation
 
@@ -522,4 +558,4 @@ The one remaining error is the firing turret's own collision. The options:
   but does not decide.
 
 For station roots the probe tests the right point. The current two-module lines do not. Note that X4
-itself fires at a station root through an empty centre.
+itself permits fire at a station root through an empty centre.

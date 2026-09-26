@@ -36,29 +36,30 @@ integrity check fails.
 
 The Ray's 14 real mounts against the shipped `xen_defence` station at 96 representative poses: 24 evenly
 spread bearings × 4 station yaws, with the Ray 1,500 m outside the station box. #60 logged neither the firing
-ship nor the geometry, so no pose is the historical one. Per turret it compares:
+ship nor the geometry, so no pose is the historical one. For each turret, under both shape models:
 
-- the two original root probes: settled muzzle with `excludeself=false`, and turret component origin with
-  `excludeself=true`; turrets that cannot bear are probed from the parked barrel;
-- X4's first ray, which ignores only the firing turret and fires on a station hit or on no hit;
-- the aimed round, the same line continued past the union-box centre (no spread, lead or slew);
-- a positive control, the settled muzzle to the nearest module's box centre, under root and module
+- the two original root probes to the union-box centre: the barrelposition with `excludeself=false`, and
+  the turret component origin with `excludeself=true`;
+- X4's pre-fire segment, the barrelposition to the centre with only the firing turret ignored. It
+  permits on no hit or a station hit;
+- the projectile path, a separate straight line along the settled barrel's +Z;
+- a positive control, the barrelposition to the nearest module's box centre, under root and module
   declaration.
 
-It reports which poses reproduce "both probes 0/14 while X4 fires", and whether any aimed round then hits.
-It shows what the geometry allows. It does not explain the historical hits.
+Turrets that cannot bear are probed from the parked barrel, and no firing path is evaluated for them.
 
-Truth is the straight path from the turret's **settled `barrelposition`** to the **point X4's shoot
-controller bears on**:
+The report gives:
 
-- the nearest authored aim point from the turret component origin, else the box centre;
-- plus the LargeTarget offset on a ship over 500 m with no authored point;
-- the union-box centre for a station root.
+- per-turret counts by primary mechanism, which is the muzzle probe's first hit: empty centre, module
+  before the centre, own turret, own hull, other obstruction, or cannot bear;
+- per-mount totals and per-pose classes, with their denominators.
 
-The first hit is traced through real collision geometry, ignoring only the firing turret's own meshes. It
-is UNKNOWN when the shape models disagree, the path hits nothing, or the first hit is a tie. Candidates
-are `benchmark.candidate()` fed the physical first hit of each tested line, from the pre-turn and the
-settled muzzle, plus the first `useaimtarget=true` probe alone.
+It is geometry only: not actual firing, weapon readiness or post-launch behavior. It does not explain the
+historical hits.
+
+Every row stores its lines' endpoints and barrel direction. The report fails when the saved reconstruction
+is missing, empty or incomplete. It also re-casts every stored line of every 6th pose and fails on any
+difference.
 
 ## Decision-rule regression tests (`benchmark.py`)
 

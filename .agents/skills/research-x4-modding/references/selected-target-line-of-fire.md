@@ -107,7 +107,7 @@ unrecorded) never showed `muzzle_los_self=1` with `muzzle_los_ex=0`; 4 showed
 `ex=1, self=0`. That is the required monotonic pattern, but it proves no cause.
 The log was not retained in the repository.
 
-### Station-root false negative: a sufficient geometric mechanism, cause unproven
+### Station-root false negative: the pattern is geometrically possible, cause unresolved
 
 A 2026-08-19 station-root report (Xenon Defence Platform, #60) recorded 0/14
 from two root probes while the same turrets fired and hit the station:
@@ -136,38 +136,47 @@ Candidate explanations, as of 2026-09-25:
 2. **Contradicted: a module hit whose `+0x70` chain misses the station root.**
    See "A station-root check accepts a module hit, exactly as X4's pre-fire
    does". Static inference, not LIVE-excluded.
-3. **Sufficient in reconstructed geometry: the centre gap.** The shipped
+3. **Geometrically possible, cause unresolved: the centre gap.** The shipped
    `xen_defence` union-box centre is (0, −319, 0) in station space. That is in
    open space below the hub dock area, inside no module. When the segment to
    it meets nothing:
    - both probes return false, because a miss is false;
-   - X4's own ray is a genuine miss, which every supported turret permits;
-   - the round flies on past the centre, and from some bearings it strikes a
-     module behind it.
+   - X4's own pre-fire ray is a genuine miss, which every supported turret
+     permits;
+   - the projectile path, the settled barrel's +Z, can continue past the
+     centre into a module behind it.
 
    Source: `research/issue202-line-of-fire/settled.py` (`station60()` and the
-   `sixty_*` reconstruction). The reconstruction uses the Ray's 14 real mounts
-   against the shipped station at 96 representative poses. The pattern needs
-   both probes at 0/14, X4 firing, and some aimed round hitting the station.
-   It appears at 34 poses under both collision-shape models; the hitting
-   rounds strike a module beyond the centre.
+   `sixty_*` reconstruction). Setup:
+   - the Ray's 14 real mounts against the shipped station, at 96
+     representative poses;
+   - both shape models;
+   - turrets that cannot bear are probed from their parked barrels, since
+     #60 did not log their rest poses.
 
-   At another 14 poses both probes read 0/14 and X4 fires, but every aimed
-   round misses. All 14 turrets bear at 8 poses, all on horizontal bearings.
-   Four of them have both probes at 0/14, and all four are in this all-miss
-   group. The
-   earlier record ("continued past the centre, every such line meets nothing,
-   36 of 36") held only for the broad population's views. It is corrected:
-   the centre gap alone *can* account for hits.
+   Results:
+   - **Turrets.** 378 of 1,344 placements have an unobstructed line through
+     the empty centre under both models. X4 permits all of them. The
+     projectile path hits the station on 234 (MESH) / 238 (HULL).
+   - **Barrel versus line.** The settled barrel lies within 0.008° of the
+     muzzle-to-centre line.
+   - **Poses.** Both probes read 0/14 while X4 permits and some projectile
+     path hits the station at 34 of 96 poses. Every projectile path misses at
+     another 14 poses.
+   - **All 14 bearing.** All 14 turrets bear at 8 poses, all on horizontal
+     bearings. The four of them with both probes at 0/14 are all in the
+     all-miss group.
 
-   The 34 poses all depend on turrets that cannot bear being probed from their
-   parked barrels, since #60 did not log their rest poses.
+   So the 34 depend on the parked-barrel assumption. The earlier record
+   ("continued past the centre, every such line meets nothing, 36 of 36")
+   held only for the broad population's views. This is geometry, not actual
+   firing or projectile behavior.
 4. **Partial: the firing turret's own socket.** This can make the muzzle probe
-   false while X4 fires. It cannot explain the turret-origin
+   false while X4 permits fire. It cannot explain the turret-origin
    `excludeself="true"` ray, which drops the turret's own meshes.
 
-Status: explanation 3 is a geometrically sufficient mechanism in a
-representative reconstruction. It is not the established cause of #60. The
+Status: explanation 3 shows the recorded pattern is geometrically possible in
+a representative reconstruction. It does not explain the #60 hits. The
 #60 firing geometry, aim direction and struck components are unknown, and none
 of these results is LIVE. What would establish it: the same-sector LIVE run
 described in the #202 issue, logging per FIRED shot the muzzle position and
@@ -251,8 +260,10 @@ Remaining uncertainty:
   false. Native then applies its no-hit rule, which permits fire for every
   supported turret.
 - A docked craft's chain also passes through its dock module to the station,
-  so a hit on it counts for the root too. #202 has not decided whether that
-  should count.
+  so a hit on it counts for the root too. Owner decision (#202): with the
+  station hull selected, a docked-ship first hit counts as CLEAR. That matches
+  X4's pre-fire permission. It is not a claim that the shot hits station
+  geometry.
 - Not LIVE-tested.
 
 ## Where a turret's shoot controller bears on a selected target
@@ -333,7 +344,7 @@ What this changes:
 - Pre-fire classification of a station-root ray (`0x007E6CB0`): a module hit
   walks `+0x70` to the station, so it permits fire (result 1). A segment that
   reaches the union-box centre with no hit is a genuine miss, and every
-  supported turret permits it. So X4 fires at a station root through the
+  supported turret permits it. So X4 permits fire at a station root through the
   centre gap whether or not the line touches a module.
 
 ## find_object_surface is not a cheaper line-of-fire primitive
@@ -618,8 +629,8 @@ None of these blocks adopting the method, because each one resolves toward
 UNKNOWN:
 
 1. The cause of the station-root false negative above. Separate zone worlds
-   are ruled out statically. The centre gap is sufficient in a representative
-   reconstruction but unproven for #60. Static tracing says a root-declared
+   are ruled out statically. The centre gap makes the pattern geometrically
+   possible in a representative reconstruction; the #60 cause is unresolved. Static tracing says a root-declared
    ray accepts a module hit. A controlled LIVE check of root-declared versus
    module-declared rays on one explicit module-centre endpoint would confirm
    that before production relies on it.

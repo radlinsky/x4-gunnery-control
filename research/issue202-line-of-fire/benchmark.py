@@ -232,7 +232,7 @@ SCENES = [
     S("hull:own-turret-mesh", "membership", "P", on_all("W", "P")),
     S("hull:hollow-centre", "membership", "P", on_all(END, "P")),
     S("hull:docked-ship", "membership", "P", on_all("DK", "P"), scored=False,
-      note="a docked craft is a hull descendant; #202 does not say whether it counts"),
+      note="a craft docked on a ship hull; #202 decided only the station-hull case"),
     S("station:nearest-module", "membership", "ST", {"M1": ["M1"], "*": []}, expect=dict(current="C")),
     S("station:module-turret", "membership", "ST", {"M1": ["MT"], "*": []}),
     S("station:other-module", "membership", "ST", {"M1": ["M2"], "*": ["X"]}, expect=dict(current="U")),
@@ -244,8 +244,9 @@ SCENES = [
     S("station:single-module", "membership", "ST", on_all("M1"), modules=["M1"]),
     S("station:module-destroyed-mid-pass", "membership", "ST", {"M1": [], "M2": ["M2"]}, absent={"M1"},
       scored=False, note="the module list is fixed at pass start; a dead entry's MD behavior is unestablished"),
-    S("station:docked-ship", "membership", "ST", on_all("DKS"), scored=False,
-      note="a docked craft is a module descendant; #202 does not say whether it counts"),
+    S("station:docked-ship", "membership", "ST", on_all("DKS"), expect=dict(current="C"),
+      note="approved (#202): a docked-ship first hit on a selected station hull is CLEAR for firing "
+           "permission, not a hit on station geometry"),
     S("station:construction-module", "membership", "ST", {"MC": ["MC"], "*": []},
       modules=["MC", "M1", "M2", "M3"]),
     S("station:module-wreck", "membership", "ST", {"M1": ["M2"], "*": ["X"]}, scored=False,
@@ -313,7 +314,7 @@ SCENES = [
     S("unknown-class", "weapon", "T", on_all("T"), weapon=dict(cls="other")),
     # 6 uncertainty (MD pre-checks; Lua pass behavior is runtime.lua)
     S("zones-differ", "uncertainty", "T", on_all("T"), zone_diff=True, expect=dict(current="U"),
-      note="production gates on zones; X4 fires across zones of one sector, so this UNKNOWN is conservative"),
+      note="production gates on zones; X4 permits fire across zones of one sector, so this UNKNOWN is conservative"),
     S("frame-lost", "uncertainty", "T", on_all("T"), frame_lost=True),
     S("other-zone-blocker", "uncertainty", "T", on_all("X2", "T"), "native", expect=dict(current="U"),
       note="same sector, other zone: the ray hits it, but its +0x70 chain never reaches $weapon.zone, "
@@ -356,12 +357,13 @@ def native_first_ray(sc):
     turret's meshes; a station-root member hit (result 1) and a miss both permit fire."""
     for h in hits(sc, "b0", "aim"):
         if h != "W":
-            return "fires" if qualifies(sc["target"], h) else "refuses"
-    return "fires, no hit"
+            return "permits" if qualifies(sc["target"], h) else "refuses"
+    return "permits, no hit"
 
 
 def round_hits(sc):
-    """The aimed round's straight line: the same segment, then on past the bearing point ('beyond')."""
+    """The projectile's straight path along the settled barrel. settled.py finds the barrel within 0.01 deg of
+    the muzzle-to-bearing-point line, so it is stated as that segment, then on past the point ('beyond')."""
     return next((qualifies(sc["target"], h) for h in hits(sc, "b0", "aim") + hits(sc, "b0", "beyond")
                  if h != "W"), False)
 
@@ -370,18 +372,18 @@ def round_hits(sc):
 # origin); 'aim' ends at the station's union-box centre, 'beyond' continues past it. Recorded: 0/14 from the
 # muzzle excludeself=false probe and from the turret-origin excludeself=true probe, while turrets fired and
 # hit the station. Each arrangement states (muzzle probe, origin probe, module-declared on the muzzle line,
-# X4 first ray, aimed round hits the station). settled.py finds each on real geometry.
+# X4 first ray, projectile path hits the station). settled.py counts each on real geometry.
 WITNESS_60 = {
     "centre gap, module behind": ({"b0": {"aim": [], "beyond": ["M2"]}, "origin": {"aim": []}},
-                                  (False, False, False, "fires, no hit", True)),
+                                  (False, False, False, "permits, no hit", True)),
     "centre gap, nothing behind": ({"b0": {"aim": [], "beyond": []}, "origin": {"aim": []}},
-                                   (False, False, False, "fires, no hit", False)),
+                                   (False, False, False, "permits, no hit", False)),
     "own socket, then centre gap": ({"b0": {"aim": ["W"], "beyond": ["M2"]}, "origin": {"aim": []}},
-                                    (False, False, False, "fires, no hit", True)),
+                                    (False, False, False, "permits, no hit", True)),
     "own hull first": ({"b0": {"aim": ["S", "M1"]}, "origin": {"aim": ["M1"]}},
                        (False, True, False, "refuses", False)),
     "module first (positive control)": ({"b0": {"aim": ["M1"]}, "origin": {"aim": ["M1"]}},
-                                        (True, True, True, "fires", True)),
+                                        (True, True, True, "permits", True)),
 }
 
 
@@ -544,7 +546,7 @@ def main():
 
     print("\n## Issue #60 witness (Xenon Defence Platform, one turret per arrangement)\n")
     print("| arrangement | muzzle probe (root, excludeself=false) | origin probe (root, excludeself=true) "
-          "| module-declared, muzzle line | X4 first ray | aimed round hits station |")
+          "| module-declared, muzzle line | X4 first ray | projectile path hits station |")
     print("|---|---|---|---|---|---|")
     for name, (lines, want) in WITNESS_60.items():
         got = witness_60(lines)
@@ -552,9 +554,9 @@ def main():
             failures.append(f"#60 witness {name}: {got} != {want}")
         yn = ["CLEAR" if v else "not" for v in got[:3]]
         print(f"| {name} | {' | '.join(yn)} | {got[3]} | {'yes' if got[4] else 'no'} |")
-    print("- the recorded 0/14 + 0/14 with X4 firing needs both probes 'not' and X4 firing: the centre-gap and "
-          "own-socket rows; only a module behind the centre turns that permission into a hit. Which arrangement "
-          "#60 had is unrecorded.")
+    print("- the recorded 0/14 + 0/14 needs both probes 'not' while X4 permits: the centre-gap and own-socket "
+          "rows; only a module behind the centre puts station geometry on the projectile path. Which arrangement "
+          "#60 had is unrecorded, and permission is not proof of firing or of a hit.")
 
     print("\n## Station root versus module declaration (root membership statically traced)\n")
     for sc in [s for s in SCENES if s["target"] == "ST"]:
