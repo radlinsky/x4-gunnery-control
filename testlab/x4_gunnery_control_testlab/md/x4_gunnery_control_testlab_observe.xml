@@ -318,6 +318,43 @@
                     + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
+                  <!-- Issue #202 step and look back (offline inference until this
+                       run): step from the barrelposition toward the aim point by
+                       half the target-first bbox distance, then Q(W) muzzle to
+                       step, forward step to aim point, back step to muzzle. The
+                       probe is muzzle_los_self above. -->
+                  <set_value name="$TgtBbox" exact="$Target.bboxdistanceto.{$Weapon}"/>
+                  <create_orientation name="$StepRot" orientation="look_at" refobject="$Target" useaimtarget="true">
+                    <position object="$Weapon" space="$Weapon" value="$Barrel"/>
+                  </create_orientation>
+                  <set_value name="$StepDir" exact="$StepRot.forward"/>
+                  <set_value name="$StepLen" exact="$TgtBbox * 0.5"/>
+                  <set_value name="$Step" exact="position.[$Barrel.x + ($StepDir.x * $StepLen), $Barrel.y + ($StepDir.y * $StepLen), $Barrel.z + ($StepDir.z * $StepLen)]"/>
+                  <check_line_of_sight name="$StepQW" object="$Weapon" objectoffset="$Barrel" target="$Weapon" targetoffset="$Step" excludeself="false"/>
+                  <check_line_of_sight name="$StepFwd" object="$Weapon" objectoffset="$Step" target="$Target" excludeself="false" useaimtarget="true"/>
+                  <check_line_of_sight name="$StepBack" object="$Weapon" objectoffset="$Step" target="$Weapon" targetoffset="$Barrel" excludeself="false"/>
+                  <debug_text text="'[X4GC TEST STEP] label=' + $Label
+                    + ' t=' + player.age
+                    + ' weapon=' + $Weapon
+                    + ' tgt=' + $Target
+                    + ' probe=' + $MuzzleLosSelf
+                    + ' qw=' + $StepQW
+                    + ' fwd=' + $StepFwd
+                    + ' back=' + $StepBack
+                    + ' rescue=' + (not $MuzzleLosSelf and $StepQW and $StepFwd and $StepBack)
+                    + ' tgt_bbox=' + $TgtBbox
+                    + ' wpn_bbox=' + $Weapon.bboxdistanceto.{$Target}
+                    + ' step_len=' + $StepLen
+                    + ' step_yaw=' + $StepRot.yaw
+                    + ' step_pitch=' + $StepRot.pitch
+                    + ' aim_yaw=' + $AimLocal.yaw
+                    + ' aim_pitch=' + $AimLocal.pitch
+                    + ' dir_x=' + $StepDir.x
+                    + ' dir_y=' + $StepDir.y
+                    + ' dir_z=' + $StepDir.z
+                    + ' step_x=' + $Step.x
+                    + ' step_y=' + $Step.y
+                    + ' step_z=' + $Step.z"/>
                 </do_for_each>
                 <debug_text text="'[X4GC TEST SOLUTION] label=' + $Label
                   + ' t=' + player.age
