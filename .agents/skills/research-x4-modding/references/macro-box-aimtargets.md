@@ -117,6 +117,25 @@ are in the same component frame. Do not invent a parent transform for it.
   [turret-fire-range-gate.md](turret-fire-range-gate.md), "A component's live
   box is recoverable with `bboxdistanceto`"). `useaimtarget=true` and `false`
   give the same direction exactly when this fallback applies.
+- Other options (traced 2026-09-26):
+  - `look_at_bbox` (value 7) aims at the **nearest point of the target's
+    box**: the slot-`+0x14E0` box delta, negated (`0x003EC44C`) and rotated
+    out of the target frame (`0x003EC4A0`–`0x003EC4C3`). It is not the aim
+    point.
+  - The `align_*` and `look_away*` values do not bear on the target.
+  - No orientation option yields X4's aim point for every target.
+- Detecting the fallback: with a null collection, `true` and `false` run the
+  same code at `0x003EC37B` and are bitwise equal. With a collection they are
+  equal only when the selected point lies on the line from the supplied
+  position through the target origin. Equality from two different positions
+  therefore means no collection, unless an authored point sits exactly at
+  the origin.
+- Shipped-source census (official source sets, 2026-09-26): 492 aim-target
+  connections on 336 components; 13 have no `offset`, so they sit at the
+  component origin. The target classes among them are `ship_tel_xs_pv_02_a`,
+  `ship_tel_xs_pv_02_b`, `engine_tfm_xl_carrier_02_allround_01_mk1` and
+  `engine_kha_l_destroyer_01_allround_01_mk1`. The rest are Boron piers and
+  Khaak landmark modules. No `class="station"` component authors one.
 
 ## Two Lua getters reach the same selector
 

@@ -22,11 +22,13 @@ Candidates see what `check_line_of_sight` sees (`excludeself=false`, so the firi
 - current: production at cf459d0 (`benchmark.py`), two nearest modules for a station root;
 - base: the `useaimtarget=true` probe, then step and look back, BLOCKED only when, from the muzzle to the
   step point, a sector-declared check is true and `Q(W)` and `Q(T.object)` are false;
-- base+modules: base, then current's module lines when base is not decided (the owner's hypothesis);
-- base+ext: base, then along the same direction the aimed line continues to EXT: CLEAR when its first hit is a
+- full: base, then along the same direction the aimed line continues to EXT: CLEAR when its first hit is a
   target member (for a beam, within R), or, for other turrets, when it hits nothing (a genuine miss). The
   direction points at the aim point: an authored one from `create_orientation`, else the box centre;
-- base+ext as shipped: the same, but for a target without an authored aim point the direction is what
+- simple, beam fix only, extension only: full with the beam line or the extension switched off per target
+  class (VARIANTS); guarded / conservative simple: simple, but rows without a trusted aim direction keep only
+  the probe (mark_ambiguous);
+- full as shipped: full, but for a target without an authored aim point the direction is what
   `create_orientation useaimtarget` actually returns, the target's coordinate origin (0x003EC289).
 
     python3 research/issue202-line-of-fire/permission.py [--report]   # ~15 min, one niced process
@@ -56,7 +58,8 @@ FIRE_RANGE = {"turret_bor_m_railgun_02_mk1_macro": 8100.0, "turret_bor_l_disrupt
               "turret_bor_m_dumbfire_01_mk1_macro": 5500.0, "turret_par_l_dumbfire_01_mk1_macro": 6500.0}
 BEAMS = {"turret_kha_m_beam_01_mk1_macro"}    # the only benchmark turret whose bullet is a beam (attach="1")
 OBJECT = {"ship surface": "P", "station surface": "ST"}   # a surface element's first class-object ancestor
-METHODS = ("current", "base", "base+modules", "base+ext", "base+ext as shipped")
+METHODS = ("current", "base", "full", "simple", "beam fix only", "extension only", "guarded full", "guarded simple",
+           "conservative simple", "full as shipped")
 
 
 def moving(target):
@@ -216,19 +219,23 @@ def base(row, model):
     return "B", 4, False
 
 
-def extended(row, model):
-    """base, then the aimed line continued to EXT from the muzzle, or from the step point when the muzzle's first
-    stretch meets only the firing turret and the look back proves it: +1 call Q(T), +1 Q(sector).
-    A beam skips the probe: X4 tests its barrel line to R, which the probe's endpoint does not bound. Q(W) to the
-    step point (+ the look back), then Q(T) along the line to R decides."""
+def beam_line(row, model):
+    """A beam skips the probe: X4 tests its barrel line to R, which the probe's endpoint does not bound. Q(W) to the
+    step point (+ the look back), then Q(T) along the aimed line to R decides."""
     ln = row["lines"][model]
     own = ln["qw_half"] == "W"
-    if row["beam"]:
-        if own and ln["back_half"] != "W":
-            return "U", 2
-        sym, t = ln["ext_s"] if own else ln["ext"]
-        t = None if t is None else t + (row["step"] if own else 0.0)
-        return ("C" if t is not None and t <= row["R"] and _member(row, sym) else "B"), 3 if own else 2
+    if own and ln["back_half"] != "W":
+        return "U", 2
+    sym, t = ln["ext_s"] if own else ln["ext"]
+    t = None if t is None else t + (row["step"] if own else 0.0)
+    return ("C" if t is not None and t <= row["R"] and _member(row, sym) else "B"), 3 if own else 2
+
+
+def extended(row, model):
+    """base, then the aimed line continued to EXT from the muzzle, or from the step point when the muzzle's first
+    stretch meets only the firing turret and the look back proves it: +1 call Q(T), +1 Q(sector)."""
+    ln = row["lines"][model]
+    own = ln["qw_half"] == "W"
     status, calls, open_ = base(row, model)
     if status != "U" or not open_:
         return status, calls
@@ -240,13 +247,32 @@ def extended(row, model):
     return ("C" if t is None else "U"), calls + 2
 
 
-def with_modules(row, model):
-    """base, then production's module lines whenever base leaves the row undecided (station roots only)."""
-    status, calls, _ = base(row, model)
-    if status != "U" or row["target_cls"] != "station root":
-        return status, calls
-    s, _r, c = current(row, model)
-    return ("C" if s == "C" else "U"), calls + c
+def unaimed(row, model):
+    """No trusted aim direction: only the probe, which needs none. A beam's probe CLEAR stands only when the aim
+    point is surely within R (|box centre - muzzle| + |half-extents| <= R)."""
+    if _member(row, row["lines"][model]["aim"]) and (not row["beam"] or row["bound"] <= row["R"]):
+        return "C", 1
+    return "U", 1
+
+
+# name: (beam fix, target classes given the extended line, which rows trust the aim direction)
+VARIANTS = {"full": (True, "all", "all"), "simple": (True, "station root", "all"),
+            "beam fix only": (True, "none", "all"), "extension only": (False, "all", "all"),
+            "guarded full": (True, "all", "guarded"), "guarded simple": (True, "station root", "guarded"),
+            "conservative simple": (True, "station root", "station root")}
+
+
+def variant(row, model, name):
+    beam_fix, ext, trust = VARIANTS[name]
+    aimed = (trust == "all" or row["target_cls"] == "station root"
+             or (trust == "guarded" and not row["ambiguous"]))
+    if not aimed:
+        return unaimed(row, model)
+    if row["beam"] and beam_fix:
+        return beam_line(row, model)
+    if not row["beam"] and ext in ("all", row["target_cls"]):
+        return extended(row, model)
+    return base(row, model)[:2]
 
 
 def current(row, model):
@@ -268,14 +294,14 @@ def shipped(row):
 def status(row, model, method):
     if row["state"] == "GUIDED":
         return "G", 0
-    if method == "base+ext as shipped":
-        return extended(shipped(row), model)
     if method == "current":
         s, _r, calls = current(row, model)
         return s, calls
     if method == "base":
         return base(row, model)[:2]
-    return (with_modules if method == "base+modules" else extended)(row, model)
+    if method == "full as shipped":
+        return variant(shipped(row), model, "full")
+    return variant(row, model, method)
 
 
 # ---------------------------------------------------------------- report
@@ -318,8 +344,28 @@ def table(say, rows, title, models=("mesh",)):
             say(f"| {method} | {m.upper()} | " + " | ".join(str(c[k]) for k in COLS) + " |")
 
 
+# Shipped components whose only aim point sits at their origin: create_orientation cannot tell them from a
+# target without aim points (census of the official source sets, 2026-09-26)
+ORIGIN_AIM = ("ship_tel_xs_pv_02_a", "ship_tel_xs_pv_02_b", "engine_tfm_xl_carrier_02_allround_01_mk1",
+              "engine_kha_l_destroyer_01_allround_01_mk1")
+
+
+def mark_ambiguous(rows):
+    """A non-station row whose aim direction a script cannot pin: a LargeTarget-eligible ship (X4 may add the
+    offset), a muzzle that selects another authored point than the turret origin, or an ORIGIN_AIM target."""
+    meta = {(r["scene"], r["turret"], r["target"], r["start"]): r for r in St.load_rows()}
+    for r in rows:
+        m = meta.get((r["scene"], r["turret"], r["target"], r.get("start")))
+        sel = (m or {}).get("select_from") or {}
+        r["ambiguous"] = m is not None and (
+            "large-target" in (m.get("aim_source") or "")
+            or ("settled muzzle" in sel and sel["settled muzzle"] != sel["turret origin"])
+            or m["target_macro"].startswith(ORIGIN_AIM))
+
+
 def report(rows):
     lines, bad = [], []
+    mark_ambiguous(rows)
     say = lines.append
     say(f"# X4 pre-fire permission benchmark ({len(rows)} tests)\n")
     for pop in POP:
@@ -343,6 +389,9 @@ def report(rows):
     for method in METHODS:
         c = Counter((status(r, "mesh", method)[0], r["macro"].split("_mk1")[0][7:], r["beam"]) for r in empty)
         say(f"- {method}: " + ", ".join(f"{k[1]}{' (beam)' if k[2] else ''} {k[0]}={v}" for k, v in sorted(c.items())))
+    amb = Counter(r["target_cls"] for r in rows if r.get("ambiguous") and r["state"] == "SETTLED")
+    say("\nSettled rows with an ambiguous aim direction (guarded): " + ", ".join(f"{k} {v}" for k, v in
+                                                                               sorted(amb.items())))
     say("\n## Why X4 decides as it does (MESH, scored rows)\n")
     for pop in POP:
         for cls in CLASSES:
@@ -365,9 +414,9 @@ def report(rows):
     say("\n## Uncertain truth\n")
     for k, v in sorted(uncertain.items()):
         say(f"- {k[0]}, {k[1]}: {k[2]}: {v}")
-    # integrity: wherever base+ext claims a miss, the extended line reaches past X4's own endpoint
+    # integrity: wherever full claims a miss, the extended line reaches past X4's own endpoint
     for r in rows:
-        if r["state"] != "SETTLED" or r["beam"] or status(r, "mesh", "base+ext")[0] != "C":
+        if r["state"] != "SETTLED" or r["beam"] or status(r, "mesh", "full")[0] != "C":
             continue
         own = r["lines"]["mesh"]["qw_half"] == "W"
         if (r["lines"]["mesh"]["ext_s" if own else "ext"][1] is None

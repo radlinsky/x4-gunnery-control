@@ -221,6 +221,152 @@ different points are decided by the probe first.
 - The LargeTarget offset on ships over 500 m with no authored aim point. The probe and `u` use the box
   centre, while X4 uses the offset. It caused no benchmark error.
 
+## Extension scope and aim direction (2026-09-26)
+
+Question: does a non-station, non-beam turret need the extended line? Can the unresolved aim-point problem
+be avoided without losing useful accuracy? Answer: the extension is worth keeping everywhere, and dropping
+it does not avoid the problem. Step and look back, the BLOCKED proof and the beam line all need the same
+aim direction. What does help is marking the few provably ambiguous directions and giving them only the
+probe.
+
+**Variants** (`permission.py`, `VARIANTS`; saved rows, MESH; HULL is identical on station roots):
+
+- **full**: the proposal: the beam line for beams, the extension for every non-beam target.
+- **simple**: the extension only for station roots; other non-beam targets get the probe and step and look
+  back.
+- **beam fix only / extension only**: each piece alone.
+- **guarded**: rows whose aim direction a script cannot pin get only the probe. A beam's probe CLEAR then
+  stands only when `|box centre − muzzle| + |half-extents| ≤ R`.
+- **conservative**: every non-station row gets only the probe.
+
+| class | method | TP | FP | TN | FN | U on PERMIT | U on NOT | GUIDED | uncertain | excluded | mean / max calls |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| station root, broad | full | 162 | 0 | 62 | 0 | 0 | 0 | 12 | 0 | 184 | 3.28 / 6 |
+|  | simple | 162 | 0 | 62 | 0 | 0 | 0 | 12 | 0 | 184 | 3.28 / 6 |
+|  | beam fix only | 84 | 0 | 62 | 0 | 78 | 0 | 12 | 0 | 184 | 2.58 / 4 |
+|  | extension only | 162 | 20 | 12 | 0 | 0 | 30 | 12 | 0 | 184 | 3.29 / 6 |
+|  | guarded full | 162 | 0 | 62 | 0 | 0 | 0 | 12 | 0 | 184 | 3.28 / 6 |
+|  | guarded simple | 162 | 0 | 62 | 0 | 0 | 0 | 12 | 0 | 184 | 3.28 / 6 |
+|  | conservative simple | 162 | 0 | 62 | 0 | 0 | 0 | 12 | 0 | 184 | 3.28 / 6 |
+| empty-path station roots (108) | full | 78 | 0 | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 4.43 / 6 |
+|  | simple | 78 | 0 | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 4.43 / 6 |
+|  | beam fix only | 0 | 0 | 30 | 0 | 78 | 0 | 0 | 0 | 0 | 2.98 / 4 |
+|  | extension only | 78 | 0 | 0 | 0 | 0 | 30 | 0 | 0 | 0 | 4.7 / 6 |
+|  | guarded full | 78 | 0 | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 4.43 / 6 |
+|  | guarded simple | 78 | 0 | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 4.43 / 6 |
+|  | conservative simple | 78 | 0 | 30 | 0 | 0 | 0 | 0 | 0 | 0 | 4.43 / 6 |
+| #60 poses | full | 728 | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 548 | 2.86 / 5 |
+|  | simple | 728 | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 548 | 2.86 / 5 |
+|  | beam fix only | 350 | 0 | 68 | 0 | 378 | 0 | 0 | 0 | 548 | 2.21 / 4 |
+|  | extension only | 728 | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 548 | 2.86 / 5 |
+|  | guarded full | 728 | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 548 | 2.86 / 5 |
+|  | guarded simple | 728 | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 548 | 2.86 / 5 |
+|  | conservative simple | 728 | 0 | 68 | 0 | 0 | 0 | 0 | 0 | 548 | 2.86 / 5 |
+| station surface | full | 188 | 0 | 220 | 0 | 30 | 402 | 48 | 12 | 780 | 3.73 / 6 |
+|  | simple | 162 | 0 | 220 | 0 | 56 | 402 | 48 | 12 | 780 | 2.79 / 4 |
+|  | beam fix only | 162 | 0 | 220 | 0 | 56 | 402 | 48 | 12 | 780 | 2.79 / 4 |
+|  | extension only | 188 | 62 | 2 | 0 | 30 | 558 | 48 | 12 | 780 | 3.85 / 6 |
+|  | guarded full | 188 | 0 | 220 | 0 | 30 | 402 | 48 | 12 | 780 | 3.73 / 6 |
+|  | guarded simple | 162 | 0 | 220 | 0 | 56 | 402 | 48 | 12 | 780 | 2.79 / 4 |
+|  | conservative simple | 106 | 0 | 0 | 0 | 112 | 622 | 48 | 12 | 780 | 1.0 / 1 |
+| whole ship | full | 1354 | 0 | 154 | 0 | 0 | 52 | 72 | 24 | 1024 | 2.09 / 6 |
+|  | simple | 1354 | 0 | 154 | 0 | 0 | 52 | 72 | 24 | 1024 | 2.07 / 4 |
+|  | beam fix only | 1354 | 0 | 154 | 0 | 0 | 52 | 72 | 24 | 1024 | 2.07 / 4 |
+|  | extension only | 1354 | 20 | 132 | 0 | 0 | 54 | 72 | 24 | 1024 | 1.94 / 6 |
+|  | guarded full | 1314 | 0 | 130 | 0 | 40 | 76 | 72 | 24 | 1024 | 1.98 / 6 |
+|  | guarded simple | 1314 | 0 | 130 | 0 | 40 | 76 | 72 | 24 | 1024 | 1.96 / 4 |
+|  | conservative simple | 994 | 0 | 0 | 0 | 360 | 206 | 72 | 24 | 1024 | 1.0 / 1 |
+| ship surface | full | 4732 | 2 | 2818 | 0 | 6 | 6020 | 240 | 588 | 4362 | 3.43 / 6 |
+|  | simple | 4570 | 2 | 2818 | 0 | 168 | 6020 | 240 | 588 | 4362 | 2.58 / 4 |
+|  | beam fix only | 4570 | 2 | 2818 | 0 | 168 | 6020 | 240 | 588 | 4362 | 2.58 / 4 |
+|  | extension only | 4720 | 14 | 2264 | 0 | 18 | 6562 | 240 | 588 | 4362 | 3.48 / 6 |
+|  | guarded full | 4732 | 2 | 2818 | 0 | 6 | 6020 | 240 | 588 | 4362 | 3.43 / 6 |
+|  | guarded simple | 4570 | 2 | 2818 | 0 | 168 | 6020 | 240 | 588 | 4362 | 2.58 / 4 |
+|  | conservative simple | 4258 | 2 | 0 | 0 | 480 | 8838 | 240 | 588 | 4362 | 1.0 / 1 |
+
+**Isolated contributions:**
+
+- **Beam line.** It removes every false CLEAR the probe gives a beam: 20 station-root, 62 station-surface,
+  20 whole-ship and 12 ship-surface rows. It also adds correct BLOCKEDs: 50 station-root (30 of them on
+  the empty path), 218 station-surface, 22 whole-ship and 554 ship-surface. The extension alone keeps
+  those FPs. Without the beam fix, the extension even calls the 30
+  empty-path beam rows UNKNOWN, where X4 refuses.
+- **Extension, station roots.** It proves the 78 broad and 140 `#60` genuine misses, and the 238 `#60`
+  module hits past the centre.
+- **Extension, other targets.** It adds 188 correct CLEARs and no error: 116 ship engines, 46 ship shields
+  and 26 station shields. All are aim points off their own mesh: X4's line misses, it fires, and the
+  continuation meets the selected element. simple leaves them UNKNOWN. The cost is at most 2 more calls
+  (worst case 4 → 6), only when the probe and step and look back did not decide.
+
+**Aim direction: what shipped X4 offers** (native trace, `macro-box-aimtargets.md`):
+
+| option | aims at | usable? |
+|---|---|---|
+| `look_at useaimtarget` with an aim-target collection | the authored point nearest the supplied position (the box centre if the collection is empty) | yes, from the muzzle; X4 selects from the turret origin |
+| `look_at useaimtarget` without one | the target's coordinate origin, the same code as plain `look_at` | no; the box centre must be computed |
+| `look_at_bbox` (value 7) | the nearest point of the target's box: slot `+0x14E0` delta, negated and rotated out (`0x003EC3CB`–`0x003EC4C3`) | no |
+| `align_*`, `look_away*` | not a bearing on the target | no |
+
+So no single option gives X4's point for every target. A demonstrably correct construction exists except
+in three named cases:
+
+1. **Detect "no collection".** `useaimtarget` true and false run the same code at `0x003EC37B`, so their
+   directions are bitwise equal. With a collection, they are equal only if the selected point lies on
+   the line from the position through the origin. Testing from two positions (the muzzle and the turret
+   origin) leaves only an authored point exactly at the origin. The census below lists those.
+2. **No collection:** X4's point is the live box centre, recovered with `bboxdistanceto`. For a station
+   it always is: no shipped station component authors an aim point, and the LargeTarget offset is always
+   rejected for a station. **Ambiguous:** a whole ship whose box radius exceeds 500 m. X4 adds the
+   LargeTarget offset only if it lies inside the ship's layer-0/1 hull body, a test no script exposes.
+   Both the probe and `u` then end at the centre, while X4 may aim at the offset.
+3. **With a collection:** `u` from the muzzle, guarded by the turret-origin orientation. The two rays meet
+   when both select the same point. Selection can flip only between two points within `2 × |muzzle −
+   turret origin|` of equal distance from the turret origin, so a passing guard bounds any remaining error
+   to points a few metres apart. **Ambiguous:** the rays do not meet.
+
+**Census** (official source sets, 2026-09-26): 492 aim connections on 336 components. 13 have no offset,
+so they sit at the component origin. Four of those are target classes Gunnery Control can select:
+`ship_tel_xs_pv_02_a`, `ship_tel_xs_pv_02_b`, `engine_tfm_xl_carrier_02_allround_01_mk1` and
+`engine_kha_l_destroyer_01_allround_01_mk1`. For these the test in (1) cannot tell the authored origin
+point from no collection, so they are ambiguous by name. The other nine are Boron piers and Khaak landmark
+modules; a station root's own aim point never uses them.
+
+**Demonstrably safe versus merely observed:**
+
+- **Safe by source:** station roots (box centre); targets with no collection other than LargeTarget-eligible
+  ships; collection targets whose guard passes, within the bound above; the beam's range and `isbeam`.
+- **Observed only:**
+  - the "full as shipped" result that the origin direction did no harm on ships and elements;
+  - the probe on LargeTarget-eligible ships, which ends at the box centre while X4 may aim at the offset.
+    It gave no error here (80 scored rows) but is not provable, so guarded keeps it only as the
+    existing probe behaviour;
+  - the 2 grazing beam rows where the barrel and `u` part.
+- **Not observable at all:** lead against moving targets or from a moving ship.
+
+The benchmark flags 156 ambiguous rows, all whole ships: 146 LargeTarget-eligible (`pir_l_scavenger_01`,
+`spl_xl_ark_01`) and 10 selection mismatches (`bor_l_miner_solid_01`). No origin-aim component is in the
+population. guarded full costs 40 correct CLEARs and 24 correct BLOCKEDs there, which become UNKNOWN; the
+10 mismatches lose nothing, because the probe decides them.
+
+**Recommendation: guarded full.**
+
+- The beam line for every beam target.
+- The extension for every non-beam target.
+- Aim directions from the construction above.
+- Only the probe where the direction is ambiguous.
+
+It keeps exact surface-element membership (`Q(T)`, `Q(T.object)`), GUIDED with no ray, and no IN RANGE
+input. It gives 0 FN and 2 FP (the grazing beams) across 16,202 broad scored rows plus 796 `#60` rows.
+
+Cost: at most 6 `check_line_of_sight` calls per turret, 3 for a beam, 0 for GUIDED. On top of that:
+
+- per target: 19 box reads;
+- per turret: up to 4 orientations (`useaimtarget` true and false from the muzzle and from the turret
+  origin). These give the collection test, `u` and the guard together.
+
+simple saves only the last 2 calls, only on non-station rows the probe left undecided, and loses the 188
+CLEARs.
+
 ## Answers
 
 1. **Ship surface elements: yes, after settling, apart from one mechanism.** On 13,390 scored rows
