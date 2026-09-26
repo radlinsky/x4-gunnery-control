@@ -25,7 +25,6 @@
 --     expectedMemberMacros list Optional exact sorted member-macro multiset.
 --     selectAll       boolean Optional; select every mutable turret group and
 --                             verify the aggregate member count.
---     strictSelectedTarget boolean Stage Attack my current enemy automatically.
 --   groups    list     One entry per batch of identical ships.
 --     label     string   Spawned name prefix and log label.
 --     macro     string   Ship macro name, without the "macro." prefix.
@@ -52,123 +51,51 @@
 --                        loadout is set. READY fails if any loaded ship differs.
 
 X4GunneryTestLabScenarioSpec = {
-    -- Issue #202 step-and-look-back LIVE check. Colossus E with two
-    -- arg_m_dumbfire_02 turrets (both con_turret_m_06/m_14 in the group),
-    -- whose muzzle probe first hits the turret's own socket. Offline, for both
-    -- mounts and both shape models, within +-100 m of each placement:
-    --   TARGET CLEAR   (above): socket, then target  -> rescue CLEAR, X4 fires.
-    --   TARGET BLOCKED (astern): socket, then own hull -> rescue not CLEAR,
-    --                            X4 refuses; an excludeself=true retry reads CLEAR.
-    -- r5: strict selected-target setup; no experimental firing-stop commands.
-    -- Create once from a safe launcher, wait for READY, teleport to the shooter,
-    -- sit at its gunnery console and open Test Lab once. Attack my current enemy
-    -- is staged automatically. Select TARGET BLOCKED for 25 unpaused seconds,
-    -- then TARGET CLEAR for 25 seconds. Pause and upload debug.log; the initial
-    -- and settled snapshots retain actual modes, missile counts and STEP rays.
-    -- This procedure has no automatic firing budget or stop guarantee. If the
-    -- blocked target unexpectedly fires, pause immediately instead of spending the
-    -- clear control's ammunition. Do not reuse a save containing the r4 fixture.
-    id      = "issue-202-step-look-back-dumbfire-r5",
+    -- Use the owner's existing, fully equipped Ray; Test Lab only creates targets.
+    -- All 14 turrets measure the selected-target CLEAR LINE OF FIRE pass.
+    id      = "issue-197-ray-two-osaka-line-of-fire-v1",
     enabled = false,
 
-    location = {
-        sectorMacro = "Cluster_29_Sector001_macro",
-        x = 500000,
-        y = 0,
-        z = 0,
-    },
-
     setup = {
-        remote            = true,
-        strictSelectedTarget = true,
-        shipMacro         = "ship_arg_xl_carrier_02_a_macro",
-        shipLabel         = "ISSUE202 STEP SHOOTER 1",
-        turretGroup       = "group_front_left_up",
-        turretLabel       = "Front Left Up Dumbfire",
-        expectedTurrets   = 2,
-        expectedMemberMacros = {
-            "turret_arg_m_dumbfire_02_mk1_macro",
-            "turret_arg_m_dumbfire_02_mk1_macro",
-        },
+        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
+        shipLabel       = "Ray",
+        -- The validator still requires a named group alongside selectAll.
+        turretGroup     = "group_front_up_left",
+        turretLabel     = "All mutable groups",
+        expectedTurrets = 14,
+        selectAll       = true,
     },
 
     groups = {
         {
-            label     = "ISSUE202 STEP SHOOTER",
-            macro     = "ship_arg_xl_carrier_02_a_macro",
-            faction   = "player",
-            count     = 1,
-            distance  = 0,
-            x         = 0,
-            y         = 0,
-            spread    = 0,
-            behaviour = "wait",
-            yaw       = 0,
-            pitch     = 0,
-            roll      = 0,
-            preserveOrientation = true,
-
-            role      = "shooter",
-            loadout   = "x4gc_testlab_arg_xl_carrier_02_dumbfire",
-            -- Missile turrets count in all three lists (native trace, not yet
-            -- LIVE): missileturrets.<state> is the turrets.<state> query
-            -- narrowed by IsClass(missileturret), and weapons.<state> filters
-            -- IsClass(weapon), which a missile turret passes. If READY reports
-            -- other counts, correct only these numbers, install, Reload UI and
-            -- Create again before teleporting; no restart is needed.
-            expectedWeapons        = 2,
-            expectedTurrets        = 2,
-            expectedMissileTurrets = 2,
-        },
-
-        {
-            label     = "ISSUE202 STEP TARGET CLEAR",
-            macro     = "ship_par_m_trans_container_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 0,
-            x         = 322,
-            y         = 2479,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
+            label             = "P1 LEFT OSAKA",
+            macro             = "ship_ter_l_destroyer_01_a_macro",
+            faction           = "xenon",
+            count             = 1,
+            distance          = 3500,
+            x                 = -900,
+            y                 = 0,
+            spread            = 0,
+            behaviour         = "wait",
+            hostile           = true,
+            holdFire          = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
-
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
         },
-
         {
-            label     = "ISSUE202 STEP TARGET BLOCKED",
-            macro     = "ship_par_m_trans_container_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = -2474,
-            x         = 345,
-            y         = 104,
-            spread    = 0,
-            behaviour = "wait",
-            hostile   = true,
-            holdFire  = true,
+            label             = "P1 RIGHT OSAKA",
+            macro             = "ship_ter_l_destroyer_01_a_macro",
+            faction           = "xenon",
+            count             = 1,
+            distance          = 3500,
+            x                 = 900,
+            y                 = 0,
+            spread            = 0,
+            behaviour         = "wait",
+            hostile           = true,
+            holdFire          = true,
             stripDefenceUnits = true,
             repairGuard       = true,
-            yaw   = 0,
-            pitch = 0,
-            roll  = 0,
-            preserveOrientation = true,
-
-            loadout   = "timelines_scenario_assassination_target_trader",
-            expectedWeapons        = 1,
-            expectedTurrets        = 1,
-            expectedMissileTurrets = 0,
         },
     },
 }

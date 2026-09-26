@@ -430,7 +430,6 @@
           </actions>
         </cue>
 
-
         <!-- DespawnScenario
              AddUITriggeredEvent("X4GunneryTestLabScenario", "despawn_scenario")
              Manual cleanup.  Also clears the spawned id so the SAME spec can be

@@ -256,11 +256,7 @@ local function validateSpec(raw)
             end
             table.sort(expectedMemberMacros)
         end
-        if raw.setup.strictSelectedTarget ~= nil and type(raw.setup.strictSelectedTarget) ~= "boolean" then
-            return nil, "spec.setup.strictSelectedTarget must be boolean"
-        end
         setup = {
-            strictSelectedTarget = raw.setup.strictSelectedTarget == true,
             remote = raw.setup.remote == true,
             shipMacro = raw.setup.shipMacro,
             shipLabel = raw.setup.shipLabel,
@@ -465,9 +461,6 @@ end
 
 local function applyExactGroup(selection)
     local session = selection.session
-    if scenarioSpec.setup.strictSelectedTarget then
-        X4GunneryState.setDirectMode(session, "autoassist")
-    end
     local checked = {}
     for key in pairs(session.checkedGroupKeys or {}) do checked[#checked + 1] = key end
     for _, key in ipairs(checked) do X4GunneryState.toggleGroup(session, key, true) end
