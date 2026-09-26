@@ -280,6 +280,103 @@
                     + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
                     + ' maxrange=' + $Weapon.maxfirerange"/>
+                  <!-- #202 FIREPROBE: X4's pre-fire rays as MD can cast them
+                       (ray group 1, own meshes kept). Each ray declares the
+                       target (T), its object (O) and the sector (S = any hit).
+                       F: muzzle to f x the aim point (X4's first ray). G: the
+                       same from 20 m out, past the own turret. N: the last
+                       10 m into the aim point. R: from the aim point 10 m back
+                       toward the muzzle. S: muzzle to the target origin (X4's
+                       second ray). The aim point is where the muzzle's
+                       useaimtarget ray meets one from 300 m to its side; the
+                       muzzle/turret-origin pair (aim_tp, production's) is
+                       ill-conditioned at game precision. -->
+                  <do_if value="$Weapon.isclass.turret">
+                    <set_value name="$FpM" exact="$Weapon.barrelposition"/>
+                    <create_orientation name="$FpMu" orientation="look_at" refobject="$Target" useaimtarget="true">
+                      <position object="$Weapon" space="$Weapon" value="$FpM"/>
+                    </create_orientation>
+                    <set_value name="$FpU" exact="$FpMu.forward"/>
+                    <set_value name="$FpN" exact="position.[$FpU.x, 0m, $FpU.z].length"/>
+                    <set_value name="$FpK" exact="position.[$FpM.x - 300m * $FpU.z / $FpN, $FpM.y, $FpM.z + 300m * $FpU.x / $FpN]"/>
+                    <create_orientation name="$FpKu" orientation="look_at" refobject="$Target" useaimtarget="true">
+                      <position object="$Weapon" space="$Weapon" value="$FpK"/>
+                    </create_orientation>
+                    <create_orientation name="$FpTu" orientation="look_at" refobject="$Target" useaimtarget="true">
+                      <position object="$Weapon" space="$Weapon" value="position.[0m, 0m, 0m]"/>
+                    </create_orientation>
+                    <set_value name="$FpV" exact="$FpTu.forward"/>
+                    <set_value name="$FpUV" exact="$FpU.x * $FpV.x + $FpU.y * $FpV.y + $FpU.z * $FpV.z"/>
+                    <set_value name="$FpTp" exact="null"/>
+                    <do_if value="1 - $FpUV * $FpUV gt 0.000000000001">
+                      <set_value name="$FpTp" exact="($FpUV * ($FpV.x * $FpM.x + $FpV.y * $FpM.y + $FpV.z * $FpM.z) - ($FpU.x * $FpM.x + $FpU.y * $FpM.y + $FpU.z * $FpM.z)) / (1 - $FpUV * $FpUV)"/>
+                    </do_if>
+                    <set_value name="$FpW" exact="$FpKu.forward"/>
+                    <set_value name="$FpUW" exact="$FpU.x * $FpW.x + $FpU.y * $FpW.y + $FpU.z * $FpW.z"/>
+                    <set_value name="$FpDU" exact="$FpU.x * ($FpM.x - $FpK.x) + $FpU.y * ($FpM.y - $FpK.y) + $FpU.z * ($FpM.z - $FpK.z)"/>
+                    <set_value name="$FpDW" exact="$FpW.x * ($FpM.x - $FpK.x) + $FpW.y * ($FpM.y - $FpK.y) + $FpW.z * ($FpM.z - $FpK.z)"/>
+                    <set_value name="$FpT" exact="null"/>
+                    <set_value name="$FpRes" exact="null"/>
+                    <do_if value="1 - $FpUW * $FpUW gt 0.000000000001">
+                      <set_value name="$FpT" exact="($FpUW * $FpDW - $FpDU) / (1 - $FpUW * $FpUW)"/>
+                      <set_value name="$FpS" exact="($FpDW - $FpUW * $FpDU) / (1 - $FpUW * $FpUW)"/>
+                      <set_value name="$FpRes" exact="position.[$FpM.x + $FpT * $FpU.x - $FpK.x - $FpS * $FpW.x, $FpM.y + $FpT * $FpU.y - $FpK.y - $FpS * $FpW.y, $FpM.z + $FpT * $FpU.z - $FpK.z - $FpS * $FpW.z].length"/>
+                    </do_if>
+                    <!-- Second ray, which needs no aim point. -->
+                    <check_line_of_sight name="$FpST" object="$Weapon" objectoffset="$FpM" target="$Target" useaimtarget="false" excludeself="false"/>
+                    <create_position name="$FpEnd" object="$Target" space="$Target.object"/>
+                    <check_line_of_sight name="$FpSO" object="$Weapon" objectoffset="$FpM" target="$Target.object" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                    <create_position name="$FpEnd" object="$Target" space="$Target.sector"/>
+                    <check_line_of_sight name="$FpSS" object="$Weapon" objectoffset="$FpM" target="$Target.sector" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                    <set_value name="$FpRays" exact="'S=' + $FpST + '/' + $FpSO + '/' + $FpSS"/>
+                    <do_if value="$FpT and $FpT gt 20m">
+                      <set_value name="$FpF" exact="(if $Target.isclass.ship or $Target.isclass.engine then 1 + [1.1 * $Weapon.maxfirerange, 500m].min / $Weapon.maxfirerange else 1) * $FpT"/>
+                      <set_value name="$FpP" exact="position.[$FpM.x + $FpT * $FpU.x, $FpM.y + $FpT * $FpU.y, $FpM.z + $FpT * $FpU.z]"/>
+                      <set_value name="$FpE" exact="position.[$FpM.x + $FpF * $FpU.x, $FpM.y + $FpF * $FpU.y, $FpM.z + $FpF * $FpU.z]"/>
+                      <set_value name="$FpQ" exact="position.[$FpM.x + 20m * $FpU.x, $FpM.y + 20m * $FpU.y, $FpM.z + 20m * $FpU.z]"/>
+                      <set_value name="$FpA" exact="position.[$FpM.x + ($FpT - 10m) * $FpU.x, $FpM.y + ($FpT - 10m) * $FpU.y, $FpM.z + ($FpT - 10m) * $FpU.z]"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target" value="$FpE"/>
+                      <check_line_of_sight name="$FpFT" object="$Weapon" objectoffset="$FpM" target="$Target" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <check_line_of_sight name="$FpGT" object="$Weapon" objectoffset="$FpQ" target="$Target" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target.object" value="$FpE"/>
+                      <check_line_of_sight name="$FpFO" object="$Weapon" objectoffset="$FpM" target="$Target.object" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <check_line_of_sight name="$FpGO" object="$Weapon" objectoffset="$FpQ" target="$Target.object" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target.sector" value="$FpE"/>
+                      <check_line_of_sight name="$FpFS" object="$Weapon" objectoffset="$FpM" target="$Target.sector" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <check_line_of_sight name="$FpGS" object="$Weapon" objectoffset="$FpQ" target="$Target.sector" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target" value="$FpP"/>
+                      <check_line_of_sight name="$FpNT" object="$Weapon" objectoffset="$FpA" target="$Target" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target.object" value="$FpP"/>
+                      <check_line_of_sight name="$FpNO" object="$Weapon" objectoffset="$FpA" target="$Target.object" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target.sector" value="$FpP"/>
+                      <check_line_of_sight name="$FpNS" object="$Weapon" objectoffset="$FpA" target="$Target.sector" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target" value="$FpA"/>
+                      <check_line_of_sight name="$FpRT" object="$Weapon" objectoffset="$FpP" target="$Target" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target.object" value="$FpA"/>
+                      <check_line_of_sight name="$FpRO" object="$Weapon" objectoffset="$FpP" target="$Target.object" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <create_position name="$FpEnd" object="$Weapon" space="$Target.sector" value="$FpA"/>
+                      <check_line_of_sight name="$FpRS" object="$Weapon" objectoffset="$FpP" target="$Target.sector" targetoffset="$FpEnd" useaimtarget="false" excludeself="false"/>
+                      <set_value name="$FpRays" exact="$FpRays
+                        + ' F=' + $FpFT + '/' + $FpFO + '/' + $FpFS
+                        + ' G=' + $FpGT + '/' + $FpGO + '/' + $FpGS
+                        + ' N=' + $FpNT + '/' + $FpNO + '/' + $FpNS
+                        + ' R=' + $FpRT + '/' + $FpRO + '/' + $FpRS
+                        + ' aim_x=' + $FpP.x + ' aim_y=' + $FpP.y + ' aim_z=' + $FpP.z"/>
+                    </do_if>
+                    <debug_text text="'[X4GC TEST FIREPROBE] label=' + $Label
+                      + ' t=' + player.age
+                      + ' weapon=' + $Weapon
+                      + ' mode=' + $Weapon.mode
+                      + ' ready=' + $Weapon.isreadytofire
+                      + ' tgt=' + $Target
+                      + ' tgtobj=' + @$Target.object
+                      + ' hull=' + @$Target.hullpercentage
+                      + ' aim_t=' + $FpT
+                      + ' aim_res=' + $FpRes
+                      + ' aim_tp=' + $FpTp
+                      + ' dist=' + $Weapon.distanceto.{$Target}
+                      + ' ' + $FpRays"/>
+                  </do_if>
                 </do_for_each>
                 <do_for_each name="$Weapon" in="player.ship.missileturrets.operational.list">
                   <check_line_of_sight name="$LosEx" object="$Weapon" target="$Target" excludeself="true" useaimtarget="true"/>

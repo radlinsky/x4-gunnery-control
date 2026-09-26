@@ -709,6 +709,18 @@ What a script can build (traced 2026-09-26):
     origin. A second `create_orientation` from the turret origin must meet
     the first ray at the same point, or the stages that use `u` are
     UNKNOWN.
+    **LIVE correction (2026-09-26, Ray/two-Osaka, X4 9.00):** that meeting
+    distance is not usable. The two origins are about 2.5 m apart and the
+    target is about 3 km away, so the rays are nearly parallel. In game the
+    solved distance ranged over 1,494–4,535 m for aim points 3,247–4,139 m
+    away, and it changed between marks on a static scene. The 1 m meeting
+    guard still passed, because nearly parallel rays stay close for their
+    whole length. The direction `u` itself is sound. A second
+    `create_orientation` from 300 m to the muzzle's side meets it within
+    0.001–0.22 m, and gave the aim-point distance to within the target's
+    extent on all 56 rows. A length derived from the muzzle/turret-origin
+    pair truncates the extended line: the line ends in empty space and
+    reads as a genuine miss, which is a false CLEAR.
 - **Sector-declared check.** `check_line_of_sight` has no class test on
   `target`; only `useaimtarget` is gated, on `destructible`. The `targetoffset`
   goes through the generic frame conversion `0x003DDE10`, whose parent fast
