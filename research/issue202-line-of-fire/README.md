@@ -67,7 +67,9 @@ The physical report also retries rows whose probe first hits the firing turret:
 - `excludeself=true`;
 - the ideal restart past the hit;
 - an advance past `macro.boundingbox` or past the collision bounds;
-- the reverse probe from the aim point, with or without an `excludeself=true` guard.
+- the reverse probe from the aim point, with or without an `excludeself=true` guard;
+- step and look back: from a point stepped along the muzzle-to-aim-point line, forward to the aim point
+  and back to the muzzle.
 
 Each is scored against the same truth for both models and both phases (see findings, "Rescue probes").
 The established tables do not change.

@@ -629,8 +629,16 @@ mesh was not traced.
     Starting a second probe just outside that box does not step past the
     socket: offline, it recovers 6 of 676 own-turret rows. Stepping past the
     collision-mesh bounds recovers all 676 with no false CLEAR, but those bounds
-    are not script-visible. See `research/issue202-line-of-fire/findings.md`,
-    "Rescue probes for the own-turret case".
+    are not script-visible.
+  - A script-only rescue matches that result offline. Step from the
+    barrelposition toward the aim point, then check forward to the aim point
+    and back to the barrelposition (declared target = the firing turret). It is
+    CLEAR only if the target is first forward and the turret is first back.
+    Anything the step skipped is then seen first by the back check. Stepping
+    from the turret component origin instead left 12 false CLEARs, because the
+    step point was off the muzzle line. This is inference, not LIVE. See
+    `research/issue202-line-of-fire/findings.md`, "Rescue probes for the
+    own-turret case".
 
 ## Remaining uncertainties
 
