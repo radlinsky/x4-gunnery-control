@@ -50,6 +50,15 @@ The Create path must fail closed on setup identity or census mismatch and must n
 require manual identity, cleanup, placement, or selection that the fixture can do
 exactly.
 
+For selected-target missile tests, inhibit firing from spawn; automatically stage
+**Attack my current enemy** and verify every actual missile-turret mode and loaded
+ammo type before enabling each phase. Fail closed on mismatch; owner menu choices
+are not proof. Check remaining ammunition before every phase and enforce launch
+budgets/time limits that reserve enough for later controls. Reuse
+`setup.strictMissilePhases = true` for its supported two-turret, shooter/clear/blocked
+layout; otherwise provide equivalent guards. Keep blocked-first when safe, preserve
+shot/hit evidence, and report these guards as OFFLINE until reviewed LIVE.
+
 ## 3. Validate and load
 
 Run relevant focused validation, `./scripts/validate.sh`, and `git diff --check`.
