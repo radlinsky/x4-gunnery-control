@@ -50,19 +50,16 @@ The Create path must fail closed on setup identity or census mismatch and must n
 require manual identity, cleanup, placement, or selection that the fixture can do
 exactly.
 
-For selected-target missile tests, inhibit firing from spawn; automatically stage
-**Attack my current enemy** and verify every actual missile-turret mode and loaded
-ammo type before enabling each phase. Fail closed on mismatch; owner menu choices
-are not proof. Check remaining ammunition before every phase and enforce launch
-budgets/time limits that reserve enough for later controls. Keep blocked-first
-when safe, preserve shot/hit evidence, and report guards as OFFLINE until reviewed
-LIVE; do not recommend reusing a guard solely because it passed offline tests.
-Verify the chosen firing-stop control against shipped sources before installation.
-Require correlated launch counts and an unpaused post-stop observation window
-covering the launch/reload cycle: no new
-FIRED projectile IDs after the stop marker. In-flight impacts are not new launches.
-A stop notification or zero counter alone is not proof; post-stop launches fail
-the guard even if geometry passes.
+For selected-target fixtures, set `setup.strictSelectedTarget = true`. On the
+setup Test Lab click aboard the verified shooter, Test Lab stages **Attack my
+current enemy** for the exact selected groups before returning to Gunnery Control;
+do not delegate this mode change to the owner. Verify actual modes in the log.
+For missile tests, plan enough ammunition for later controls; do not interpret an
+empty magazine as blocked fire. Keep experimental firing controls out of geometry fixtures unless
+their use is explicitly requested. Source support and offline tests do not prove
+a live stop: when testing one, require no new FIRED projectile IDs during an
+unpaused post-stop window covering the launch/reload cycle. Stop notifications,
+zero counters and later impacts from existing missiles are not that proof.
 
 ## 3. Validate and load
 

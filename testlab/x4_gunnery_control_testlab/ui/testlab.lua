@@ -256,11 +256,11 @@ local function validateSpec(raw)
             end
             table.sort(expectedMemberMacros)
         end
-        if raw.setup.strictMissilePhases ~= nil and type(raw.setup.strictMissilePhases) ~= "boolean" then
-            return nil, "spec.setup.strictMissilePhases must be boolean"
+        if raw.setup.strictSelectedTarget ~= nil and type(raw.setup.strictSelectedTarget) ~= "boolean" then
+            return nil, "spec.setup.strictSelectedTarget must be boolean"
         end
         setup = {
-            strictMissilePhases = raw.setup.strictMissilePhases == true,
+            strictSelectedTarget = raw.setup.strictSelectedTarget == true,
             remote = raw.setup.remote == true,
             shipMacro = raw.setup.shipMacro,
             shipLabel = raw.setup.shipLabel,
@@ -271,14 +271,6 @@ local function validateSpec(raw)
             selectAll = selectAll,
             singleTurretMacro = singleTurretMacro,
         }
-    end
-    if setup and setup.strictMissilePhases then
-        if not setup.remote or setup.expectedTurrets ~= 2 or #groups ~= 3
-                or groups[1].role ~= "shooter" or groups[1].expectedMissileTurrets ~= 2
-                or not groups[2].holdFire or not groups[3].holdFire
-                or groups[1].count ~= 1 or groups[2].count ~= 1 or groups[3].count ~= 1 then
-            return nil, "strictMissilePhases requires remote two-turret shooter, clear, blocked"
-        end
     end
     local location
     if raw.location ~= nil then
@@ -359,7 +351,6 @@ local function sendScenarioSpec(force, requestId)
     end
     local location = scenarioSpec.location or {}
     AddUITriggeredEvent("X4GunneryTestLabScenario", "scenario_begin", {
-        strictMissilePhases = scenarioSpec.setup and scenarioSpec.setup.strictMissilePhases or false,
         specId = scenarioSpec.id, force = force == true, requestId = requestId or "",
         sectorMacro = location.sectorMacro or "",
         anchorX = location.x or 0, anchorY = location.y or 0, anchorZ = location.z or 0,
@@ -474,7 +465,7 @@ end
 
 local function applyExactGroup(selection)
     local session = selection.session
-    if scenarioSpec.setup.strictMissilePhases then
+    if scenarioSpec.setup.strictSelectedTarget then
         X4GunneryState.setDirectMode(session, "autoassist")
     end
     local checked = {}

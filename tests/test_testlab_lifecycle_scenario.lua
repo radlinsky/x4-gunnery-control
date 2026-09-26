@@ -824,7 +824,7 @@ do
     local harness = loadHarness({
         id = "strict-missile-lifecycle", enabled = false,
         location = { sectorMacro = "synthetic_sector_macro", x = 0, y = 0, z = 0 },
-        setup = { remote = true, strictMissilePhases = true,
+        setup = { remote = true, strictSelectedTarget = true,
             shipMacro = "remote_ship_macro", shipLabel = "Remote Ship",
             turretGroup = "g", turretLabel = "Remote Group", expectedTurrets = 2 },
         groups = {
@@ -834,9 +834,7 @@ do
         },
     })
     harness.openFromGunnery({ label = "safe launcher", phase = "console" })
-    local events, requestId = requestScenario(harness)
-    assert(events[1].params.strictMissilePhases == true,
-        "the ship-level firing inhibit must be requested with scenario creation")
+    local _, requestId = requestScenario(harness)
     harness.fix.fireEvent("X4GunneryTestLab.ScenarioReady",
         ready9(requestId, "strict-missile-lifecycle", { spawned = 3,
             safeFixtures = 2, safeWeapons = 2, shooters = 1,

@@ -90,6 +90,16 @@ missiles=$(grep -Fc 'in="player.ship.missileturrets.operational.list"' "$md")
 [[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.missileturrets.operational.list'])" "$md") == "1" ]] \
   || fail "expected one census missile-turret loop"
 
+# Missile emitters receive their specialised STEP snapshot only once.
+[[ $(xmllint --xpath "count(//do_for_each[@in='player.ship.weapons.operational.list']/do_if[@value='\$Weapon.class != class.missileturret'])" "$md") == "1" ]] \
+  || fail "ordinary snapshot must leave missiles to their specialised STEP block"
+
+# Overlapping property lists must not repeat a missile turret in the census.
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.weapons.operational.list']/append_to_list[@name='\$SeenWeapons'][@exact='\$Weapon'])" "$md") == "1" ]] \
+  || fail "census must remember ordinary-list emitters"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.missileturrets.operational.list']/do_if[@value='not \$SeenWeapons.indexof.{\$Weapon}']/set_value[@name='\$Census'])" "$md") == "1" ]] \
+  || fail "census must omit missile emitters already reported"
+
 # Issue #54 Task 2: inrange must mirror shipped combat-AI reachability —
 # bounding-box distance under maxfirerange, no size term — in both snapshot
 # loops, and the stale "distance plus half the target's size" framing is gone.
