@@ -198,9 +198,23 @@
               <set_value name="$target" exact="component.{$target}"/>
             </do_if>
             <set_value name="LineOfFireService.$target" exact="$target"/>
-            <set_value name="LineOfFireService.$centre" exact="null"/>
-            <set_value name="LineOfFireService.$ambiguous" exact="true"/>
-            <do_if value="typeof $target == datatype.component">
+            <set_value name="LineOfFireService.$boxdone" exact="false"/>
+          </actions>
+        </cue>
+        <!-- Once per target per pass, and only when a turret needs it: the
+             target's live box, then this turret's [box centre in weapon space,
+             muzzle-to-box bound], or null. -->
+        <library name="LineOfFireBound" purpose="run_actions">
+          <params>
+            <param name="target"/>
+            <param name="weapon"/>
+            <param name="muzzle"/>
+          </params>
+          <actions>
+            <do_if value="not LineOfFireService.$boxdone">
+              <set_value name="LineOfFireService.$boxdone" exact="true"/>
+              <set_value name="LineOfFireService.$centre" exact="null"/>
+              <set_value name="LineOfFireService.$ambiguous" exact="true"/>
               <!-- The target's live box (a station's module union) is the box X4
                    aims at without an authored aim point. bboxdistanceto measures
                    to it; from an inside point, three reads per face recover it. -->
@@ -247,8 +261,13 @@
                     or $target.macro == macro.engine_kha_l_destroyer_01_allround_01_mk1_macro"/>
               </do_if>
             </do_if>
+            <do_if value="LineOfFireService.$centre">
+              <create_position name="$point" object="$target" space="$weapon" value="LineOfFireService.$centre"/>
+              <return value="[$point, $point.distanceto.{$muzzle} + LineOfFireService.$radius]"/>
+            </do_if>
+            <return value="null"/>
           </actions>
-        </cue>
+        </library>
         <cue name="LineOfFireTurret" instantiate="true">
           <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'line_of_fire_turret'"/></conditions>
           <actions>
@@ -292,12 +311,7 @@
               <!-- A beam fires only when its barrel line meets the target within
                    max fire range; the probe's endpoint does not bound that. -->
               <set_value name="$beam" exact="$weapon.isbeam and not $target.isclass.missile"/>
-              <set_value name="$centre" exact="LineOfFireService.$centre"/>
-              <set_value name="$bound" exact="null"/>
-              <do_if value="$centre">
-                <create_position name="$point" object="$target" space="$weapon" value="$centre"/>
-                <set_value name="$bound" exact="$point.distanceto.{$muzzle} + LineOfFireService.$radius"/>
-              </do_if>
+              <set_value name="$box" exact="null"/>
               <do_if value="not $beam">
                 <check_line_of_sight name="$los" object="$weapon" objectoffset="$muzzle" target="$target" useaimtarget="true" excludeself="false"/>
                 <set_value name="$calls" operation="add"/>
@@ -326,8 +340,13 @@
                 <set_value name="$aim" exact="null"/>
                 <do_if value="$muzzleaim.yaw == $muzzleorigin.yaw and $muzzleaim.pitch == $muzzleorigin.pitch
                               and $turretaim.yaw == $turretorigin.yaw and $turretaim.pitch == $turretorigin.pitch">
-                  <do_if value="$centre and not LineOfFireService.$ambiguous">
-                    <set_value name="$aim" exact="position.[$point.x - $muzzle.x, $point.y - $muzzle.y, $point.z - $muzzle.z].rotation.forward"/>
+                  <run_actions ref="LineOfFireBound" result="$box">
+                    <param name="target" value="$target"/>
+                    <param name="weapon" value="$weapon"/>
+                    <param name="muzzle" value="$muzzle"/>
+                  </run_actions>
+                  <do_if value="$box and not LineOfFireService.$ambiguous">
+                    <set_value name="$aim" exact="position.[$box.{1}.x - $muzzle.x, $box.{1}.y - $muzzle.y, $box.{1}.z - $muzzle.z].rotation.forward"/>
                   </do_if>
                 </do_if>
                 <do_else>
@@ -348,7 +367,14 @@
                   <!-- Direction unknown: only the probe, which needs none. A beam's
                        probe hit counts only if the aim point is surely within R. -->
                   <set_value name="$reason" exact="'aim'"/>
-                  <do_if value="$beam and $bound and $bound le $range">
+                  <do_if value="$beam">
+                    <run_actions ref="LineOfFireBound" result="$box">
+                      <param name="target" value="$target"/>
+                      <param name="weapon" value="$weapon"/>
+                      <param name="muzzle" value="$muzzle"/>
+                    </run_actions>
+                  </do_if>
+                  <do_if value="$beam and $box and $box.{2} le $range">
                     <check_line_of_sight name="$los" object="$weapon" objectoffset="$muzzle" target="$target" useaimtarget="true" excludeself="false"/>
                     <set_value name="$calls" operation="add"/>
                     <do_if value="$los">
@@ -401,15 +427,22 @@
                          anywhere on it is X4's result 1 or a genuine miss short of
                          it; no hit at all is a genuine miss. Its length covers
                          X4's endpoint, f times the aim-point distance. -->
+                    <do_if value="not $beam">
+                      <run_actions ref="LineOfFireBound" result="$box">
+                        <param name="target" value="$target"/>
+                        <param name="weapon" value="$weapon"/>
+                        <param name="muzzle" value="$muzzle"/>
+                      </run_actions>
+                    </do_if>
                     <do_if value="$range le 0m">
                       <set_value name="$reason" exact="'range'"/>
                     </do_if>
-                    <do_elseif value="not $beam and not $bound">
+                    <do_elseif value="not $beam and not $box">
                       <set_value name="$reason" exact="'box'"/>
                     </do_elseif>
                     <do_else>
                       <set_value name="$length" exact="if $beam then $range
-                          else (1 + [1.1 * $range, 500m].min / $range) * $bound * 1.001 + 1m"/>
+                          else (1 + [1.1 * $range, 500m].min / $range) * $box.{2} * 1.001 + 1m"/>
                       <set_value name="$far" exact="position.[$muzzle.x + $length * $aim.x, $muzzle.y + $length * $aim.y, $muzzle.z + $length * $aim.z]"/>
                       <create_position name="$end" object="$weapon" space="$target" value="$far"/>
                       <check_line_of_sight name="$los" object="$weapon" objectoffset="$start" target="$target" targetoffset="$end" useaimtarget="false" excludeself="false"/>
