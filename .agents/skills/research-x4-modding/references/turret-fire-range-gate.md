@@ -78,6 +78,31 @@ if R > 0:
 `R == 0`, meaning no loaded ammunition, skips the whole test. An
 out-of-range result does not set the LINE OF FIRE BLOCKED flag.
 
+### The pre-fire alignment test and its tolerance
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace; pre-fire gate `0x00816D20`, alignment section
+  `0x008175F3`–`0x00817774`; `Turret::SetTarget()` `0x0080C3E0`; weapon
+  defaults parser `0x0081EFC1`–`0x0081EFCD`; `libraries/defaults.xml`
+- Live test: no — static trace only. A 2026-09-26 Ray/Osaka log shows a
+  turret at rest 0.006° off its aim point that did not fire, which this
+  test cannot explain.
+- Finding: after the aim solve (controller slot `+0xA8`) and before the range
+  test, the gate withholds fire when
+  `acos(barrel forward · unit(aim point − muzzle))` exceeds a tolerance. The
+  test runs only when controller slot `+0x38` returns true.
+  - For a large target, the tolerance is `max(target size term, 1°)`. Large
+    means `0x0051FD20`: slot `+0x1BF0` on the target or on its class-`object`
+    ancestor, so a station, or a ship with box radius over 500 m.
+  - Otherwise the tolerance is controller `+0x80` when positive, else the
+    weapon defaults' `+0xA00`.
+  - `Turret::SetTarget()` sets controller `+0x80` from `+0xA00`.
+  - `+0xA00` is `<weapon angle>` in degrees, converted to radians, with
+    default 5°. `+0xA04` is `<weapon shotangle>`.
+  - Class `turret` defaults give `angle="3.0"`, so a turret bears within 3°
+    of its aim point whatever the element it targets.
+
 ### Shipped AI shot-range parameters
 
 - X4: 9.00

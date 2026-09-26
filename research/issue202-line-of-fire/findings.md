@@ -1136,31 +1136,50 @@ non-beam) read CLEAR against the LEFT Osaka's XEN M Shield Generator Mk2 `0x1793
 - **The scene is exact** (inference, from logged data). A rigid fit places the Osaka and its
   `con_shieldgen_02` shield within 1 mm of every logged `rel`. The settling model reproduces the muzzle
   that fired at the graviton turret to 0.1 mm. Aimed at the shield's authored aim point, it predicts
-  `mark_7`'s logged muzzle to 0.1 mm. So the turret bore on the shield. The `mark_6`→`mark_7` muzzle shift
-  is the hunting the owner describes when a turret cannot fire; it does not affect the check.
+  `mark_7`'s logged muzzle to 0.1 mm. So the turret bore on the shield. `mark_6`, 0.3 s after the shield
+  was selected (248981.29), caught it mid-slew from the graviton pose: the muzzle's azimuth in the weapon
+  frame runs −0.400 (graviton) → −0.388 (`mark_6`) → −0.324 rad (`mark_7`).
 - **Our collision model says X4 fires.** The shield is not a ship or engine, so X4's `f = 1`: its first
   ray ends exactly at the aim point, 3310.1 m. With the shield's collision file, that ray hits the shield
   at 3306.7 m (classifier 1, fire) in both shape models. The production probe hits the same way, and
   every Ray turret with a clear path does too (12 of 14 from their logged muzzles).
 - **The game disagrees with the model.** The same probe (`muzzle_los_self`, identical to production's)
-  was 0 for all 14 turrets at both marks; it was 1 against the graviton turret. The one reading that
-  reproduces `0x3e594`'s logged probe=0 and CLEAR together is that MD rays do not see this shield element.
-  Then every line misses: nothing lies on the aim line out to 3528 m. So CLEAR came from the sector
-  genuine-miss route. This is an inference, not reproduced.
+  was 0 for all 14 turrets at both marks; it was 1 against the graviton turret. Why is unexplained.
+  Removing the shield from the model reproduces `0x3e594`'s probe=0 and CLEAR, because nothing else lies
+  on the aim line out to 3528 m. No mechanism for that is known, so it is not a finding.
 - **CLEAR is not proven wrong.** Production's non-beam line starts at the muzzle, or at the step point
   past its own socket, and runs 1.0001 × the aim distance + 1 m. It contains X4's first ray. Its C routes
   are "the first hit is the shield" and "no hit at all". Under both, X4's documented first ray on the
   same geometry sees the shield first or nothing, and a non-beam fires either way. No second ray
   arises, because result 0 needs a hit on the Osaka itself first, and nothing is on that line.
 - **The exact endpoint changes nothing here.** With the shield hit at 3306.7 m, both lengths end past
-  it. With the shield invisible, nothing is hit by 3311.4 m (the exact endpoint) or by 3528.2 m (the
+  it. With the shield removed, nothing is hit by 3311.4 m (the exact endpoint) or by 3528.2 m (the
   box bound before `fef5c7d`).
+- **Not a cannot-bear problem** (inference; native trace, pinned build, not LIVE-tested). X4's gate
+  (`0x00816D20`) tests alignment after its aim solve and before range and obstruction:
+  - The test is `acos(barrel forward · unit(aim point − muzzle)) > tolerance` → no fire
+    (`0x008175F3`–`0x00817774`).
+  - For a target that is not "large", the tolerance is the shoot controller's `+0x80`. The shield
+    qualifies (`0x0051FD20`: shields are constant false, and the Osaka's 372 m box radius is under 500 m).
+  - `Turret::SetTarget()` (`0x0080C3E0`) builds that controller with `+0x80` = the weapon defaults'
+    `+0xA00` (`0x0080C494`/`0x0080C58D`).
+  - `+0xA00` is `<weapon angle>` in radians (parser `0x0081EFC1`–`0x0081EFCD`, default 5°; element and
+    attribute ids `0x320`/`0x1D` resolve to `weapon`/`angle`). `libraries/defaults.xml` gives class
+    `turret` `<weapon angle="3.0"/>`, and neither the Boron railgun macro nor its bullet overrides it.
+
+  At rest on the shield the barrel is 9.8e-5 rad (0.006°) off its aim point, against 0.0524 rad: a
+  530× margin. At the graviton, where it fired, the offset was 9.1e-5 rad. The target does not enter
+  this test only through its aim point and that tolerance.
+- **No stop-fire command.** Test Lab's hold-fire guard (`ScenarioSafetyGuard`, `cease_fire` plus
+  `weaponmode.holdfire`) covers only `holdFire` groups, here the two Osakas. The census every 10 s from
+  248987 to 249047 shows all 14 Ray turrets in `autoassist`, with hard and soft target `0x1793c7`. No
+  Test Lab or mod cease or mode event appears in the window.
 - **Still plausible:**
   1. X4's native ray (ray group 7, MD's is 1) sees a collider that MD's does not, giving result 2
      (blocked), or result 0 with a failing second ray to the shield origin. That would make the CLEAR
      wrong.
-  2. A firing requirement outside the pre-fire gate: for example, the turret AI's handling of an
-     element target that its rays cannot hit.
+  2. A requirement not yet traced: the gate's checks before alignment (`0x0051E8B0`, `0x007E67B0`,
+     and the timing test at `0x008172EB`), or the firing update `0x008132D0` that calls the gate.
 
   The fleet-wide pattern fits a target-level cause better than a per-turret line: one launch in 71 s from 14 ready,
   in-range turrets, against 40–47 shots at the graviton in 5 s. (`aimed=` in FIRED rows is

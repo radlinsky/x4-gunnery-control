@@ -64,11 +64,14 @@ def fit_osaka():
 
 
 def settled_muzzle(record, ctx, turret, point, start):
+    """(state, muzzle in the weapon frame, barrel-to-point angle): the gate's alignment test (0x008176C1)."""
     state, y, x = St.settle(record, ctx["turs"][turret["macro"]], tuple(map(float, point)), start)
     if state != "SETTLED":
-        return state, None
-    world = St._muzzles(ctx["evs"][turret["macro"]], record["endpoint"]["tag"], x, y, turret["frame"])[0][0]
-    return state, Sc.to_local(world, turret["frame"])
+        return state, None, None
+    world, z = St._muzzles(ctx["evs"][turret["macro"]], record["endpoint"]["tag"], x, y, turret["frame"])[0]
+    to = Sc.to_world(np.asarray(point), turret["frame"]) - world
+    angle = math.acos(min(1.0, float(z @ to / np.linalg.norm(z) / np.linalg.norm(to))))
+    return state, Sc.to_local(world, turret["frame"]), angle
 
 
 def main():
@@ -94,9 +97,9 @@ def main():
     # 1. the settling model reproduces the muzzle where the turret did fire (graviton)
     pt = direction(*GRAVITON["aim"]) * float(np.linalg.norm(GRAVITON["rel"]))
     for start in St.START_YAWS:
-        state, m = settled_muzzle(record, ctx, turret, pt, start)
+        state, m, a = settled_muzzle(record, ctx, turret, pt, start)
         print(f"graviton, start yaw {start:.2f}: {state}, predicted muzzle {None if m is None else m.round(4)}"
-              f", logged {GRAVITON['barrel']}"
+              f", barrel-to-aim {a:.2e} rad, logged {GRAVITON['barrel']}"
               + ("" if m is None else f", off by {np.linalg.norm(m - GRAVITON['barrel']):.4f} m"))
     # 2. where the same turret would rest aimed at the shield's aim point
     aim, source, _i = St.bearing_point(sc, turret, shield)
@@ -104,8 +107,9 @@ def main():
     print(f"shield bearing point ({source}), weapon frame: {pt.round(2)}; logged bearing direction "
           f"{direction(*SHIELD_LOG['aim']).round(5)} vs reconstructed {(pt / np.linalg.norm(pt)).round(5)}")
     for start in St.START_YAWS:
-        state, m = settled_muzzle(record, ctx, turret, pt, start)
-        print(f"shield, start yaw {start:.2f}: {state}, predicted muzzle {None if m is None else m.round(4)}")
+        state, m, a = settled_muzzle(record, ctx, turret, pt, start)
+        print(f"shield, start yaw {start:.2f}: {state}, predicted muzzle {None if m is None else m.round(4)}, "
+              f"barrel-to-aim {a:.2e} rad")
     for mark, b in SHIELD_LOG["barrels"].items():
         print(f"  logged muzzle at {mark}: {b}")
     # 3. X4's rays and the production MD's decision from the settled muzzle
