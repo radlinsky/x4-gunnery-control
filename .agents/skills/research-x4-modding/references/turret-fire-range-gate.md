@@ -258,6 +258,37 @@ themselves.
     8.6 km), where the gate compares `d²` with `Re²` exactly;
   - MD evaluates at script time, the gate at firing time.
 
+### A component's live box is recoverable with `bboxdistanceto`
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace; shared handler `0x00CF2409`, position branch
+  (argument type `0x63`) → `0x00B5CB80` → `0x003E0750(this, position,
+  space = this+0x70, mode)`, the same routine as the component form above;
+  `create_position` `object`/`space` documentation in `libraries/common.xsd`
+  (shipped source)
+- Live test: no
+- Finding: `$C.bboxdistanceto.{$p}`, with `$p` in `$C`'s parent space, is the
+  distance from `$C`'s own oriented box (slot `+0x14B0`; for a station the live
+  instance box `+0xC90`) to `$p`. There is no radius subtraction, and it is 0
+  inside the box.
+  - From a point known to be inside, moving along one of `$C`'s own axes, the
+    reading is the gap to that face alone.
+  - Three reads per face recover the face to 0.2 mm (worst case in
+    simulation), despite MD's approximate square root (about ±7e-4 relative):
+    1. read at 100 km;
+    2. read again past the estimated face by `0.001 × 100 km + 1 m`;
+    3. read again past the new estimate by 0.3 m.
+  - Six faces then give the box centre and half-extents. That is the station
+    root's bearing point and the ship box centre, without the macro-box
+    override question.
+  - Use the station origin or the macro box centre as the inside point, and
+    confirm it reads 0 first.
+- Same-gate readings, confirmed here: `$weapon.maxfirerange` calls weapon slot
+  `+0x1EF0` with `false` (`0x00D0199E`–`0x00D019AA`), the gate's `R`.
+  `$weapon.isbeam` returns byte `+0x50` of `0x00D4B460(loaded ammunition, else
+  the macro default)` (`0x000F15F0`), the byte the gate tests.
+
 ### Distance 1: how the aim point is produced
 
 - X4: 9.00 build 611726

@@ -70,7 +70,7 @@ containment check, or clamp in this authored-point branch.
 
 The accepted caller trace is `create_orientation useaimtarget` through
 `0x00BE1970 → 0x00C707A0 → 0x003EC190`; the call at `0x003EC313` reaches
-the selector. `check_line_of_sight useaimtarget` reaches the same logic and
+the selector. **Only when the target has a collection** (see the next record). `check_line_of_sight useaimtarget` reaches the same logic and
 the same fallback through a sibling selector: RTTI
 `.?AVCheckLineOfSightAction@Scripts@@`, vtable `0x02C0D738`, run method
 `0x00BCB4D0`, calling `0x00520FC0` at `0x00BCBAFF`. `0x00520FC0` differs from
@@ -84,6 +84,39 @@ passes. Target-local origin and selected point are transformed by
 connection `+0x60`; parent-composed transforms use separate storage. For an
 unparented aim connection, the raw translation and the macro/component box
 are in the same component frame. Do not invent a parent transform for it.
+
+## create_orientation useaimtarget looks at the origin when there is no aim-target collection
+
+- X4: 9.00 build 611726
+- Status: inference — native trace, same executable and SHA-256 as above,
+  traced 2026-09-26.
+- Live test: no.
+- Finding: `create_orientation` with `refobject` and `useaimtarget="true"`
+  (`0x003EC190`) calls the selector only when the target is `destructible`
+  (`0x003EC26A`) **and** its macro data `[0x0059E100(target+0x60)]+0x760` is
+  non-null (`0x003EC289`). The supplied `<position>` is transformed into the
+  target frame and passed as the selection origin (`0x003EC306`–`0x003EC313`),
+  so the chosen authored point is the one nearest that position. With a null
+  collection it jumps to `0x003EC37B`: it transforms the identity transform at
+  `0x0391F380` out of the target's frame, which is the target's **coordinate
+  origin**, exactly as plain `look_at` does.
+  - The selector `0x005210E0` tests the same pointer (`0x00521103`) and falls
+    back to the box centre. So `check_line_of_sight useaimtarget` and the shoot
+    controller end at the box centre while `create_orientation` looks at the
+    origin. The XSD text "or the bounding box center if there are none" is
+    true only for an empty, non-null collection.
+  - Macro constructors zero `+0x760` (`0x00A045B1`, `0x00A03E2C`). No
+    allocation was traced, so which macros carry an empty collection is
+    unknown. Treat "no authored aim point" as "looks at the origin".
+  - `look_at` is orientation value 3. Values 5–8 (`align_right_bbox`,
+    `align_left_bbox`, `look_at_bbox`, `look_away_bbox`; token rows
+    `0x022C4910`–`0x022C4970`) take the separate box branch at `0x003EC3CB`.
+- Consequence: a direction toward the aim point of a station root, or of a
+  ship or element without authored aim points, cannot come from
+  `create_orientation`; build it from the box centre instead (see
+  [turret-fire-range-gate.md](turret-fire-range-gate.md), "A component's live
+  box is recoverable with `bboxdistanceto`"). `useaimtarget=true` and `false`
+  give the same direction exactly when this fallback applies.
 
 ## Two Lua getters reach the same selector
 

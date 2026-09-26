@@ -808,6 +808,20 @@ are the only other layer-3 creator family; their native-only group-16 bodies
 were recorded as living in an interior/room physics world. That world assignment
 was not re-traced when the per-zone world claim was corrected (2026-09-25).
 
+Both callers reach Jolt through `0x000BB5D0`, which fixes two more query
+properties (traced 2026-09-26):
+
+- **Ray-cast settings `{1, 1, 1}`** (`0x000BB728`/`0x000BB72E`, the collector's
+  settings after its ray). Triangles and convex shapes both collide with back
+  faces, and convex shapes are solid. A ray starting inside collision
+  geometry therefore reports that body, for MD and native alike: the exit face
+  of a mesh, or fraction 0 inside a convex piece. The benchmark's two-sided
+  MESH and solid HULL models match this.
+- **Ray collision group.** The ray's group ID is 7 for the pre-fire gate and 1
+  for MD (`0x000BB692`), each with sub-group −1, next to the filter indices 14
+  and 2 above. The pair lookup that could use the ray group (`0x000B9020`) is
+  the untraced caveat below.
+
 Therefore MD sees no supported blocker that native ignores, and native sees no
 supported blocker that MD ignores. Ship hulls, stations/modules, asteroids,
 missiles, mines, gates, satellites, collectables, characters and generic

@@ -664,8 +664,9 @@ mesh was not traced.
   ("Beam ammunition casts along the barrel", "Blocker categories"); the
   sector-declared trace there; offline benchmark
   `research/issue202-line-of-fire/permission.py`
-- Live test: no. `create_orientation useaimtarget` from an offset origin and a
-  sector-declared `check_line_of_sight` have never been run.
+- Live test: no. A sector-declared `check_line_of_sight` and the
+  `bboxdistanceto` box recovery have never been run; both are traced natively
+  (below).
 - Finding: let `u` be the direction from the muzzle toward the aim point and
   `X` a point along `u` far past it. A script cannot read the aim point of a
   station root or of a target with authored aim points, but it can still decide
@@ -691,7 +692,46 @@ mesh was not traced.
 Offline, on X4 9.00 geometry, this recovers every station-root case, including
 the empty-centre ones: 0 false CLEAR, 0 false BLOCKED and 0 UNKNOWN on 224
 broad and 796 `#60`-pose settled rows. See
-`research/issue202-line-of-fire/findings.md`, "X4 pre-fire permission".
+`research/issue202-line-of-fire/findings.md`, "X4 pre-fire permission" and
+"Runtime feasibility".
+
+What a script can build (traced 2026-09-26):
+
+- **Direction `u`.** Build it toward the aim point:
+  - without an authored aim point, toward the target's box centre;
+    `create_orientation useaimtarget` looks at the coordinate origin instead
+    ([macro-box-aimtargets.md](macro-box-aimtargets.md)). The station's live
+    union box, and a ship's runtime box, are recoverable with
+    `bboxdistanceto` from a known inside point
+    ([turret-fire-range-gate.md](turret-fire-range-gate.md));
+  - with authored aim points, `create_orientation` from the barrelposition
+    selects the point nearest the muzzle, while X4 selects from the turret
+    origin. A second `create_orientation` from the turret origin must meet
+    the first ray at the same point, or the stages that use `u` are
+    UNKNOWN.
+- **Sector-declared check.** `check_line_of_sight` has no class test on
+  `target`; only `useaimtarget` is gated, on `destructible`. The `targetoffset`
+  goes through the generic frame conversion `0x003DDE10`, whose parent fast
+  path covers a sector, and the result walk ends at the sector for any
+  resolved hit ([weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md)).
+  An unresolved sub-shape is a miss to both MD and native (native's classifier
+  receives a null hit and applies its no-hit rule).
+- **Length.** X4's non-beam endpoint is `f × |aim point − muzzle|`. It is
+  bounded by `f × (|box centre − muzzle| + |half-extents|)` whenever the aim
+  point lies in the box, which held on every benchmark row. `f` needs only
+  `$weapon.maxfirerange` and whether `$target.maxspeed` is non-zero.
+- **Beams.** `$weapon.isbeam` and `$weapon.maxfirerange` read exactly what the
+  gate reads. A missile target switches the beam to the default mode.
+  `lenientfireallowance` is not script-visible. Only the Xenon-only
+  `turret_xen_xl_battleship_01_mk1` sets it, and treating it as a plain beam
+  can give a false BLOCKED, never a false CLEAR.
+- **BLOCKED proof** on the muzzle-to-step stretch needs `Q(T.object)` false as
+  well: a surface element's own parent there is X4's result 0, not a block.
+- **Not observable: lead.** X4's non-beam aim point is lead-corrected: target
+  motion over the flight time, and the shooter's velocity × flight time unless
+  a bullet flag is set. No script property exposes projectile speed, barrel
+  direction or the lead point. Against a moving target, or from a moving
+  firing ship, the tested line is the unled one.
 
 ## Remaining uncertainties
 

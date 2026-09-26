@@ -34,8 +34,9 @@ and the firing turret's own meshes are ignored, as X4 does.
 - **current**: production at `cf459d0`. It tests box-centre endpoints, and for a station root the two
   nearest modules.
 - **base**: the fresh-muzzle `useaimtarget=true` probe, then step and look back.
-  - BLOCKED is claimed only when `Q(Z)` is true and `Q(W)` false on the muzzle-to-step stretch, and that
-    first hit is neither a target member nor the element's own parent or sibling.
+  - BLOCKED is claimed only when, on the muzzle-to-step stretch, a sector-declared check is true and
+    `Q(W)` and `Q(T.object)` are false. That means the first hit is neither the firing turret, a target
+    member, nor the element's own parent or sibling.
 - **base+modules**: base, then current's module lines whenever base is undecided on a station root. This
   is the owner's hypothesis.
 - **base+ext**: base, then the aimed line continued along the `create_orientation useaimtarget` direction
@@ -57,9 +58,9 @@ except current):
 | method | TP | FP | TN | FN | U on PERMIT | U on NOT | mean / max calls |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | current | 108 | 50 (HULL 52) | 10 | 0 | 54 | 2 (HULL 0) | 2.49 / 6 |
-| base | 84 | 20 | 12 | 0 | 78 | 30 | 2.54 / 4 |
-| base+modules | 134 | 48 | 12 | 0 | 28 | 2 | 3.75 / 10 |
-| **base+ext** | **162** | **0** | **62** | **0** | **0** | **0** | 3.22 / 6 |
+| base | 84 | 20 | 12 | 0 | 78 | 30 | 2.60 / 4 |
+| base+modules | 134 | 48 | 12 | 0 | 28 | 2 | 3.80 / 10 |
+| **base+ext** | **162** | **0** | **62** | **0** | **0** | **0** | 3.28 / 6 |
 
 **The 108 previously excluded empty-path rows** (72 `arg_shipyard`, 36 `xen_defence`). Truth: 78 PERMIT
 (non-beam: a genuine miss) and 30 NOT (the beam: no station hit along its barrel within `R`).
@@ -82,9 +83,9 @@ of which 140 are genuine misses and 238 hit a module past the centre, and 68 NOT
 | method | TP | FP | TN | FN | U on PERMIT | mean / max calls |
 |---|---:|---:|---:|---:|---:|---:|
 | current | 702 (HULL 706) | 10 (14) | 58 (54) | 26 (22) | 0 | 1.57 / 6 |
-| base | 350 | 0 | 68 | 0 | 378 | 2.12 / 3 |
-| base+modules | 716 | 0 | 68 | 0 | 12 | 2.69 / 9 |
-| **base+ext** | **728** | **0** | **68** | **0** | **0** | 2.77 / 5 |
+| base | 350 | 0 | 68 | 0 | 378 | 2.21 / 4 |
+| base+modules | 716 | 0 | 68 | 0 | 12 | 2.78 / 9 |
+| **base+ext** | **728** | **0** | **68** | **0** | **0** | 2.86 / 5 |
 
 **Other target classes, broad population, MESH** (station surfaces are exact-element targets; they are not
 part of the station-root membership):
@@ -92,14 +93,14 @@ part of the station-root membership):
 | class (scored) | method | TP | FP | TN | FN | U on PERMIT | U on NOT | mean / max |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | station surface (840) | current | 106 | 60 | 398 | 0 | 112 | 164 | 2.54 / 3 |
-| | base | 162 | 62 | 2 | 0 | 56 | 558 | 2.86 / 4 |
-| | base+ext | 188 | 0 | 220 | 0 | 30 | 402 | 3.68 / 6 |
+| | base | 162 | 62 | 2 | 0 | 56 | 558 | 2.92 / 4 |
+| | base+ext | 188 | 0 | 220 | 0 | 30 | 402 | 3.73 / 6 |
 | whole ship (1,560) | current | 860 | 30 | 128 | 12 | 482 | 48 | 1.74 / 3 |
-| | base | 1,354 | 20 | 132 | 0 | 0 | 54 | 1.84 / 4 |
-| | base+ext | 1,354 | 0 | 154 | 0 | 0 | 52 | 2.01 / 6 |
+| | base | 1,354 | 20 | 132 | 0 | 0 | 54 | 1.93 / 4 |
+| | base+ext | 1,354 | 0 | 154 | 0 | 0 | 52 | 2.09 / 6 |
 | ship surface (13,578) | current | 3,002 | 24 | 7,960 | 1,130 | 606 | 856 | 2.53 / 3 |
-| | base | 4,558 | 14 | 2,264 | 0 | 180 | 6,562 | 2.46 / 4 |
-| | base+ext | 4,732 | 2 | 2,818 | 0 | 6 | 6,020 | 3.27 / 6 |
+| | base | 4,558 | 14 | 2,264 | 0 | 180 | 6,562 | 2.62 / 4 |
+| | base+ext | 4,732 | 2 | 2,818 | 0 | 6 | 6,020 | 3.43 / 6 |
 
 base+modules equals base off station roots.
 
@@ -140,17 +141,16 @@ No station-root row is uncertain.
   `lenientfireallowance` beam are not simulated.
 - `R` is a census value; `f` changed the truth on 2 rows.
 
-**Cost.** Worst case per turret per pass:
+**Cost** (updated in "Runtime feasibility"). Worst case per turret per pass:
 
 - base+ext: 6 `check_line_of_sight` calls (the own-socket branch: probe, `Q(W)`, forward, back, `Q(T)`,
   sector), a beam 3, a guided turret 0;
 - current: 3, or 6 for a station root;
 - base: 4.
 
-base+ext also needs one `create_orientation` and one `bboxdistanceto` read. It makes those only when
-the probe fails, and before any probe for a beam. Calls per scored settled row: 1 call 5,594; 2 calls
-1,588; 3 calls 2,536; 4 calls 1,404; 5 calls 5,766; 6 calls 734. The 30 km lines are longer than
-current's, so each ray's broad-phase cost may be higher. None of this is measured frame time.
+These counts are `check_line_of_sight` calls only; "Runtime feasibility" adds the per-target box
+recovery and the orientations. The 30 km lines are longer than current's, so each ray's broad-phase cost
+may be higher. None of this is measured frame time.
 
 **Soundness conditions, all offline:**
 
@@ -158,8 +158,68 @@ current's, so each ray's broad-phase cost may be higher. None of this is measure
   is 10.75 km; the integrity check enforces it per row;
 - `u` is taken toward the aim point nearest the muzzle, which differs from X4's point only near an
   aim-point switch on multi-point targets;
-- a sector-declared call and `create_orientation useaimtarget` from an offset origin are statically
-  traced but never run LIVE.
+- `u` points at the box centre when there is no authored aim point. `create_orientation` does not give
+  that direction (see "Runtime feasibility").
+
+## Runtime feasibility (2026-09-26)
+
+Can base+ext be built from MD actions? Yes, with two changes. Everything below is offline: shipped
+source, the pinned `X4.exe` (SHA-256 re-verified 2026-09-26) and `permission.py`. Records are in the KB
+files named.
+
+**Change 1: the aim direction for a target without authored aim points.** `create_orientation
+useaimtarget` looks at the target's coordinate origin, not the box centre, when the macro has no aim-target
+collection (`macro-box-aimtargets.md`). That covers every station root and most ships. Scored with that
+direction ("as shipped"), base+ext is unchanged on ships and elements but wrong on station roots, MESH:
+
+| population | method | TP | FP | TN | FN | U on PERMIT |
+|---|---|---:|---:|---:|---:|---:|
+| broad station roots (224) | base+ext, direction to box centre | 162 | 0 | 62 | 0 | 0 |
+| | base+ext as shipped | 156 | 6 | 56 | 2 | 4 |
+| `#60` poses (796) | base+ext, direction to box centre | 728 | 0 | 68 | 0 | 0 |
+| | base+ext as shipped | 712 | 16 | 52 | 16 | 0 |
+
+So the station's live union-box centre must be computed. `$station.bboxdistanceto.{$p}` measures to that
+exact box (`turret-fire-range-gate.md`). From an inside point, three reads per face recover it to 0.2 mm
+(simulated worst case under MD's approximate square root): 19 property reads per target per pass.
+
+**Change 2: the BLOCKED proof costs one more call.** Declaring `T.object` on the muzzle-to-step stretch
+separates X4's result 0 (a surface element's own parent) from a block. The worst case is still 6 calls.
+
+**Requirements, by evidence:**
+
+| requirement | status | source |
+|---|---|---|
+| declared target may be a sector; any resolved hit walks to it | native trace | `0x00BCB52D` (no class test), `0x00BCBAE7` (only `useaimtarget` gated), `0x00BCBBEF` walk |
+| sector-frame `targetoffset` converts | native trace + shipped source | `0x003DDE10` parent fast path; XSD `object`/`space`: "any positional" |
+| MD sees what native sees | native trace | shared `0x000BB5D0`: ray settings `{1,1,1}`, layer 3; filters 2/14 overlap; pair lookup `0x000B9020` untraced |
+| start inside geometry | native trace | back faces collide, convex solid: MD and native report it alike |
+| unresolved sub-shape | native trace | MD false; native no-hit rule, so the miss claim agrees |
+| aim direction, authored aim points | native trace | selector uses the supplied position (`0x003EC306`); guard by a second orientation from the turret origin |
+| aim direction, no authored aim point | native trace | `create_orientation` looks at the origin: use the recovered box centre |
+| live box recovery | native trace + simulation | `0x00CF2409` → `0x00B5CB80` → `0x003E0750` |
+| step distance | native trace (KB) | `$target.bboxdistanceto.{$weapon}` |
+| beam test and `R` | native trace | `isbeam` → `0x000F15F0` (`+0x50`); `maxfirerange` → slot `+0x1EF0(false)` |
+| `lenientfireallowance` | shipped source | Xenon-only turret; a plain-beam treatment never gives a false CLEAR |
+| extension length | benchmark | `f × (|box centre − muzzle| + |half-extents|)` covered X4's endpoint on every row; 0 exceptions |
+| guided, membership, IN RANGE | unchanged | GUIDED keeps no ray; `Q(T)` and `Q(T.object)` keep whole-target vs exact-element; no range input |
+
+The multi-aim-point guard changes no benchmark row: all 10 rows whose muzzle and turret origin pick
+different points are decided by the probe first.
+
+**Not observable, and not settled by a live test:**
+
+- Lead. X4's non-beam aim point includes target motion over the flight time, and the firing ship's
+  velocity × flight time. No script property exposes the projectile speed, the barrel direction or the
+  lead point. Against a moving target or from a moving ship, the tested line is the unled one.
+- The same reading is also taken at script time, not firing time.
+
+**Remaining uncertainty:**
+
+- The pair collision lookup `0x000B9020`, and group-16 character bodies (native-only), are untraced for
+  the main world. They could only make a claimed miss wrong where such a body sits on the line.
+- The LargeTarget offset on ships over 500 m with no authored aim point. The probe and `u` use the box
+  centre, while X4 uses the offset. It caused no benchmark error.
 
 ## Answers
 

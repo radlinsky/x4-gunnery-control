@@ -20,11 +20,14 @@ TIE differ in outcome, or the answer changes between f = 1 and the f of the turr
 
 Candidates see what `check_line_of_sight` sees (`excludeself=false`, so the firing turret's own meshes too):
 - current: production at cf459d0 (`benchmark.py`), two nearest modules for a station root;
-- base: the `useaimtarget=true` probe, then step and look back, BLOCKED only when `Q(Z)` true and `Q(W)`
-  false from the muzzle to the step point;
+- base: the `useaimtarget=true` probe, then step and look back, BLOCKED only when, from the muzzle to the
+  step point, a sector-declared check is true and `Q(W)` and `Q(T.object)` are false;
 - base+modules: base, then current's module lines when base is not decided (the owner's hypothesis);
 - base+ext: base, then along the same direction the aimed line continues to EXT: CLEAR when its first hit is a
-  target member (for a beam, within R), or, for other turrets, when it hits nothing (a genuine miss).
+  target member (for a beam, within R), or, for other turrets, when it hits nothing (a genuine miss). The
+  direction points at the aim point: an authored one from `create_orientation`, else the box centre;
+- base+ext as shipped: the same, but for a target without an authored aim point the direction is what
+  `create_orientation useaimtarget` actually returns, the target's coordinate origin (0x003EC289).
 
     python3 research/issue202-line-of-fire/permission.py [--report]   # ~15 min, one niced process
 """
@@ -53,7 +56,7 @@ FIRE_RANGE = {"turret_bor_m_railgun_02_mk1_macro": 8100.0, "turret_bor_l_disrupt
               "turret_bor_m_dumbfire_01_mk1_macro": 5500.0, "turret_par_l_dumbfire_01_mk1_macro": 6500.0}
 BEAMS = {"turret_kha_m_beam_01_mk1_macro"}    # the only benchmark turret whose bullet is a beam (attach="1")
 OBJECT = {"ship surface": "P", "station surface": "ST"}   # a surface element's first class-object ancestor
-METHODS = ("current", "base", "base+modules", "base+ext")
+METHODS = ("current", "base", "base+modules", "base+ext", "base+ext as shipped")
 
 
 def moving(target):
@@ -97,9 +100,14 @@ def test(scene, turret, target, start, ctx, models=St.MODELS):
     step = o + half * u
     origin = target["frame"][0]
     own = {turret["label"]}
+    # create_orientation useaimtarget as shipped: with no authored aim point it looks at the target's origin
+    uo = (origin - o) / np.linalg.norm(origin - o)
+    stepo = o + half * uo
+    centre = Sc.to_world(target["C"], target["frame"])
     row.update(beam=turret["macro"] in BEAMS, R=FIRE_RANGE.get(turret["macro"]), moving=moving(target),
                reach=float(np.linalg.norm(aim - o)), reach_origin=float(np.linalg.norm(origin - o)),
-               step=half, lines={}, x4={})
+               step=half, points=bool(target["points"]),
+               bound=float(np.linalg.norm(centre - o) + np.linalg.norm(target["H"])), lines={}, x4={})
     for m in models:
         row["x4"][m] = dict(      # X4's view: the firing turret ignored
             first=_hit(scene, turret, target, rank, o, d=(aim - o) / row["reach"], tmax=F_MAX * row["reach"],
@@ -111,6 +119,13 @@ def test(scene, turret, target, start, ctx, models=St.MODELS):
             {k: v[0] if v else None for k, v in lines[m].items() if not k.startswith("diag")},
             ext=_hit(scene, turret, target, rank, o, d=u, tmax=EXT, model=m)[:2],
             ext_s=_hit(scene, turret, target, rank, step, d=u, tmax=EXT, model=m)[:2])
+        if not target["points"]:
+            row["lines"][m].update(
+                o_qw=_hit(scene, turret, target, rank, o, e=stepo, model=m)[0],
+                o_fwd=_hit(scene, turret, target, rank, stepo, e=ends["aim"], model=m)[0],
+                o_back=_hit(scene, turret, target, rank, stepo, e=o, model=m)[0],
+                o_ext=_hit(scene, turret, target, rank, o, d=uo, tmax=EXT, model=m)[:2],
+                o_ext_s=_hit(scene, turret, target, rank, stepo, d=uo, tmax=EXT, model=m)[:2])
     return row
 
 
@@ -195,9 +210,10 @@ def base(row, model):
         return ("C", 4, False) if ok else ("U", 4, True)
     if ln["qw_half"] is None:                 # nothing short of the step point: Q(Z) false
         return "U", 3, True
+    # Q(sector) true on that stretch; Q(T.object) tells a target or same-object hit (X4 fires or re-casts)
     if _member(row, ln["qw_half"]) or _same_object(row, ln["qw_half"]):
-        return "U", 3, False
-    return "B", 3, False
+        return "U", 4, False
+    return "B", 4, False
 
 
 def extended(row, model):
@@ -239,9 +255,21 @@ def current(row, model):
                                    if not isinstance(v, list)}), "current")
 
 
+def shipped(row):
+    """The row as the shipped create_orientation would build it: a target without an authored aim point is
+    looked at through its coordinate origin, not its box centre (0x003EC289 -> 0x003EC37B)."""
+    if row["points"]:
+        return row
+    lines = {m: dict(ln, qw_half=ln["o_qw"], fwd_half=ln["o_fwd"], back_half=ln["o_back"], ext=ln["o_ext"],
+                     ext_s=ln["o_ext_s"]) for m, ln in row["lines"].items()}
+    return dict(row, lines=lines)
+
+
 def status(row, model, method):
     if row["state"] == "GUIDED":
         return "G", 0
+    if method == "base+ext as shipped":
+        return extended(shipped(row), model)
     if method == "current":
         s, _r, calls = current(row, model)
         return s, calls
@@ -345,6 +373,8 @@ def report(rows):
         if (r["lines"]["mesh"]["ext_s" if own else "ext"][1] is None
                 and (1 + min(1.1 * r["R"], 500.0) / r["R"] if r["moving"] else 1.0) * r["reach"] > EXT):
             bad.append(f"{r['scene']} {r['turret']} {r['target']}: miss claimed short of X4's endpoint")
+    over = sum(r["state"] == "SETTLED" and r["reach"] > r["bound"] for r in rows)
+    say(f"\nSettled rows whose bearing point lies beyond |muzzle - box centre| + |half-extents|: {over}.")
     far = sum(r["state"] == "SETTLED" and r["reach"] > EXT / F_MAX for r in rows)
     say(f"\nRows whose bearing point lies beyond EXT / F_MAX: {far}.")
     if not rows or not any(r["pop"] == "sixty" for r in rows):
