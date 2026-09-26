@@ -519,6 +519,110 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
   - stored first hits that differ from a re-cast of their stored lines (every 6th pose, both models);
   - a missing positive control.
 
+## Rescue probes for the own-turret case
+
+When the settled probe's first hit is the firing turret itself, the conservative answer is UNKNOWN
+(`self`). This is the probe plus a `Q(W)` call: 676 MESH / 678 HULL settled FN, 0 FP. The rescue methods
+below retry only those rows. Source: `settled.py` "Rescue probes". The established tables are unchanged.
+
+What the mod can use:
+
+- `check_line_of_sight` with any `objectoffset`. The aim point is still selected from the turret
+  component origin, so moving the start keeps the same endpoint.
+- The turret's `macro.boundingbox` (`center`, `max` = half-extents).
+- The direction to the engine's aim point, from `create_orientation useaimtarget` at the turret
+  origin. This is inference, not yet LIVE-checked.
+
+What it cannot use:
+
+- the first hit's position or identity;
+- collision meshes;
+- a per-turret current target;
+- an authored aim point's position.
+
+Results, settled phase (cells MESH / HULL):
+
+| method | implementable | recovered FN | FP | self left UNKNOWN on CLEAR | mean / max calls |
+|---|---|---:|---:|---:|---:|
+| conservative (probe, `Q(W)`) | yes | – | 0 / 0 | 676 / 678 | 1.65 / 2 |
+| `excludeself=true` retry | yes | 676 / 678 | 78 / 56 | 0 / 0 | 1.76 / 3 |
+| restart just past the own-turret hit | no: hit position not exposed | 676 / 678 | 0 / 0 | 0 / 0 | 1.76 / 3 |
+| advance past the turret's `macro.boundingbox` | yes | 6 / 6 | 0 / 0 | 670 / 672 | 1.76 / 3 |
+| advance past the turret's collision-mesh bounds | only with prebuilt per-turret data | 676 / 678 | 0 / 0 | 0 / 0 | 1.76 / 3 |
+| reverse from the aim point to the muzzle, target `excludeself=true`, aim point assumed known | no | 676 / 678 | 546 / 550 | 0 / 0 | 1.76 / 3 |
+| reverse, whole ships whose aim point is the box centre | partly | 74 / 74 | 0 / 0 | 602 / 604 | 1.65 / 3 |
+| `excludeself=true` retry guarded by the advance or the whole-ship reverse | as its guard | same as its guard | 0 / 0 | same | +1 call |
+
+Parked (MESH):
+
+- conservative 111 FP / 1,643 FN;
+- `excludeself=true` retry 426 / 132;
+- restart past the hit 136 / 141;
+- advance past the collision bounds 138 / 140;
+- advance past `macro.boundingbox` 111 / 1,622.
+
+Parked FPs are mostly sibling turrets and the firing hull, which the parked line crosses but the
+settled line does not.
+
+**1. Advance past the own turret, without excluding the firing ship.** The idea works; the
+script-visible box does not.
+
+- `macro.boundingbox` is the union of authored part sizes, not the socket's collision mesh. For
+  `turret_arg_m_dumbfire_02` the box reaches 3.0 m above the mount and the socket 8.1 m. The
+  `par_l_dumbfire_01` and `kha_m_beam_01` sockets also overhang their boxes.
+- So on 1,700 of the settled self rows (MESH), the advanced probe's first hit is still the firing
+  turret's socket.
+- Advanced past the real collision bounds, the same probe matches the ideal restart exactly on settled
+  rows. That needs a shipped per-macro extent table, which is prebuilt data.
+- Skipped segments:
+  - For the `macro.boundingbox` advance, no obstruction lay on the skipped muzzle-to-start segment in
+    this population.
+  - The collision-bounds advance's skipped segments were not recorded separately. It has the same
+    settled FPs as the ideal restart (0), and 2 more parked MESH FPs (138 against 136), which is the
+    upper bound on what its skipping cost.
+  - Both are population results, not guarantees.
+
+**2. A guarded `excludeself=true` retry.** The mod has no signal that the firing hull is off the path.
+
+- The only guards available are the advance and the reverse probe. Each already proves CLEAR by
+  itself, so adding the `excludeself=true` retry costs a call and changes nothing.
+
+**3. A probe from where the first probe stopped.** Impossible as stated.
+
+- `check_line_of_sight` returns only a boolean.
+- `find_object_surface` returns a point but is randomized and unverified (see the KB record).
+- The feasible variant runs the other way: from the aim point back to the muzzle with
+  `object=$target excludeself=true`. It is CLEAR only when its first hit is the firing turret.
+- On a surface element, `excludeself=true` also drops the element's parent hull or module. The probe
+  then misses a parent that blocks: 546 incorrect CLEARs, 428 of them `arg_m_dumbfire_02` against a
+  ship surface.
+- It is sound only when the whole target is excluded, which means whole ships and station roots. It
+  also needs the aim point's position:
+  - Whole ships with no authored aim point have it at the macro box centre. That assumes the runtime
+    box is the macro box; the ship override families are untested.
+  - Station roots need a live union box that is not script-visible.
+  - A mod can detect "no authored point" only by comparing the `create_orientation useaimtarget`
+    direction with the direction to the box centre. That is inference.
+
+**4. Other routes.**
+
+- `event_weapon_fired` with `bullet.launcher` and `.rotation` shows that X4 permitted a shot and its
+  bore. That comes only after the turret fires, and the turret's own target is not readable, so it
+  cannot predict CLEAR. It is a LIVE corroboration signal, not a probe.
+- `find_object_surface` with `object=$weapon` could in principle return the own-turret hit point for
+  the ideal restart. Its retries, jitter and lattice entry are unresolved. It needs a LIVE check before
+  any use.
+
+Conclusion:
+
+- Without prebuilt data, no available rescue removes the own-turret UNKNOWNs safely at scale.
+- The whole-ship reverse probe safely recovers 74 of 676 (MESH).
+- An advance past per-macro collision bounds would recover all of them with no incorrect CLEAR here,
+  at the cost of a prebuilt extent table.
+- The unguarded `excludeself=true` retry recovers all of them but claims CLEAR through the firing hull
+  (78 MESH / 56 HULL).
+- Everything above is offline inference; none of it is LIVE.
+
 ## Evidence gaps
 
 1. Which triangle source the layer-3 ray uses: geometry `+0x20` (`-mesh`), at a geometry slot from a

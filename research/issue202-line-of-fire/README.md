@@ -61,6 +61,17 @@ Every row stores its lines' endpoints and barrel direction. The report fails whe
 is missing, empty or incomplete. It also re-casts every stored line of every 6th pose and fails on any
 difference.
 
+## Rescue probes
+
+The physical report also retries rows whose probe first hits the firing turret:
+- `excludeself=true`;
+- the ideal restart past the hit;
+- an advance past `macro.boundingbox` or past the collision bounds;
+- the reverse probe from the aim point, with or without an `excludeself=true` guard.
+
+Each is scored against the same truth for both models and both phases (see findings, "Rescue probes").
+The established tables do not change.
+
 ## Decision-rule regression tests (`benchmark.py`)
 
 Hand-stated first-hit arrangements for blockers, membership, points, weapon classes and uncertainty. They
