@@ -25,7 +25,7 @@ turrets bypass the obstruction check and are only counted (GUIDED).
 
 Separately, the #60 reconstruction (`sixty_*`) puts the Ray's 14 real mounts against the shipped
 `xen_defence` station at a fixed grid of representative poses and compares the two original #60 root probes,
-X4's first ray, the aimed round continued past the bearing point, and a module-hitting positive control.
+X4's first ray, the projectile path along the settled barrel, and a module-hitting positive control.
 
     python3 research/issue202-line-of-fire/settled.py [--report]   # ~13 min, one niced process; needs the #176 corpus
     python3 research/issue202-line-of-fire/settled.py --sixty      # the #60 reconstruction only, ~1 min
@@ -691,165 +691,265 @@ def _spiral(k, n):
 # from the turret-origin excludeself=true root probe, while the turrets fired and hit the station. Neither the
 # firing ship nor the geometry was logged. The owner's Boron Ray (14 turrets, the #202 anchor) stands in for
 # the firing ship, so the 14 mounts are real Ray mounts, but every station placement below is REPRESENTATIVE:
-# a fixed grid, not the #60 geometry.
+# a fixed grid, not the #60 geometry. This is geometry only: it does not model actual firing, weapon
+# readiness, spread, lead or anything after launch.
 
 SIXTY_OUT = ROOT / ".x4-research-cache/issue202-settled/sixty.jsonl.gz"
 SIXTY_PLAN = "xen_defence"
 SIXTY_BEARINGS = 24                  # evenly spread bearings of the station centre from the Ray
 SIXTY_YAWS = (0, 90, 180, 270)       # station yaw
 SIXTY_GAP = Sc.GAPS["ordinary"]      # clearance from the station box face to the Ray's bounding sphere (m)
+SIXTY_TURRETS = 14
+SIXTY_RECHECK = 6                    # the report re-casts every stored line of every 6th pose
+SIXTY_POSES = {f"sixty:b{k}:y{yaw}": (k, yaw) for k in range(SIXTY_BEARINGS) for yaw in SIXTY_YAWS}
 
 
-def sixty_scenes():
-    """(scene, station root) per grid pose: the Ray at the origin, the station's union-box centre on a
-    bearing, the Ray's bounding sphere SIXTY_GAP outside the station box along that bearing."""
+def sixty_scene(k, yaw):
+    """(scene, station root): the Ray at the origin, the station's union-box centre on bearing k, the Ray's
+    bounding sphere SIXTY_GAP outside the station box along that bearing."""
     probe = _station(Sc.Scene("probe"), SIXTY_PLAN, Sc.frame(np.zeros(3), np.eye(3)))[0]
     C0, H0 = probe["C"], probe["H"]
     Cr, Hr = Sc.box(FIRING[0])
-    for k in range(SIXTY_BEARINGS):
-        d = _spiral(k, SIXTY_BEARINGS)
-        for yaw in SIXTY_YAWS:
-            R = Sc.ry(yaw)
-            u = np.abs(-d @ R.T)                           # bearing from the centre, station frame
-            face = min(H0[i] / u[i] for i in range(3) if u[i] > 1e-9)
-            sc = _ray_scene(f"sixty:b{k}:y{yaw}")
-            centre = Cr + d * (face + float(np.linalg.norm(Hr)) + SIXTY_GAP)
-            root = _station(sc, SIXTY_PLAN, Sc.frame(centre - C0 @ R, R))[0]
-            yield sc, root
+    d, R = _spiral(k, SIXTY_BEARINGS), Sc.ry(yaw)
+    u = np.abs(-d @ R.T)                           # bearing from the centre, station frame
+    face = min(H0[i] / u[i] for i in range(3) if u[i] > 1e-9)
+    sc = _ray_scene(f"sixty:b{k}:y{yaw}")
+    centre = Cr + d * (face + float(np.linalg.norm(Hr)) + SIXTY_GAP)
+    return sc, _station(sc, SIXTY_PLAN, Sc.frame(centre - C0 @ R, R))[0]
+
+
+def sixty_lines(row, own, exself):
+    """{name: (start, end, direction, skip)} of one stored row. Every line toward the station ends at the
+    union-box centre, the bearing point of a station root:
+    - muzzle: the #60 MD probe from the barrelposition, excludeself=false (sees the turret's own socket);
+    - origin_ex: the #60 MD probe from the turret component origin (no objectoffset), excludeself=true (drops
+      the turret and the firing hull, keeps siblings);
+    - native: X4's pre-fire segment from the barrelposition, ignoring only the firing turret;
+    - projectile: from the barrelposition along the settled barrel's +Z to SHOT_RANGE, the firing turret
+      ignored (a straight path, not a launched round);
+    - control / control_native: the barrelposition to the box centre of the module nearest the firing ship
+      (production's first module), as MD excludeself=false and with only the firing turret ignored.
+    A turret that cannot bear is probed from its parked barrel (yaw 0, pitch 0): #60 did not log its rest."""
+    o, aim = np.array(row["muzzle"]), np.array(row["aim"])
+    out = dict(muzzle=(o, aim, None, ()), origin_ex=(np.array(row["origin"]), aim, None, exself))
+    if row["state"] == "SETTLED":
+        c = np.array(row["control"])
+        out.update(native=(o, aim, None, own), projectile=(o, None, np.array(row["barrel"]), own),
+                   control=(o, c, None, ()), control_native=(o, c, None, own))
+    return out
+
+
+def sixty_cast(sc, turret, root, row):
+    """{model: {line: benchmark.py symbol of its first hit}}"""
+    rank = module_rank(sc, root)
+    own = {turret["label"]}
+    exself = own | {label for label in sc.meta if label.startswith("F:hull")}
+    out = {}
+    for model in MODELS:
+        out[model] = {}
+        for name, (a, e, d, skip) in sixty_lines(row, own, exself).items():
+            label = Gm.first_hit(sc.instances, a, e=e, d=d, tmax=None if d is None else SHOT_RANGE,
+                                 model=model, skip=skip)[0]
+            out[model][name] = symbol(sc, label, turret, root, rank)
+    return out
 
 
 def sixty_test(sc, turret, root, ctx):
-    """One Ray turret's lines toward the station root, as benchmark.py symbols per shape model:
-    - muzzle: the #60 MD probe from the settled barrelposition, excludeself=false (sees the turret's own socket);
-    - origin_ex: the #60 MD probe from the turret component origin (no objectoffset), excludeself=true (drops
-      the turret and the firing hull, keeps siblings);
-    - native: X4's pre-fire segment, settled barrelposition to the bearing point, ignoring only the turret;
-    - round: the aimed line continued past the bearing point (stationary target, no spread, no lead);
-    - control / control_native: the settled barrelposition to the box centre of the module nearest the firing
-      ship (production's first module), as MD excludeself=false and as X4's own-turret-only exclusion."""
     record = ctx["records"][turret["key"]]
-    rank = module_rank(sc, root)
     aim = Sc.to_world(root["C"], root["frame"])     # a station root's bearing point (bearing_point)
     pt = tuple(float(v) for v in Sc.to_local(aim, turret["frame"]))
     state, y, x = settle(record, ctx["turs"][turret["macro"]], pt, 0.0)
-    row = dict(scene=sc.name, turret=turret["label"], macro=turret["macro"], state=state)
-    own = {turret["label"]}
-    exself = own | {label for label in sc.meta if label.startswith("F:hull")}
     settled = state == "SETTLED"
-    # a turret that cannot bear does not fire, but its probes still count toward 0/14: probe it from its
-    # parked barrel (yaw 0, pitch 0), since #60 did not log where it rested
-    o = _muzzles(ctx["evs"][turret["macro"]], record["endpoint"]["tag"], x if settled else 0.0,
-                 y if settled else 0.0, turret["frame"])[0][0]
-    lines = dict(muzzle=(o, aim, ()), origin_ex=(turret["frame"][0], aim, exself))
+    o, z = _muzzles(ctx["evs"][turret["macro"]], record["endpoint"]["tag"], x if settled else 0.0,
+                    y if settled else 0.0, turret["frame"])[0]
+    row = dict(scene=sc.name, turret=turret["label"], macro=turret["macro"], state=state,
+               origin=turret["frame"][0].tolist(), muzzle=o.tolist(), aim=aim.tolist())
     if settled:
+        rank = module_rank(sc, root)
         m1 = next(m for m in root["modules"] if rank[m["label"]] == "M1")
-        control = Sc.to_world(Sc.box(m1["macro"])[0], m1["frame"])
-        lines.update(native=(o, aim, own), control=(o, control, ()), control_native=(o, control, own))
-    d = (aim - o) / np.linalg.norm(aim - o)
-    row["hits"] = {}
-    for model in MODELS:
-        h = {k: Gm.first_hit(sc.instances, a, e=b, model=model, skip=s)[0] for k, (a, b, s) in lines.items()}
-        if settled:
-            h["round"] = Gm.first_hit(sc.instances, o, d=d, tmax=SHOT_RANGE, model=model, skip=own)[0]
-        row["hits"][model] = {k: symbol(sc, v, turret, root, rank) for k, v in h.items()}
+        row.update(barrel=(z / np.linalg.norm(z)).tolist(),
+                   control=Sc.to_world(Sc.box(m1["macro"])[0], m1["frame"]).tolist())
+    row["hits"] = sixty_cast(sc, turret, root, row)
     return row
 
 
-def sixty_outcome(h):
-    """Check results and X4's permission from one model's first hits. A root-declared check accepts a module
-    or module-element hit (+0x70 walk); X4 fires on a station hit (result 1) and on no hit."""
-    def fire(sym):
-        return "fires, no hit" if sym is None else "fires, station hit" if B.qualifies("ST", sym) else "refuses"
-    return dict(muzzle=B.qualifies("ST", h["muzzle"]), origin_ex=B.qualifies("ST", h["origin_ex"]),
-                native=fire(h["native"]), round=B.qualifies("ST", h["round"]),
-                control_root=B.qualifies("ST", h["control"]), control_module=B.qualifies("M1", h["control"]),
-                control_native=fire(h["control_native"]))
+MECHANISMS = ("line through the empty centre", "station geometry before the centre",
+              "own turret collision (mod check only)", "firing ship hull", "other obstruction", "cannot bear")
+
+
+def sixty_outcome(row, model):
+    """Primary mechanism = the first hit of the muzzle probe (the mod's check). X4's permission, the
+    turret-origin probe and the projectile path are additional observations, never a second mechanism."""
+    h = row["hits"][model]
+
+    def member(sym):
+        return B.qualifies("ST", sym)
+    out = dict(muzzle=member(h["muzzle"]), origin_ex=member(h["origin_ex"]))
+    if row["state"] != "SETTLED":
+        return dict(out, mechanism="cannot bear", permit=None, projectile=None, behind=None)
+    first = h["muzzle"]
+    mechanism = (MECHANISMS[0] if first is None else MECHANISMS[1] if member(first) else
+                 MECHANISMS[2] if first == "W" else MECHANISMS[3] if first == "S" else MECHANISMS[4])
+    behind = None
+    if first == "W":           # what X4, which ignores the turret's own meshes, meets on the same segment
+        behind = "empty centre" if h["native"] is None else "station" if member(h["native"]) else "obstruction"
+    return dict(out, mechanism=mechanism, behind=behind, permit=h["native"] is None or member(h["native"]),
+                projectile=member(h["projectile"]), control_root=member(h["control"]),
+                control_module=B.qualifies("M1", h["control"]),
+                control_permit=h["control_native"] is None or member(h["control_native"]))
+
+
+def sixty_integrity(rows, recheck=True):
+    """The complete reconstruction ran and was saved, and every stored result matches its geometry."""
+    bad = []
+    names = Counter(r["scene"] for r in rows)
+    if set(names) != set(SIXTY_POSES) or len(rows) != len(SIXTY_POSES) * SIXTY_TURRETS:
+        return [f"#60 reconstruction incomplete: {len(rows)} rows over {len(names)} poses, expected "
+                f"{len(SIXTY_POSES) * SIXTY_TURRETS} over {len(SIXTY_POSES)}"]
+    for name in SIXTY_POSES:
+        if len({r["turret"] for r in rows if r["scene"] == name}) != SIXTY_TURRETS:
+            bad.append(f"#60 pose without 14 distinct turrets: {name}")
+    for r in rows:
+        want = {"muzzle", "origin_ex"} | ({"native", "projectile", "control", "control_native"}
+                                          if r["state"] == "SETTLED" else set())
+        if set(r.get("hits", {})) != set(MODELS) or any(set(r["hits"][m]) != want for m in MODELS):
+            bad.append(f"#60 row without every line under both models: {r['scene']} {r['turret']}")
+            continue
+        if r["state"] == "SETTLED":
+            if abs(np.linalg.norm(r["barrel"]) - 1) > 1e-6:
+                bad.append(f"#60 barrel direction not a unit vector: {r['scene']} {r['turret']}")
+            for m in MODELS:
+                h = r["hits"][m]
+                if h["muzzle"] != "W" and h["native"] != h["muzzle"]:   # same segment; X4 only drops the turret
+                    bad.append(f"#60 X4 segment disagrees with the muzzle probe: {r['scene']} {r['turret']} {m}")
+    if bad or not recheck:
+        return bad
+    for name, (k, yaw) in list(SIXTY_POSES.items())[::SIXTY_RECHECK]:
+        sc, root = sixty_scene(k, yaw)
+        turrets = {t["label"]: t for t in sc.turrets}
+        for r in rows:
+            if r["scene"] == name and sixty_cast(sc, turrets[r["turret"]], root, r) != r["hits"]:
+                bad.append(f"#60 stored first hits differ from a re-cast of their stored lines: {name} {r['turret']}")
+    return bad
 
 
 def sixty_report(rows):
     """-> (text, integrity failures) for the #60 reconstruction."""
-    out, bad = [], []
+    out = []
     say = out.append
+    bad = sixty_integrity(rows)
+    say(f"## #60 reconstruction: Ray vs `{SIXTY_PLAN}` (representative poses x 14 real Ray mounts)\n")
+    say("The 14 mounts, turret macros and settling are the owner's Boron Ray (the #202 anchor). #60 did not log "
+        "the firing ship or any geometry, so every station pose is a fixed grid point, not the #60 placement. "
+        "Both original probes end at the station's union-box centre: `muzzle` from the barrelposition with "
+        "excludeself=false, `origin` from the turret component origin with excludeself=true. `X4 permits` is the "
+        "pre-fire segment (barrelposition to the centre, firing turret ignored) meeting nothing or the station. "
+        "`projectile` is the straight path along the settled barrel's +Z. None of this is actual firing, weapon "
+        "readiness or post-launch behavior.\n")
+    if bad:
+        say("### #60 reconstruction integrity\n\nFAIL\n" + "\n".join(f"- {b}" for b in bad[:30]))
+        return "\n".join(out), bad
     poses = defaultdict(list)
     for r in rows:
         poses[r["scene"]].append(r)
-    say(f"## #60 reconstruction: Ray vs `{SIXTY_PLAN}` ({len(poses)} representative poses x 14 real Ray mounts)\n")
-    say("The 14 mounts, turret macros and settling are the owner's Boron Ray (the #202 anchor). #60 did not log "
-        "the firing ship or any geometry, so every station pose is a fixed grid point, not the #60 placement. "
-        "Probes: `muzzle` = settled barrelposition, excludeself=false; `origin ex` = turret component origin, "
-        "excludeself=true; both end at the station's union-box centre (useaimtarget on a station root). "
-        "`X4` = the pre-fire segment ignoring only the firing turret. `round` = the aimed line continued past "
-        "the centre (stationary target; no spread, lead or slew).\n")
-    settled = Counter(r["state"] for r in rows)
-    say(f"- turret tests: {len(rows)}; " + ", ".join(f"{k}: {n}" for k, n in settled.most_common()))
-    ok = [r for r in rows if r["state"] == "SETTLED"]
-    for model in MODELS:
-        combos = Counter()
-        for r in ok:
-            s = sixty_outcome(r["hits"][model])
-            combos[s["muzzle"], s["origin_ex"], s["native"], s["round"]] += 1
-            if s["muzzle"] and s["native"] == "refuses":
-                bad.append(f"muzzle probe CLEAR but X4 refuses: {r['scene']} {r['turret']} {model}")
-            if s["round"] != (s["native"] == "fires, station hit") and s["native"] != "fires, no hit":
-                bad.append(f"aimed round disagrees with its own first segment: {r['scene']} {r['turret']} {model}")
-        say(f"\n### Per turret, {model.upper()} ({len(ok)} settled)\n")
-        say("| muzzle probe | origin ex probe | X4 pre-fire | aimed round hits station | turrets |")
-        say("|---|---|---|---|---:|")
-        for (m, e, n, rd), c in sorted(combos.items(), key=lambda kv: -kv[1]):
-            say(f"| {'CLEAR' if m else 'not'} | {'CLEAR' if e else 'not'} | {n} | {'yes' if rd else 'no'} | {c} |")
-        both_not = sum(c for (m, e, n, rd), c in combos.items() if not m and not e and n != "refuses")
-        explain = sum(c for (m, e, n, rd), c in combos.items() if not m and not e and n != "refuses" and rd)
-        say(f"\nBoth probes not CLEAR while X4 fires: {both_not} turrets; of these the aimed round hits the "
-            f"station on {explain}.")
-    def pose_class(rs, model):
-        """'0/14 + 0/14' when no turret's probe is CLEAR; then whether a turret fires, and whether a fired
-        aimed round reaches the station."""
-        if any(B.qualifies("ST", r["hits"][model][k]) for r in rs for k in ("muzzle", "origin_ex")):
+    n = len(rows)
+    outc = {m: [(r, sixty_outcome(r, m)) for r in rows] for m in MODELS}
+    say(f"- {len(poses)} poses x {SIXTY_TURRETS} turrets = {n} turret placements, all present; "
+        f"stored lines re-cast on every {SIXTY_RECHECK}th pose")
+    say("\n### Per turret placement, by primary mechanism (the muzzle probe's first hit)\n")
+    say(f"Denominator {n} per model. X4 permits and projectile hits are counted within each row, never as a "
+        "second mechanism.\n")
+    say("| primary mechanism | MESH turrets | X4 permits | projectile hits station | HULL turrets | X4 permits "
+        "| projectile hits station |")
+    say("|---|---:|---:|---:|---:|---:|---:|")
+    for mech in MECHANISMS:
+        cells = []
+        for m in MODELS:
+            os = [o for _r, o in outc[m] if o["mechanism"] == mech]
+            cells += [str(len(os))] + (["-", "-"] if mech == "cannot bear" else
+                                       [str(sum(o["permit"] for o in os)), str(sum(o["projectile"] for o in os))])
+        say(f"| {mech} | " + " | ".join(cells) + " |")
+    say("\nOwn turret collision: what X4, ignoring it, meets on the same segment (additional observation):\n")
+    for m in MODELS:
+        c = Counter(o["behind"] for _r, o in outc[m] if o["behind"])
+        say(f"- {m.upper()}: " + (", ".join(f"{k} {v}" for k, v in sorted(c.items())) or "none"))
+    say("\nThe two original probes, each on its own:\n")
+    say("| model | muzzle probe CLEAR | origin probe CLEAR | both CLEAR | denominator |")
+    say("|---|---:|---:|---:|---:|")
+    for m in MODELS:
+        o = [x for _r, x in outc[m]]
+        say(f"| {m.upper()} | {sum(x['muzzle'] for x in o)} | {sum(x['origin_ex'] for x in o)} "
+            f"| {sum(x['muzzle'] and x['origin_ex'] for x in o)} | {n} |")
+    say("\nProjectile paths where X4 permits:\n")
+    say("| model | X4 permits | projectile hits station | projectile misses |")
+    say("|---|---:|---:|---:|")
+    for m in MODELS:
+        o = [x for _r, x in outc[m] if x["permit"]]
+        say(f"| {m.upper()} | {len(o)} | {sum(x['projectile'] for x in o)} | {sum(not x['projectile'] for x in o)} |")
+    angles = sorted(math.degrees(math.acos(min(1.0, float(np.dot(r["barrel"], np.subtract(r["aim"], r["muzzle"]))
+                                                           / np.linalg.norm(np.subtract(r["aim"], r["muzzle"]))))))
+                    for r in rows if r["state"] == "SETTLED")
+    say(f"\nSettled barrel +Z versus the muzzle-to-centre line (deg, {len(angles)} settled): median "
+        f"{_q(angles, .5):.3f}, p90 {_q(angles, .9):.3f}, max {max(angles, default=0):.3f}")
+    say(f"\n### Per mount ({len(poses)} poses each; cells MESH/HULL)\n")
+    say("| mount | macro | bears | muzzle probe CLEAR | origin probe CLEAR | X4 permits | projectile hits station |")
+    say("|---|---|---:|---:|---:|---:|---:|")
+    for label in sorted({r["turret"] for r in rows}):
+        per = {m: [o for r, o in outc[m] if r["turret"] == label] for m in MODELS}
+        macro = next(r["macro"] for r in rows if r["turret"] == label)
+
+        def cell(f):
+            return "/".join(str(sum(bool(f(o)) for o in per[m])) for m in MODELS)
+        say(f"| {label.split(':')[-1]} | {macro} | {cell(lambda o: o['mechanism'] != 'cannot bear')} "
+            f"| {cell(lambda o: o['muzzle'])} | {cell(lambda o: o['origin_ex'])} | {cell(lambda o: o['permit'])} "
+            f"| {cell(lambda o: o['projectile'])} |")
+
+    def pose_class(rs, m):
+        os = [sixty_outcome(r, m) for r in rs]
+        if any(o["muzzle"] or o["origin_ex"] for o in os):
             return "a probe CLEAR"
-        fired = [sixty_outcome(r["hits"][model]) for r in rs if r["state"] == "SETTLED"]
-        fired = [s for s in fired if s["native"] != "refuses"]
-        if not fired:
-            return "0/14 + 0/14, no turret fires"
-        return "0/14 + 0/14, fires, a round hits" if any(s["round"] for s in fired) else "0/14 + 0/14, fires, all miss"
-    classes = {n: {m: pose_class(rs, m) for m in MODELS} for n, rs in poses.items()}
-    say("\n### Poses: both probes 0/14 while turrets fire (turrets that cannot bear probed from the parked barrel)\n")
-    say("| pose class | MESH | HULL | both models agree |")
+        permitted = [o for o in os if o["permit"]]
+        if not permitted:
+            return "both probes 0/14, X4 permits none"
+        return ("both probes 0/14, X4 permits, a projectile path hits the station" if any(o["projectile"] for o in permitted)
+                else "both probes 0/14, X4 permits, every projectile path misses")
+    classes = {name: {m: pose_class(rs, m) for m in MODELS} for name, rs in poses.items()}
+    say(f"\n### Per station arrangement (denominator {len(poses)} poses)\n")
+    say("| pose class | MESH | HULL | both models |")
     say("|---|---:|---:|---:|")
     for c in sorted({c for v in classes.values() for c in v.values()}):
         say(f"| {c} | {sum(v['mesh'] == c for v in classes.values())} | {sum(v['hull'] == c for v in classes.values())} "
             f"| {sum(v['mesh'] == v['hull'] == c for v in classes.values())} |")
-    for c in sorted({v["mesh"] for v in classes.values()}):
-        n = Counter(sum(r["state"] == "SETTLED" for r in poses[p]) for p, v in classes.items() if v["mesh"] == c)
-        say(f"- {c}: turrets that bear per pose (MESH) {dict(sorted(n.items()))}")
-    demo = next((n for n, v in classes.items() if v["mesh"] == v["hull"] == "0/14 + 0/14, fires, a round hits"), None)
+    for m in MODELS:
+        say(f"- {m.upper()}: muzzle probe 0/14 at {sum(not any(sixty_outcome(r, m)['muzzle'] for r in rs) for rs in poses.values())}, "
+            f"origin probe 0/14 at {sum(not any(sixty_outcome(r, m)['origin_ex'] for r in rs) for rs in poses.values())} poses")
+    bears = Counter(sum(r["state"] == "SETTLED" for r in rs) for rs in poses.values())
+    say(f"- turrets that bear per pose: {dict(sorted(bears.items()))}")
+    demo = next((name for name, v in classes.items()
+                 if v["mesh"] == v["hull"] == "both probes 0/14, X4 permits, a projectile path hits the station"), None)
+    say("\nFirst pose with both probes 0/14, X4 permitting and a projectile path hitting the station, under both "
+        "models: " + (f"`{demo}`\n" if demo else "**none**"))
     if demo:
-        say(f"\nFirst pose in grid order with that pattern under both models: `{demo}`\n")
-        say("| turret | macro | state | muzzle first hit | origin ex first hit | X4 | aimed round | MESH = HULL |")
-        say("|---|---|---|---|---|---|---|---|")
+        say("| turret | state | primary mechanism | X4 permits | projectile | MESH = HULL |")
+        say("|---|---|---|---|---|---|")
         for r in sorted(poses[demo], key=lambda r: r["turret"]):
-            h = r["hits"]["mesh"]
-            if r["state"] == "SETTLED":
-                s = sixty_outcome(h)
-                x4, rd, same = s["native"], "hits" if s["round"] else "misses", sixty_outcome(r["hits"]["hull"]) == s
-            else:
-                x4, rd, same = "does not fire", "-", h == r["hits"]["hull"]
-            say(f"| {r['turret'].split(':')[-1]} | {r['macro']} | {r['state']} | {mech_sym(h['muzzle'])} "
-                f"| {mech_sym(h['origin_ex'])} | {x4} | {rd} | {'yes' if same else 'no'} |")
-    say("\n### Positive control: settled muzzle to the nearest module's box centre\n")
-    say("| model | first hit | root-declared | module-declared | X4 (own turret ignored) | turrets |")
+            o, oh = sixty_outcome(r, "mesh"), sixty_outcome(r, "hull")
+            say(f"| {r['turret'].split(':')[-1]} | {r['state']} | {o['mechanism']} | "
+                f"{'-' if o['permit'] is None else 'yes' if o['permit'] else 'no'} | "
+                f"{'-' if o['projectile'] is None else 'hits' if o['projectile'] else 'misses'} | {'yes' if o == oh else 'no'} |")
+    say("\n### Positive control: barrelposition to the nearest module's box centre (settled turrets)\n")
+    say("| model | first hit | root-declared | module-declared | X4 permits | turrets |")
     say("|---|---|---|---|---|---:|")
-    for model in MODELS:
-        ctl = Counter()
-        for r in ok:
-            s = sixty_outcome(r["hits"][model])
-            ctl[mech_sym(r["hits"][model]["control"]), s["control_root"], s["control_module"], s["control_native"]] += 1
+    for m in MODELS:
+        ctl = Counter((mech_sym(r["hits"][m]["control"]), o["control_root"], o["control_module"], o["control_permit"])
+                      for r, o in outc[m] if o["permit"] is not None)
         for (sym, root, mod, nat), c in sorted(ctl.items(), key=lambda kv: -kv[1]):
-            say(f"| {model} | {sym} | {'CLEAR' if root else 'not'} | {'CLEAR' if mod else 'not'} | {nat} | {c} |")
-        if not ctl[("M1", True, True, "fires, station hit")]:
-            bad.append(f"no positive control: no {model} line hits the nearest module with both declarations CLEAR")
-    say("\nPermission is not a hit. X4's segment ends at the centre, so `fires, no hit` says nothing about where "
-        "the round lands: past an empty centre it can strike a module behind it or nothing at all. These are "
-        "representative paths. They show which outcomes the geometry allows, not what happened in #60.")
+            say(f"| {m} | {sym} | {'CLEAR' if root else 'not'} | {'CLEAR' if mod else 'not'} | "
+                f"{'yes' if nat else 'no'} | {c} |")
+        if not ctl[("M1", True, True, True)]:
+            bad.append(f"no positive control: no {m} line hits the nearest module with both declarations CLEAR")
+    say("\nThese are representative paths. They show which outcomes the geometry allows. They do not show what "
+        "happened in #60 or explain its recorded hits.")
     say("\n### #60 reconstruction integrity\n")
     say("PASS" if not bad else "FAIL\n" + "\n".join(f"- {b}" for b in bad[:30]))
     return "\n".join(out), bad
@@ -1248,7 +1348,8 @@ def load_rows(path=OUT):
 
 
 def sixty(ctx, out):
-    for sc, root in sixty_scenes():
+    for k, yaw in SIXTY_POSES.values():
+        sc, root = sixty_scene(k, yaw)
         for turret in sc.turrets:
             out.write(json.dumps(sixty_test(sc, turret, root, ctx), separators=(",", ":"), default=float) + "\n")
 
@@ -1266,7 +1367,11 @@ def main():
         with gzip.open(SIXTY_OUT, "wt") as stream:
             sixty(ctx, stream)
     text, bad = ("", []) if only60 else report(load_rows())
-    text60, bad60 = sixty_report(load_rows(SIXTY_OUT)) if SIXTY_OUT.exists() else ("## #60 reconstruction\n\nnot run", [])
+    if SIXTY_OUT.exists():
+        text60, bad60 = sixty_report(load_rows(SIXTY_OUT))
+    else:
+        bad60 = [f"#60 reconstruction not run: {SIXTY_OUT} is missing (run settled.py or --sixty)"]
+        text60 = "## #60 reconstruction\n\nFAIL\n- " + bad60[0]
     print(text + "\n\n" + text60)
     return 1 if bad or bad60 else 0
 
