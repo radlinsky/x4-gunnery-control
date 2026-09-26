@@ -9,6 +9,7 @@ python3 research/issue202-line-of-fire/settled.py --report        # re-report th
 nice python3 research/issue202-line-of-fire/permission.py         # scored against X4's pre-fire permission, ~13 min
 python3 research/issue202-line-of-fire/benchmark.py               # decision-rule regression tests, < 1 s
 lua research/issue202-line-of-fire/runtime.lua                    # real ui/gunnery_control.lua pass behavior
+nice python3 research/issue202-line-of-fire/shield_case.py [debug.log]  # LIVE shield no-fire case, ~1 min
 ```
 
 `settled.py` needs the ignored #176 corpus (`python3 research/issue176-a4x/corpus.py`), the official

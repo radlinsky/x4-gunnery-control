@@ -1126,3 +1126,53 @@ The one remaining error is the firing turret's own collision. The options:
 
 For station roots the probe tests the right point. The current two-module lines do not. Note that X4
 itself permits fire at a station root through an empty centre.
+
+## LIVE shield no-fire: Ray turret `0x3e594` (2026-09-26)
+
+Owner log SHA-256 `1f69e3d0…` (not stored). Ray `con_turret_m_11` (`turret_bor_m_railgun_02_mk1`, a
+non-beam) read CLEAR against the LEFT Osaka's XEN M Shield Generator Mk2 `0x1793c7` from the first scan
+(248981.83) onward, but never fired. `shield_case.py` rebuilds that one turret from its logged rows.
+
+- **The scene is exact** (inference, from logged data). A rigid fit places the Osaka and its
+  `con_shieldgen_02` shield within 1 mm of every logged `rel`. The settling model reproduces the muzzle
+  that fired at the graviton turret to 0.1 mm. Aimed at the shield's authored aim point, it predicts
+  `mark_7`'s logged muzzle to 0.1 mm. So the turret bore on the shield. The `mark_6`→`mark_7` muzzle shift
+  is the hunting the owner describes when a turret cannot fire; it does not affect the check.
+- **Our collision model says X4 fires.** The shield is not a ship or engine, so X4's `f = 1`: its first
+  ray ends exactly at the aim point, 3310.1 m. With the shield's collision file, that ray hits the shield
+  at 3306.7 m (classifier 1, fire) in both shape models. The production probe hits the same way, and
+  every Ray turret with a clear path does too (12 of 14 from their logged muzzles).
+- **The game disagrees with the model.** The same probe (`muzzle_los_self`, identical to production's)
+  was 0 for all 14 turrets at both marks; it was 1 against the graviton turret. The one reading that
+  reproduces `0x3e594`'s logged probe=0 and CLEAR together is that MD rays do not see this shield element.
+  Then every line misses: nothing lies on the aim line out to 3528 m. So CLEAR came from the sector
+  genuine-miss route. This is an inference, not reproduced.
+- **CLEAR is not proven wrong.** Production's non-beam line starts at the muzzle, or at the step point
+  past its own socket, and runs 1.0001 × the aim distance + 1 m. It contains X4's first ray. Its C routes
+  are "the first hit is the shield" and "no hit at all". Under both, X4's documented first ray on the
+  same geometry sees the shield first or nothing, and a non-beam fires either way. No second ray
+  arises, because result 0 needs a hit on the Osaka itself first, and nothing is on that line.
+- **The exact endpoint changes nothing here.** With the shield hit at 3306.7 m, both lengths end past
+  it. With the shield invisible, nothing is hit by 3311.4 m (the exact endpoint) or by 3528.2 m (the
+  box bound before `fef5c7d`).
+- **Still plausible:**
+  1. X4's native ray (ray group 7, MD's is 1) sees a collider that MD's does not, giving result 2
+     (blocked), or result 0 with a failing second ray to the shield origin. That would make the CLEAR
+     wrong.
+  2. A firing requirement outside the pre-fire gate: for example, the turret AI's handling of an
+     element target that its rays cannot hit.
+
+  The fleet-wide pattern fits a target-level cause better than a per-turret line: one launch in 71 s from 14 ready,
+  in-range turrets, against 40–47 shots at the graviton in 5 s. (`aimed=` in FIRED rows is
+  `player.target`, so `0x3e59e`'s single launch does not show that it aimed at the shield; its
+  `aim_error_yaw` of 0.016 rad is 54 m off it.)
+- **Minimum diagnostic.** One Test Lab mark row for `0x3e594` against `0x1793c7`, from the logged
+  muzzle:
+  1. `Q(T)` on a short segment through the aim point, from 50 m before it to 50 m past, to test
+     whether MD rays can hit this element at all;
+  2. `Q(T)`, `Q(T.object)` and `Q(sector)` from the muzzle to exactly the aim point: X4's first ray;
+  3. `Q(T)` from the muzzle to the shield's origin: X4's second ray.
+
+  If (2) shows the shield first, or no hit, the documented pre-fire gate permits fire. The one
+  remaining fact is then native and cannot be seen from MD: the return of `0x00816D20` (or its
+  classifier `0x7E6CB0`) for this weapon on a withheld frame. That decides between cases 1 and 2.
