@@ -302,8 +302,10 @@ Why the candidate set is exactly these categories:
   another class-`object` parent. A module gets its own bodies when its owning object is
   a station. Turrets and weapons have none, so a weapon cannot block its own
   shot through its own body;
-- bodies register in their zone's physics world. The query runs in the physics
-  world of the querying component;
+- bodies register in the physics world of the **active sector** that contains
+  their zone, not in a per-zone world. The query runs in the world of the firing
+  weapon's zone, which is that same sector world (see "Physics worlds belong to
+  active sectors, not zones" below; corrected 2026-09-25);
 - the body filter also applies collision-group filter 14 (argument `0xE`,
   initialized at RVA `0x000C6FA0`). It accepts body groups 1–4, 6–13 and 15–18
   and rejects 0, 5 and 14. Per-class group ids (vtable `+0x1C58`): ship 8 or
@@ -315,6 +317,71 @@ Class ids come from the static name/id table at RVA `0x0255D440` (`0x49` =
 `object`, `0x6D` = `zone`, `0x62` = `station`). The shoot-controller and
 XPhys type names are real RTTI names. "Query body", "stop ancestor" and
 "alternate aim mode" are analyst labels.
+
+### Physics worlds belong to active sectors, not zones
+
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace of the pinned executable (hash and base as above),
+  re-verified 2026-09-25. The world names are the executable's own strings;
+  "Main world", "reference zone" and "active sector" are analyst labels.
+- Live test: no — static trace only
+- Finding: a zone owns no physics world. Every zone in the same active sector
+  resolves to one shared world, so zone boundaries do not partition the
+  pre-fire or `check_line_of_sight` candidate set.
+
+The worlds:
+
+- The world set-up at `0x0083F7D0` creates three named worlds: "Main" (global
+  RVA `0x038F0748`), "Cutscene" (`0x038F0740`) and "Navigation" (`0x038F0738`).
+- The zone's world getter is Zone vtable `+0x1D78` = `0x0083FE70`. It walks the
+  zone's `+0x70` chain to its sector (class `0x58`). It returns "Main" when that
+  sector is the sector of the global player anchor (`0x0083FECC`–`0x0083FF21`;
+  the highway case goes through `0x009F7C20`). It returns "Cutscene" when the
+  sector matches the second anchor from `0x009FCA10` (`0x0083FF92`). Otherwise
+  it returns null.
+
+Bodies and queries use that world:
+
+- **Bodies.** The generic builder `0x0051BB90` walks the component's `+0x70`
+  chain to its zone (class `0x6D`, `0x0051BBAF`–`0x0051BBD3`) and takes that
+  zone's world (`0x0051BBF6`). It builds the layer-0/1 and layer-3 bodies
+  relative to the world's own zone at `world+0x40` (`0x0051BC0E`/`0x0051BC42` →
+  `0x0051B730` → `0x003DB8A0`). A zone with no world gets no bodies
+  (`0x0051BC02`).
+- **Queries.** The ray wrapper `0x000BC4D0` takes the query zone. If that zone
+  is not `world+0x40`, it converts the segment into `world+0x40`'s frame
+  (`0x000BC537`–`0x000BC58B`) before casting.
+- **Native pre-fire.** The query zone is the weapon's zone (`+0x70` walk at
+  `0x00816D7A`–`0x00816D96`). The world lookups are at `0x00817AB7` and
+  `0x00817B8C`. A null world skips the cast, which leaves no hit.
+- **MD `check_line_of_sight`.** The query zone is the `object`'s zone
+  (`0x00BCB58B`–`0x00BCB5DA`, through the thread-selected `+0xE0`/`+0x160`
+  parent link). Both endpoints are converted into that zone's frame
+  (`0x00BCB813`, `0x00BCBB18`). The world lookup is at `0x00BCBB73`; a null
+  world skips the cast and the action returns false.
+
+The native gate refuses a target in another sector:
+
+- Before any ray, the gate compares the weapon's zone with the target's zone
+  (`0x008171D1`–`0x008171F6`). For class Zone that test is inert, because Zone
+  vtable `+0x1D00` is the constant-false stub `0x000B38C0`.
+- It then compares the two zones' sectors (`0x008171FA`–`0x00817254`). Different
+  sectors take `0x0081725A`–`0x008172DB`: the weapon's shoot controller is
+  released and the gate returns no fire.
+
+Consequences:
+
+- A station module, ship or asteroid in another zone of the firing weapon's
+  sector is in the queried world. It can be the first hit for both X4's
+  pre-fire ray and MD `check_line_of_sight`. The earlier record that bodies
+  register in their zone's world, so that cross-zone blockers are not
+  candidates, was wrong.
+- A shot cannot reach collision geometry that both checks miss because of a
+  zone boundary. Across sectors, X4 does not fire. In a sector with no world,
+  no body exists for either check.
+- Not traced: projectile collision after launch, how `world+0x40` is updated,
+  and out-of-sector (no-world) combat.
 
 ### Wrecked ships and station modules keep a pre-fire body
 
@@ -537,19 +604,25 @@ and same world-space `P`, with `useaimtarget=false`.
   [selected-target-line-of-fire.md](selected-target-line-of-fire.md).
 - If both preceding calls are false and `Q(Z,P)=true`, some other relevant body
   was hit, which is native result 2 and LINE OF FIRE BLOCKED. The action's
-  result walk at `0x00BCBBEF` continues to null, and every relevant outer-space
-  layer-3 body in the querying physics world reaches that zone through the same
-  `+0x70` chain.
-- If all three are false, the supported query population produced no hit. A
-  miss leaves the collector hit pointer null and reliably returns false. No
-  legitimate supported outer-space layer-3 hit fails the zone ancestry test.
+  result walk at `0x00BCBBEF` continues to null. It reaches `Z` for every body
+  registered under `weapon.zone`.
+- If all three are false, either the query produced no hit or the first hit is
+  a body under **another zone of the same sector**. CORRECTED 2026-09-25: the
+  queried world is shared by every zone in the active sector (see "Physics
+  worlds belong to active sectors, not zones"). Such a body can be the first hit,
+  but its `+0x70` chain reaches its own zone and the sector, never `Z`. A miss
+  and an other-zone blocker therefore look the same. Treat all-false as UNKNOWN,
+  not as a proven miss.
 
 The action's public `object` target type accepts a zone. Explicit
 `targetoffset` follows the normal target-to-zone transform at
 `0x00BCB83D`–`0x00BCBB18`, so a zone-relative representation of `P` preserves
-the endpoint. Use the firing/query zone, not blindly `target.zone`: the shared
-wrapper runs in the world returned by the querying component at vtable slot
-`+0x1D78`. Changing only the declared target changes the endpoint transform and
+the endpoint. Use the firing/query zone, not blindly `target.zone`: the action
+converts both endpoints into the `object`'s zone and casts in that zone's sector
+world (Zone vtable `+0x1D78`). Declaring the sector instead of `weapon.zone`
+would, by the same `+0x70` walk, also accept other-zone bodies. That is
+inference only; no MD call declaring a sector has been checked, so it is not
+adopted. Changing only the declared target changes the endpoint transform and
 post-query parent comparison; after preserving world-space `P`, it does not
 change the physics world, segment, collector, filters, or closest hit.
 
@@ -686,7 +759,8 @@ object-family groups. Turret, weapon, shield and engine children under an
 existing class-`object` owner add no independent layer-3 body; their eligible
 collision meshes are identified sub-shapes of the owner's body (see below). NPC characters
 are the only other layer-3 creator family; their native-only group-16 bodies
-live in an interior/room physics world, not the weapon's outer-space zone world.
+were recorded as living in an interior/room physics world. That world assignment
+was not re-traced when the per-zone world claim was corrected (2026-09-25).
 
 Therefore MD sees no supported blocker that native ignores, and native sees no
 supported blocker that MD ignores. Ship hulls, stations/modules, asteroids,
@@ -777,9 +851,10 @@ Supported guided missiles remain clear without a ray query.
 | `Q(T,P)` false; `Q(O,P)` true; second-ray contract accepted; target-origin query true | result 0, then exact supported surface hit | clear |
 | same branch; target-origin query false | native second ray rejects | LINE OF FIRE BLOCKED |
 | `Q(T,P)` and `Q(O,P)` false; `Q(Z,P)` true | unrelated closest hit, result 2 | LINE OF FIRE BLOCKED |
-| all three false; non-large controller | constant-true ordinary no-hit policy | clear |
-| all three false; any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
-| unresolved turret type or missile guidance, hierarchy/frame, cross-zone target, or material pair-filter uncertainty | outside proved boundary | UNKNOWN |
+| all three false, genuine miss; non-large controller | constant-true ordinary no-hit policy | clear |
+| all three false, genuine miss; any supported controller/target/surface | supported firing weapon is a turret, so large-controller `+0xB0` remains true | clear |
+| all three false when the line may reach a body under another zone of the same sector | a miss and an other-zone hit both leave `Q(Z,P)` false | UNKNOWN |
+| unresolved turret type or missile guidance, hierarchy/frame, target in another zone, or material pair-filter uncertainty | outside proved boundary (X4 itself refuses only another sector) | UNKNOWN |
 
 With native second-ray handling accepted, the retained worst-case cost is three
 `check_line_of_sight` calls per supported non-guided firing-origin + aim-point
@@ -858,8 +933,9 @@ launch, but cannot select a different pre-fire obstruction branch.
 Return UNKNOWN only when a required input or an unresolved part of the normal
 check prevents a sound decision: turret type is unavailable or ambiguous;
 missile guidance is missing or ambiguous; the firing-origin/aim-point hierarchy
-or frame cannot be established; the line may cross physics zones; or the
-recorded collision pair-filter uncertainty applies. A known conventional or
+or frame cannot be established; the first hit may be a body under another zone
+of the same sector, which `Q(Z,P)` cannot recognise; or the recorded collision
+pair-filter uncertainty applies. A known conventional or
 unguided turret does not become UNKNOWN merely because its projectile or
 ammunition macro is unfamiliar.
 
@@ -923,9 +999,12 @@ query's Jolt/XPhys filter configuration are separate native results.
 The blocker-category and conventional-terrain questions are settled above as
 native inference. What static analysis cannot settle:
 
-1. **Cross-zone blockers:** an obstruction registered in a different zone's
-   physics world from the querying component is not a candidate. How often a
-   real firing line crosses such a boundary is a runtime question.
+1. **Other-zone blockers (corrected 2026-09-25):** an obstruction under
+   another zone of the same sector *is* a candidate, because the sector's zones
+   share one physics world. What remains open is only the MD side: a
+   `weapon.zone`-declared `Q(Z,P)` cannot recognise such a hit, so a miss and an
+   other-zone blocker both read false. How often a real firing line meets such a
+   body is a runtime question.
 2. **Pair collision filters:** the group filter's final pair lookup
    (`0x000B9020`, likely backing MD `addcollisionfilter`) was not traced. It
    could exempt a specific object pair.

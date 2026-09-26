@@ -107,54 +107,72 @@ unrecorded) never showed `muzzle_los_self=1` with `muzzle_los_ex=0`; 4 showed
 `ex=1, self=0`. That is the required monotonic pattern, but it proves no cause.
 The log was not retained in the repository.
 
-### Station-root false negative remains unexplained
+### Station-root false negative: a sufficient geometric mechanism, cause unproven
 
-A 2026-08-19 station-root report (Xenon Defence Platform) recorded 0/14 from
-both the muzzle `excludeself="false"` root ray and the turret-origin
-`excludeself="true"` root ray while the same turrets hit the station. Neither
-filter rule explains a false result for a module hit. Station components
-author no aim connection, so a station's `useaimtarget` endpoint is its live
-union-box centre. That is a shipped-source census: no `class="station"`
-component in the official source sets has an `aimtarget` connection.
+A 2026-08-19 station-root report (Xenon Defence Platform, #60) recorded 0/14
+from two root probes while the same turrets fired and hit the station:
 
-The source-level explanations were:
+- the muzzle `excludeself="false"` root ray;
+- the turret-origin `excludeself="true"` root ray.
 
-1. The ray crossed into another zone's physics world.
-2. A module hit's `+0x70` chain does not reach the station root.
-3. The segment toward the centre reached no geometry.
+The log did not record the firing geometry, the turrets' actual aim or barrel
+direction, or which component each round struck. Its `FIRED aimed` field copied
+the mod's selected target. `HIT istgt` only compared that selection with the
+hit object or component. So the log proves station damage, not the line a
+round flew.
 
-Explanation 2 is now contradicted by static evidence. A root-declared check
-accepts a module hit by the same `+0x70` walk that X4's pre-fire and shipped
-scripts' `.object`/`.container` rely on (see "A station-root check accepts a
-module hit, exactly as X4's pre-fire does"). It is not LIVE-excluded. The raw
-log was not retained.
+Station components author no aim connection, so a station's `useaimtarget`
+endpoint is its live union-box centre. That is a shipped-source census: no
+`class="station"` component in the official source sets has an `aimtarget`
+connection. The native bearing point is the same centre (see "Where a
+turret's shoot controller bears on a selected target").
 
-Explanation 3 is geometrically real, though not proven for that run. The
-shipped `xen_defence` construction plan was assembled offline with the real
-module collision shapes (see the collision-shape record below). Its union-box
-centre is (0, −319, 0) in station space, in open space below the hub dock
-area and inside no module. Of 200 evenly spread lines from 4 km toward it,
-about 105 reach it without touching any module under either shape model, so
-a root `useaimtarget` probe from those directions is false regardless of the
-link. The #60 firing geometry was not retained. Source:
-`research/issue202-line-of-fire/settled.py` `station60()`.
+Candidate explanations, as of 2026-09-25:
 
-The union-box centre is also where the turrets bear (see "Where a turret's
-shoot controller bears on a selected target"). In the #202 benchmark, every
-settled `xen_defence` turret whose line to the centre met no module also met
-nothing when the line was continued past the centre (36 of 36 rows). A
-stationary station gives no lead, so rounds aimed along those lines do not
-hit it. The centre gap alone therefore cannot account for turrets that hit
-the station. Those hits need a path that meets a module. On such a path the
-muzzle root probe is true unless:
+1. **Ruled out: separate zone physics worlds.** Every zone of an active sector
+   shares one world. X4 refuses a target in another sector outright. See
+   [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md),
+   "Physics worlds belong to active sectors, not zones". Static inference.
+2. **Contradicted: a module hit whose `+0x70` chain misses the station root.**
+   See "A station-root check accepts a module hit, exactly as X4's pre-fire
+   does". Static inference, not LIVE-excluded.
+3. **Sufficient in reconstructed geometry: the centre gap.** The shipped
+   `xen_defence` union-box centre is (0, −319, 0) in station space. That is in
+   open space below the hub dock area, inside no module. When the segment to
+   it meets nothing:
+   - both probes return false, because a miss is false;
+   - X4's own ray is a genuine miss, which every supported turret permits;
+   - the round flies on past the centre, and from some bearings it strikes a
+     module behind it.
 
-- the ray crosses into another zone's physics world;
-- the firing turret's own socket is first (see "Some launcher sockets
-  enclose their own launch points").
+   Source: `research/issue202-line-of-fire/settled.py` (`station60()` and the
+   `sixty_*` reconstruction). The reconstruction uses the Ray's 14 real mounts
+   against the shipped station at 96 representative poses. The pattern needs
+   both probes at 0/14, X4 firing, and some aimed round hitting the station.
+   It appears at 34 poses under both collision-shape models; the hitting
+   rounds strike a module beyond the centre.
 
-The turret-origin `excludeself="true"` ray removes the turret's own meshes,
-so the socket cannot explain that ray's 0/14. This is inference from offline
-geometry; the #60 firing geometry is still unknown.
+   At another 14 poses both probes read 0/14 and X4 fires, but every aimed
+   round misses. All 14 turrets bear at 8 poses, all on horizontal bearings.
+   Four of them have both probes at 0/14, and all four are in this all-miss
+   group. The
+   earlier record ("continued past the centre, every such line meets nothing,
+   36 of 36") held only for the broad population's views. It is corrected:
+   the centre gap alone *can* account for hits.
+
+   The 34 poses all depend on turrets that cannot bear being probed from their
+   parked barrels, since #60 did not log their rest poses.
+4. **Partial: the firing turret's own socket.** This can make the muzzle probe
+   false while X4 fires. It cannot explain the turret-origin
+   `excludeself="true"` ray, which drops the turret's own meshes.
+
+Status: explanation 3 is a geometrically sufficient mechanism in a
+representative reconstruction. It is not the established cause of #60. The
+#60 firing geometry, aim direction and struck components are unknown, and none
+of these results is LIVE. What would establish it: the same-sector LIVE run
+described in the #202 issue, logging per FIRED shot the muzzle position and
+barrel direction, the union-box centre, the HIT component, and the probes on
+the muzzle-to-centre segment.
 
 ### A station-root check accepts a module hit, exactly as X4's pre-fire does
 
@@ -371,8 +389,9 @@ This is a design built on the traced action semantics.
   and [turret-fire-range-gate.md](turret-fire-range-gate.md); MD
   `create_position` object/space semantics in `libraries/common.xsd`
   (`position` attribute group, shipped source)
-- Live test: not required to adopt it. Its failure modes under the unresolved
-  station-root link and cross-zone boundary are UNKNOWN, never a false CLEAR.
+- Live test: not required to adopt it. Its failure modes around a body under
+  another zone of the same sector, and the not-yet-LIVE station-root link, are
+  UNKNOWN, never a false CLEAR.
   End-to-end behavior is still checked by the owning feature's normal LIVE
   validation.
 
@@ -406,7 +425,7 @@ Per line, `W` is the firing turret, `S` the firing ship and `Z` `$weapon.zone`:
 | Outcome | Rule | Calls |
 |---|---|---|
 | `Q(T,E)` or `Q(M,E)` true | **CLEAR**: first hit is the target, or for a station that module | 1 |
-| Ship/element: `Q(T)` false, `Q(Z)` false | UNKNOWN: the line reached no geometry | 2 |
+| Ship/element: `Q(T)` false, `Q(Z)` false | UNKNOWN: the line reached no geometry under `weapon.zone` (a miss, or a body under another zone of the sector) | 2 |
 | Ship/element: `Q(Z)` true, `Q(W)` true | UNKNOWN: first hit is the firing turret's own mesh, which native ignores | 3 |
 | Ship/element: `Q(Z)` true, `Q(W)` false | **BLOCKED ON TESTED PATH**: something else is hit first (own hull, a sibling element, the target's own parent hull or a neighbouring element, or an external object) | 3 |
 | Station: `Q(M)` false, `Q(S)` true, `Q(W)` true | UNKNOWN (own turret mesh) | 3 |
@@ -415,7 +434,8 @@ Per line, `W` is the firing turret, `S` the firing ship and `Z` `$weapon.zone`:
 
 UNKNOWN before any ray is cast:
 
-- the weapon and target zones differ;
+- the weapon and target zones differ. This is conservative: X4 itself fires
+  across zones of one sector and refuses only a target in another sector;
 - a frame or endpoint cannot be built;
 - turret class is unknown;
 - missile guidance is missing.
@@ -423,6 +443,16 @@ UNKNOWN before any ray is cast:
 A zone-declared call counts a hit only if the hit's parent walk reaches `Z`
 (see [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md)).
 A broken chain yields UNKNOWN.
+
+Limitation of `Q(Z)` (corrected 2026-09-25): the ray is cast in the active
+sector's shared world, so a body under **another zone of the same sector** can
+be the first hit. Its `+0x70` chain reaches its own zone and the sector, never
+`Z`. So such a blocker leaves `Q(Z)` false, and the ship/element rows report
+UNKNOWN with reason `miss`, not BLOCKED ON TESTED PATH. The answer is still
+never a false CLEAR, but the `miss` label then means "no hit under
+`weapon.zone`", not "no hit". Station rows do not use `Q(Z)`. Declaring the
+sector instead of the zone would also accept such hits by the same walk, but
+that MD call has not been checked, so it is not adopted.
 
 Guided loaded missile ammunition: **GUIDED**, with no ray. X4 skips its
 pre-launch obstruction section for it
@@ -587,14 +617,17 @@ mesh was not traced.
 None of these blocks adopting the method, because each one resolves toward
 UNKNOWN:
 
-1. The cause of the station-root false negative above. Static tracing now says
-   a root-declared ray accepts a module hit. A controlled LIVE check of
-   root-declared versus module-declared rays on one explicit module-centre
-   endpoint would confirm that before production relies on it.
+1. The cause of the station-root false negative above. Separate zone worlds
+   are ruled out statically. The centre gap is sufficient in a representative
+   reconstruction but unproven for #60. Static tracing says a root-declared
+   ray accepts a module hit. A controlled LIVE check of root-declared versus
+   module-declared rays on one explicit module-centre endpoint would confirm
+   that before production relies on it.
 2. How often the firing turret's own mesh is the first hit from its muzzle.
    Offline it is high for some launchers and one beam turret (see "Some
    launcher sockets enclose their own launch points"). Every such line is
    UNKNOWN (`self`), however many points are tried.
-3. The cross-zone and pair-collision-filter caveats already recorded in
+3. The other-zone `Q(Z)` limitation above, and the pair-collision-filter
+   caveat recorded in
    [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md).
 4. Frame-time cost, which is not measured here.

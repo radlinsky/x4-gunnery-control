@@ -23,11 +23,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------- world
-# Physical parent links. Z zone; S firing ship with turret W and siblings;
-# P target ship; ST target station (M1..M4 operational, MC construction);
-# the rest are unrelated bodies. Elements own no body: their meshes are
-# sub-shapes of the owning ship/module body (native inference).
+# Physical parent links. Z the firing weapon's zone and Z2 another zone of the same
+# sector (one shared physics world per active sector); S firing ship with turret W
+# and siblings; P target ship; ST target station (M1..M4 operational, MC
+# construction); the rest are unrelated bodies. Elements own no body: their
+# meshes are sub-shapes of the owning ship/module body (native inference).
 PARENT = dict(
+    Z="SEC", Z2="SEC", X2="Z2",           # X2: an unrelated body registered in the other zone
     S="Z", W="S", W2="S", SSH="S", SEN="S",
     P="Z", T="P", T2="P", PSH="P", PEN="P",
     ST="Z", M1="ST", M2="ST", M3="ST", M4="ST", MC="ST", MT="M1", MT2="M1", MS="M2", MT3="M3",
@@ -43,17 +45,6 @@ def ancestors(c):
     while c:
         yield c
         c = PARENT.get(c)
-
-
-def md_chain(sc, h):
-    """`+0x70` walk as check_line_of_sight sees it; `link` is the unproven module->station edge."""
-    for c in ancestors(h):
-        yield c
-        if c in MODULES and sc.get("link") == "null":
-            return
-        if c in MODULES and sc.get("link") == "zone":
-            yield "Z"
-            return
 
 
 def hits(sc, origin, e):
@@ -123,7 +114,7 @@ def los(sc, e, declared, mut):
             h = h[0]                       # engine tie-break is unknown; take the listed order
         if h in sc.get("absent", ()) or ("excludeself" in mut and h in ("W", "S")):
             continue
-        return declared in md_chain(sc, h)
+        return declared in ancestors(h)   # the `+0x70` walk to the declared target
     return False
 
 
@@ -132,8 +123,6 @@ def plan_for(sc, strategy, mut=frozenset()):
     # Production breaks on `$index gt 2`; MD loop counters are 1-based, so two modules.
     modules = sc.get("modules", ["M1", "M2", "M3", "M4"])[:3 if "three_modules" in mut else 2]
     declared = PARENT[t] if "declare_parent" in mut and t in ("T", "MT") else t
-    if strategy == "legacy":                                        # #60 ENGAGEABLE root probe
-        return dict(endpoints=[("aim", t)], blocker=None)
     if station:
         root = strategy.startswith("root")
         return dict(endpoints=[(m, t if root else m) for m in modules],
@@ -157,8 +146,6 @@ def candidate(sc, strategy, mut=frozenset()):
             return ("C" if "guided_clear" in mut else "G"), "", 0
     elif w.get("cls", "turret") != "turret":
         return "U", "class", 0
-    if sc.get("zone_diff") and strategy == "legacy":
-        return "B", "", 1               # the old probe had no zone gate; its ray cannot see the target
     if sc.get("zone_diff") and "zone_skip" not in mut:
         return "U", "zone", 0
     plan = plan_for(sc, strategy, mut)
@@ -170,8 +157,6 @@ def candidate(sc, strategy, mut=frozenset()):
         calls += 1
         if los(sc, e, declared, mut):
             return "C", "", calls
-        if strategy == "legacy":
-            return "B", "", calls
         if e != "aim":                  # a useaimtarget endpoint cannot be re-declared
             failed.append(e)
         if strategy != "lazy" and e != "aim":
@@ -269,13 +254,10 @@ SCENES = [
     S("station:own-turret-mesh", "membership", "ST", on_all("W", "M1")),
     S("station:external-blocker", "membership", "ST", on_all("X", "M1")),
     S("station:no-modules", "membership", "ST", on_all("M1"), modules=[]),
-    S("station:link-null", "membership", "ST", on_all("M1"), link="null"),
-    S("station:link-zone", "membership", "ST", on_all("M1"), link="zone"),
     S("station-element:exact", "membership", "MT", on_all("MT")),
     S("station-element:parent-module", "membership", "MT", on_all("M1", "MT"), expect=dict(current="B")),
     S("station-element:sibling", "membership", "MT", on_all("MT2", "MT")),
     S("station-element:other-module", "membership", "MT", on_all("M2", "MT")),
-    S("station-element:link-null", "membership", "MT", on_all("M1", "MT"), link="null"),
     # 3 point selection on a selected element (centre is the current endpoint)
     S("aim-first", "points", "T", {"aim": ["T"], "*": ["P", "T"]}, expect=dict(current="B", seven="C")),
     *[S(f"first-clear-{p}", "points", "T", {p: ["T"], "*": ["P", "T"]}) for p in SIX],
@@ -330,10 +312,12 @@ SCENES = [
            "cf. missile_story_dumbfire_light_mk2_macro"),
     S("unknown-class", "weapon", "T", on_all("T"), weapon=dict(cls="other")),
     # 6 uncertainty (MD pre-checks; Lua pass behavior is runtime.lua)
-    S("zones-differ", "uncertainty", "T", on_all("T"), zone_diff=True, expect=dict(current="U")),
+    S("zones-differ", "uncertainty", "T", on_all("T"), zone_diff=True, expect=dict(current="U"),
+      note="production gates on zones; X4 fires across zones of one sector, so this UNKNOWN is conservative"),
     S("frame-lost", "uncertainty", "T", on_all("T"), frame_lost=True),
-    S("cross-zone-blocker-unseen", "uncertainty", "T", on_all("T"), scored=False,
-      note="a blocker in another zone's physics world is not a query candidate"),
+    S("other-zone-blocker", "uncertainty", "T", on_all("X2", "T"), "native", expect=dict(current="U"),
+      note="same sector, other zone: the ray hits it, but its +0x70 chain never reaches $weapon.zone, "
+           "so Q(Z) is false and it reads UNKNOWN 'miss', never CLEAR"),
     # negative controls
     S("neg:69-near-all-blocked", "negative", "T", on_all("X", "T"), "live",
       expect=dict(current="B", seven="B"), note="#69 NEAR: fast probe and all six blocked by a Terraformer"),
@@ -367,14 +351,44 @@ def witness_202(hyp):
     return out
 
 
-def witness_60(hyp):
-    """Xenon Defence Platform: legacy root useaimtarget probe 0/14 while turrets hit it."""
-    base = dict(target="ST", modules=["M1", "M2", "M3", "M4"], level="live")
-    if hyp == "centre-gap":
-        return dict(base, lines={"aim": [], "*": ["M1"]})
-    if hyp == "module-link-null":
-        return dict(base, lines={"*": ["M1"]}, link="null")
-    return dict(base, lines={"*": ["M1"]}, zone_diff=True)
+def native_first_ray(sc):
+    """X4's pre-fire first ray on the settled muzzle line to the bearing point: it ignores only the firing
+    turret's meshes; a station-root member hit (result 1) and a miss both permit fire."""
+    for h in hits(sc, "b0", "aim"):
+        if h != "W":
+            return "fires" if qualifies(sc["target"], h) else "refuses"
+    return "fires, no hit"
+
+
+def round_hits(sc):
+    """The aimed round's straight line: the same segment, then on past the bearing point ('beyond')."""
+    return next((qualifies(sc["target"], h) for h in hits(sc, "b0", "aim") + hits(sc, "b0", "beyond")
+                 if h != "W"), False)
+
+
+# #60 Xenon Defence Platform, per turret: lines by origin (b0 the settled muzzle, origin the turret component
+# origin); 'aim' ends at the station's union-box centre, 'beyond' continues past it. Recorded: 0/14 from the
+# muzzle excludeself=false probe and from the turret-origin excludeself=true probe, while turrets fired and
+# hit the station. Each arrangement states (muzzle probe, origin probe, module-declared on the muzzle line,
+# X4 first ray, aimed round hits the station). settled.py finds each on real geometry.
+WITNESS_60 = {
+    "centre gap, module behind": ({"b0": {"aim": [], "beyond": ["M2"]}, "origin": {"aim": []}},
+                                  (False, False, False, "fires, no hit", True)),
+    "centre gap, nothing behind": ({"b0": {"aim": [], "beyond": []}, "origin": {"aim": []}},
+                                   (False, False, False, "fires, no hit", False)),
+    "own socket, then centre gap": ({"b0": {"aim": ["W"], "beyond": ["M2"]}, "origin": {"aim": []}},
+                                    (False, False, False, "fires, no hit", True)),
+    "own hull first": ({"b0": {"aim": ["S", "M1"]}, "origin": {"aim": ["M1"]}},
+                       (False, True, False, "refuses", False)),
+    "module first (positive control)": ({"b0": {"aim": ["M1"]}, "origin": {"aim": ["M1"]}},
+                                        (True, True, True, "fires", True)),
+}
+
+
+def witness_60(lines):
+    sc = dict(target="ST", modules=["M1", "M2"], lines=lines, origins=1)
+    return (los(sc, "aim", "ST", frozenset()), los(dict(sc, query="origin"), "aim", "ST", frozenset({"excludeself"})),
+            los(sc, "aim", "M1", frozenset()), native_first_ray(sc), round_hits(sc))
 
 
 # ---------------------------------------------------------------- production drift check
@@ -528,17 +542,21 @@ def main():
         print(f"| {hyp} | {ncur}/14 | {sum(c for *_, c in cur)} | {nsev}/14 | {sum(c for *_, c in sev)} "
               f"| {sum(c for *_, c in lz)} | {note} |")
 
-    print("\n## Issue #60 witness (Xenon station, legacy root useaimtarget probe)\n")
-    for hyp in ("centre-gap", "module-link-null", "cross-zone"):
-        w = witness_60(hyp)
-        res = {st: candidate(w, st)[:2] for st in ("legacy", "current", "root_zone", "root_ship")}
-        if res["legacy"][0] == "C":
-            failures.append(f"#60 witness does not reproduce 0/14: {hyp}")
-        print(f"- {hyp}: " + ", ".join(f"{k} {s}{(' ' + r) if r else ''}" for k, (s, r) in res.items()))
-    print("- discriminator: module-declared vs root-declared on one module-centre endpoint separates "
-          "link-null from centre-gap; weapon.zone vs target.zone separates cross-zone (LIVE needed)")
+    print("\n## Issue #60 witness (Xenon Defence Platform, one turret per arrangement)\n")
+    print("| arrangement | muzzle probe (root, excludeself=false) | origin probe (root, excludeself=true) "
+          "| module-declared, muzzle line | X4 first ray | aimed round hits station |")
+    print("|---|---|---|---|---|---|")
+    for name, (lines, want) in WITNESS_60.items():
+        got = witness_60(lines)
+        if got != want:
+            failures.append(f"#60 witness {name}: {got} != {want}")
+        yn = ["CLEAR" if v else "not" for v in got[:3]]
+        print(f"| {name} | {' | '.join(yn)} | {got[3]} | {'yes' if got[4] else 'no'} |")
+    print("- the recorded 0/14 + 0/14 with X4 firing needs both probes 'not' and X4 firing: the centre-gap and "
+          "own-socket rows; only a module behind the centre turns that permission into a hit. Which arrangement "
+          "#60 had is unrecorded.")
 
-    print("\n## Station root declaration under the unproven module link\n")
+    print("\n## Station root versus module declaration (root membership statically traced)\n")
     for sc in [s for s in SCENES if s["target"] == "ST"]:
         res = {st: candidate(sc, st)[0] for st in ("current", "root_zone", "root_ship")}
         exp = expected(sc, plan_for(sc, "current"))

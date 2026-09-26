@@ -103,4 +103,5 @@ are real native names.
 | Missile-turret guidance query, guided pre-launch bypass, `distribute` field, and the pre-fire Jolt/XPhys ray-cast filters | [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md) |
 | Pre-fire range gate, shot-range allowance and `parameters` fields, object max-speed cache `+0x3AC`, controller aim/lead paths, `maxfirerange`/`bboxdistanceto`/`maxspeed` handlers, per-class box getters | [turret-fire-range-gate.md](turret-fire-range-gate.md) |
 | Ray body/shape filters (`XBodyFilter`, `XShapeFilter`), `excludeself` sub-shape semantics, `FindObjectSurfaceAction` retries | [selected-target-line-of-fire.md](selected-target-line-of-fire.md) |
+| Named physics worlds (Main/Cutscene/Navigation), Zone `+0x1D78` sector-world getter, body and query frames, the pre-fire same-sector gate | [weapon-path-obstruction-groups.md](weapon-path-obstruction-groups.md) |
 | PE export table of the engine (2493 named exports) | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) |
