@@ -28,7 +28,9 @@ MESH unless stated.
    fires, and the aimed line misses the station. Those rows are UNKNOWN. On the 116 scored rows the
    root probe has 0 FP and 26 own-turret FN. The production two-module lines have 8 FP, all blocked by
    the firing ship's own hull, and 32 FN. They also read CLEAR on 78 of the 108 empty-path rows, where
-   X4's aimed line reaches nothing.
+   X4's aimed line reaches nothing. That the continuation misses is true of these views, not in general.
+   In the #60 reconstruction, a round aimed through the empty `xen_defence` centre often strikes a
+   module behind it (see "Historical witnesses").
 6. **Before settling**, the probe's errors come from where the barrel is parked:
    - FN: the firing turret's own collision (1,528), the firing ship's own hull (93);
    - FP: the parked line reaches the target, but the settled path is blocked by a sibling turret (59),
@@ -371,8 +373,10 @@ Settled, the probe has no false positives and 966 fewer false negatives. The six
 - **Root CLEAR membership is statically traced.** The root probe counts a module or module-element
   hit as CLEAR, and so does X4's pre-fire. Both walk the hit's `+0x70` parent chain to the station.
   Shipped scripts' `.object` and `.container` rely on the same chain. See KB "A station-root check
-  accepts a module hit, exactly as X4's pre-fire does". This is inference, not LIVE-tested; cross-zone
-  physics also remains untested.
+  accepts a module hit, exactly as X4's pre-fire does". This is inference, not LIVE-tested.
+- **Zones do not split the collision world.** Every zone of an active sector shares one physics world,
+  and X4 refuses a target in another sector (native trace, KB "Physics worlds belong to active
+  sectors, not zones"). No zone boundary hides station geometry from either check.
 
 ## Where truth is undefined
 
@@ -411,18 +415,47 @@ continuation says it would on 34 of 74 rows.
 **#60 Xenon Defence Platform.**
 
 - **Retained:** 0/14 from the muzzle `excludeself="false"` root ray and from the turret-origin
-  `excludeself="true"` root ray, while the same turrets hit the station.
-- **New offline evidence.** The turrets bear on the union-box centre. Where that path is empty, so is
-  its continuation (36/36), so rounds aimed through the gap do not hit a stationary station.
-- **So the centre gap alone does not explain the hits.** They need a path that meets a module. On
-  such a path the muzzle root probe is true unless one of these holds:
-  - the zones differ;
-  - the firing turret's own socket is first. This cannot explain the `excludeself="true"` ray.
-- A failed module-to-root link, the earlier third candidate, is contradicted by the native trace: MD
-  accepts a module hit on a root-declared check by the same `+0x70` walk that X4 and shipped scripts
-  use. It is not LIVE-excluded.
-- The #60 firing geometry was not retained. Neither remaining cause is LIVE-proven, and neither is
-  excluded.
+  `excludeself="true"` root ray, while the same turrets fired and hit the station. Not retained: the
+  firing ship, the geometry, each turret's aim or barrel direction, and which component each round
+  struck. `FIRED aimed` copied the mod's selection; `HIT istgt` only compared it with the hit object or
+  component.
+- **Ruled out (static):** separate zone physics worlds. **Contradicted (static):** a module whose
+  `+0x70` chain misses the station root.
+- **Reconstruction (`settled.py --sixty`).** The owner's Boron Ray, the #202 anchor, stands in for the
+  unlogged firing ship. So the 14 mounts, macros and settling are real, but all 96 station poses are a
+  representative grid: 24 bearings × 4 station yaws, the Ray 1,500 m outside the station box. Turrets
+  that cannot bear are probed from the parked barrel. Both shape models agree on every pose class:
+
+  | pose class | poses |
+  |---|---:|
+  | both probes 0/14, X4 fires, some aimed round hits the station | 34 |
+  | both probes 0/14, X4 fires, every aimed round misses | 14 |
+  | some probe CLEAR | 48 |
+
+  In the 34, the segment to the union-box centre meets nothing. Both probes are false and X4's own ray
+  is a genuine miss, so it fires. The round flies past the centre into a module behind it. First such
+  pose: `sixty:b0:y0`, the station above the Ray. There, 7 turrets bear and all 7 aimed rounds hit, and
+  the other 7 cannot bear.
+
+  All 14 turrets bear at 8 poses, all horizontal. Four of them have both probes at 0/14, and there
+  every aimed round misses, matching the broad-population result below. The 34 therefore depend on the
+  parked-barrel assumption for the turrets that cannot bear.
+- **Correction.** The earlier "where the centre path is empty, so is its continuation (36/36)" holds
+  only for the broad population's views. **The centre gap alone can reproduce the whole recorded
+  pattern** in representative geometry.
+- Over 796 settled turret rows (MESH), X4 fires with both probes false on 378. Of those 378, the aimed
+  round hits the station on 238.
+- The positive control, the settled muzzle to the nearest module's box centre, hits that module on 692
+  MESH / 704 HULL rows. There the root-declared and module-declared checks both read CLEAR and X4
+  fires.
+- **Unresolved.** This is a sufficient mechanism, not the established cause. The historical hits stay
+  unexplained until a LIVE run logs, per FIRED shot, the muzzle, barrel direction, union-box centre,
+  struck component and probes.
+- `benchmark.py` states the same arrangements by hand:
+  - centre gap with a module behind or with nothing behind;
+  - own socket, then the gap;
+  - own hull first: the origin probe CLEAR while X4 refuses;
+  - the module-first positive control.
 
 ## Shape model
 
@@ -432,8 +465,13 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
 
 ## Decision-rule tests and integrity
 
-- `benchmark.py` is unchanged in substance. The drift signature passes, all 9 mutants are killed, and
-  integrity is PASS. The standing rule FAIL remains: **missing missile guidance becomes unguided**.
+- `benchmark.py`: the drift signature passes, all 9 mutants are killed, and integrity is PASS. The
+  standing rule FAIL remains: **missing missile guidance becomes unguided**.
+  - Removed: the module-link-null and cross-zone #60 hypotheses, and the three `link` scenes. Both are
+    contradicted by the native trace.
+  - Replaced: the unscored "cross-zone blocker unseen" scene. It is now `other-zone-blocker`, a
+    same-sector body under another zone: the production answer is UNKNOWN `miss`, never CLEAR.
+  - The #60 witness now checks five stated arrangements.
 - `runtime.lua`: 13 CODE checks pass. The 2 SPEC rows (#202 task 3) fail as expected. There are 2
   NOTEs.
 - `settled.py` integrity checks, all PASS. They would catch:
@@ -443,16 +481,20 @@ conclusion above holds under HULL: settled probe 0 FP / 678 FN, probe+ex 56 FP /
   - a station element CLEAR on its parent module, a sibling or another module;
   - a multi-point row without its three-origin selector record;
   - an alternate box point turning a blocked bearing path into a correct CLEAR;
-  - lazy differing from seven.
+  - lazy differing from seven;
+  - (#60 reconstruction) a muzzle probe CLEAR where X4 refuses, an aimed round disagreeing with its own
+    first segment, and a missing positive control.
 
 ## Evidence gaps
 
 1. Which triangle source the layer-3 ray uses: geometry `+0x20` (`-mesh`), at a geometry slot from a
    member virtual (`+0x15D8`), with a `-collision` XMF fallback. 744 rows excluded where MESH and HULL
    disagree. The LargeTarget point-inside test is resolved: layer 0/1, `-hull` only (see below).
-2. Cross-zone rays, and a LIVE check of root-declared versus module-declared rays. The module-to-root
-   `+0x70` membership is statically traced. The code that writes a module's parent, and modules under
-   construction, are not traced.
+2. A LIVE check of root-declared versus module-declared rays. The module-to-root `+0x70` membership is
+   statically traced. The code that writes a module's parent, and modules under construction, are not
+   traced. Separate zone worlds are ruled out statically. The remaining zone limit is on the MD side:
+   `Q(weapon.zone)` cannot recognise a blocker under another zone of the same sector, so that line
+   reads UNKNOWN `miss`, never CLEAR.
 3. The `U::Turret` slot `+0x1BF0` predicate (`0x005BF690`). It matters only for a turret element with
    no authored point; none was in the population.
 4. Whether any parameter file overrides the 500 m LargeTarget radius (no writer found besides the
