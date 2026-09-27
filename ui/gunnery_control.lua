@@ -4,157 +4,6 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
-local TurretArcLimits = X4GunneryTurretArcLimits or {}
-local TurretMuzzleGeometry = X4GunneryTurretMuzzleGeometry or {}
-
--- Prospective-muzzle geometry for the supported self-masking macros (#74, #98).
--- The accepted per-macro construction is O + Ry(yaw) * (P + Rx(-pitch) * D).
--- Rather than hand-copy the constants, derive O/P/D from the generated
--- source-resolved record (ui/turret_muzzle_geometry.lua) and hand MD the three
--- fixed vectors as flat scalars. This walks the authored layer/transform chain
--- exactly as tests/test_turret_muzzle_geometry.lua evaluates it, but factors the
--- two runtime rotations (yaw rotator, pitch gun) back out into constants.
--- ponytail: support is whatever deriveProspectiveMuzzle understands in the
--- generated data; no second allow-list to keep in sync (#106).
-
-local function vadd(a, b)
-    return { a[1] + b[1], a[2] + b[2], a[3] + b[3] }
-end
-
-local function qrotate(q, v)
-    local x, y, z, w = q[1], q[2], q[3], q[4]
-    local vx, vy, vz = v[1], v[2], v[3]
-    local tx = 2 * (y * vz - z * vy)
-    local ty = 2 * (z * vx - x * vz)
-    local tz = 2 * (x * vy - y * vx)
-    return {
-        vx + w * tx + y * tz - z * ty,
-        vy + w * ty + z * tx - x * tz,
-        vz + w * tz + x * ty - y * tx,
-    }
-end
-
-local function rotateInFrame(rotations, vector)
-    for index = #rotations, 1, -1 do
-        vector = qrotate(rotations[index], vector)
-    end
-    return vector
-end
-
--- Shared chain math. `fixed` is the accumulated frame rotation stack, `segment`
--- the translation accumulated since the last runtime-rotation split.
-local function chainTranslate(chain, position)
-    chain.segment = vadd(chain.segment, rotateInFrame(chain.fixed, position))
-end
-
-local function chainRotate(chain, quaternion)
-    chain.fixed[#chain.fixed + 1] = quaternion
-end
-
--- The authored connection/part transform pair every layer carries.
-local function chainAuthoredLayer(chain, layer)
-    chainRotate(chain, layer.connection_transform.quaternion)
-    chainTranslate(chain, layer.part_transform.position)
-    chainRotate(chain, layer.part_transform.quaternion)
-end
-
--- Close off the segment feeding a runtime rotation (yaw rotator, pitch gun).
-local function chainSplit(chain, layer)
-    local rotation = layer.runtime_rotation
-    if not rotation then return end
-    if rotation.axis == "y" then
-        chain.origin = chain.segment
-        chain.segment = { 0, 0, 0 }
-    elseif rotation.axis == "x" then
-        chain.pivot = chain.segment
-        chain.segment = { 0, 0, 0 }
-    end
-end
-
--- ponytail: the semantic case names a turret movement rule, so dispatch on it
--- explicitly (#79). Each behavior only orders the per-layer steps around the
--- runtime-rotation split; all math above stays shared, and every turret-specific
--- value still comes from the generated record. Layer order per case mirrors
--- tests/test_turret_muzzle_geometry.lua exactly.
-local semanticCaseBehaviors = {
-    -- Settled translation applies before the split; authored rotations follow it.
-    depth4_dual_translation = function(chain, layer)
-        if layer.settled_position then
-            chainTranslate(chain, layer.settled_position)
-        end
-        chainSplit(chain, layer)
-        chainAuthoredLayer(chain, layer)
-    end,
-    -- Authored rotations plus the settled local-X rotation all precede the split.
-    depth5_additive_x_rotation = function(chain, layer)
-        chainAuthoredLayer(chain, layer)
-        if layer.settled_rotation_x_radians then
-            local half = layer.settled_rotation_x_radians / 2
-            chainRotate(chain, { math.sin(half), 0, 0, math.cos(half) })
-        end
-        chainSplit(chain, layer)
-    end,
-}
-
--- Split L stores the same depth-4 composition with zero settled translations
--- (#79), so it reuses that behavior rather than restating the layer order.
-semanticCaseBehaviors.depth4_zero_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- The one-key barrel case (#79) is the same depth-4 composition with a settled
--- translation on each of the same two edges, so it reuses that behavior too.
-semanticCaseBehaviors.depth4_one_key_barrel_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- The shortened rank-1 one-key case (#137) has the same translation/split
--- ordering over three source layers; only its source-evidence boundary differs.
-semanticCaseBehaviors.depth3_one_key_barrel_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- P6 uses the already-proved depth-4 translation composition; its separate
--- semantic case only preserves the narrower source-evidence boundary.
-semanticCaseBehaviors.depth4_p6_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- P8 (#135) is the same depth-4 translation composition; its separate semantic
--- case only preserves the narrower source-evidence boundary.
-semanticCaseBehaviors.depth4_p8_translation =
-    semanticCaseBehaviors.depth4_dual_translation
-
--- Endpoints are emitted in lexical name order, which is not the engine's
--- barrelposition semantic, so a record naming its representative endpoint is
--- resolved by that identity. Records without the field keep the historical
--- second entry. Returns nil if a named identity is absent, so no prospective
--- geometry is streamed rather than guessing an endpoint.
-local function barrelpositionEndpoint(geometry)
-    local connection = geometry.barrelposition_connection
-    if not connection then return geometry.endpoints[2] end
-    for _, endpoint in ipairs(geometry.endpoints) do
-        if endpoint.connection == connection then return endpoint end
-    end
-end
-
--- Returns nil for an unknown semantic case, so no prospective geometry is
--- streamed and the prospective generated-geometry path is not entered.
-local function deriveProspectiveMuzzle(geometry)
-    local behavior = semanticCaseBehaviors[geometry.semantic_case]
-    if not behavior then return nil end
-    local chain = { fixed = {}, segment = { 0, 0, 0 } }
-    for _, layer in ipairs(geometry.layers) do
-        chainTranslate(chain, layer.connection_transform.position)
-        behavior(chain, layer)
-    end
-    local endpoint = barrelpositionEndpoint(geometry)
-    if not (chain.origin and chain.pivot and endpoint) then return nil end
-    local downstream = vadd(chain.segment, rotateInFrame(chain.fixed, endpoint.transform.position))
-    return { origin = chain.origin, pivot = chain.pivot, downstream = downstream }
-end
-
-local prospectiveMuzzles = {}
-for macroName, geometry in pairs(TurretMuzzleGeometry) do
-    prospectiveMuzzles[macroName] = deriveProspectiveMuzzle(geometry)
-end
-
 ffi.cdef[[
 typedef uint64_t UniverseID;
 typedef struct { UniverseID softtargetID; const char* softtargetConnectionName; uint32_t messageID; } SofttargetDetails2;
@@ -213,7 +62,6 @@ local resumePending, resumeOpenPending, endingSession = false, false, false
 local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
-local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
 local Range = { serial = 0, cache = {}, targets = {}, order = {}, members = {},
     totalWork = 0, peakWork = 0 }
 local rangeTargetLimit = 20
@@ -282,7 +130,6 @@ end
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship, origin)
-    engageabilityCache, engageabilityRequests = {}, {}
     Range.automatic, Range.status, Range.nextSweepAt, Range.nextSortAt = nil, nil, nil, nil
     Range.cache, Range.targets, Range.order, Range.active = {}, {}, {}, nil
     Range.signature, Range.members, Range.selectedKey = nil, {}, nil
@@ -707,7 +554,7 @@ local function readGroups(ship)
                 groups[#groups + 1] = entry
             end
             entry.members[#entry.members + 1] = { componentID = component, componentKey = State.memberKey(component),
-                macro = entry.macro or "", displayName = memberName(component, #entry.members + 1),
+                displayName = memberName(component, #entry.members + 1),
                 operational = C.IsComponentOperational(component), cameraSupported = C.IsPlayerCameraTargetViewPossible(component, true) }
             if entry.kind == "single" and entry.members[#entry.members].operational then entry.operationalCount = 1 end
         end
@@ -984,7 +831,6 @@ local function discardSession(reason)
     local hadDirectControl = session.controlMode == "direct"
     Range.cancelAutomatic()
     sessionEpoch = sessionEpoch + 1
-    engageabilityCache, engageabilityRequests = {}, {}
     Range.active, Range.targets, Range.order = nil, {}, {}
     resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
@@ -1708,162 +1554,6 @@ function Range.onRangeResult(_, param)
             end
         end
     end
-end
-
--- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
--- events avoid relying on unproven nested-table transport: selected turret ids
--- are streamed once, followed by at most 20 target ids for the batch.
-local engageabilityBatchSize = 20
-local function requestEngageabilities(targets, purpose)
-    local results = {}
-    if not session then return results end
-    local members, signatureParts = checkedOperationalTurrets(), {}
-    for _, member in ipairs(members) do
-        signatureParts[#signatureParts + 1] = State.normID(member.componentID)
-    end
-    local signature = table.concat(signatureParts, ",")
-    local now, pending, seen = getElapsedTime(), {}, {}
-    -- Normally MD follows the final result immediately with batch completion.
-    -- If only that aggregate event is lost, retain the empty request briefly so
-    -- a late completion can still be audited, then reclaim it before the next
-    -- completed-result cache refresh.
-    for nonce, request in pairs(engageabilityRequests) do
-        if request.resultsCompleteAt and now - request.resultsCompleteAt >= 1 then
-            engageabilityRequests[nonce] = nil
-        end
-    end
-    for position, target in ipairs(targets or {}) do
-        if not State.isNullID(target) then
-            local targetKey = State.normID(target)
-            local key = tostring(sessionEpoch) .. ":" .. targetKey
-            local cached = engageabilityCache[key]
-            if cached and cached.signature == signature then
-                if cached.pending and now - cached.requestedAt < 2 then
-                    results[position] = cached
-                elseif not cached.pending and now - cached.requestedAt < 1 then
-                    results[position] = cached
-                end
-            end
-            if not results[position] then
-                if #members == 0 then
-                    cached = { engageable = 0, total = 0, signature = signature, requestedAt = now }
-                    engageabilityCache[key] = cached
-                else
-                    -- Supersede only this target in an older batch. The older
-                    -- request remains alive for its other correlated targets.
-                    if cached and cached.pendingNonce then
-                        local previousNonce = cached.pendingNonce
-                        local previous = engageabilityRequests[previousNonce]
-                        if previous then
-                            previous.targets[targetKey] = nil
-                            if next(previous.targets) == nil then engageabilityRequests[previousNonce] = nil end
-                        end
-                    end
-                    cached = cached and cached.signature == signature and cached or {}
-                    cached.signature, cached.requestedAt, cached.pending, cached.total,
-                        cached.engageable, cached.known = signature, now, true, #members, nil, nil
-                    engageabilityCache[key] = cached
-                    if not seen[targetKey] then
-                        seen[targetKey] = true
-                        pending[#pending + 1] = { target = target, targetKey = targetKey, key = key, cached = cached }
-                    end
-                end
-                results[position] = cached
-            end
-        end
-    end
-
-    for first = 1, #pending, engageabilityBatchSize do
-        local last = math.min(first + engageabilityBatchSize - 1, #pending)
-        engageabilitySerial = engageabilitySerial + 1
-        local nonce = tostring(sessionEpoch) .. "_" .. tostring(engageabilitySerial)
-        local request = {
-            epoch = sessionEpoch, signature = signature, selectedTotal = #members,
-            targets = {}, requested = last - first + 1, purpose = purpose,
-        }
-        engageabilityRequests[nonce] = request
-        AddUITriggeredEvent("X4GunneryControl", "engageability_begin", {
-            nonce = nonce, members = #members, targets = request.requested,
-        })
-        for _, member in ipairs(members) do
-            -- GetUpgradeGroupInfo2.currentmacro is the authoritative installed
-            -- equipment macro. Live surface components can return an empty
-            -- The component-data macro field can be blank for installed surface
-            -- components, so use that fallback only for ungrouped
-            -- singleton weapons whose group metadata has no macro.
-            local macro = tostring(member.macro or "")
-            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
-            local arc = TurretArcLimits[macro]
-            local muzzle = prospectiveMuzzles[macro]
-            local origin = muzzle and muzzle.origin or nil
-            local pivot = muzzle and muzzle.pivot or nil
-            local downstream = muzzle and muzzle.downstream or nil
-            AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
-                nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
-                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0,
-                muzzleknow = muzzle and 1 or 0,
-                mox = origin and origin[1] or 0, moy = origin and origin[2] or 0, moz = origin and origin[3] or 0,
-                mpx = pivot and pivot[1] or 0, mpy = pivot and pivot[2] or 0, mpz = pivot and pivot[3] or 0,
-                mdx = downstream and downstream[1] or 0, mdy = downstream and downstream[2] or 0,
-                mdz = downstream and downstream[3] or 0 })
-        end
-        for index = first, last do
-            local entry = pending[index]
-            entry.cached.pendingNonce = nonce
-            request.targets[entry.targetKey] = entry.key
-            AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
-                nonce = nonce, target = id(entry.target),
-            })
-        end
-        AddUITriggeredEvent("X4GunneryControl", "engageability_commit", { nonce = nonce })
-        log("event=engageability_batch action=request nonce=" .. nonce
-            .. " requested=" .. tostring(request.requested)
-            .. " selected_total=" .. tostring(#members)
-            .. " selected_signature=" .. string.format("%q", signature))
-    end
-    return results
-end
-
-local function requestEngageability(target, purpose)
-    return requestEngageabilities({ target }, purpose)[1]
-end
-
-local function onEngageabilityResult(_, param)
-    local nonce, targetKey, engageable, known, total = tostring(param or ""):match(
-        "^x4gce3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    engageable, known, total = tonumber(engageable), tonumber(known), tonumber(total)
-    if total ~= request.selectedTotal or known > total or engageable > known then return end
-    targetKey = State.normID(targetKey)
-    local key = request.targets[targetKey]
-    local cached = key and engageabilityCache[key]
-    if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.engageable, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
-        engageable, known, total, false, nil, getElapsedTime()
-    request.targets[targetKey] = nil
-    if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
-end
-
-
-local function onEngageabilityBatchComplete(_, param)
-    local nonce, accepted, completed = tostring(param or ""):match("^x4gce2c:([^:]+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    local unresolved = 0
-    for _, key in pairs(request.targets) do
-        local cached = engageabilityCache[key]
-        if cached and cached.signature == request.signature and cached.pendingNonce == nonce then
-            cached.pendingNonce = nil
-            unresolved = unresolved + 1
-        end
-    end
-    engageabilityRequests[nonce] = nil
-    log("event=engageability_batch action=complete nonce=" .. nonce
-        .. " requested=" .. tostring(request.requested)
-        .. " accepted=" .. tostring(accepted)
-        .. " completed=" .. tostring(completed)
-        .. " unresolved=" .. tostring(unresolved))
 end
 
 targetRoot = function(component)
@@ -2606,13 +2296,11 @@ function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
-function TestAPI.requestEngageability(target) return requestEngageability(target) end
 function TestAPI.setRangeTargets(targets, selected) return Range.setRangeTargets(targets, selected) end
 function TestAPI.rangeResult(target) return Range.rangeResult(target) end
 function TestAPI.runRangeSweep(now) return Range.runRangeSweep(now) end
 function TestAPI.rangeSpeedShip(target) return Range.rangeSpeedShip(target) end
 function TestAPI.rangeText(result) return Range.rangeText(result) end
-function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
@@ -3333,8 +3021,7 @@ local function updateSessionRuntime()
     end
     local now = getElapsedTime()
     -- X4 can continue delivering UI updates while simulation time is paused.
-    -- Do not let those updates turn a frozen elapsed-time deadline into a
-    -- recursive pinned-engageability request/repaint loop.
+    -- Keep the pinned distance refresh on unpaused simulation time.
     if not C.IsGamePaused()
             and session.phase == "engaged" and session.controlMode == "direct"
             and session.targetObjectID and session.surfaceBrowser then
@@ -3811,9 +3498,7 @@ local function init()
     -- The handler's own guards silently drop events for stale sessions.
     RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
-    RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
     RegisterEvent("X4GunneryControl.InRangeResult", Range.onRangeResult)
-    RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
