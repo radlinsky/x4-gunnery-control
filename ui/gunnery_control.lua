@@ -283,6 +283,7 @@ end
 -- id is reassigned, so a restore has nothing else to check the payload against.
 local function newSession(ship, origin)
     engageabilityCache, engageabilityRequests = {}, {}
+    Range.automatic, Range.status, Range.nextSweepAt, Range.nextSortAt = nil, nil, nil, nil
     Range.cache, Range.targets, Range.order, Range.active = {}, {}, {}, nil
     Range.signature, Range.members, Range.selectedKey = nil, {}, nil
     Range.memberIndex, Range.targetIndex, Range.sweepStarted, Range.passStarted = 1, 1, nil, nil
@@ -1296,6 +1297,7 @@ end
 
 local function openTargetBrowser()
     if not session or session.controlMode ~= "direct" then return false end
+    Range.cancelAutomatic()
     session.targetFallback = nil
     session.phase = "target_select"
     menu.display()
@@ -1357,6 +1359,7 @@ local function engageTarget(targetID)
     -- the planner made this call or the player cycled or picked a target.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    Range.cancelAutomatic()
     session.targetFallback = nil
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
@@ -1506,7 +1509,7 @@ local function checkedOperationalTurrets()
     return members
 end
 
--- Browser evidence is separate from Auto-next's retained ENGAGEABLE service.
+-- Range counts are estimates, not firing permission.
 function Range.rangeText(result)
     local total = result and result.total or #Range.members
     return tostring(result and result.count or 0) .. " / " .. tostring(total) .. " IN RANGE"
@@ -1523,7 +1526,8 @@ function Range.rangeSpeedShip(target)
     end
 end
 
-function Range.setRangeTargets(targets, selected)
+function Range.setRangeTargets(targets, selected, automatic)
+    if session.targetFallback and not automatic then return end
     local members, parts = checkedOperationalTurrets(), {}
     for _, member in ipairs(members) do parts[#parts + 1] = State.normID(member.componentID) end
     local signature = table.concat(parts, ",")
@@ -1560,13 +1564,37 @@ function Range.rangeResult(target)
     return Range.cache[State.normID(target)]
 end
 
+function Range.cancelAutomatic()
+    if not Range.automatic then return end
+    Range.automatic, Range.status, Range.active = nil, nil, nil
+    Range.signature, Range.page, Range.selectedKey = nil, nil, nil
+    Range.order, Range.targets, Range.cache = {}, {}, {}
+end
+
+function Range.startAutomatic(targets)
+    Range.cancelAutomatic()
+    Range.setRangeTargets(targets, nil, true)
+    Range.cache = {}
+    Range.automatic, Range.status = true, "pending"
+    Range.active, Range.memberIndex, Range.targetIndex = nil, 1, 1
+    Range.sweepStarted, Range.passStarted, Range.nextSweepAt = nil, nil, nil
+    Range.runRangeSweep(getElapsedTime())
+end
+
 function Range.runRangeSweep(now)
+    if Range.automatic and (not session or not session.targetFallback
+            or session.autoNextTarget == false or session.controlMode ~= "direct") then
+        Range.cancelAutomatic()
+        return
+    end
+    if Range.automatic and Range.status ~= "pending" then return end
     if C.IsGamePaused() or not session or (session.phase ~= "target_select"
             and not (session.phase == "engaged" and session.controlMode == "direct")) then return end
     if Range.active then
         if now - Range.active.started < 2 then return end
         log("event=in_range action=timeout turret=" .. Range.active.memberKey)
         Range.active = nil
+        if Range.automatic then Range.status = "failed"; return end
     end
     if Range.nextSweepAt and now < Range.nextSweepAt then return end
     if #Range.order == 0 then return end
@@ -1574,6 +1602,7 @@ function Range.runRangeSweep(now)
         for _, entry in ipairs(Range.order) do
             Range.cache[entry.key] = { count = 0, total = 0, receivedAt = now }
         end
+        if Range.automatic then Range.status = "complete" end
         Range.nextSweepAt = now + 1
         return
     end
@@ -1617,6 +1646,11 @@ function Range.onRangeResult(_, param)
         local selected = session.aimTargetID or session.targetObjectID
         liveSelected = not isNullID(selected) and State.normID(selected) or nil
     end
+    if Range.automatic then liveSelected = nil end
+    if Range.automatic and (not session or not session.targetFallback
+            or session.autoNextTarget == false or session.controlMode ~= "direct") then
+        Range.cancelAutomatic(); return
+    end
     if not session or not active or liveSelected ~= active.selectedKey
             or liveSignature ~= active.signature or session ~= active.session or nonce ~= active.nonce
             or memberKey ~= active.memberKey or active.signature ~= Range.signature
@@ -1653,10 +1687,11 @@ function Range.onRangeResult(_, param)
                 .. tostring(math.floor((now - Range.sweepStarted) * 1000))
                 .. " checks=" .. tostring(Range.totalWork)
                 .. " peak_checks_per_update=" .. tostring(Range.peakWork))
+            if Range.automatic then Range.status = "complete" end
             Range.memberIndex, Range.sweepStarted = 1, nil
             Range.nextSweepAt = now + 1
             Range.totalWork, Range.peakWork = 0, 0
-            if session.phase == "target_select" and (not Range.nextSortAt or now >= Range.nextSortAt) then
+            if not Range.automatic and session.phase == "target_select" and (not Range.nextSortAt or now >= Range.nextSortAt) then
                 Range.nextSortAt = now + 5
                 local expectedSession, expectedEpoch = session, sessionEpoch
                 Helper.addDelayedOneTimeCallbackOnUpdate(function()
@@ -2272,59 +2307,19 @@ local function chooseAimTarget()
     return nil
 end
 
--- One planner page is one MD batch: never let a fallback page span the
--- engageability batch size.
-local fallbackPageSize = engageabilityBatchSize
-
--- Session-scoped asynchronous resolution of a Direct surface loss
--- (Issue #45 Task 5). onDirectTargetLost() refreshes the root's surface
--- snapshot, records the ranked unfiltered same-root surfaces in
--- session.targetFallback (page 1), issues the page-1 ENGAGEABLE query at
--- once, and returns without choosing anything. Each later 0.25 s tick,
--- updateTargetFallback() re-queries the current stage's batch through the
--- standard engageability path and applies one State.planEngageFallback
--- decision: ranked surfaces in pages, then the target's hull, then ranked
--- other objects. Only accepted results reach the planner:
--- requestEngageabilities() owns epoch, signature and staleness (a stale
--- reading comes back as a fresh pending entry, and the planner yields "wait"
--- for it), so no second staleness model lives here.
-
--- Asks the checked turrets' ENGAGEABLE for `ids` and reshapes the positional
--- cache entries into the normID -> accepted result map the planner consumes.
-local function queryFallbackBatch(ids)
-    local raw = requestEngageabilities(ids, "auto_next_fallback")
-    local results = {}
-    for position, target in ipairs(ids) do
-        local cached = raw[position]
-        if cached ~= nil and not State.isNullID(target) then
-            results[State.normID(target)] = cached
-        end
-    end
-    return results
+-- Automatic replacements use one fresh, complete IN RANGE sweep at a time.
+-- Surface pages retain browser metadata ordering; browser objects use distance.
+local function automaticTargetAllowed(component)
+    if not C.IsComponentOperational(id(component)) then return false end
+    local eligible, root = isEligibleEngagementTarget(component)
+    local enemy, hostile = componentData(root, "isenemy", "ishostile")
+    return eligible and (enemy or hostile)
 end
 
--- The ranked other-objects fallback list: readTargetCandidates()'s own order
--- with the lost root and every non-operational candidate dropped, so a dead
--- object neither enters orderedIDs nor burns an ENGAGEABLE batch slot.
-local function rankFallbackObjects(root)
-    local objects = {}
-    for _, candidate in ipairs(readTargetCandidates()) do
-        local component = candidate.componentID
-        if not sameID(component, root)
-                and C.IsComponentOperational(id(component)) then
-            objects[#objects + 1] = component
-        end
-    end
-    return objects
-end
-
--- Last resort for both fallback paths: reset the view, clear the engagement,
--- hand the choice back at the target browser.
 local function fallbackToBrowser()
-    -- applyPov() only acts while the phase is still "engaged", so reset the view
-    -- before openTargetBrowser() moves the phase on.
     session.aimTargetID, session.targetObjectID = nil, nil
     session.povAnchor, session.povMode = "turret", "manual"
+    Range.cancelAutomatic()
     session.targetFallback = nil
     applyPov()
     openTargetBrowser()
@@ -2332,230 +2327,138 @@ local function fallbackToBrowser()
     logSession("engaged target lost; back to target selection")
 end
 
--- Ordinary object-level loss (aimTargetID == targetObjectID), or a surface
--- fallback aborted on a dead root: the existing object sweep, then the
--- browser. With Auto-next Target off there is no sweep at all.
-local function handleObjectLoss()
-    local nextTarget
-    if session.autoNextTarget ~= false then
-        nextTarget = chooseAimTarget()
-    end
-    if nextTarget and engageTarget(nextTarget) then
-        if (session.povMode or "manual") == "cinematic" then
-            -- A running cutscene cannot be re-aimed; same stop/restart cut the
-            -- auto-engage retarget path takes.
-            sendCutsceneAimStop()
-            sendCutsceneAimStart(session.povAnchor or "turret")
+local function browserReplacementCandidates()
+    local candidates = {}
+    for _, candidate in ipairs(readTargetCandidates()) do
+        if automaticTargetAllowed(candidate.componentID) then
+            candidates[#candidates + 1] = candidate
         end
-        logSession("engaged target lost; auto-next engaged " .. tostring(nextTarget))
-        return
     end
+    table.sort(candidates, function(a, b)
+        if a.distance ~= b.distance then
+            if a.distance < 0 then return false end
+            if b.distance < 0 then return true end
+            return a.distance < b.distance
+        end
+        return State.normID(a.componentID) < State.normID(b.componentID)
+    end)
+    local ids = {}
+    for _, candidate in ipairs(candidates) do ids[#ids + 1] = candidate.componentID end
+    return ids
+end
+
+local function startFallbackScan(fb)
+    if fb.stage == "objects" then
+        fb.orderedIDs = browserReplacementCandidates()
+        if #fb.orderedIDs == 0 or fb.attempts >= 3 then
+            fallbackToBrowser()
+            return
+        end
+        fb.attempts = fb.attempts + 1
+        fb.scanIDs = fb.orderedIDs
+    else
+        fb.scanIDs = State.surfacePage(fb.orderedIDs, fb.page, 20)
+    end
+    fb.scanning = true
+    Range.startAutomatic(fb.scanIDs)
+end
+
+local function handleObjectLoss()
     fallbackToBrowser()
+    if session.autoNextTarget == false then return end
+    local fb = { stage = "objects", attempts = 0 }
+    session.targetFallback = fb
+    startFallbackScan(fb)
 end
 
 local function startTargetFallback(lostID, root)
-    -- Task 5A: the loss tick refreshes the root's surface snapshot through
-    -- the browser's own rebuild path (fresh generation, logged reason),
-    -- then ranks the UNFILTERED same-root alternatives of that snapshot's
-    -- allSurfaces -- the user's browser filters never narrow auto-next --
-    -- under the same cross-type policy the browser sorts with, starting at
-    -- page 1. The page-1 batch enters the standard ENGAGEABLE path
-    -- immediately; the loss tick itself still makes no choice.
+    Range.cancelAutomatic()
     local browser = rebuildSurfaceSnapshot("auto_next")
-    local alternatives = State.surfaceAlternatives(browser.allSurfaces,
-        lostID, "any", "any")
+    local alternatives = State.surfaceAlternatives(browser.allSurfaces, lostID, "any", "any")
     table.sort(alternatives, function(a, b)
         return State.surfaceMetadataLess(a, b, surfaceCrossTypePolicy)
     end)
-    local orderedIDs = {}
+    local ids = {}
     for _, surface in ipairs(alternatives) do
-        orderedIDs[#orderedIDs + 1] = State.normID(surface.componentID)
+        if automaticTargetAllowed(surface.componentID) then
+            ids[#ids + 1] = surface.componentID
+        end
     end
-    session.targetFallback = {
-        stage = "surfaces", root = root, lostID = lostID,
-        orderedIDs = orderedIDs, page = 1,
-    }
-    local pageIDs = State.surfacePage(orderedIDs, 1, fallbackPageSize)
-    queryFallbackBatch(pageIDs)
-    log("event=auto_next_fallback action=start root=" .. tostring(root)
-        .. " lost=" .. tostring(lostID)
-        .. " surfaces=" .. tostring(#orderedIDs)
-        .. " snapshot_generation=" .. tostring(browser.generation))
+    local fb = { stage = "surfaces", root = root, lostID = lostID,
+        orderedIDs = ids, page = 1 }
+    session.targetFallback = fb
+    if #ids > 0 then startFallbackScan(fb) end
 end
 
--- Direct-control lost what it was engaging. Setting aimTargetID alone would
--- move only the camera and leave every checked group armed against a wreck,
--- so the replacement always goes through engageTarget(), which repoints the
--- soft target, targetObjectID and camera together. When the lost aim was a
--- surface element (lost ID differs from the root) and Auto-next Target is on,
--- the choice is deferred to the asynchronous resolution; everything else
--- keeps the ordinary object fallback. With Auto-next off -- or on with
--- nothing left to shoot -- reset the view and hand the choice back to the
--- player at the target browser.
 local function onDirectTargetLost()
     local lostID, root = session.aimTargetID, session.targetObjectID
-    if session.autoNextTarget ~= false
-            and not isNullID(lostID) and not isNullID(root)
-            and not sameID(lostID, root) then
+    if session.autoNextTarget ~= false and not isNullID(lostID) and not isNullID(root)
+            and not sameID(lostID, root) and automaticTargetAllowed(root) then
         startTargetFallback(lostID, root)
-        return
+    else
+        handleObjectLoss()
     end
-    handleObjectLoss()
 end
 
--- Runs on every 0.25 s update tick while session.targetFallback is set.
--- One planner decision per tick; a "wait" simply re-queries on the next tick,
--- so pending and stale readings settle without a dedicated timer.
 local function updateTargetFallback()
     local fb = session.targetFallback
     if not fb then return end
-    -- Leaving Direct cancels the resolution quietly: the mode switch itself
-    -- owns the hand-off, so no browser transition of our own. Checked before
-    -- the Auto-next-off path so a session that left Direct while the checkbox
-    -- was off is not forced into a browser it never asked for.
     if session.controlMode ~= "direct" then
-        session.targetFallback = nil
-        return
+        Range.cancelAutomatic(); session.targetFallback = nil; return
     end
-    -- Task 5C: the player switched Auto-next Target off while a resolution
-    -- was in flight. Cancel the automatic resolution and hand the choice
-    -- back at the browser through the existing browser-fallback path; never
-    -- engage a replacement after the switch.
-    if session.autoNextTarget == false then
-        log("event=auto_next_fallback action=auto_next_off_cancel root="
-            .. tostring(fb.root) .. " stage=" .. tostring(fb.stage))
-        fallbackToBrowser()
-        return
+    if session.autoNextTarget == false then fallbackToBrowser(); return end
+    if fb.stage ~= "objects" and not automaticTargetAllowed(fb.root) then
+        handleObjectLoss(); return
     end
-    -- The whole chain is evidence about this one root: if the root itself is
-    -- gone mid-resolution the surface and hull evidence is stale, so abort to
-    -- the ordinary object loss.
-    if not C.IsComponentOperational(id(fb.root)) then
-        log("event=auto_next_fallback action=root_lost_abort root=" .. tostring(fb.root))
-        session.targetFallback = nil
-        handleObjectLoss()
-        return
-    end
-    -- A dead objects-stage candidate whose ENGAGEABLE evidence is still
-    -- pending (or was never queried this epoch) can never settle, and the
-    -- planner would keep yielding "wait" for the whole page even while a
-    -- surviving sibling proved positive (5B2c). A dead candidate whose
-    -- evidence SETTLED TO ZERO is equally stale: the planner would read its
-    -- zero from the outdated list, conclude "none", and fall to the browser
-    -- even though a newly operational object now exists (5B2c). Only a dead
-    -- candidate whose cached result is settled and ENGAGEABLE-positive stays
-    -- on the ordinary path, where the engage-time recheck (5B2b) re-verifies
-    -- and restarts. A restart rebuilds the ranked list exactly as the stage
-    -- entry does (the dead object drops out, any new operational object
-    -- ranks) and lets ordinary evaluation resume from page 1 on the next
-    -- tick.
-    if fb.stage == "objects" then
-        local deadParts = {}
-        for _, componentID in ipairs(fb.orderedIDs) do
-            if not C.IsComponentOperational(id(componentID)) then
-                local cached = engageabilityCache[
-                    tostring(sessionEpoch) .. ":" .. State.normID(componentID)]
-                -- Settled and positive is the only dead evidence that may
-                -- keep its batch slot (5B2b owns it); anything else --
-                -- missing, pending, or settled zero -- is a stale list.
-                if cached == nil or cached.pending
-                        or (cached.engageable or 0) <= 0 then
-                    deadParts[#deadParts + 1] = tostring(componentID)
+    if fb.scanning then
+        local parts = {}
+        for _, member in ipairs(checkedOperationalTurrets()) do
+            parts[#parts + 1] = State.normID(member.componentID)
+        end
+        if table.concat(parts, ",") ~= Range.signature then
+            Range.active, Range.status = nil, "failed"
+        end
+        if Range.status == "pending" then return end
+        if Range.status == "complete" then
+            -- Recheck eligibility immediately before normal engagement. A lost
+            -- candidate invalidates this sweep, including its zero readings.
+            for _, target in ipairs(fb.scanIDs) do
+                if not automaticTargetAllowed(target) then
+                    if fb.stage == "surfaces" then startTargetFallback(fb.lostID, fb.root)
+                    else startFallbackScan(fb) end
+                    return
                 end
             end
-        end
-        if #deadParts > 0 then
-            fb.orderedIDs = rankFallbackObjects(fb.root)
-            fb.page = 1
-            log("event=auto_next_fallback action=stale_object_list_restart root="
-                .. tostring(fb.root) .. " dead=" .. table.concat(deadParts, ",")
-                .. " ranked=" .. tostring(#fb.orderedIDs))
-            return
-        end
-    end
-    local orderedIDs = fb.orderedIDs
-    local decision
-    if fb.stage == "hull" then
-        decision = State.planEngageFallback("hull", orderedIDs, 1, fallbackPageSize,
-            queryFallbackBatch(orderedIDs))
-    else
-        local pageIDs, page = State.surfacePage(orderedIDs, fb.page, fallbackPageSize)
-        fb.page = page
-        decision = State.planEngageFallback(fb.stage, orderedIDs, page, fallbackPageSize,
-            queryFallbackBatch(pageIDs))
-    end
-    if decision.action == "wait" then return end
-    if decision.action == "engage" then
-        -- A positive reading proves the surface was ENGAGEABLE when the
-        -- answer was accepted, not that it is alive on this tick: the surface
-        -- may have died in between. Re-verify immediately before committing.
-        -- A dead surface is neither engaged nor a proven zero, so there is no
-        -- hull/browser fallthrough: restart the same-root surface stage from
-        -- a fresh snapshot, where the dead surface has dropped out of the
-        -- ranking and the new page 1 is requested at once (5A behaviour).
-        if fb.stage == "surfaces"
-            and not C.IsComponentOperational(id(decision.targetID)) then
-            log("event=auto_next_fallback action=stale_surface_restart root="
-                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID))
-            startTargetFallback(fb.lostID, fb.root)
-            return
-        end
-        -- The same stale-proof for objects-stage targets (5B2b): a positive
-        -- reading proves ENGAGEABLE at acceptance, not on this tick. A dead
-        -- object is neither engaged nor a proven zero, so there is no browser
-        -- fallthrough either: rebuild the ranked objects list exactly as the
-        -- stage entry does and resume the ordinary evaluation from page 1.
-        if fb.stage == "objects"
-            and not C.IsComponentOperational(id(decision.targetID)) then
-            fb.orderedIDs = rankFallbackObjects(fb.root)
-            fb.page = 1
-            log("event=auto_next_fallback action=stale_object_restart root="
-                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID)
-                .. " ranked=" .. tostring(#fb.orderedIDs))
-            return
-        end
-        if engageTarget(decision.targetID) then
-            -- engageTarget cleared the fallback state; log from fb while it
-            -- is still in hand.
-            if (session.povMode or "manual") == "cinematic" then
-                sendCutsceneAimStop()
-                sendCutsceneAimStart(session.povAnchor or "turret")
+            for _, target in ipairs(fb.scanIDs) do
+                local result = Range.rangeResult(target)
+                if result and result.count > 0 then
+                    if engageTarget(target) then
+                        if (session.povMode or "manual") == "cinematic" then
+                            sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
+                        end
+                        logSession("engaged target lost; auto-next engaged " .. tostring(target))
+                    else fallbackToBrowser() end
+                    return
+                end
             end
-            log("event=auto_next_fallback action=engage stage=" .. fb.stage
-                .. " target=" .. tostring(decision.targetID))
-            logSession("engaged target lost; auto-next engaged " .. tostring(decision.targetID))
+        else
+            -- Failed/incomplete original-root checks retry the same stage;
+            -- browser failures consume one of its three attempts.
+            startFallbackScan(fb)
             return
         end
-        -- The planner's pick could not be engaged (eligibility or camera
-        -- refusal): hand the choice back the way a failed sync engage did.
-        fallbackToBrowser()
+        Range.cancelAutomatic()
+        fb.scanning = nil
+    end
+    if fb.stage == "objects" then startFallbackScan(fb); return end
+    if fb.stage == "surfaces" then
+        local _, _, pages = State.surfacePage(fb.orderedIDs, fb.page, 20)
+        if #fb.orderedIDs > 0 and fb.page < pages then fb.page = fb.page + 1
+        else fb.stage, fb.page, fb.orderedIDs = "hull", 1, { fb.root } end
+        startFallbackScan(fb)
         return
     end
-    if decision.action == "next_page" then
-        fb.page = fb.page + 1
-        log("event=auto_next_fallback action=next_page stage=" .. fb.stage
-            .. " page=" .. tostring(fb.page))
-        return
-    end
-    if decision.action == "hull" then
-        fb.stage, fb.page = "hull", 1
-        fb.orderedIDs = { fb.root }
-        log("event=auto_next_fallback action=stage stage=hull root=" .. tostring(fb.root))
-        return
-    end
-    if decision.action == "objects" then
-        -- Keep readTargetCandidates() ranking intact; the planner must not
-        -- burn an ENGAGEABLE batch slot on a candidate that is already dead,
-        -- so a non-operational candidate is dropped alongside the lost root.
-        fb.stage, fb.page = "objects", 1
-        fb.orderedIDs = rankFallbackObjects(fb.root)
-        log("event=auto_next_fallback action=stage stage=objects ranked="
-            .. tostring(#fb.orderedIDs))
-        return
-    end
-    -- "none": every stage proved zero engageable; nothing left to shoot.
-    log("event=auto_next_fallback action=exhausted root=" .. tostring(fb.root))
-    fallbackToBrowser()
+    handleObjectLoss()
 end
 
 -- Fired by MD (X4GunneryControl.DirectTargetLost) when the engaged target's
@@ -2588,17 +2491,18 @@ end
 -- Updates session.aimTargetID and restarts the cinematic when the target changes.
 local nextAimScan = 0
 local function updateAimTarget()
-    if not session or session.phase ~= "engaged" then return end
-    -- A surface-loss resolution in flight (Issue #45 Task 5) owns the tick:
-    -- each 0.25 s refresh walks the planner exactly one decision.
+    if not session then return end
+    -- Automatic resolution also runs while the target browser is visible.
     if session.targetFallback ~= nil then
         updateTargetFallback()
         return
     end
+    if session.phase ~= "engaged" then return end
     local prev = session.aimTargetID
     local now = getElapsedTime()
     local hadTarget = not isNullID(prev)
-    if hadTarget and not C.IsComponentOperational(id(prev)) and session.controlMode == "direct" then
+    if hadTarget and session.controlMode == "direct"
+            and not automaticTargetAllowed(prev) then
         return onDirectTargetLost()
     end
     if session.controlMode == "direct" then
@@ -3453,7 +3357,7 @@ local function updateSessionRuntime()
             menu.display()
         end
         -- Auto-retarget runs on the same tick as the data refresh.
-        if session.phase == "engaged" then updateAimTarget() end
+        if session.phase == "engaged" or session.targetFallback then updateAimTarget() end
         -- The player's first Esc during a cinematic goes to the cutscene, not to
         -- our frame, so the engine ends it behind our back. Notice that and
         -- return to the default view here; otherwise the panel keeps claiming
