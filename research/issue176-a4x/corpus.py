@@ -10,6 +10,7 @@ import gzip
 import json
 import re
 import struct
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -141,7 +142,10 @@ def _behavior(element, projectiles):
 
 def _official_macros(projectiles, turrets):
     """Collect official macros in one pass: turret scope plus every projectile macro."""
-    lua = (ROOT / "ui/turret_muzzle_geometry.lua").read_text()
+    # Freeze the accepted study scope independently of the current production tree.
+    lua = subprocess.check_output(
+        ["git", "show", "2ae784b9a1818fcd141bab4fbce5470e59a8f536:ui/turret_muzzle_geometry.lua"],
+        cwd=ROOT, text=True)
     conventional = sorted(b.split('"', 1)[0] for b in re.split(r'\n    \["', lua)[1:] if "chain = {" in b)
     missile = []
     for name in REQUIRED_SOURCE_SETS:

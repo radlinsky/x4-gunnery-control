@@ -376,8 +376,21 @@ GetComponentData = function(component, ...)
     return unpack(vals)
 end
 -- The engaged target 500 is destroyed; 98 is the only survivor.
+C.IsComponentClass = function(component, class) return tostring(component) == "98" and class == "ship" end
 C.IsComponentOperational = function(cid) return tostring(cid) == "98" end
+local rangeRequest
+local savedAdd39 = AddUITriggeredEvent
+AddUITriggeredEvent = function(screen, control, params)
+    if control == "in_range_begin" then rangeRequest = params end
+    return savedAdd39(screen, control, params)
+end
 X4GunneryControlAPI.updateAimTarget()
+assert(sess39.phase == "target_select" and rangeRequest,
+    "object loss must open the browser and begin a fresh range sweep")
+fix.fireEvent("X4GunneryControl.InRangeResult", "x4gcr2:" .. rangeRequest.nonce
+    .. ":" .. rangeRequest.weaponid .. ":1")
+X4GunneryControlAPI.updateAimTarget()
+AddUITriggeredEvent = savedAdd39
 assert(tostring(sess39.aimTargetID) == "98",
     "auto-next must move the aim to the survivor; got " .. tostring(sess39.aimTargetID))
 assert(tostring(sess39.targetObjectID) == "98",

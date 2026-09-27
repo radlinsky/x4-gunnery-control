@@ -178,9 +178,6 @@ do
         "52a: the slot carrying group 10's representative component (101) must be listed under group 10")
     assert(hasMember(rear52a, 102),
         "52a: the slot carrying group 20's representative component (102) must be listed under group 20")
-    assert(front52a.members[1].macro == "turret_bor_m_railgun_02_mk1_macro"
-            and rear52a.members[1].macro == "turret_bor_m_railgun_02_mk1_macro",
-        "52a: every member must retain its authoritative group currentmacro for arc lookup")
     local members52a = #front52a.members + #rear52a.members
     assert(members52a == #slotComponents,
         "52a: every turret slot must appear exactly once across the groups; expected "

@@ -1,5 +1,5 @@
 """P3c: build corpus.pkl (aimtarget records, boxes, pairs, turret geometry, arc limits)."""
-import pickle, re
+import pickle, re, subprocess
 from sources import COMPONENTS, MACROS, REPO, SRC, StudyError, center_half, connections, tags
 from barrelposition_evaluator import _native_connection_name_hash, joint_segments, load_turrets
 from census_common import REQUIRED_SOURCE_SETS
@@ -45,12 +45,16 @@ counts = dict(aim=len(aim), candidates=len(cand), macro_referenced=len(comps), r
 print(counts)
 assert counts == dict(aim=336, candidates=255, macro_referenced=248, records=270, multi=15, component_pairs=33, pairs=38), counts
 
-lua = (REPO / "ui/turret_muzzle_geometry.lua").read_text()
+# The accepted study used these historical assets; production retired them.
+ASSET_SHA = "2ae784b9a1818fcd141bab4fbce5470e59a8f536"
+lua = subprocess.check_output(
+    ["git", "show", f"{ASSET_SHA}:ui/turret_muzzle_geometry.lua"], cwd=REPO, text=True)
 blocks = re.split(r'\n    \["', lua)[1:]
 turret_names = sorted(b.split('"', 1)[0] for b in blocks if "chain = {" in b)
 assert len(turret_names) == 92
 arcs = {m: (float(a), float(b)) for m, a, b in re.findall(
-    r'\["(\w+)"\] = \{ (-?[\d.]+), (-?[\d.]+) \}', (REPO / "ui/turret_arc_limits.lua").read_text())}
+    r'\["(\w+)"\] = \{ (-?[\d.]+), (-?[\d.]+) \}', subprocess.check_output(
+        ["git", "show", f"{ASSET_SHA}:ui/turret_arc_limits.lua"], cwd=REPO, text=True))}
 cache = REPO / ".x4-research-cache"
 outdir = cache / "issue167-p3c"
 outdir.mkdir(exist_ok=True)
