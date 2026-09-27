@@ -241,6 +241,18 @@ objectSetup(); late = pending(); s.controlMode, s.phase = nil, "console"
 reply(late, "1"); API.updateAimTarget()
 assert(s.targetFallback == nil and s.phase == "console" and #choices == 0)
 
+-- Test Lab parking cancels the sweep even though it retains the same session.
+objectSetup(); late = pending()
+local labOpened = false
+API.registerTestLab({ open = function() labOpened = true end })
+originalDisplay()
+local lab = assert(fix.buttonByText("text:20991:32"))
+lab.handlers.onClick()
+assert(labOpened and s.targetFallback == nil)
+reply(late, "1")
+assert(#choices == 0, "parked session must reject a late positive")
+API.registerTestLab(nil)
+
 -- Destruction and ownership changes invalidate a complete sweep before selection.
 objectSetup(); reply(pending(), "1"); pass("1"); alive[101] = false
 API.updateAimTarget(); assert(s.targetFallback == nil and #choices == 0)

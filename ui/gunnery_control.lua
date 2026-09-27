@@ -418,6 +418,10 @@ end
 local function transitionLifecycle(nextLifecycle, reason, quiet)
     if not session then return end
     local previous = session.lifecycle or "none"
+    if nextLifecycle ~= State.lifecycle.owned and session.targetFallback then
+        Range.cancelAutomatic()
+        session.targetFallback = nil
+    end
     State.setLifecycle(session, nextLifecycle)
     if not quiet then
         logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
