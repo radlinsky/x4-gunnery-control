@@ -376,6 +376,7 @@ GetComponentData = function(component, ...)
     return unpack(vals)
 end
 -- The engaged target 500 is destroyed; 98 is the only survivor.
+C.IsComponentClass = function(component, class) return tostring(component) == "98" and class == "ship" end
 C.IsComponentOperational = function(cid) return tostring(cid) == "98" end
 local rangeRequest
 local savedAdd39 = AddUITriggeredEvent

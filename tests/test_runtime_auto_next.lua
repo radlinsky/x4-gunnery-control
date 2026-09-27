@@ -6,14 +6,16 @@ getElapsedTime = function() return now end
 local alive, enemy, ships, stations, surfaces, sizes, distances = {}, {}, {}, {}, {}, {}, {}
 local events, choices = {}, {}
 AddUITriggeredEvent = function(_, control, params)
-    assert(not control:find("engageability"), "Auto-next must never request ENGAGEABLE")
+    assert(not control:find("engageability") and not control:find("clear"),
+        "Auto-next must never request ENGAGEABLE or CLEAR")
     events[#events + 1] = { control = control, params = params }
 end
 C.GetSofttarget2 = function() return { softtargetID = soft, softtargetConnectionName = "" } end
 C.SetSofttarget = function(target) soft = target; choices[#choices + 1] = target; return true end
 C.IsComponentOperational = function(target) return alive[tonumber(target)] == true end
 C.IsComponentClass = function(target, class)
-    return class == "ship" and tonumber(target) < 700
+    return (class == "ship" and tonumber(target) < 700 and tonumber(target) ~= 99)
+        or (class == "station" and tonumber(target) == 99)
 end
 C.GetContextByClass = function(target)
     if tonumber(target) >= 700 and tonumber(target) < 800 then return 600 end
@@ -33,7 +35,7 @@ GetComponentData = function(target, ...)
     local values = {}
     for _, key in ipairs({...}) do
         local value = false
-        if key == "isenemy" then value = enemy[tonumber(target)] ~= "hostile"
+        if key == "isenemy" then value = enemy[tonumber(target)] ~= "hostile" and enemy[tonumber(target)] ~= "neutral"
         elseif key == "ishostile" then value = enemy[tonumber(target)] == "hostile"
         elseif key == "isknown" or key == "isradarvisible" then value = true
         elseif key == "maxradarrange" then value = 40000 end
@@ -100,6 +102,37 @@ pass("110")
 API.updateAimTarget()
 assert(s.aimTargetID == 704 and #choices == 1, "first qualifying surface wins over higher count")
 
+-- A larger zero-range candidate loses to a smaller positive candidate.
+s = setup(true, 2)
+reply(pending(), "01"); pass("01"); API.updateAimTarget()
+assert(s.aimTargetID == 703, "zero-range surface must never win its metadata rank")
+
+-- Original-root retries have no three-attempt cap and cannot reuse old positives.
+s = setup(true, 1)
+for _ = 1, 4 do
+    reply(pending(), "1") -- one turret positive, second never replies
+    API.runRangeSweep(now)
+    now = now + 2.1
+    API.runRangeSweep(now); API.updateAimTarget()
+    assert(s.targetFallback.stage == "surfaces" and #choices == 0)
+end
+finish("0")
+assert(s.targetFallback.stage == "hull", "fresh zero sweep must discard earlier partial positives")
+for _ = 1, 4 do
+    now = now + 2.1; API.runRangeSweep(now); API.updateAimTarget()
+    assert(s.targetFallback.stage == "hull", "hull retries must not consume browser budget")
+end
+finish("1"); assert(s.aimTargetID == 600)
+
+-- Losing the root mid-surface scan skips directly to the visible browser.
+s = setup(true, 1)
+local obsoleteSurface = pending()
+alive[600], alive[99], ships = false, true, { 99 }
+API.updateAimTarget()
+assert(s.phase == "target_select" and s.targetFallback.stage == "objects")
+reply(obsoleteSurface, "1"); assert(#choices == 0)
+finish("1"); assert(s.aimTargetID == 99)
+
 -- Complete surface pages, original hull, visible browser, and equal relations.
 s = setup(true, 21)
 finish(string.rep("0", 20))
@@ -144,6 +177,25 @@ API.updateAimTarget(); assert(#choices == 0, "second turret still required")
 pass(string.rep("0", 20)); pass("0")
 API.updateAimTarget(); assert(s.aimTargetID == 101)
 
+-- Neutral candidates do not start a browser scan, and a disabled option scans nothing.
+s = setup(false)
+ships, alive[101], enemy[101] = { 101 }, true, "neutral"
+s.phase, s.aimTargetID, s.targetObjectID = "engaged", 500, 500
+API.updateAimTarget(); assert(s.targetFallback == nil and not pending())
+-- A forced soft target such as a missile is not a ship/station candidate.
+ships, soft, alive[900] = {}, 900, true
+s.phase, s.aimTargetID, s.targetObjectID = "engaged", 500, 500
+API.updateAimTarget(); assert(s.targetFallback == nil and not pending())
+enemy[101], s.autoNextTarget = nil, false
+s.phase, s.aimTargetID, s.targetObjectID = "engaged", 500, 500
+API.updateAimTarget(); assert(s.targetFallback == nil and not pending())
+
+-- Browser ranking uses distance when the complete sweep is consumed.
+objectSetup(2)
+reply(pending(), "11"); pass("11")
+distances[102] = 500
+API.updateAimTarget(); assert(s.aimTargetID == 102, "moving nearer candidate must win")
+
 -- Three attempts include malformed replies/timeouts and complete zero sweeps.
 objectSetup()
 local late = pending()
@@ -171,6 +223,23 @@ assert(API.engageTarget(102)); reply(late, "1"); API.updateAimTarget()
 assert(s.aimTargetID == 102 and #choices == 1)
 objectSetup(); late = pending(); setup(false); reply(late, "1")
 assert(#choices == 0)
+
+-- Manual tracking of an operational neutral target remains unchanged.
+s = setup(false)
+s.phase, s.aimTargetID, s.targetObjectID = "engaged", 500, 500
+soft, alive[500], enemy[500] = 500, true, "neutral"
+API.updateAimTarget()
+assert(s.phase == "engaged" and s.aimTargetID == 500 and s.targetFallback == nil)
+
+-- A membership change after completion invalidates the entire result.
+objectSetup(); reply(pending(), "1"); pass("1"); s.checkedGroupKeys = {}
+API.updateAimTarget()
+assert(#choices == 0 and s.targetFallback.attempts == 2)
+
+-- Leaving Direct cancels without forcing a new browser transition.
+objectSetup(); late = pending(); s.controlMode, s.phase = nil, "console"
+reply(late, "1"); API.updateAimTarget()
+assert(s.targetFallback == nil and s.phase == "console" and #choices == 0)
 
 -- Destruction and ownership changes invalidate a complete sweep before selection.
 objectSetup(); reply(pending(), "1"); pass("1"); alive[101] = false

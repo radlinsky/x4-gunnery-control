@@ -956,6 +956,8 @@ end
 local function returnToConsole(reason)
     if not session then return end
     if session.origin == "onboard" then restoreStandingCamera() else C.SetPlayerCameraCockpitView(true) end
+    Range.cancelAutomatic()
+    session.targetFallback = nil
     State.returnToConsole(session)
     menu.display()
 end
@@ -976,6 +978,7 @@ local function discardSession(reason)
     -- discardSession rather than leaveChair so the playerGetUp/playerUndock
     -- route (endForMovement -> endSession) is also covered.
     local hadDirectControl = session.controlMode == "direct"
+    Range.cancelAutomatic()
     sessionEpoch = sessionEpoch + 1
     engageabilityCache, engageabilityRequests = {}, {}
     Range.active, Range.targets, Range.order = nil, {}, {}
@@ -2328,22 +2331,14 @@ local function fallbackToBrowser()
 end
 
 local function browserReplacementCandidates()
-    local candidates = {}
+    local ids = {}
     for _, candidate in ipairs(readTargetCandidates()) do
-        if automaticTargetAllowed(candidate.componentID) then
-            candidates[#candidates + 1] = candidate
+        local object = id(candidate.componentID)
+        if (C.IsComponentClass(object, "ship") or C.IsComponentClass(object, "station"))
+                and automaticTargetAllowed(object) then
+            ids[#ids + 1] = candidate.componentID
         end
     end
-    table.sort(candidates, function(a, b)
-        if a.distance ~= b.distance then
-            if a.distance < 0 then return false end
-            if b.distance < 0 then return true end
-            return a.distance < b.distance
-        end
-        return State.normID(a.componentID) < State.normID(b.componentID)
-    end)
-    local ids = {}
-    for _, candidate in ipairs(candidates) do ids[#ids + 1] = candidate.componentID end
     return ids
 end
 
@@ -2360,6 +2355,10 @@ local function startFallbackScan(fb)
         fb.scanIDs = State.surfacePage(fb.orderedIDs, fb.page, 20)
     end
     fb.scanning = true
+    log("event=auto_next action=scan stage=" .. fb.stage
+        .. " page=" .. tostring(fb.page or 1)
+        .. " attempt=" .. tostring(fb.attempts or 0)
+        .. " targets=" .. tostring(#fb.scanIDs))
     Range.startAutomatic(fb.scanIDs)
 end
 
@@ -2419,6 +2418,9 @@ local function updateTargetFallback()
             Range.active, Range.status = nil, "failed"
         end
         if Range.status == "pending" then return end
+        log("event=auto_next action=result stage=" .. fb.stage
+            .. " attempt=" .. tostring(fb.attempts or 0)
+            .. " status=" .. tostring(Range.status))
         if Range.status == "complete" then
             -- Recheck eligibility immediately before normal engagement. A lost
             -- candidate invalidates this sweep, including its zero readings.
@@ -2429,17 +2431,29 @@ local function updateTargetFallback()
                     return
                 end
             end
+            local chosen, nearest = nil, math.huge
             for _, target in ipairs(fb.scanIDs) do
                 local result = Range.rangeResult(target)
                 if result and result.count > 0 then
-                    if engageTarget(target) then
-                        if (session.povMode or "manual") == "cinematic" then
-                            sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
-                        end
-                        logSession("engaged target lost; auto-next engaged " .. tostring(target))
-                    else fallbackToBrowser() end
-                    return
+                    if fb.stage ~= "objects" then chosen = target; break end
+                    -- Measure again after the sweep: moving candidates may
+                    -- have exchanged places while the turrets were scanned.
+                    local distance = tonumber(C.GetDistanceBetween(session.shipID, id(target))) or -1
+                    if distance < 0 then distance = math.huge end
+                    if not chosen or distance < nearest or (distance == nearest
+                            and State.normID(target) < State.normID(chosen)) then
+                        chosen, nearest = target, distance
+                    end
                 end
+            end
+            if chosen then
+                if engageTarget(chosen) then
+                    if (session.povMode or "manual") == "cinematic" then
+                        sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
+                    end
+                    logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
+                else fallbackToBrowser() end
+                return
             end
         else
             -- Failed/incomplete original-root checks retry the same stage;
@@ -2501,8 +2515,7 @@ local function updateAimTarget()
     local prev = session.aimTargetID
     local now = getElapsedTime()
     local hadTarget = not isNullID(prev)
-    if hadTarget and session.controlMode == "direct"
-            and not automaticTargetAllowed(prev) then
+    if hadTarget and not C.IsComponentOperational(id(prev)) and session.controlMode == "direct" then
         return onDirectTargetLost()
     end
     if session.controlMode == "direct" then
