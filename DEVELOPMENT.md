@@ -86,9 +86,15 @@ soft target over a target the player selected in Map.
 
 Direct-control uses selected `attackenemies` (enemy fallback) or `autoassist`
 (strict soft-target) policy. With **Auto-next Target** enabled, target loss
-re-engages automatically; a lost surface element searches ENGAGEABLE same-root
-surfaces before hull/object fallback. With Auto-next off, choose the next target
-manually.
+requires fresh, complete IN RANGE results and at least one selected operational
+turret in range for every replacement. A lost surface searches same-root surfaces
+by size/type/distance, then the original hull, then the visible target browser.
+Whole-object loss starts in the browser, which chooses the closest qualifying
+enemy/hostile object and allows at most three scan attempts. With no eligible
+candidates, manual selection resumes immediately. With Auto-next off, choose the
+next target manually. See [the behavior guide](docs/FIRE_CONTROL_BEHAVIOR.md) for
+range-estimate limits and the complete rules. P3/P4 are accepted OFFLINE; issue
+#197 P5 LIVE acceptance remains pending.
 
 **ID normalisation.** Raw FFI values such as the return of `targetRoot()`
 stringify with a `ULL` suffix; `id()`-converted values do not. A bare

@@ -1,6 +1,6 @@
 # Turret behavior by firing situation
 
-What your turrets do in each firing situation, under Direct-control and under Auto-engage. This document records current behavior. Where a section is explicitly marked **accepted future behavior**, it describes a method already accepted for the next production update but not yet used by the current runtime code.
+Current Direct-control and Auto-engage behavior, with the mod’s range and distance estimates separated from X4’s firing decisions. Auto-next rules are implemented and accepted OFFLINE for issue #197 P3; end-to-end LIVE acceptance remains pending in P5.
 
 ## Terms used here
 
@@ -36,34 +36,33 @@ The situations that matter for this mod. Each is checked against **your target**
 | **ENGAGEABLE** | Generic fire-control condition: the turret can aim at the target, the target is in range, nothing blocks the shot, a valid FIRING SOLUTION exists, and firing at that target is authorized. |
 | **OUT OF RANGE** | The target is farther away than the turret's weapons can reach. |
 | **CANNOT BEAR** | The target is in a direction the turret cannot rotate or tilt far enough to aim at. For example, a turret on the top of the ship and a target directly below the ship. |
-| **LINE OF FIRE BLOCKED** | The turret can bear on the target, but an obstruction masks a required projectile path. The obstruction may be the firing ship, terrain, or another object; guided missile turrets do not use a direct muzzle-to-target path for the console's geometry check. |
+| **LINE OF FIRE BLOCKED** | The turret can bear on the target, but an obstruction masks a required projectile path. The obstruction may be the firing ship, terrain, or another object; native tracing indicates guided loaded missiles bypass X4’s pre-fire obstruction check; that does not guarantee a hit. See [obstruction evidence](../.agents/skills/research-x4-modding/references/weapon-path-obstruction-groups.md) (**INFERRED**). |
 | **NO FIRING SOLUTION** | The turret can aim and the target is in range, but the target is moving in a way that leaves no shot that would connect. |
-| **WEAPON NOT READY** | The turret is destroyed. Destroyed turrets cannot be Direct-controlled by Gunnery Control, so they are excluded from ENGAGEABLE evaluation. |
+| **WEAPON NOT READY** | A weapon cannot fire, for example because it is destroyed, reloading, or out of ammunition. Destroyed turrets are excluded from Direct-control and IN RANGE counts. |
 | **FIRE NOT AUTHORIZED** | A shot is possible, but firing is held back on purpose: the group is on Hold fire, or the target is one you are not allowed to attack (friendly, surrendered, or captured). |
 
 *Standard fire-control vocabulary also names TARGET NOT DETECTED (the target is not detected at all). The console will not let you select a target it cannot detect, so this is left out here. Gunnery Control does not use a separate target-information condition: any target position or movement information needed to make a shot is part of whether a valid FIRING SOLUTION exists.*
 
-**Readiness and authorization in Gunnery Control.** Direct-control applies its attack mode and armed state before ENGAGEABLE is computed. Destroyed turrets are excluded from the selected/evaluated ENGAGEABLE population, so **WEAPON NOT READY** remains a documented firing situation but is not a retained predictor gate under the current mod design. **FIRE NOT AUTHORIZED** does remain part of prospective ENGAGEABLE. The current target-selection path normally limits Direct-control to enemy targets, so authorization should usually be a cheap PASS, but friendly, neutral, surrendered/captured, ownership-changed, or otherwise non-attackable targets must not be treated as ENGAGEABLE merely because the geometry works.
+## What the console estimates
 
-**What the console's ENGAGEABLE ratio measures today.** The `N / total ENGAGEABLE` value shown in Gunnery Control is a mod-computed geometry check, not a readout of an X4 firing state. The current production code checks bearing, range, and its older line-of-fire method. Issue #189 will replace that older line-of-fire code with the accepted method below as part of the full ENGAGEABLE pipeline.
+**IN RANGE** is the only production turret prediction. `N / total IN RANGE` counts unique operational turret members in ticked groups whose range estimate passes for that target. For example, `3 / 4 IN RANGE` means three of four members pass; it does not mean three can aim or fire. The console has no ENGAGEABLE, CLEAR LINE OF FIRE, CAN AIM, or separate selected-detail calculation.
 
-**Accepted future behavior — LINE OF FIRE.** Issue #186 has selected the LINE OF FIRE method that #189 will put into production. It uses the exact aim point supplied by the accepted aim-point work and evaluates every accepted firing origin separately against that same point.
+For each turret, the mod uses:
 
-- A conventional turret uses the normal obstruction check. A missile turret with guided loaded ammunition is **clear** without an obstruction check; one with unguided loaded ammunition uses the same normal check. This guided bypass does not guarantee that the missile reaches its target after launch.
-- Missing or ambiguous turret type or missile guidance makes LINE OF FIRE **UNKNOWN**. An unfamiliar ammunition macro or unaudited post-launch projectile behavior alone does not.
-- If the target is outside the X4 zone used by the firing weapon's path check, LINE OF FIRE is **UNKNOWN** rather than treating failed checks as a clear miss.
-- Conventional and unguided missile turrets, including cluster parents, use the same obstruction rules. The firing ship's own hull can block any of these weapons.
-- If the first thing hit on the firing-origin-to-aim-point path is the selected target, the path is **clear**.
-- If the first thing hit is another part of the same ship or station module that contains the selected target, X4's own second obstruction check is used from the same firing origin to the selected component's origin. If that check accepts the selected component, the path is **clear**; otherwise it is **LINE OF FIRE BLOCKED**.
-- If the first thing hit is an unrelated physical object, the result is **LINE OF FIRE BLOCKED**.
-- If the path genuinely hits nothing, the result is **clear** for the supported turret population.
-- The method does **not** try another aim point, another target or module, or another firing origin. If several firing origins are supplied, each keeps its own result for the later ENGAGEABLE decision.
+```text
+R = turret.maxfirerange
+IN RANGE iff R > 0 and target.bboxdistanceto.{turret} < R + extra
+```
 
-The retained method needs at most three line-of-fire checks for one supported non-guided firing-origin + aim-point pair, and none for a supported guided missile.
+`extra` is `min(1.1 × R, 500 m)` for non-beam ammunition against a ship with positive maximum speed or an engine on that ship; otherwise it is zero. This tests capability to move, not current motion. Stations and their elements, and turret/shield elements on ships, receive no allowance. Range comes from the weapon’s current ammunition and equipment state.
 
-The source-backed reasoning and its limits are recorded in [weapon path obstruction groups](../.agents/skills/research-x4-modding/references/weapon-path-obstruction-groups.md) and the supporting [MD/AI research](../.agents/skills/research-x4-modding/references/md-ai.md).
+**Native range evidence — INFERRED, X4 9.00 build 611726.** Static native tracing indicates that X4’s pre-fire range gate accepts either muzzle-to-aim-point distance (including lead) or turret-origin-to-target-oriented-box distance below the adjusted range. The mod approximates only the box branch with `target.bboxdistanceto.{turret}`. It can report OUT OF RANGE when X4’s other branch would accept the shot. Approximate square-root rounding and different evaluation times also affect boundaries. This is range evidence only: bearing, intercept, obstructions, readiness, authorization, and actual firing remain X4’s decisions. See the [range-gate evidence and limits](../.agents/skills/research-x4-modding/references/turret-fire-range-gate.md).
 
-The denominator is the count of all selected/evaluated turret members represented by the request, including members whose arc data are unknown. A turret with unknown or modded-macro arc coverage stays in the denominator but cannot enter the ENGAGEABLE numerator; its arc-unknown status is reported separately as UNKNOWN. The displayed ratio **today** does not prove a valid FIRING SOLUTION, fire authorization, or actual firing — the current range/arc/line-of-fire checks are geometry evidence only. The #79 prediction program extends this toward the full prospective ENGAGEABLE definition above, including FIRE NOT AUTHORIZED. WEAPON NOT READY remains outside that predictor while destroyed turrets are filtered from the evaluated population by design.
+**Distance** is the approximate origin-to-origin distance from your ship to the target or exact surface element, displayed in kilometres. It is distinct from the turret-to-target-box distance used for IN RANGE and is not a weapon-range test.
+
+Browser sweeps automatically check one selected operational turret across the visible targets before advancing to the next turret, including the pinned selected target. Completed browsing sweeps repeat after a one-second delay and pause with the game. Displayed counts can be partial or from an earlier sweep; Auto-next requires fresh, complete results. The object browser puts candidates with every evaluated turret IN RANGE first, then sorts by relation, distance, and name. Surface pages keep size/type/distance ordering, 20 rows at a time. List refresh controls are separate from the automatic range sweeps.
+
+The generic firing situations above describe game behavior, not console status labels. Historical geometry and obstruction research remains in the [research index](../.agents/skills/research-x4-modding/references/index.md); it is not a production firing predictor.
 
 ---
 
@@ -135,9 +134,21 @@ Because the mod tells no turret what to shoot in Auto-engage, each situation pla
 These apply on top of everything above.
 
 - **Not armed means no fire.** A turret group that is not armed does not fire, whatever its mode or your selection. Direct-control arms your ticked groups when you engage. In Auto-engage, a group keeps whatever armed state you gave it.
-- **When your target can no longer be attacked** (it is destroyed, surrenders, or changes owner), what happens next depends on **Auto-next target**. If it is off, the target-selection screen reopens and you pick again. If it is on (the default), Direct-control moves on automatically. When the lost target was a surface element, it tries candidates in this order: the other ENGAGEABLE surface elements on the same ship or station, ranked and paged 20 at a time; then that root's hull; then, if none of those work, the other objects in range, ranked. When a target changes owner or otherwise stops being one you are allowed to attack, X4's own combat AI notices on its own: it stops firing at it, drops it from its target lists, and picks a new target. That part is the game's doing, not the mod's. **X4 CODE**
+- **When your target can no longer be attacked** (it is destroyed, surrenders, or changes owner), Auto-next chooses a replacement as described below. With Auto-next off, the target browser reopens for manual selection. Separately, X4’s shipped combat AI handles loss of attack permission by stopping fire, clearing target lists, and restarting target selection; `autoassist` has its own cease-fire handling. This is script behavior, not a universal engine guarantee. **X4 CODE** — see [combat AI evidence](../.agents/skills/research-x4-modding/references/md-ai.md).
 - **Selecting part of a ship.** You can select one component (a specific turret or engine) instead of a whole ship. Direct-control aims at that component, and the situations in Table 1 apply to it the same way.
 - **Standing up.** When you stand up from the console, every turret group goes back to the mode and armed state it had before you sat down. The one exception is if you pressed **Update turret behavior** — the commit button on the main console, not the engaged panels — which makes your current settings the ones it returns to instead.
+
+## Auto-next replacement rules
+
+Auto-next is on by default. Every automatic replacement must be attackable and have **at least one** selected operational Direct-controlled turret IN RANGE before it can compete for selection. All selected turrets need not pass; a higher count does not win priority. Incomplete or stale scans cannot supply a replacement.
+
+1. **Lost surface element:** check other operational surfaces on the original ship/station in 20-row pages. Require fresh, complete IN RANGE results for each page. Among qualifying surfaces, choose the first by size (XL → L → M → S → XS), then type (turret → shield → engine), then distance. A farther large turret outranks a nearer small shield.
+2. **Original hull:** if no surface qualifies, check that ship/station hull with a fresh, complete IN RANGE sweep.
+3. **Target browser:** if the hull does not qualify, visibly open the browser and scan there. Ordinary ship/station loss starts here directly. Enemy and hostile attackable ships/stations compete equally; choose the closest qualifying object using distance measured after the sweep.
+
+Only the target-browser stage has a **three-attempt limit**. Each fresh scan attempt counts, including failed or incomplete scans; selection requires complete results. With no eligible enemy/hostile candidates, return immediately to manual selection without scanning. After three attempts without a replacement, leave the browser open for manual selection. Same-root surface pages and the original hull follow their established order without that limit.
+
+Attack eligibility and selected operational turret membership are rechecked before engagement. Manual engagement, disabling Auto-next, returning to the console, or ending the session cancels the automatic process. These mod rules do not change X4’s per-turret fallback behavior in Table 3.
 
 ---
 
