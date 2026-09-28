@@ -132,8 +132,13 @@ local function projectTurret(entry, state)
     if z <= 1 then return nil end
     local mx = -(rel[1] * r[1] + rel[3] * r[3]) / z / HOLO_TANHALF / holo.aspect
     local my = (rel[1] * u[1] + rel[2] * u[2] + rel[3] * u[3]) / z / HOLO_TANHALF
-    -- far = behind the plane through the ship origin, seen from the camera
-    return mx, my, z > fl
+    -- Far side = back-facing: the turret's outward direction, taken as away
+    -- from the keel line (x, y, 0), points away from the camera. The
+    -- hologram's slot picking sees through the hull, so true occlusion is not
+    -- available. ponytail: keel-line normal; read each mount's
+    -- relativerotation once if odd hulls misjudge.
+    local farSide = (entry.x * (cam[1] - entry.x) + entry.y * (cam[2] - entry.y)) < 0
+    return mx, my, farSide
 end
 
 local function line(ax, ay, bx, by, color, thickness)
@@ -181,7 +186,7 @@ local MARKERS = {
 
 local function dimmed(colors)
     local out = {}
-    for k, c in pairs(colors) do out[k] = { r = c.r, g = c.g, b = c.b, a = math.floor((c.a or 100) * 0.15), glow = c.glow } end
+    for k, c in pairs(colors) do out[k] = { r = c.r, g = c.g, b = c.b, a = math.floor((c.a or 100) * 0.10), glow = c.glow } end
     return out
 end
 
@@ -207,7 +212,7 @@ local function drawMarkers(force)
             if mx and math.abs(mx) <= 1 and math.abs(my) <= 1 then
                 local cx = rt.x + (mx + 1) / 2 * rt.w
                 local cy = rt.y + (1 - my) / 2 * rt.h
-                -- Far side: 15% opacity and 70% size.
+                -- Far side: 10% opacity and 70% size.
                 MARKERS[entry.state](cx, cy, far and size * 0.7 or size, far and faded or colors, segs)
             end
         end
