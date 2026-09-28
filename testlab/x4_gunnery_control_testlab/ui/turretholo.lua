@@ -102,6 +102,110 @@ local function highlight(slots, why)
     C.SetSelectedMapMacroSlots(holo.holomap, holo.ship, 0, holo.macro, false, "turret", buffer, #slots)
 end
 
+-- Our own turret markers over the hologram. Camera model fitted offline to
+-- the 2026-09-28 Ray scans (13 slot centroids, rms 0.019 in -1..1 units):
+-- orbit around the ship origin, camera at yaw/pitch from GetMapState,
+-- vertical tan(fov/2) = 0.798, one cameradistance unit = HOLO_SCALE metres.
+-- ponytail: HOLO_SCALE is the Ray's fitted value; the per-ship rule (likely
+-- one of the MD bounding-box sizes logged below) is not known yet.
+local HOLO_SCALE, HOLO_TANHALF = 521.4, 0.798
+local STATE_COLORS = function()
+    return { unselected = Color["text_inactive"], idle = Color["icon_normal"],
+        fired = Color["text_warning"], hit = Color["text_positive"] }
+end
+
+local function projectTurret(entry, state)
+    local yaw, pitch, d = state.offset.yaw, state.offset.pitch, state.cameradistance * HOLO_SCALE
+    local cp = math.cos(pitch)
+    local cam = { -cp * math.sin(yaw) * d, -math.sin(pitch) * d, -cp * math.cos(yaw) * d }
+    local fl = math.sqrt(cam[1] ^ 2 + cam[2] ^ 2 + cam[3] ^ 2)
+    local f = { -cam[1] / fl, -cam[2] / fl, -cam[3] / fl }
+    local r = { -f[3], 0, f[1] }                      -- f x (0,1,0)
+    local rl = math.sqrt(r[1] ^ 2 + r[3] ^ 2)
+    if rl < 1e-6 then return nil end
+    r = { r[1] / rl, 0, r[3] / rl }
+    local u = { r[2] * f[3] - r[3] * f[2], r[3] * f[1] - r[1] * f[3], r[1] * f[2] - r[2] * f[1] }
+    local rel = { entry.x - cam[1], entry.y - cam[2], entry.z - cam[3] }
+    local z = rel[1] * f[1] + rel[2] * f[2] + rel[3] * f[3]
+    if z <= 1 then return nil end
+    local mx = -(rel[1] * r[1] + rel[3] * r[3]) / z / HOLO_TANHALF / holo.aspect
+    local my = (rel[1] * u[1] + rel[2] * u[2] + rel[3] * u[3]) / z / HOLO_TANHALF
+    return mx, my
+end
+
+local function line(ax, ay, bx, by, color, thickness)
+    Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness, nil, color, true)
+end
+
+-- Shapes from rectangles only: X4's circle/triangle shapes are 3D meshes
+-- that smear in the widget scene.
+local MARKERS = {
+    unselected = function(cx, cy, s, color, segs)           -- open circle
+        local r = s * 0.45
+        for i = 0, segs - 1 do
+            local a0, a1 = i * 2 * math.pi / segs, (i + 1) * 2 * math.pi / segs
+            line(cx + r * math.cos(a0), cy + r * math.sin(a0), cx + r * math.cos(a1), cy + r * math.sin(a1), color, 2)
+        end
+    end,
+    idle = function(cx, cy, s, color, segs)                 -- filled circle
+        local r, strips = s * 0.45, math.max(4, math.floor(segs * 0.7))
+        local h = 2 * r / strips
+        for j = 0, strips - 1 do
+            local y = -r + (j + 0.5) * h
+            local hw = math.sqrt(math.max(r * r - y * y, 0))
+            Helper.drawRectangle(2 * hw, h + 1, cx - hw, cy + y - h / 2, 0, nil, color, true)
+        end
+    end,
+    fired = function(cx, cy, s, color)                      -- eight-point burst
+        for _, a in ipairs({ 0, 45, 90, 135 }) do
+            local dx, dy = math.cos(math.rad(a)) * s * 0.55, math.sin(math.rad(a)) * s * 0.55
+            line(cx - dx, cy - dy, cx + dx, cy + dy, color, 2)
+        end
+    end,
+    hit = function(cx, cy, s, color)                        -- FPS hit marker
+        for _, d in ipairs({ { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }) do
+            line(cx + d[1] * s * 0.18, cy + d[2] * s * 0.18, cx + d[1] * s * 0.55, cy + d[2] * s * 0.55, color, 3)
+        end
+    end,
+}
+
+local function drawMarkers(force)
+    if holo.holomap == 0 or not holo.rt or not holo.markers then return end
+    local key, state = stateKey()
+    local stateSig = {}
+    for _, entry in ipairs(holo.slots or {}) do stateSig[#stateSig + 1] = entry.state or "" end
+    key = key .. table.concat(stateSig, ",")
+    if key == holo.lastMarkerKey and not force then return end
+    holo.lastMarkerKey = key
+    HideAllRects()
+    local colors, rt = STATE_COLORS(), holo.rt
+    -- Bigger when zoomed in; bounded so markers stay markers.
+    local size = math.max(12, math.min(32, 14 / math.sqrt(math.max(state.cameradistance, 0.05))))
+    -- Rectangle pool is 1000; keep circles coarser on crowded ships.
+    local segs = math.max(8, math.min(14, math.floor(700 / math.max(#(holo.slots or {}), 1))))
+    for _, entry in ipairs(holo.slots or {}) do
+        if entry.x and entry.state then
+            local mx, my = projectTurret(entry, state)
+            if mx and math.abs(mx) <= 1 and math.abs(my) <= 1 then
+                local cx = rt.x + (mx + 1) / 2 * rt.w
+                local cy = rt.y + (1 - my) / 2 * rt.h
+                MARKERS[entry.state](cx, cy, size, colors[entry.state], segs)
+            end
+        end
+    end
+end
+
+local function shuffleStates()
+    for _, entry in ipairs(holo.slots or {}) do
+        if holo.preview then
+            local states = { "unselected", "idle", "fired", "hit" }
+            entry.state = states[math.random(#states)]
+        else
+            entry.state = entry.ticked and "idle" or "unselected"
+        end
+    end
+end
+
 local function requestPositions()
     for index, entry in ipairs(holo.slots or {}) do
         AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position", {
@@ -118,6 +222,7 @@ local function onPosition(_, param)
     local function num(v) return tonumber(tostring(v):match("^%s*([-+]?[%d%.]+[eE]?[-+]?%d*)")) end
     entry.x, entry.y, entry.z = num(x), num(y), num(z)
     log("position", { slot = entry.slot, component = tostring(entry.component), x = entry.x, y = entry.y, z = entry.z })
+    holo.lastMarkerKey = nil
 end
 
 -- Scan: walk a virtual mouse over a grid, one point per frame, and ask the
@@ -165,7 +270,12 @@ end
 
 function menu.onShowMenu()
     holo.closing, holo.flash, holo.scan = false, false, nil
-    if not readSlots() then log("no_session") else requestPositions() end
+    holo.markers, holo.preview = true, true
+    if not readSlots() then log("no_session") else
+        requestPositions()
+        AddUITriggeredEvent("X4GunneryTestLabObserve", "holo_size", { ship = ConvertStringToLuaID(tostring(holo.ship)) })
+        shuffleStates()
+    end
     menu.display()
 end
 
@@ -176,24 +286,39 @@ function menu.display()
     local rtHeight = Helper.scaleY(460)
     local frame = Helper.createFrameHandle(menu, { layer = LAYER, x = math.floor((Helper.viewWidth - width) / 2),
         y = Helper.scaleY(60), width = width, standardButtons = { close = true } })
+    -- ponytail: frame x/y repeated in holo.rt below; keep them in step.
     menu.frame = frame
     local t = frame:addTable(4, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize })
     local title = t:addRow(false, { bgColor = Color["row_title_background"] })
     title[1]:setColSpan(4):createText("Turret hologram probe (issue #205)", Helper.headerRowCenteredProperties)
     local buttons = t:addRow("holo_buttons", {})
-    buttons[1]:createButton({}):setText("Highlight ticked")
+    buttons[1]:createButton({}):setText("Markers: " .. (holo.markers and "ON" or "OFF"))
     buttons[1].handlers.onClick = function()
-        holo.flash = false
+        holo.markers = not holo.markers
+        if not holo.markers then HideAllRects() end
+        holo.lastMarkerKey = nil
+        menu.display()
+    end
+    buttons[2]:createButton({}):setText("States: " .. (holo.preview and "preview all 4" or "real selection"))
+    buttons[2].handlers.onClick = function()
+        holo.preview = not holo.preview
+        shuffleStates()
+        menu.display()
+    end
+    buttons[3]:createButton({}):setText("Highlight ticked")
+    buttons[3].handlers.onClick = function()
         local slots = {}
         for _, entry in ipairs(holo.slots or {}) do if entry.ticked then slots[#slots + 1] = entry.slot end end
         highlight(slots, "ticked")
     end
-    buttons[2]:createButton({}):setText("Flash random (1 Hz)")
-    buttons[2].handlers.onClick = function() holo.flash = true; log("flash", { on = true }) end
-    buttons[3]:createButton({}):setText("Clear highlight")
-    buttons[3].handlers.onClick = function() holo.flash = false; highlight({}, "clear") end
     buttons[4]:createButton({}):setText("Back to Test Lab")
     buttons[4].handlers.onClick = function() menu.onCloseElement("back") end
+    local legend = t:addRow(false, {})
+    local colors = STATE_COLORS()
+    for index, spec in ipairs({ { "unselected", "open circle: not selected" }, { "idle", "filled circle: selected" },
+            { "fired", "burst: firing" }, { "hit", "hit marker: hitting" } }) do
+        legend[index]:createText(spec[2], { color = colors[spec[1]], fontsize = Helper.scaleFont(Helper.standardFont, 9) })
+    end
     local scanRow = t:addRow("holo_scan", {})
     scanRow[1]:setColSpan(2):createButton({}):setText("Scan turret positions (hold still ~25 s)")
     scanRow[1].handlers.onClick = function()
@@ -208,6 +333,10 @@ function menu.display()
     frame:addRenderTarget({ width = width - 2 * Helper.borderSize, height = rtHeight, x = Helper.borderSize, y = rtY, scaling = false, alpha = 100 })
     frame.properties.height = rtY + rtHeight + Helper.borderSize
     holo.aspect = (width - 2 * Helper.borderSize) / rtHeight
+    -- Absolute pixel rectangle of the render target, for the marker overlay.
+    local frameX = math.floor((Helper.viewWidth - width) / 2)
+    holo.rt = { x = frameX + Helper.borderSize, y = Helper.scaleY(60) + rtY, w = width - 2 * Helper.borderSize, h = rtHeight }
+    holo.lastMarkerKey = nil
     frame:display()
 end
 
@@ -273,6 +402,11 @@ function menu.onUpdate()
                 log("state", { offset_and_distance = key })
             end
         end
+        if holo.preview and now >= (holo.nextShuffle or 0) then
+            holo.nextShuffle = now + 1
+            shuffleStates()
+        end
+        drawMarkers()
         if holo.flash and now >= (holo.nextFlash or 0) then
             holo.nextFlash = now + 1
             local slots = {}
@@ -328,6 +462,7 @@ end
 function menu.onCloseElement(dueToClose)
     if holo.closing then return end
     holo.closing = true
+    HideAllRects()
     if holo.holomap ~= 0 then C.RemoveHoloMap(); holo.holomap = 0 end
     holo.map, holo.activate, holo.flash = nil, false, false
     log("close", { reason = tostring(dueToClose) })
