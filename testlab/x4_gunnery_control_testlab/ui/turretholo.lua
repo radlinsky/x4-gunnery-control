@@ -102,9 +102,70 @@ local function highlight(slots, why)
     C.SetSelectedMapMacroSlots(holo.holomap, holo.ship, 0, holo.macro, false, "turret", buffer, #slots)
 end
 
+local function requestPositions()
+    for index, entry in ipairs(holo.slots or {}) do
+        AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position", {
+            ship = ConvertStringToLuaID(tostring(holo.ship)), turret = ConvertStringToLuaID(tostring(entry.component)), idx = index })
+    end
+end
+
+-- Same reply the turret-map probe parses; testlab.lua ignores it while its
+-- own probe is off.
+local function onPosition(_, param)
+    local idx, x, y, z = tostring(param or ""):match("^x4gtm1:([%d%.]+):([^:]+):([^:]+):([^:]+)$")
+    local entry = idx and holo.slots and holo.slots[math.floor(tonumber(idx))]
+    if not entry then return end
+    local function num(v) return tonumber(tostring(v):match("^%s*([-+]?[%d%.]+[eE]?[-+]?%d*)")) end
+    entry.x, entry.y, entry.z = num(x), num(y), num(z)
+    log("position", { slot = entry.slot, component = tostring(entry.component), x = entry.x, y = entry.y, z = entry.z })
+end
+
+-- Scan: walk a virtual mouse over a grid, one point per frame, and ask the
+-- holomap which slot is under it. Per-slot centroids plus the camera state
+-- are the calibration data for drawing our own markers.
+local SCAN_COLS, SCAN_ROWS = 48, 32
+local function startScan()
+    if holo.holomap == 0 then return end
+    holo.scan = { index = 0, pending = nil, hits = {}, state = stateKey() }
+    log("scan_start", { state = holo.scan.state, grid = SCAN_COLS .. "x" .. SCAN_ROWS })
+end
+
+local function stepScan()
+    local scan = holo.scan
+    if scan.pending then
+        local kind, slot = pickedSlot()
+        if kind == "turret" and slot then
+            local hit = scan.hits[slot] or { sx = 0, sy = 0, n = 0 }
+            hit.sx, hit.sy, hit.n = hit.sx + scan.pending[1], hit.sy + scan.pending[2], hit.n + 1
+            scan.hits[slot] = hit
+        end
+    end
+    if scan.index >= SCAN_COLS * SCAN_ROWS then
+        local found = 0
+        for slot, hit in pairs(scan.hits) do
+            found = found + 1
+            local entry = holo.bySlot[slot]
+            log("scan_hit", { slot = slot, component = entry and tostring(entry.component) or "",
+                mouse = string.format("%.4f,%.4f", hit.sx / hit.n, hit.sy / hit.n), samples = hit.n,
+                pos = entry and entry.x and string.format("%.3f,%.3f,%.3f", entry.x, entry.y, entry.z) or "", state = scan.state })
+        end
+        log("scan_done", { turrets_found = found, state = scan.state, state_after = stateKey() })
+        holo.scan = nil
+        holo.hover = "scan done: " .. found .. " turrets found"
+        menu.frame:update()
+        return
+    end
+    local col, row = scan.index % SCAN_COLS, math.floor(scan.index / SCAN_COLS)
+    local x = -1 + (col + 0.5) * 2 / SCAN_COLS
+    local y = -1 + (row + 0.5) * 2 / SCAN_ROWS
+    C.SetMapRelativeMousePosition(holo.holomap, true, x, y)
+    scan.pending = { x, y }
+    scan.index = scan.index + 1
+end
+
 function menu.onShowMenu()
-    holo.closing, holo.flash = false, false
-    if not readSlots() then log("no_session") end
+    holo.closing, holo.flash, holo.scan = false, false, nil
+    if not readSlots() then log("no_session") else requestPositions() end
     menu.display()
 end
 
@@ -133,8 +194,13 @@ function menu.display()
     buttons[3].handlers.onClick = function() holo.flash = false; highlight({}, "clear") end
     buttons[4]:createButton({}):setText("Back to Test Lab")
     buttons[4].handlers.onClick = function() menu.onCloseElement("back") end
+    local scanRow = t:addRow("holo_scan", {})
+    scanRow[1]:setColSpan(2):createButton({}):setText("Scan turret positions (hold still ~25 s)")
+    scanRow[1].handlers.onClick = function()
+        startScan(); holo.hover = "scanning..."; menu.frame:update()
+    end
     local help = t:addRow(false, {})
-    help[1]:setColSpan(4):createText("Left-drag rotate, right-drag pan, wheel zoom, click a turret for its camera.",
+    help[1]:setColSpan(4):createText("Left-drag rotate, right- or middle-drag pan, wheel zoom, click a turret for its camera.",
         { fontsize = Helper.scaleFont(Helper.standardFont, 9) })
     local hover = t:addRow(false, {})
     hover[1]:setColSpan(4):createText(function() return "Hover: " .. holo.hover end)
@@ -172,6 +238,10 @@ function menu.onUpdate()
             C.SetMapPicking(holo.holomap, true)
             log("holomap", { id = tostring(holo.holomap), show_ok = tostring(ok), err = tostring(err or "") })
         end
+    end
+    if holo.holomap ~= 0 and holo.scan then
+        stepScan()
+        return
     end
     if holo.holomap ~= 0 and holo.map then
         local x, y = GetRenderTargetMousePosition(holo.map)
@@ -222,6 +292,8 @@ function menu.onRenderTargetMouseUp()
     if holo.holomap ~= 0 then C.StopRotateMap(holo.holomap) end
 end
 
+function menu.onRenderTargetMiddleMouseDown() if holo.holomap ~= 0 then C.StartPanMap(holo.holomap) end end
+function menu.onRenderTargetMiddleMouseUp() if holo.holomap ~= 0 then C.StopPanMap(holo.holomap) end end
 function menu.onRenderTargetRightMouseDown() if holo.holomap ~= 0 then C.StartPanMap(holo.holomap) end end
 function menu.onRenderTargetRightMouseUp() if holo.holomap ~= 0 then C.StopPanMap(holo.holomap) end end
 function menu.onRenderTargetCombinedScrollDown(step) if holo.holomap ~= 0 then C.ZoomMap(holo.holomap, step) end end
@@ -265,6 +337,7 @@ end
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     if Helper then Helper.registerMenu(menu) end
+    RegisterEvent("X4GunneryTestLab.TurretMapPosition", onPosition)
 end
 
 init()
