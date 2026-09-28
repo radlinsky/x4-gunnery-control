@@ -1,0 +1,670 @@
+{
+  "classification": "inference; captured mod scan observations, not exact engine projection points",
+  "x4": "9.00 build 611726",
+  "fixture_sha": "2cd5bab427a79790431dc7347ca6a6abc77d3414",
+  "log_header": "Logfile started, time Mon Sep 28 16:50:33 2026",
+  "log_sha256": "c5c27b5d4bae7965ad38060ced331575be8d0cd16800cc5a20b9177a49c29f4b",
+  "ray_source": "preserved data from fit_holo_camera.py at 36d6c5c; original raw log unavailable",
+  "scans": [
+    {
+      "ship": "Ray",
+      "pose": "Ray-1",
+      "macro": "ship_bor_l_destroyer_01_a_macro",
+      "size": 1096.25,
+      "length": 1064.62,
+      "bbox_center": null,
+      "state": [
+        0,
+        0,
+        0,
+        -1.8084,
+        -0.5687,
+        0,
+        1.1
+      ],
+      "distance_source": "rounded stateKey; exact distance unavailable",
+      "observations": [
+        {
+          "slot": 1,
+          "position": [
+            0,
+            36.663,
+            128.849
+          ],
+          "mouse": [
+            0.1952,
+            0.0302
+          ]
+        },
+        {
+          "slot": 2,
+          "position": [
+            -84.122,
+            27.507,
+            68.473
+          ],
+          "mouse": [
+            0.1062,
+            0.1199
+          ]
+        },
+        {
+          "slot": 3,
+          "position": [
+            -83.362,
+            24.601,
+            86.064
+          ],
+          "mouse": [
+            0.1427,
+            0.1073
+          ]
+        },
+        {
+          "slot": 6,
+          "position": [
+            66.666,
+            -45.906,
+            128.783
+          ],
+          "mouse": [
+            0.1762,
+            -0.2156
+          ]
+        },
+        {
+          "slot": 7,
+          "position": [
+            66.361,
+            -46.256,
+            112.565
+          ],
+          "mouse": [
+            0.1394,
+            -0.2045
+          ]
+        },
+        {
+          "slot": 8,
+          "position": [
+            84.122,
+            27.507,
+            68.473
+          ],
+          "mouse": [
+            0.0758,
+            -0.0717
+          ]
+        },
+        {
+          "slot": 9,
+          "position": [
+            83.362,
+            24.601,
+            86.064
+          ],
+          "mouse": [
+            0.1107,
+            -0.0881
+          ]
+        },
+        {
+          "slot": 10,
+          "position": [
+            0,
+            -46.368,
+            -71.036
+          ],
+          "mouse": [
+            -0.0833,
+            -0.0491
+          ]
+        },
+        {
+          "slot": 11,
+          "position": [
+            0,
+            -44.628,
+            -89.021
+          ],
+          "mouse": [
+            -0.1195,
+            -0.0519
+          ]
+        },
+        {
+          "slot": 13,
+          "position": [
+            0,
+            45.916,
+            -650.241
+          ],
+          "mouse": [
+            -0.7828,
+            0.2284
+          ]
+        },
+        {
+          "slot": 14,
+          "position": [
+            0,
+            44.438,
+            -635.577
+          ],
+          "mouse": [
+            -0.7512,
+            0.2167
+          ]
+        }
+      ]
+    },
+    {
+      "ship": "Ray",
+      "pose": "Ray-2",
+      "macro": "ship_bor_l_destroyer_01_a_macro",
+      "size": 1096.25,
+      "length": 1064.62,
+      "bbox_center": null,
+      "state": [
+        0,
+        0,
+        0,
+        3.0293,
+        -0.4604,
+        0,
+        0.7
+      ],
+      "distance_source": "rounded stateKey; exact distance unavailable",
+      "observations": [
+        {
+          "slot": 1,
+          "position": [
+            0,
+            36.663,
+            128.849
+          ],
+          "mouse": [
+            -0.0524,
+            -0.1321
+          ]
+        },
+        {
+          "slot": 2,
+          "position": [
+            -84.122,
+            27.507,
+            68.473
+          ],
+          "mouse": [
+            0.2233,
+            -0.0405
+          ]
+        },
+        {
+          "slot": 3,
+          "position": [
+            -83.362,
+            24.601,
+            86.064
+          ],
+          "mouse": [
+            0.2304,
+            -0.0939
+          ]
+        },
+        {
+          "slot": 8,
+          "position": [
+            84.122,
+            27.507,
+            68.473
+          ],
+          "mouse": [
+            -0.2542,
+            -0.0017
+          ]
+        },
+        {
+          "slot": 9,
+          "position": [
+            83.362,
+            24.601,
+            86.064
+          ],
+          "mouse": [
+            -0.2757,
+            -0.0532
+          ]
+        },
+        {
+          "slot": 13,
+          "position": [
+            0,
+            45.916,
+            -650.241
+          ],
+          "mouse": [
+            0.0704,
+            0.4758
+          ]
+        },
+        {
+          "slot": 14,
+          "position": [
+            0,
+            44.438,
+            -635.577
+          ],
+          "mouse": [
+            0.0656,
+            0.4418
+          ]
+        }
+      ]
+    },
+    {
+      "ship": "M",
+      "pose": "M-1",
+      "macro": "ship_arg_m_frigate_01_a_macro",
+      "size": 173.844,
+      "length": 138.914,
+      "width": 77.9771,
+      "height": 69.672,
+      "bbox_center": [
+        0.0,
+        14.555032,
+        -4.896217
+      ],
+      "state": [
+        0.0,
+        0.0,
+        0.0,
+        2.5307,
+        -0.3491,
+        -0.0,
+        1.0
+      ],
+      "logged_state": "0.0_0.0_0.0_2.5307_-0.3491_-0.0000_1.0",
+      "distance_source": "initial engine distance 1; log and predictions agree",
+      "start_line": 811,
+      "observations": [
+        {
+          "slot": 1,
+          "position": [
+            -15.25,
+            21.262,
+            -35.084
+          ],
+          "mouse": [
+            0.2925,
+            0.3617
+          ],
+          "predicted": [
+            0.2837,
+            0.3531
+          ],
+          "samples": 19,
+          "line": 814
+        },
+        {
+          "slot": 3,
+          "position": [
+            0.0,
+            11.191,
+            55.881
+          ],
+          "mouse": [
+            -0.7054,
+            -0.1725
+          ],
+          "predicted": [
+            -0.6847,
+            -0.1662
+          ],
+          "samples": 19,
+          "line": 817
+        },
+        {
+          "slot": 4,
+          "position": [
+            15.265,
+            21.262,
+            -35.084
+          ],
+          "mouse": [
+            0.0568,
+            0.3775
+          ],
+          "predicted": [
+            0.0568,
+            0.3701
+          ],
+          "samples": 12,
+          "line": 820
+        }
+      ],
+      "end_line": 823,
+      "state_after": "0.0_0.0_0.0_2.5307_-0.3491_-0.0000_1.0"
+    },
+    {
+      "ship": "M",
+      "pose": "M-2",
+      "macro": "ship_arg_m_frigate_01_a_macro",
+      "size": 173.844,
+      "length": 138.914,
+      "width": 77.9771,
+      "height": 69.672,
+      "bbox_center": [
+        0.0,
+        14.555032,
+        -4.896217
+      ],
+      "state": [
+        0.0,
+        0.0,
+        0.0,
+        -0.0288,
+        -0.442,
+        -0.0,
+        1.0
+      ],
+      "logged_state": "0.0_0.0_0.0_-0.0288_-0.4420_-0.0000_1.0",
+      "distance_source": "initial engine distance 1; log and predictions agree",
+      "start_line": 903,
+      "observations": [
+        {
+          "slot": 1,
+          "position": [
+            -15.25,
+            21.262,
+            -35.084
+          ],
+          "mouse": [
+            -0.31,
+            0.129
+          ],
+          "predicted": [
+            -0.2991,
+            0.1227
+          ],
+          "samples": 19,
+          "line": 909
+        },
+        {
+          "slot": 3,
+          "position": [
+            0.0,
+            11.191,
+            55.881
+          ],
+          "mouse": [
+            0.0104,
+            0.3398
+          ],
+          "predicted": [
+            0.0104,
+            0.3323
+          ],
+          "samples": 12,
+          "line": 912
+        },
+        {
+          "slot": 4,
+          "position": [
+            15.265,
+            21.262,
+            -35.084
+          ],
+          "mouse": [
+            0.2717,
+            0.1142
+          ],
+          "predicted": [
+            0.2668,
+            0.1142
+          ],
+          "samples": 12,
+          "line": 915
+        }
+      ],
+      "end_line": 918,
+      "state_after": "0.0_0.0_0.0_-0.0288_-0.4420_-0.0000_1.0"
+    },
+    {
+      "ship": "XL",
+      "pose": "XL-1",
+      "macro": "ship_arg_xl_carrier_02_a_macro",
+      "size": 2630.5,
+      "length": 2273.474,
+      "width": 1182.158,
+      "height": 593.971,
+      "bbox_center": [
+        0.0,
+        -59.50943,
+        199.878296
+      ],
+      "state": [
+        0.0,
+        0.0,
+        0.0,
+        2.5307,
+        -0.3491,
+        -0.0,
+        1.0
+      ],
+      "logged_state": "0.0_0.0_0.0_2.5307_-0.3491_-0.0000_1.0",
+      "distance_source": "initial engine distance 1; log and predictions agree",
+      "start_line": 1085,
+      "observations": [
+        {
+          "slot": 17,
+          "position": [
+            295.7,
+            118.886,
+            720.616
+          ],
+          "mouse": [
+            -0.658,
+            -0.0474
+          ],
+          "predicted": [
+            -0.6384,
+            -0.0474
+          ],
+          "samples": 15,
+          "line": 1088
+        },
+        {
+          "slot": 13,
+          "position": [
+            -295.7,
+            118.886,
+            720.616
+          ],
+          "mouse": [
+            -0.2663,
+            -0.3501
+          ],
+          "predicted": [
+            -0.2614,
+            -0.3426
+          ],
+          "samples": 16,
+          "line": 1091
+        },
+        {
+          "slot": 16,
+          "position": [
+            295.7,
+            118.886,
+            808.636
+          ],
+          "mouse": [
+            -0.7646,
+            -0.0908
+          ],
+          "predicted": [
+            -0.7449,
+            -0.0908
+          ],
+          "samples": 15,
+          "line": 1094
+        },
+        {
+          "slot": 12,
+          "position": [
+            -295.7,
+            118.886,
+            808.636
+          ],
+          "mouse": [
+            -0.3953,
+            -0.4681
+          ],
+          "predicted": [
+            -0.385,
+            -0.4546
+          ],
+          "samples": 22,
+          "line": 1097
+        }
+      ],
+      "end_line": 1100,
+      "state_after": "0.0_0.0_0.0_2.5307_-0.3491_-0.0000_1.0"
+    },
+    {
+      "ship": "XL",
+      "pose": "XL-3",
+      "macro": "ship_arg_xl_carrier_02_a_macro",
+      "size": 2630.5,
+      "length": 2273.474,
+      "width": 1182.158,
+      "height": 593.971,
+      "bbox_center": [
+        0.0,
+        -59.50943,
+        199.878296
+      ],
+      "state": [
+        0.0,
+        0.0,
+        0.0,
+        -0.5023,
+        -0.4635,
+        -0.0,
+        0.27249053120613
+      ],
+      "logged_state": "0.0_0.0_0.0_-0.5023_-0.4635_-0.0000_0.3",
+      "distance_source": "last zoom_past_limit.after; corroborated by logged predictions",
+      "start_line": 1194,
+      "observations": [
+        {
+          "slot": 17,
+          "position": [
+            295.7,
+            118.886,
+            720.616
+          ],
+          "mouse": [
+            0.7219,
+            0.5792
+          ],
+          "predicted": [
+            0.6986,
+            0.5671
+          ],
+          "samples": 22,
+          "line": 1199
+        },
+        {
+          "slot": 13,
+          "position": [
+            -295.7,
+            118.886,
+            720.616
+          ],
+          "mouse": [
+            0.0736,
+            0.6005
+          ],
+          "predicted": [
+            0.0753,
+            0.5877
+          ],
+          "samples": 25,
+          "line": 1202
+        },
+        {
+          "slot": 16,
+          "position": [
+            295.7,
+            118.886,
+            808.636
+          ],
+          "mouse": [
+            0.6912,
+            0.5929
+          ],
+          "predicted": [
+            0.6839,
+            0.574
+          ],
+          "samples": 20,
+          "line": 1205
+        },
+        {
+          "slot": 12,
+          "position": [
+            -295.7,
+            118.886,
+            808.636
+          ],
+          "mouse": [
+            0.1089,
+            0.6145
+          ],
+          "predicted": [
+            0.1045,
+            0.5916
+          ],
+          "samples": 25,
+          "line": 1208
+        }
+      ],
+      "end_line": 1211,
+      "state_after": "0.0_0.0_0.0_-0.5023_-0.4635_-0.0000_0.3"
+    }
+  ],
+  "excluded": [
+    {
+      "pose": "M-3",
+      "state": [
+        0.0,
+        0.0,
+        0.0,
+        -0.7616,
+        -0.4544,
+        -0.0,
+        0.27249053120613
+      ],
+      "start_line": 969,
+      "end_line": 972,
+      "reason": "no equipped-turret hit with position and prediction"
+    },
+    {
+      "pose": "XL-2",
+      "state": [
+        0.0,
+        0.0,
+        0.0,
+        0.3823,
+        0.3724,
+        -0.0,
+        1.0
+      ],
+      "start_line": 1121,
+      "end_line": 1127,
+      "reason": "no equipped-turret hit with position and prediction"
+    }
+  ]
+}
