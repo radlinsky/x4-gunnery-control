@@ -150,7 +150,11 @@ end
 local function turretMapShuffleStates()
     for _, point in ipairs(turretMap.points) do
         local roll = math.random()
-        if not point.selected then
+        if turretMap.preview then
+            -- Preview: show all four states regardless of real selection.
+            local states = point.isMissile and { "unselected", "idle", "fired" } or { "unselected", "idle", "fired", "hit" }
+            point.state = states[math.random(#states)]
+        elseif not point.selected then
             point.state = "unselected"
         elseif point.isMissile then
             point.state = (roll < 0.6) and "idle" or "fired"
@@ -789,6 +793,7 @@ local function cleanup(reason, clearSweep)
     turretMap = nil
 end
 
+local startTurretMapTicker, turretMapDraw3D
 local function startTurretMapProbe()
     -- Read the live session, not getCurrentShipSweep(): that one requires the
     -- gunner chair, and Gunnery Control is also opened onboard (docked menu).
@@ -817,10 +822,11 @@ local function startTurretMapProbe()
         end
     end
     turretMap = {
-        ship = ship, points = points, typeIcons = true, synthetic = false,
+        ship = ship, points = points, typeIcons = true, synthetic = false, preview = true, cycle = {}, yaw = 0, pitch = 25,
         nextShuffle = getElapsedTime() + 1, renderCount = 0, shuffleCount = 0, lastRenderKey = nil,
     }
     log("turretmap", { action = "on", ok = "true", points = #points })
+    startTurretMapTicker()
     for i, point in ipairs(points) do
         AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position", {
             ship = ConvertStringToLuaID(ship.id), turret = ConvertStringToLuaID(point.id), idx = i,
@@ -866,11 +872,16 @@ local function turretMapAxisRange(values, minExtent)
     return extent * 1.15
 end
 
--- The X4 graph widget failed live (5-icon cap, smeared circle markers, no
--- per-point colour). Table icon cells instead take function-valued icon,
--- colour and hover text that frame:update() re-evaluates without a rebuild.
+-- The X4 graph widget failed live (one graph per UI, 5-icon cap, smeared
+-- circle markers). Two replacements are probed side by side:
+--   * a compact table-icon grid: function-valued icon colour and hover text
+--     that frame:update() re-evaluates without a rebuild; clickable;
+--   * a 3D view drawn with the widget system's shapes (Helper.drawCircle /
+--     drawLine, as menu_encyclopedia/menu_timeline use): exact positions, any
+--     colour, no hover or click. Shape pools: 100 circles, 1000 rectangles.
 -- Tables cap at 13 columns (helper.lua maxTableCols).
-local TURRETMAP_COLS, TURRETMAP_ROWS = 13, 5
+local TURRETMAP_COLS, TURRETMAP_ROWS, TURRETMAP_CELL = 13, 3, 20
+local TURRETMAP_MAX_CIRCLES = 95
 local TURRETMAP_RANK = { unselected = 1, idle = 2, fired = 3, hit = 4 }
 
 local function turretMapColors()
@@ -891,30 +902,18 @@ local function turretMapIcon(macro)
     return "ency_timeline_dot_01"
 end
 
--- Bucket turrets into a COLS x ROWS grid stretched over their bounding box.
-local function turretMapGrid(points, coordA, coordB)
-    local aLo, aHi, bLo, bHi = math.huge, -math.huge, math.huge, -math.huge
+-- Normalise each axis to [-1, 1] over the turrets' bounding box (schematic).
+local function turretMapNormaliser(points)
+    local lo, hi = { x = math.huge, y = math.huge, z = math.huge }, { x = -math.huge, y = -math.huge, z = -math.huge }
     for _, p in ipairs(points) do
         if p.x then
-            aLo, aHi = math.min(aLo, coordA(p)), math.max(aHi, coordA(p))
-            bLo, bHi = math.min(bLo, coordB(p)), math.max(bHi, coordB(p))
+            for _, k in ipairs({ "x", "y", "z" }) do lo[k], hi[k] = math.min(lo[k], p[k]), math.max(hi[k], p[k]) end
         end
     end
-    local function slot(v, lo, hi, n)
-        if hi - lo < 1 then return math.ceil(n / 2) end
-        return math.floor((v - lo) / (hi - lo) * (n - 1) + 0.5) + 1
+    return function(p, k)
+        if hi[k] - lo[k] < 1 then return 0 end
+        return (p[k] - lo[k]) / (hi[k] - lo[k]) * 2 - 1
     end
-    local cells = {}
-    for _, p in ipairs(points) do
-        if p.x then
-            local col = slot(coordA(p), aLo, aHi, TURRETMAP_COLS)
-            local row = TURRETMAP_ROWS + 1 - slot(coordB(p), bLo, bHi, TURRETMAP_ROWS)
-            local key = row * 100 + col
-            cells[key] = cells[key] or {}
-            table.insert(cells[key], p)
-        end
-    end
-    return cells
 end
 
 local function turretMapCellState(list)
@@ -925,43 +924,140 @@ local function turretMapCellState(list)
     return best
 end
 
-local function turretMapAddGrid(tableView, title, points, coordA, coordB)
+-- Compact grid: columns stern -> bow, rows by the second axis.
+local function turretMapAddGrid(tableView, title, points, norm, axisB, flipB)
     local titleRow = tableView:addRow(false, {})
-    titleRow[1]:setColSpan(TURRETMAP_COLS):createText(title)
-    local cells, colors = turretMapGrid(points, coordA, coordB), turretMapColors()
-    local size = 44 -- button heights are scaled by Helper itself
-    local crowded = 0
+    titleRow[1]:setColSpan(TURRETMAP_COLS):createText(title, { fontsize = Helper.scaleFont(Helper.standardFont, 9) })
+    local cells = {}
+    for _, p in ipairs(points) do
+        if p.x then
+            local col = math.floor((norm(p, "z") + 1) / 2 * (TURRETMAP_COLS - 1) + 0.5) + 1
+            local b = norm(p, axisB) * (flipB and -1 or 1)
+            local row = TURRETMAP_ROWS - math.floor((b + 1) / 2 * (TURRETMAP_ROWS - 1) + 0.5)
+            local key = row * 100 + col
+            cells[key] = cells[key] or {}
+            table.insert(cells[key], p)
+        end
+    end
+    local colors, shared = turretMapColors(), 0
     for r = 1, TURRETMAP_ROWS do
         local row = tableView:addRow(true, { bgColor = Color["row_background_blue"] })
         for c = 1, TURRETMAP_COLS do
             local list = cells[r * 100 + c]
             if list then
-                if #list > 1 then crowded = crowded + 1 end
-                local names = {}
-                for _, p in ipairs(list) do names[#names + 1] = p.name .. " — " .. p.groupName end
-                local button = row[c]:createButton({ height = size,
+                if #list > 1 then shared = shared + 1 end
+                local key = title .. ":" .. r .. ":" .. c
+                local button = row[c]:createButton({ height = TURRETMAP_CELL,
                     bgColor = Color["button_background_hidden"], highlightColor = Color["button_highlight_default"],
                     borderColor = Color["button_border_hidden"],
-                    mouseOverText = function() return table.concat(names, "\n") .. "\n[" .. turretMapCellState(list) .. "]" end })
+                    mouseOverText = function()
+                        local lines = {}
+                        for _, p in ipairs(list) do lines[#lines + 1] = p.name .. " — " .. p.groupName .. " [" .. p.state .. "]" end
+                        return table.concat(lines, "\n")
+                    end })
                 button:setIcon(turretMap.typeIcons and turretMapIcon(list[1].macro) or "ency_timeline_dot_01",
                     { color = function() return colors[turretMapCellState(list)] end })
-                if #list > 1 then button:setText(tostring(#list), { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 9) }) end
+                if #list > 1 then button:setText(tostring(#list), { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 8) }) end
                 row[c].handlers.onClick = function()
-                    local real = turretMap and turretMap.points[list[1].sourceIndex]
+                    -- Repeated clicks cycle through every turret in the cell.
+                    local nextIndex = ((turretMap.cycle[key] or 0) % #list) + 1
+                    turretMap.cycle[key] = nextIndex
+                    local real = turretMap.points[list[nextIndex].sourceIndex]
                     if not real then return end
                     local ok, reason = api().enterCamera({ componentID = real.componentID, cameraSupported = true })
-                    log("turretmap", { action = "click", view = title, turret = real.id, cell_turrets = #list, ok = tostring(ok), reason = tostring(reason or "") })
+                    log("turretmap", { action = "click", view = title, turret = real.id, cycle = nextIndex .. "/" .. #list, ok = tostring(ok), reason = tostring(reason or "") })
                 end
             else
-                row[c]:createText("", { minRowHeight = size })
+                row[c]:createText("", { minRowHeight = TURRETMAP_CELL })
             end
         end
     end
-    return crowded
+    local ends = tableView:addRow(false, {})
+    ends[1]:setColSpan(3):createText("STERN", { fontsize = Helper.scaleFont(Helper.standardFont, 8) })
+    ends[11]:setColSpan(3):createText("BOW", { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 8) })
+    return shared
 end
 
-local function turretMapBody(tableView)
+-- Orthographic 3D view with yaw/pitch from the sliders, true proportions,
+-- scaled to fit. X4 ship-local axes: x starboard, y dorsal, z bow. At yaw 0 the
+-- bow points right and pitch tilts the camera down onto the deck, so port is
+-- the near side. A generic grey hull outline on the y = 0 plane rotates with
+-- the view: pointed bow, thick port edge.
+turretMapDraw3D = function()
+    HideAllCircles(); HideAllRects()
+    local area = turretMap and turretMap.area3d
+    if not area then return end
+    local yaw, pitch = math.rad(turretMap.yaw or 0), math.rad(turretMap.pitch or 25)
+    local cy_, sy_, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+    local function view(x, y, z)
+        local h = z * cy_ - x * sy_
+        local d = z * sy_ + x * cy_          -- + = away from the viewer at yaw 0
+        return h, y * cp + d * sp, d * cp - y * sp
+    end
+    local turrets = {}
+    local zlo, zhi, wmax = math.huge, -math.huge, 10
+    for _, p in ipairs(area.points) do
+        if p.x then
+            turrets[#turrets + 1] = p
+            zlo, zhi, wmax = math.min(zlo, p.z), math.max(zhi, p.z), math.max(wmax, math.abs(p.x) * 1.1)
+        end
+    end
+    if #turrets == 0 then return end
+    local len = math.max(zhi - zlo, 20)
+    local sternZ, shoulderZ, bowZ = zlo - 0.05 * len, zlo + 0.75 * len, zhi + 0.12 * len
+    local hull = { { -wmax, sternZ }, { wmax, sternZ }, { wmax, shoulderZ }, { 0, bowZ }, { -wmax, shoulderZ } }
+    -- Fit: project everything once, then scale the bounding box into the area.
+    local hlo, hhi, vlo, vhi = math.huge, -math.huge, math.huge, -math.huge
+    local function extend(h, v) hlo, hhi, vlo, vhi = math.min(hlo, h), math.max(hhi, h), math.min(vlo, v), math.max(vhi, v) end
+    for _, c in ipairs(hull) do extend(view(c[1], 0, c[2])) end
+    for _, p in ipairs(turrets) do extend(view(p.x, p.y, p.z)) end
+    local pad = 14
+    local scale = math.min((area.w - 2 * pad) / math.max(hhi - hlo, 1), (area.h - 2 * pad) / math.max(vhi - vlo, 1))
+    local ox = area.x + area.w / 2 - (hlo + hhi) / 2 * scale
+    local oy = area.y + area.h / 2 + (vlo + vhi) / 2 * scale
+    local function screen(x, y, z)
+        local h, v, d = view(x, y, z)
+        return ox + h * scale, oy - v * scale, d
+    end
+    local function line(ax, ay, bx, by, color, thickness)
+        Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness or 1, nil, color, true)
+    end
+    local outline, faint = Color["text_inactive"], Color["row_background_blue"]
+    for i, c in ipairs(hull) do
+        local n = hull[i % #hull + 1]
+        local ax, ay = screen(c[1], 0, c[2])
+        local bx, by = screen(n[1], 0, n[2])
+        -- Edges 5->1 and 4->5 lie on the port (-x) side.
+        local port = (i == 4) or (i == 5)
+        line(ax, ay, bx, by, outline, port and 3 or 1)
+    end
+    local kx, ky = screen(0, 0, sternZ)
+    local bx, by = screen(0, 0, bowZ)
+    line(kx, ky, bx, by, faint, 1)
+
+    local colors = turretMapColors()
+    local radius = (#turrets > 40) and 4 or 7
+    local projected = {}
+    for _, p in ipairs(turrets) do
+        local sx, sy, depth = screen(p.x, p.y, p.z)
+        local fx, fy = screen(p.x, 0, p.z)
+        projected[#projected + 1] = { p = p, sx = sx, sy = sy, fx = fx, fy = fy, depth = depth }
+    end
+    table.sort(projected, function(a, b) return a.depth > b.depth end) -- far first
+    for index, q in ipairs(projected) do
+        line(q.sx, q.sy, q.fx, q.fy, faint, 1)
+        if index <= TURRETMAP_MAX_CIRCLES then
+            Helper.drawCircle(radius, q.sx, q.sy, nil, colors[q.p.state], true)
+        else
+            -- Circle pool exhausted: fall back to squares from the rectangle pool.
+            Helper.drawRectangle(radius * 2, radius * 2, q.sx - radius, q.sy - radius, 0, nil, colors[q.p.state], true)
+        end
+    end
+end
+
+local function turretMapBody(tableView, frameX, frameY)
     local cols = TURRETMAP_COLS
+    local small = { fontsize = Helper.scaleFont(Helper.standardFont, 9) }
     local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
     title[1]:setColSpan(cols):createText("Turret map probe (issue #205)", Helper.headerRowCenteredProperties)
 
@@ -970,54 +1066,91 @@ local function turretMapBody(tableView)
         row[1]:setColSpan(cols):createText("Turret map probe failed: " .. tostring(turretMap.failReason))
         local off = tableView:addRow("tm_off", {})
         off[1]:setColSpan(cols):createButton({}):setText("Probe: OFF")
-        off[1].handlers.onClick = function() turretMap = nil; menu.display() end
+        off[1].handlers.onClick = function() turretMap = nil; HideAllCircles(); HideAllRects(); menu.display() end
         return
     end
 
     local controls = tableView:addRow("tm_controls", {})
     controls[1]:setColSpan(3):createButton({}):setText("Probe: OFF")
-    controls[1].handlers.onClick = function() turretMap = nil; menu.display() end
-    controls[4]:setColSpan(3):createButton({}):setText("Icons: " .. (turretMap.typeIcons and "weapon type" or "dot"))
-    controls[4].handlers.onClick = function()
-        turretMap.typeIcons = not turretMap.typeIcons
-        turretMap.lastRenderKey = nil
-        menu.display()
-    end
-    controls[7]:setColSpan(3):createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
-    controls[7].handlers.onClick = function()
-        turretMap.synthetic = not turretMap.synthetic
-        turretMap.lastRenderKey = nil
-        menu.display()
-    end
+    controls[1].handlers.onClick = function() turretMap = nil; HideAllCircles(); HideAllRects(); menu.display() end
+    controls[4]:setColSpan(3):createButton({}):setText("Icons: " .. (turretMap.typeIcons and "weapon" or "dot"))
+    controls[4].handlers.onClick = function() turretMap.typeIcons = not turretMap.typeIcons; turretMap.lastRenderKey = nil; menu.display() end
+    controls[7]:setColSpan(3):createButton({}):setText("States: " .. (turretMap.preview and "preview all 4" or "real selection"))
+    controls[7].handlers.onClick = function() turretMap.preview = not turretMap.preview; turretMap.lastRenderKey = nil; menu.display() end
+    controls[10]:setColSpan(4):createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
+    controls[10].handlers.onClick = function() turretMap.synthetic = not turretMap.synthetic; turretMap.lastRenderKey = nil; menu.display() end
 
     local colors = turretMapColors()
     local legend = tableView:addRow(false, {})
     for index, spec in ipairs({ { "unselected", "not selected" }, { "idle", "selected, idle" }, { "fired", "firing" }, { "hit", "hitting" } }) do
-        legend[(index - 1) * 3 + 1]:setColSpan(3):createText(spec[2], { color = colors[spec[1]] })
+        legend[(index - 1) * 3 + 1]:setColSpan(3):createText(spec[2], { color = colors[spec[1]], fontsize = small.fontsize })
     end
 
     local received, total = turretMapReceivedCount(), #turretMap.points
-    local statusRow = tableView:addRow(false, {})
-    statusRow[1]:setColSpan(cols):createText("positions received " .. received .. " / " .. total)
-    if received < total then return end
+    if received < total then
+        local statusRow = tableView:addRow(false, {})
+        statusRow[1]:setColSpan(cols):createText("positions received " .. received .. " / " .. total)
+        return
+    end
 
     local rangeSeed = {}
     for _, point in ipairs(turretMap.points) do
         if point.x then rangeSeed[#rangeSeed + 1] = point.x; rangeSeed[#rangeSeed + 1] = point.y; rangeSeed[#rangeSeed + 1] = point.z end
     end
     local drawPoints = turretMapDrawPoints(turretMapAxisRange(rangeSeed, 10))
-    local crowdedTop = turretMapAddGrid(tableView, "Top (forward right, port up)", drawPoints,
-        function(p) return p.z end, function(p) return -p.x end)
-    local crowdedSide = turretMapAddGrid(tableView, "Side (forward right, dorsal up)", drawPoints,
-        function(p) return p.z end, function(p) return p.y end)
+    local norm = turretMapNormaliser(drawPoints)
 
-    local renderKey = tostring(turretMap.typeIcons) .. ":" .. tostring(turretMap.synthetic)
+    -- 3D view: reserve an empty block; shapes are drawn over it after display.
+    local label3d = tableView:addRow(false, {})
+    label3d[1]:setColSpan(cols):createText("3D (shapes; no hover/click). Pointed end = BOW, thick edge = PORT. Drag sliders to rotate.", small)
+    local rotate = tableView:addRow("tm_rotate", {})
+    rotate[1]:setColSpan(2):createText("Yaw", small)
+    rotate[3]:setColSpan(4):createSliderCell({ min = -180, max = 180, start = turretMap.yaw or 0, step = 5, height = Helper.standardTextHeight })
+    rotate[3].handlers.onSliderCellChanged = function(_, value) turretMap.yaw = value; turretMapDraw3D() end
+    rotate[7]:setColSpan(2):createText("Pitch", small)
+    rotate[9]:setColSpan(5):createSliderCell({ min = -90, max = 90, start = turretMap.pitch or 25, step = 5, height = Helper.standardTextHeight })
+    rotate[9].handlers.onSliderCellChanged = function(_, value) turretMap.pitch = value; turretMapDraw3D() end
+    local areaTop = tableView:getFullHeight()
+    local areaH = Helper.scaleY(170)
+    tableView:addEmptyRow(areaH, false)
+    turretMap.area3d = { x = frameX + tableView.properties.x, y = frameY + tableView.properties.y + areaTop,
+        w = tableView.properties.width, h = areaH, points = drawPoints }
+
+    local sharedTop = turretMapAddGrid(tableView, "Grid top view (hover/click; upper row = PORT)", drawPoints, norm, "x", true)
+    local sharedSide = turretMapAddGrid(tableView, "Grid side view (upper row = DORSAL)", drawPoints, norm, "y", false)
+
+    local renderKey = tostring(turretMap.typeIcons) .. ":" .. tostring(turretMap.synthetic) .. ":" .. tostring(turretMap.preview)
     if renderKey ~= turretMap.lastRenderKey then
         turretMap.lastRenderKey = renderKey
-        log("turretmap", { action = "render", renderer = "table", icons = tostring(turretMap.typeIcons),
-            synthetic = tostring(turretMap.synthetic), points = #drawPoints,
-            shared_cells_top = crowdedTop, shared_cells_side = crowdedSide })
+        log("turretmap", { action = "render", renderer = "grid+shapes", icons = tostring(turretMap.typeIcons),
+            synthetic = tostring(turretMap.synthetic), preview = tostring(turretMap.preview), points = #drawPoints,
+            shared_cells_top = sharedTop, shared_cells_side = sharedSide,
+            area = string.format("%d,%d,%dx%d", turretMap.area3d.x, turretMap.area3d.y, turretMap.area3d.w, turretMap.area3d.h) })
     end
+end
+
+-- Own 1 Hz ticker: Test Lab's menu.onUpdate never runs, because onShowMenu
+-- redraws via Helper.clearMenu, which clears the handler Helper installed
+-- just before calling onShowMenu (helper.lua ~1408 vs ~1436).
+local turretMapTickGeneration = 0
+local function turretMapTick(generation)
+    if generation ~= turretMapTickGeneration or not turretMap or not turretMap.ship then return end
+    if turretMapPendingCount() == 0 then
+        turretMapShuffleStates()
+        turretMap.shuffleCount = turretMap.shuffleCount + 1
+        if turretMap.shuffleCount % 10 == 0 then
+            log("turretmap", { action = "update", updates = turretMap.shuffleCount })
+        end
+        if menu.turretMapFrame then menu.turretMapFrame:update() end
+        turretMapDraw3D()
+    end
+    Helper.addDelayedOneTimeCallbackOnUpdate(function() turretMapTick(generation) end, false, getElapsedTime() + 1)
+end
+
+startTurretMapTicker = function()
+    turretMapTickGeneration = turretMapTickGeneration + 1
+    local generation = turretMapTickGeneration
+    Helper.addDelayedOneTimeCallbackOnUpdate(function() turretMapTick(generation) end, false, getElapsedTime() + 1)
 end
 
 -- Gunnery parks its live session before opening this companion. Every
@@ -1120,11 +1253,15 @@ function menu.display()
         -- Not Helper.clearMenu: it also drops the menu's onUpdate ticker
         -- (onUpdateHandler = nil), which stopped the probe's 1 Hz refresh.
         Helper.clearDataForRefresh(menu)
-        local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(1100), height = Helper.scaleY(760), standardButtons = { close = true } })
-        local tableView = frame:addTable(TURRETMAP_COLS, { tabOrder = 1, width = Helper.scaleX(1080) })
-        turretMapBody(tableView)
+        local width = Helper.scaleX(700)
+        local frameX, frameY = math.floor((Helper.viewWidth - width) / 2), Helper.scaleY(60)
+        local frame = Helper.createFrameHandle(menu, { x = frameX, y = frameY, width = width, standardButtons = { close = true } })
+        local tableView = frame:addTable(TURRETMAP_COLS, { tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize, width = width - 2 * Helper.borderSize })
+        turretMapBody(tableView, frameX, frameY)
+        frame.properties.height = tableView.properties.y + tableView:getFullHeight() + 2 * Helper.borderSize
         frame:display()
         menu.turretMapFrame = frame
+        turretMapDraw3D()
         return
     end
     Helper.clearMenu(menu)
@@ -1253,16 +1390,6 @@ function menu.onUpdate()
             expected_ships = request.expectedShips })
         menu.display()
         return
-    end
-    if turretMap and turretMap.ship and turretMapPendingCount() == 0 and now >= turretMap.nextShuffle then
-        turretMapShuffleStates()
-        turretMap.nextShuffle = now + 1
-        turretMap.shuffleCount = turretMap.shuffleCount + 1
-        if turretMap.shuffleCount % 10 == 0 then
-            log("turretmap", { action = "update", reason = "shuffle", updates = turretMap.shuffleCount })
-        end
-        -- Function-valued colours/hover re-evaluate here; no menu rebuild.
-        if menu.turretMapFrame then menu.turretMapFrame:update() end
     end
     if not sweep or sweep.phase ~= "inspecting" then return end
     local item = State.current(sweep)
