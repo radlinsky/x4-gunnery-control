@@ -130,7 +130,8 @@ local function projectTurret(entry, state)
     if z <= 1 then return nil end
     local mx = -(rel[1] * r[1] + rel[3] * r[3]) / z / HOLO_TANHALF / holo.aspect
     local my = (rel[1] * u[1] + rel[2] * u[2] + rel[3] * u[3]) / z / HOLO_TANHALF
-    return mx, my
+    -- far = behind the plane through the ship origin, seen from the camera
+    return mx, my, z > fl
 end
 
 local function line(ax, ay, bx, by, color, thickness)
@@ -138,36 +139,49 @@ local function line(ax, ay, bx, by, color, thickness)
 end
 
 -- Shapes from rectangles only: X4's circle/triangle shapes are 3D meshes
--- that smear in the widget scene.
+-- that smear in the widget scene. Selected states build on the white disc.
+local function ring(cx, cy, r, color, segs, thickness)
+    for i = 0, segs - 1 do
+        local a0, a1 = i * 2 * math.pi / segs, (i + 1) * 2 * math.pi / segs
+        line(cx + r * math.cos(a0), cy + r * math.sin(a0), cx + r * math.cos(a1), cy + r * math.sin(a1), color, thickness)
+    end
+end
+
+local function disc(cx, cy, r, color, segs)
+    local strips = math.max(4, math.floor(segs * 0.6))
+    local h = 2 * r / strips
+    for j = 0, strips - 1 do
+        local y = -r + (j + 0.5) * h
+        local hw = math.sqrt(math.max(r * r - y * y, 0))
+        Helper.drawRectangle(2 * hw, h + 1, cx - hw, cy + y - h / 2, 0, nil, color, true)
+    end
+end
+
 local MARKERS = {
-    unselected = function(cx, cy, s, color, segs)           -- open circle
-        local r = s * 0.45
-        for i = 0, segs - 1 do
-            local a0, a1 = i * 2 * math.pi / segs, (i + 1) * 2 * math.pi / segs
-            line(cx + r * math.cos(a0), cy + r * math.sin(a0), cx + r * math.cos(a1), cy + r * math.sin(a1), color, 2)
-        end
-    end,
-    idle = function(cx, cy, s, color, segs)                 -- filled circle
-        local r, strips = s * 0.45, math.max(4, math.floor(segs * 0.7))
-        local h = 2 * r / strips
-        for j = 0, strips - 1 do
-            local y = -r + (j + 0.5) * h
-            local hw = math.sqrt(math.max(r * r - y * y, 0))
-            Helper.drawRectangle(2 * hw, h + 1, cx - hw, cy + y - h / 2, 0, nil, color, true)
-        end
-    end,
-    fired = function(cx, cy, s, color)                      -- eight-point burst
+    unselected = function(cx, cy, s, c, segs) ring(cx, cy, s * 0.42, c.unselected, segs, 2) end,
+    idle = function(cx, cy, s, c, segs) disc(cx, cy, s * 0.42, c.idle, segs) end,
+    fired = function(cx, cy, s, c, segs)                     -- disc + orange burst
+        disc(cx, cy, s * 0.42, c.idle, segs)
         for _, a in ipairs({ 0, 45, 90, 135 }) do
-            local dx, dy = math.cos(math.rad(a)) * s * 0.55, math.sin(math.rad(a)) * s * 0.55
-            line(cx - dx, cy - dy, cx + dx, cy + dy, color, 2)
+            local dx, dy = math.cos(math.rad(a)) * s * 0.75, math.sin(math.rad(a)) * s * 0.75
+            line(cx - dx, cy - dy, cx + dx, cy + dy, c.fired, 2)
         end
     end,
-    hit = function(cx, cy, s, color)                        -- FPS hit marker
-        for _, d in ipairs({ { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }) do
-            line(cx + d[1] * s * 0.18, cy + d[2] * s * 0.18, cx + d[1] * s * 0.55, cy + d[2] * s * 0.55, color, 3)
+    hit = function(cx, cy, s, c, segs)                       -- disc + green lock reticle
+        disc(cx, cy, s * 0.42, c.idle, segs)
+        -- Rectangle pool is 1000: crowded ships keep only the ticks.
+        if segs > 6 then ring(cx, cy, s * 0.62, c.hit, segs, 2) end
+        for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+            line(cx + d[1] * s * 0.5, cy + d[2] * s * 0.5, cx + d[1] * s * 0.85, cy + d[2] * s * 0.85, c.hit, 2)
         end
     end,
 }
+
+local function dimmed(colors)
+    local out = {}
+    for k, c in pairs(colors) do out[k] = { r = c.r, g = c.g, b = c.b, a = math.floor((c.a or 100) * 0.35), glow = c.glow } end
+    return out
+end
 
 local function drawMarkers(force)
     if holo.holomap == 0 or not holo.rt or not holo.markers then return end
@@ -180,16 +194,18 @@ local function drawMarkers(force)
     HideAllRects()
     local colors, rt = STATE_COLORS(), holo.rt
     -- Bigger when zoomed in; bounded so markers stay markers.
-    local size = math.max(12, math.min(32, 14 / math.sqrt(math.max(state.cameradistance, 0.05))))
-    -- Rectangle pool is 1000; keep circles coarser on crowded ships.
-    local segs = math.max(8, math.min(14, math.floor(700 / math.max(#(holo.slots or {}), 1))))
+    local size = math.max(16, math.min(36, 18 / math.sqrt(math.max(state.cameradistance, 0.05))))
+    -- Rectangle pool is 1000 and a hit marker costs ~2.6 segs rects.
+    -- ponytail: fixed budget; crowded ships (~100 turrets) get coarse circles.
+    local segs = math.max(6, math.min(20, math.floor(850 / (3 * math.max(#(holo.slots or {}), 1)))))
+    local faded = dimmed(colors)
     for _, entry in ipairs(holo.slots or {}) do
         if entry.x and entry.state then
-            local mx, my = projectTurret(entry, state)
+            local mx, my, far = projectTurret(entry, state)
             if mx and math.abs(mx) <= 1 and math.abs(my) <= 1 then
                 local cx = rt.x + (mx + 1) / 2 * rt.w
                 local cy = rt.y + (1 - my) / 2 * rt.h
-                MARKERS[entry.state](cx, cy, size, colors[entry.state], segs)
+                MARKERS[entry.state](cx, cy, size, far and faded or colors, segs)
             end
         end
     end
@@ -235,6 +251,29 @@ local function startScan()
     log("scan_start", { state = holo.scan.state, grid = SCAN_COLS .. "x" .. SCAN_ROWS })
 end
 
+-- Refine: 9x9 samples, 3 px apart, around each turret's predicted screen
+-- position; centroids are ~10x more precise than the coarse grid.
+local function startRefine()
+    if holo.holomap == 0 or not holo.rt then return end
+    local key, state = stateKey()
+    local points = {}
+    for _, entry in ipairs(holo.slots or {}) do
+        if entry.x then
+            local mx, my = projectTurret(entry, state)
+            if mx and math.abs(mx) < 1 and math.abs(my) < 1 then
+                for i = -4, 4 do
+                    for j = -4, 4 do
+                        points[#points + 1] = { mx + i * 6 / holo.rt.w, my + j * 6 / holo.rt.h, entry.slot, mx, my }
+                    end
+                end
+            end
+        end
+    end
+    holo.scan = { index = 0, pending = nil, hits = {}, state = key, points = points, predicted = {} }
+    for _, p in ipairs(points) do holo.scan.predicted[p[3]] = { p[4], p[5] } end
+    log("refine_start", { state = key, samples = #points })
+end
+
 local function stepScan()
     local scan = holo.scan
     if scan.pending then
@@ -245,12 +284,15 @@ local function stepScan()
             scan.hits[slot] = hit
         end
     end
-    if scan.index >= SCAN_COLS * SCAN_ROWS then
+    local total = scan.points and #scan.points or SCAN_COLS * SCAN_ROWS
+    if scan.index >= total then
         local found = 0
         for slot, hit in pairs(scan.hits) do
             found = found + 1
             local entry = holo.bySlot[slot]
+            local pred = scan.predicted and scan.predicted[slot]
             log("scan_hit", { slot = slot, component = entry and tostring(entry.component) or "",
+                predicted = pred and string.format("%.4f,%.4f", pred[1], pred[2]) or "",
                 mouse = string.format("%.4f,%.4f", hit.sx / hit.n, hit.sy / hit.n), samples = hit.n,
                 pos = entry and entry.x and string.format("%.3f,%.3f,%.3f", entry.x, entry.y, entry.z) or "", state = scan.state })
         end
@@ -260,9 +302,14 @@ local function stepScan()
         menu.frame:update()
         return
     end
-    local col, row = scan.index % SCAN_COLS, math.floor(scan.index / SCAN_COLS)
-    local x = -1 + (col + 0.5) * 2 / SCAN_COLS
-    local y = -1 + (row + 0.5) * 2 / SCAN_ROWS
+    local x, y
+    if scan.points then
+        x, y = scan.points[scan.index + 1][1], scan.points[scan.index + 1][2]
+    else
+        local col, row = scan.index % SCAN_COLS, math.floor(scan.index / SCAN_COLS)
+        x = -1 + (col + 0.5) * 2 / SCAN_COLS
+        y = -1 + (row + 0.5) * 2 / SCAN_ROWS
+    end
     C.SetMapRelativeMousePosition(holo.holomap, true, x, y)
     scan.pending = { x, y }
     scan.index = scan.index + 1
@@ -316,13 +363,17 @@ function menu.display()
     local legend = t:addRow(false, {})
     local colors = STATE_COLORS()
     for index, spec in ipairs({ { "unselected", "open circle: not selected" }, { "idle", "filled circle: selected" },
-            { "fired", "burst: firing" }, { "hit", "hit marker: hitting" } }) do
+            { "fired", "+ orange burst: firing" }, { "hit", "+ green lock: hitting" } }) do
         legend[index]:createText(spec[2], { color = colors[spec[1]], fontsize = Helper.scaleFont(Helper.standardFont, 9) })
     end
     local scanRow = t:addRow("holo_scan", {})
     scanRow[1]:setColSpan(2):createButton({}):setText("Scan turret positions (hold still ~25 s)")
     scanRow[1].handlers.onClick = function()
         startScan(); holo.hover = "scanning..."; menu.frame:update()
+    end
+    scanRow[3]:setColSpan(2):createButton({}):setText("Refine scan (hold still ~20 s)")
+    scanRow[3].handlers.onClick = function()
+        startRefine(); holo.hover = "refining..."; menu.frame:update()
     end
     local help = t:addRow(false, {})
     help[1]:setColSpan(4):createText("Left-drag rotate, right- or middle-drag pan, wheel zoom, click a turret for its camera.",
