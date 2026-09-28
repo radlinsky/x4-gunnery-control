@@ -95,6 +95,88 @@ local function pushObserveState()
     if Helper then Helper.addDelayedOneTimeCallbackOnUpdate(pushObserveState, false, getElapsedTime() + 1.0) end
 end
 
+-- Throwaway issue #205 feasibility probe: can the X4 graph widget show a
+-- turret map? nil = probe off. See docs comment above menu.display() for the
+-- probe-only body it triggers.
+local turretMap = nil
+local turretMapGraphPoints = {} -- graph handle -> recordIndex -> ordered list of points (click resolution)
+
+local ICON_DOT = "ency_timeline_dot_01"
+local function iconForMacro(macro)
+    local m = tostring(macro or "")
+    if m:find("missile") then return ICON_DOT end
+    if m:find("_beam_") then return "weapon_beam_mk1" end
+    if m:find("_plasma_") then return "weapon_plasma_mk1" end
+    if m:find("_ion_") then return "weapon_ion_mk1" end
+    if m:find("_gatling_") then return "weapon_gatling_mk1" end
+    if m:find("_shotgun_") or m:find("_flak_") then return "weapon_shotgun_mk1" end
+    if m:find("_railgun_") then return "weapon_railgun_mk1" end
+    if m:find("_cannon_") then return "weapon_cannon_mk1" end
+    if m:find("_laser_") then return "weapon_laser_mk1" end
+    if m:find("_arc_") then return "weapon_bor_arc_mk1" end
+    return ICON_DOT
+end
+
+-- MD may stringify a length with a unit suffix ("12.5m"); pull the leading
+-- number out tolerantly rather than assume tonumber() handles it directly.
+local function parseLength(s)
+    local head = tostring(s or ""):match("^%s*([-+]?[%d%.]+[eE]?[-+]?%d*)")
+    return tonumber(head)
+end
+
+local function turretMapPendingCount()
+    if not turretMap then return 0 end
+    local pending = 0
+    for _, point in ipairs(turretMap.points) do
+        if point.x == nil then pending = pending + 1 end
+    end
+    return pending
+end
+
+local function turretMapReceivedCount()
+    if not turretMap then return 0 end
+    return #turretMap.points - turretMapPendingCount()
+end
+
+local function onTurretMapPosition(_, param)
+    if not turretMap then return end
+    local raw = tostring(param or "")
+    log("turretmap", { action = "position", raw = raw })
+    local prefix, idxStr, rest = raw:match("^(x4gtm1):([%d%.]+):(.*)$")
+    if not prefix then return end
+    -- MD may echo the Lua integer back as "1.0".
+    local idx = tonumber(idxStr) and math.floor(tonumber(idxStr))
+    local point = idx and turretMap.points[idx]
+    if not point then return end
+    if rest == "fail" then
+        point.x = false -- mark answered-but-failed so it stops counting as pending
+        return
+    end
+    local xs, ys, zs = rest:match("^([^:]*):([^:]*):(.*)$")
+    point.x, point.y, point.z = parseLength(xs), parseLength(ys), parseLength(zs)
+    if turretMapPendingCount() == 0 then menu.display() end
+end
+
+local function turretMapPointName(point)
+    return point.name .. " — " .. point.groupName .. " [" .. point.state .. "]"
+end
+
+-- Random shuffle of FAKE per-turret states; missile turrets can never show
+-- "hit" because X4 does not attribute missile impacts per turret (see the
+-- observe MD script's HIT-line comment for the same limitation).
+local function turretMapShuffleStates()
+    for _, point in ipairs(turretMap.points) do
+        local roll = math.random()
+        if point.isMissile then
+            point.state = (roll < 0.6) and "idle" or "fired"
+        else
+            if roll < 0.5 then point.state = "idle"
+            elseif roll < 0.8 then point.state = "fired"
+            else point.state = "hit" end
+        end
+    end
+end
+
 local function setObserving(enabled, suppressAimTarget)
     observing = enabled
     lastObservedAimTarget, observedAimActiveSeconds, observedAimLastTick, observedAimSettled = nil, nil, nil, nil
@@ -719,6 +801,241 @@ local function cleanup(reason, clearSweep)
     inspectStarted, nextPoll, stableSamples, unstableSamples, technical, targetBefore, targetPreserved = nil, nil, 0, 0, nil, nil, nil
     if reason and activeSweep and activeSweep.phase ~= "complete" then log("abort", { reason = reason, ship_id = activeSweep.ship.id, ship_name = activeSweep.ship.name, ship_macro = activeSweep.ship.macro }) end
     if clearSweep then sweep = nil end
+    turretMap = nil
+end
+
+local function startTurretMapProbe()
+    local ship, reason = api() and api().getCurrentShipSweep()
+    if not ship then
+        turretMap = { failReason = tostring(reason or "no API"), points = {} }
+        log("turretmap", { action = "on", ok = "false", reason = tostring(reason or "no API") })
+        menu.display()
+        return
+    end
+    local points = {}
+    for _, group in ipairs(ship.groups or {}) do
+        for _, member in ipairs(group.members or {}) do
+            points[#points + 1] = {
+                id = member.id, name = member.name, groupName = group.name,
+                macro = member.macro, isMissile = tostring(member.macro or ""):find("missile") ~= nil,
+                state = "idle", sourceIndex = #points + 1,
+            }
+        end
+    end
+    turretMap = {
+        ship = ship, points = points, style = "halo", typeIcons = false, synthetic = false,
+        nextShuffle = getElapsedTime() + 1, renderCount = 0, shuffleCount = 0, lastRenderKey = nil,
+    }
+    log("turretmap", { action = "on", ok = "true", points = #points })
+    for i, point in ipairs(points) do
+        AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position", {
+            ship = ConvertStringToLuaID(ship.id), turret = ConvertStringToLuaID(point.id), idx = i,
+        })
+    end
+    menu.display()
+end
+
+-- Pads the real point list up to exactly 101 by repeating real points with
+-- small deterministic jitter, keeping sourceIndex so a click on a synthetic
+-- point still focuses the real turret it was copied from.
+local function turretMapDrawPoints(range)
+    if not turretMap.synthetic then return turretMap.points end
+    local drawn, real = {}, turretMap.points
+    for _, point in ipairs(real) do drawn[#drawn + 1] = point end
+    local jitter = range * 0.02
+    local k = 0
+    -- Bounded: if every real position failed, base.x is never set.
+    while #drawn < 101 and k < 101 * math.max(#real, 1) do
+        k = k + 1
+        local base = real[((k - 1) % #real) + 1]
+        if base.x then
+            -- Deterministic pseudo-jitter from k, no math.random so repeated
+            -- renders of the same padded set stay visually stable.
+            local dx = jitter * (((k * 37) % 7) - 3) / 3
+            local dz = jitter * (((k * 53) % 7) - 3) / 3
+            local dy = jitter * (((k * 61) % 7) - 3) / 3
+            drawn[#drawn + 1] = {
+                id = base.id, name = base.name .. " #" .. k .. " (synthetic)",
+                groupName = base.groupName, macro = base.macro, isMissile = base.isMissile,
+                x = base.x + dx, y = base.y + dy, z = base.z + dz,
+                state = base.state, sourceIndex = base.sourceIndex,
+            }
+        end
+    end
+    return drawn
+end
+
+-- Equal-scale symmetric axis range so the ship silhouette is not stretched.
+local function turretMapAxisRange(values, minExtent)
+    local extent = minExtent
+    for _, v in ipairs(values) do extent = math.max(extent, math.abs(v)) end
+    return extent * 1.15
+end
+
+local function turretMapBuildGraph(cell, points, coordA, coordB, style, typeIcons)
+    local graph = cell:createGraph({ height = Helper.scaleY(400), scaling = false })
+    local avals, bvals = {}, {}
+    for _, point in ipairs(points) do
+        if point.x then
+            avals[#avals + 1] = coordA(point)
+            bvals[#bvals + 1] = coordB(point)
+        end
+    end
+    -- One scale for both axes so the ship is not stretched. ponytail: fixed
+    -- aspect guess for a ~540x400 cell; measure the cell if it looks skewed.
+    local aspect = 540 / 400
+    local rangeB = math.max(turretMapAxisRange(avals, 10) / aspect, turretMapAxisRange(bvals, 10))
+    local rangeA = rangeB * aspect
+    graph:setXAxis({ startvalue = -rangeA, endvalue = rangeA, granularity = rangeA / 4, gridcolor = Color["graph_grid"] })
+    graph:setYAxis({ startvalue = -rangeB, endvalue = rangeB, granularity = rangeB / 4, gridcolor = Color["graph_grid"] })
+
+    local stateColor = { idle = Color["text_inactive"], fired = Color["text_warning"], hit = Color["text_positive"] }
+    local haloColor = { idle = Color["icon_normal"], fired = Color["text_warning"], hit = Color["text_positive"] }
+    local records = { idle = nil, fired = nil, hit = nil }
+    local pointsByRecord = {}
+    local function recordFor(state)
+        if not records[state] then
+            records[state] = graph:addDataRecord({ markertype = "square", markersize = (style == "badge") and 4 or 10, markercolor = stateColor[state] })
+            pointsByRecord[records[state]] = {}
+        end
+        return records[state]
+    end
+    local iconRecord
+    if style ~= "marker" then
+        iconRecord = graph:addDataRecord({})
+        pointsByRecord[iconRecord] = {}
+    end
+    local aRange, bRange = rangeA, rangeB
+    for _, point in ipairs(points) do
+        if point.x then
+            local a, b = coordA(point), coordB(point)
+            if style == "halo" then
+                local rec = recordFor(point.state)
+                rec:addData(a, b)
+                table.insert(pointsByRecord[rec], point)
+            elseif style == "badge" then
+                local rec = recordFor(point.state)
+                rec:addData(a + aRange * 0.04, b + bRange * 0.04)
+                table.insert(pointsByRecord[rec], point)
+            end
+            if iconRecord then
+                local icon = typeIcons and iconForMacro(point.macro) or ICON_DOT
+                iconRecord:addData(a, b, icon, turretMapPointName(point))
+                table.insert(pointsByRecord[iconRecord], point)
+            elseif style == "marker" then
+                local rec = recordFor(point.state)
+                rec:addData(a, b)
+                table.insert(pointsByRecord[rec], point)
+            end
+        end
+    end
+
+    local recordIndexOf = {}
+    for i, dr in ipairs(graph.datarecords or {}) do recordIndexOf[dr] = i end
+    local orderedByIndex = {}
+    for dr, pts in pairs(pointsByRecord) do
+        local i = recordIndexOf[dr]
+        if i then orderedByIndex[i] = pts end
+    end
+    turretMapGraphPoints[graph] = orderedByIndex
+    return graph
+end
+
+local function turretMapOnClick(view)
+    return function(_, data)
+        for key, value in pairs(data or {}) do
+            log("turretmap", { action = "click", view = view, style = turretMap and turretMap.style or "?", key = tostring(key), value = tostring(value) })
+        end
+        local recordIdx, dataIdx = data and data[3], data and data[4]
+        local resolved
+        for graph, byRecord in pairs(turretMapGraphPoints) do
+            if byRecord[recordIdx] and byRecord[recordIdx][dataIdx] then
+                resolved = byRecord[recordIdx][dataIdx]
+                break
+            end
+        end
+        if not resolved then
+            log("turretmap", { action = "click", view = view, resolved = "false" })
+            return
+        end
+        local real = turretMap and turretMap.points[resolved.sourceIndex]
+        if not real then return end
+        local ok, reason = api().focusTestTurret(real.id)
+        log("turretmap", { action = "click", view = view, resolved = "true", turret = real.id, ok = tostring(ok), reason = tostring(reason or "") })
+    end
+end
+
+local function turretMapBody(tableView)
+    local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
+    title[1]:setColSpan(4):createText("Turret map probe (issue #205)", Helper.headerRowCenteredProperties)
+
+    if not turretMap.ship then
+        local row = tableView:addRow(false, {})
+        row[1]:setColSpan(4):createText("getCurrentShipSweep failed: " .. tostring(turretMap.failReason))
+        local off = tableView:addRow("tm_off", {})
+        off[1]:setColSpan(4):createButton({}):setText("Probe: OFF")
+        off[1].handlers.onClick = function() turretMap = nil; menu.display() end
+        return
+    end
+
+    local controls = tableView:addRow("tm_controls", {})
+    controls[1]:createButton({}):setText("Probe: OFF")
+    controls[1].handlers.onClick = function() turretMap = nil; menu.display() end
+    controls[2]:createButton({}):setText("State style: " .. turretMap.style)
+    controls[2].handlers.onClick = function()
+        local order = { halo = "badge", badge = "marker", marker = "halo" }
+        turretMap.style = order[turretMap.style]
+        turretMap.lastRenderKey = nil
+        log("turretmap", { action = "style", style = turretMap.style })
+        menu.display()
+    end
+    controls[3]:createButton({}):setText("Icons: " .. (turretMap.typeIcons and "type" or "dot"))
+    controls[3].handlers.onClick = function()
+        turretMap.typeIcons = not turretMap.typeIcons
+        turretMap.lastRenderKey = nil
+        menu.display()
+    end
+    controls[4]:createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
+    controls[4].handlers.onClick = function()
+        turretMap.synthetic = not turretMap.synthetic
+        turretMap.lastRenderKey = nil
+        menu.display()
+    end
+
+    local received, total = turretMapReceivedCount(), #turretMap.points
+    local statusRow = tableView:addRow(false, {})
+    statusRow[1]:setColSpan(4):createText("positions received " .. received .. " / " .. total)
+
+    if received < total then return end
+
+    turretMapGraphPoints = {}
+    -- Jitter for synthetic padding scales with the real ship's extent rather
+    -- than a placeholder minimum.
+    local rangeSeed = {}
+    for _, point in ipairs(turretMap.points) do
+        if point.x then rangeSeed[#rangeSeed + 1] = point.x; rangeSeed[#rangeSeed + 1] = point.y; rangeSeed[#rangeSeed + 1] = point.z end
+    end
+    local drawPoints = turretMapDrawPoints(turretMapAxisRange(rangeSeed, 10))
+
+    local titleRow = tableView:addRow(false, {})
+    titleRow[1]:setColSpan(2):createText("Top (x right, z forward)")
+    titleRow[3]:setColSpan(2):createText("Side (z forward, y up)")
+    local graphRow = tableView:addRow(false, {})
+    local topCell = graphRow[1]:setColSpan(2)
+    local sideCell = graphRow[3]:setColSpan(2)
+    local topGraph = turretMapBuildGraph(topCell, drawPoints,
+        function(p) return p.x end, function(p) return p.z end, turretMap.style, turretMap.typeIcons)
+    topGraph.handlers.onClick = turretMapOnClick("top")
+    local sideGraph = turretMapBuildGraph(sideCell, drawPoints,
+        function(p) return p.z end, function(p) return p.y end, turretMap.style, turretMap.typeIcons)
+    sideGraph.handlers.onClick = turretMapOnClick("side")
+
+    local renderKey = turretMap.style .. ":" .. tostring(turretMap.typeIcons) .. ":" .. tostring(turretMap.synthetic)
+    if renderKey ~= turretMap.lastRenderKey then
+        turretMap.lastRenderKey = renderKey
+        log("turretmap", { action = "render", style = turretMap.style, icons = tostring(turretMap.typeIcons),
+            synthetic = tostring(turretMap.synthetic), points = #drawPoints })
+    end
 end
 
 -- Gunnery parks its live session before opening this companion. Every
@@ -821,10 +1138,20 @@ function menu.display()
     -- Leave the camera unobscured during the mandatory five-second visual check.
     -- The menu remains registered, so onUpdate continues to poll its stability.
     if sweep and sweep.phase == "inspecting" then return end
+    if turretMap then
+        local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(1100), height = Helper.scaleY(640), standardButtons = { close = true } })
+        local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(1080) })
+        turretMapBody(tableView)
+        frame:display()
+        return
+    end
     local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(900), height = Helper.scaleY(520), standardButtons = { close = true } })
     local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(880) })
     local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
     title[1]:setColSpan(4):createText(text(1), Helper.headerRowCenteredProperties)
+    local tmRow = tableView:addRow("tm_open", {})
+    tmRow[1]:setColSpan(4):createButton({}):setText("Turret map probe")
+    tmRow[1].handlers.onClick = function() startTurretMapProbe() end
     local reloadRow = tableView:addRow("reload", {})
     for index, spec in ipairs({ { text(22), "ui" }, { text(23), "md" }, { text(24), "ai" } }) do
         local label, kind = spec[1], spec[2]
@@ -941,6 +1268,15 @@ function menu.onUpdate()
         menu.display()
         return
     end
+    if turretMap and turretMap.ship and turretMapPendingCount() == 0 and now >= turretMap.nextShuffle then
+        turretMapShuffleStates()
+        turretMap.nextShuffle = now + 1
+        turretMap.shuffleCount = turretMap.shuffleCount + 1
+        if turretMap.shuffleCount % 10 == 0 then
+            log("turretmap", { action = "render", reason = "shuffle", redraws = turretMap.shuffleCount })
+        end
+        menu.display()
+    end
     if not sweep or sweep.phase ~= "inspecting" then return end
     local item = State.current(sweep)
     if not item then return end
@@ -992,6 +1328,7 @@ local function init()
     end
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.ScenarioReady", onScenarioReady)
+    RegisterEvent("X4GunneryTestLab.TurretMapPosition", onTurretMapPosition)
     if api() then
         api().registerTestLab({ open = function()
             local main = Helper.getMenu("X4GunneryMenu")

@@ -352,6 +352,42 @@
           </actions>
         </cue>
 
+        <!-- TurretMapPosition
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position",
+               {ship =, turret =, idx =})
+             Throwaway issue #205 feasibility probe for a graph-widget turret
+             map. Lua has no MD-free route to a turret's real mount position;
+             relativeposition.{$component} is the same primitive the existing
+             ObserveMark snapshot already uses for $Aimed.relativeposition.{...}.
+             One event per turret, answered once, synchronously; the Lua side
+             counts replies against its point list to know when it can draw. -->
+        <cue name="TurretMapPosition" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'turretmap_position'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <set_value name="$Turret" exact="@event.param3.$turret"/>
+            <set_value name="$Idx" exact="event.param3.$idx"/>
+            <do_if value="$Ship? and $Ship.exists and $Turret? and $Turret.exists">
+              <set_value name="$Pos" exact="$Turret.relativeposition.{$Ship}"/>
+              <debug_text text="'[X4GC TEST TURRETMAP] idx=' + $Idx
+                + ' turret=' + $Turret
+                + ' macro=' + $Turret.macro
+                + ' x=' + $Pos.x
+                + ' y=' + $Pos.y
+                + ' z=' + $Pos.z"/>
+              <raise_lua_event name="'X4GunneryTestLab.TurretMapPosition'"
+                param="'x4gtm1:' + $Idx + ':' + $Pos.x + ':' + $Pos.y + ':' + $Pos.z"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST TURRETMAP] idx=' + $Idx + ' failed: ship or turret missing'"/>
+              <raise_lua_event name="'X4GunneryTestLab.TurretMapPosition'"
+                param="'x4gtm1:' + $Idx + ':fail'"/>
+            </do_else>
+          </actions>
+        </cue>
+
         <!-- ObserveArm
              The gate.  Its children only exist while it has fired, so switching
              logging off genuinely detaches both listeners rather than leaving
