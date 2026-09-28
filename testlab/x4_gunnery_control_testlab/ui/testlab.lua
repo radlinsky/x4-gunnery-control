@@ -151,7 +151,9 @@ end
 local function turretMapShuffleStates()
     for _, point in ipairs(turretMap.points) do
         local roll = math.random()
-        if point.isMissile then
+        if not point.selected then
+            point.state = "unselected"
+        elseif point.isMissile then
             point.state = (roll < 0.6) and "idle" or "fired"
         else
             if roll < 0.5 then point.state = "idle"
@@ -802,6 +804,7 @@ local function startTurretMapProbe()
     local ship = { id = tostring(session.shipID) }
     local points = {}
     for _, group in ipairs(session.groups or {}) do
+        local selected = session.checkedGroupKeys and session.checkedGroupKeys[group.key] and true or false
         for _, member in ipairs(group.members or {}) do
             if member.operational then
                 local macro = tostring(GetComponentData(ConvertStringTo64Bit(tostring(member.componentID)), "macro") or "")
@@ -809,13 +812,13 @@ local function startTurretMapProbe()
                     id = tostring(member.componentID), componentID = member.componentID,
                     name = member.displayName or "?", groupName = group.displayName or "?",
                     macro = macro, isMissile = macro:find("missile") ~= nil,
-                    state = "idle", sourceIndex = #points + 1,
+                    selected = selected, state = selected and "idle" or "unselected", sourceIndex = #points + 1,
                 }
             end
         end
     end
     turretMap = {
-        ship = ship, points = points, style = "state", synthetic = false,
+        ship = ship, points = points, style = "state", fit = "stretch", synthetic = false,
         nextShuffle = getElapsedTime() + 1, renderCount = 0, shuffleCount = 0, lastRenderKey = nil,
     }
     log("turretmap", { action = "on", ok = "true", points = #points })
@@ -850,7 +853,7 @@ local function turretMapDrawPoints(range)
                 id = base.id, name = base.name .. " #" .. k .. " (synthetic)",
                 groupName = base.groupName, macro = base.macro, isMissile = base.isMissile,
                 x = base.x + dx, y = base.y + dy, z = base.z + dz,
-                state = base.state, sourceIndex = base.sourceIndex,
+                selected = base.selected, state = base.state, sourceIndex = base.sourceIndex,
             }
         end
     end
@@ -869,7 +872,36 @@ end
 -- mouseOverText. So: no icons, one record per turret mark, name on the record.
 local TURRETMAP_MAX_POINTS = 200
 
-local function turretMapBuildGraph(cell, points, coordA, coordB, style)
+-- ponytail: fixed aspect guess for a ~540x400 cell; measure it if skewed.
+local TURRETMAP_ASPECT = 540 / 400
+local function turretMapColors()
+    return { unselected = Color["text_inactive"], idle = Color["icon_normal"],
+        fired = Color["text_warning"], hit = Color["text_positive"] }
+end
+
+-- "stretch" fills the graph by scaling each axis to the bounding box on its
+-- own (a schematic, like a subway map); "true" keeps one scale for both.
+local function turretMapAxes(avals, bvals, fit)
+    local function box(values)
+        local lo, hi = math.huge, -math.huge
+        for _, v in ipairs(values) do lo, hi = math.min(lo, v), math.max(hi, v) end
+        if lo > hi then lo, hi = -10, 10 end
+        if hi - lo < 10 then local mid = (lo + hi) / 2; lo, hi = mid - 5, mid + 5 end
+        return lo, hi
+    end
+    local aLo, aHi = box(avals)
+    local bLo, bHi = box(bvals)
+    if fit == "true" then
+        local half = math.max((aHi - aLo) / TURRETMAP_ASPECT, bHi - bLo) / 2
+        local aMid, bMid = (aLo + aHi) / 2, (bLo + bHi) / 2
+        aLo, aHi = aMid - half * TURRETMAP_ASPECT, aMid + half * TURRETMAP_ASPECT
+        bLo, bHi = bMid - half, bMid + half
+    end
+    local aPad, bPad = (aHi - aLo) * 0.08, (bHi - bLo) * 0.08
+    return aLo - aPad, aHi + aPad, bLo - bPad, bHi + bPad
+end
+
+local function turretMapBuildGraph(cell, points, coordA, coordB, style, fit)
     local graph = cell:createGraph({ height = Helper.scaleY(400), scaling = false })
     local avals, bvals = {}, {}
     for _, point in ipairs(points) do
@@ -878,29 +910,25 @@ local function turretMapBuildGraph(cell, points, coordA, coordB, style)
             bvals[#bvals + 1] = coordB(point)
         end
     end
-    -- One scale for both axes so the ship is not stretched. ponytail: fixed
-    -- aspect guess for a ~540x400 cell; measure the cell if it looks skewed.
-    local aspect = 540 / 400
-    local rangeB = math.max(turretMapAxisRange(avals, 10) / aspect, turretMapAxisRange(bvals, 10))
-    local rangeA = rangeB * aspect
-    graph:setXAxis({ startvalue = -rangeA, endvalue = rangeA, granularity = rangeA / 4, gridcolor = Color["graph_grid"] })
-    graph:setYAxis({ startvalue = -rangeB, endvalue = rangeB, granularity = rangeB / 4, gridcolor = Color["graph_grid"] })
+    local aLo, aHi, bLo, bHi = turretMapAxes(avals, bvals, fit)
+    graph:setXAxis({ startvalue = aLo, endvalue = aHi, granularity = (aHi - aLo) / 4, gridcolor = Color["graph_grid"] })
+    graph:setYAxis({ startvalue = bLo, endvalue = bHi, granularity = (bHi - bLo) / 4, gridcolor = Color["graph_grid"] })
 
-    local stateColor = { idle = Color["text_inactive"], fired = Color["text_warning"], hit = Color["text_positive"] }
-    -- Shape carries the type (circle = missile, square = gun); only these two exist.
+    local stateColor = turretMapColors()
+    -- Bigger marks for small ships, smaller when crowded.
+    local size = math.max(8, math.min(20, math.floor(240 / math.sqrt(#points))))
     local byText, used, perPoint = {}, 0, (style == "ring") and 2 or 1
     for index, point in ipairs(points) do
         if point.x and used + perPoint <= TURRETMAP_MAX_POINTS then
             local a, b = coordA(point), coordB(point)
-            local shape = point.isMissile and "circle" or "square"
             local hover = "#" .. index .. " " .. turretMapPointName(point)
             byText[hover] = point
             if style == "ring" then
-                -- Big state-colored square behind a small neutral type marker.
-                graph:addDataRecord({ markertype = "square", markersize = 16, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
-                graph:addDataRecord({ markertype = shape, markersize = 7, markercolor = Color["icon_normal"], mouseOverText = hover }):addData(a, b)
+                -- Big state-colored circle behind a small neutral core.
+                graph:addDataRecord({ markertype = "circle", markersize = size, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
+                graph:addDataRecord({ markertype = "circle", markersize = math.floor(size / 2), markercolor = Color["frame_background_default"] or Color["text_inactive"], mouseOverText = hover }):addData(a, b)
             else
-                graph:addDataRecord({ markertype = shape, markersize = 10, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
+                graph:addDataRecord({ markertype = "circle", markersize = size, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
             end
             used = used + perPoint
         end
@@ -962,6 +990,20 @@ local function turretMapBody(tableView)
         menu.display()
     end
 
+    local fitRow = tableView:addRow("tm_fit", {})
+    fitRow[1]:createButton({}):setText("Fit: " .. turretMap.fit)
+    fitRow[1].handlers.onClick = function()
+        turretMap.fit = (turretMap.fit == "stretch") and "true" or "stretch"
+        turretMap.lastRenderKey = nil
+        menu.display()
+    end
+    local colors = turretMapColors()
+    for col, spec in ipairs({ { "unselected", "not selected" }, { "idle", "selected, not firing" }, { "fired", "firing" } }) do
+        fitRow[col + 1]:createText(spec[2], { color = colors[spec[1]] })
+    end
+    local legend2 = tableView:addRow(false, {})
+    legend2[4]:createText("hitting", { color = colors.hit })
+
     local received, total = turretMapReceivedCount(), #turretMap.points
     local statusRow = tableView:addRow(false, {})
     statusRow[1]:setColSpan(4):createText("positions received " .. received .. " / " .. total)
@@ -978,22 +1020,22 @@ local function turretMapBody(tableView)
     local drawPoints = turretMapDrawPoints(turretMapAxisRange(rangeSeed, 10))
 
     local titleRow = tableView:addRow(false, {})
-    titleRow[1]:setColSpan(2):createText("Top (x right, z forward)")
-    titleRow[3]:setColSpan(2):createText("Side (z forward, y up)")
+    titleRow[1]:setColSpan(2):createText("Top (forward right, port up)")
+    titleRow[3]:setColSpan(2):createText("Side (forward right, dorsal up)")
     local graphRow = tableView:addRow(false, {})
     local topCell = graphRow[1]:setColSpan(2)
     local sideCell = graphRow[3]:setColSpan(2)
     local topGraph, used = turretMapBuildGraph(topCell, drawPoints,
-        function(p) return p.x end, function(p) return p.z end, turretMap.style)
+        function(p) return p.z end, function(p) return -p.x end, turretMap.style, turretMap.fit)
     topGraph.handlers.onClick = turretMapOnClick("top")
     local sideGraph = turretMapBuildGraph(sideCell, drawPoints,
-        function(p) return p.z end, function(p) return p.y end, turretMap.style)
+        function(p) return p.z end, function(p) return p.y end, turretMap.style, turretMap.fit)
     sideGraph.handlers.onClick = turretMapOnClick("side")
     local noteRow = tableView:addRow(false, {})
     noteRow[1]:setColSpan(4):createText("graph points used " .. used .. " / " .. TURRETMAP_MAX_POINTS
         .. " per view (" .. #drawPoints .. " turrets; ring uses 2 per turret)")
 
-    local renderKey = turretMap.style .. ":" .. tostring(turretMap.synthetic)
+    local renderKey = turretMap.style .. ":" .. turretMap.fit .. ":" .. tostring(turretMap.synthetic)
     if renderKey ~= turretMap.lastRenderKey then
         turretMap.lastRenderKey = renderKey
         log("turretmap", { action = "render", style = turretMap.style,
