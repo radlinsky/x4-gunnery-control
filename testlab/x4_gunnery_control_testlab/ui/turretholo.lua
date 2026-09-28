@@ -10,6 +10,10 @@ ffi.cdef[[
 typedef uint64_t UniverseID;
 typedef struct { const char* upgradetype; size_t slot; } UILoadoutSlot;
 typedef struct { const char* path; const char* group; } UpgradeGroup;
+typedef struct { float x; float y; float z; float yaw; float pitch; float roll; } UIPosRot;
+typedef struct { UIPosRot offset; float cameradistance; } HoloMapState;
+void GetMapState(UniverseID holomapid, HoloMapState* state);
+void SetMapState(UniverseID holomapid, HoloMapState state);
 UniverseID AddHoloMap(const char* texturename, float x0, float x1, float y0, float y1, float aspectx, float aspecty);
 void RemoveHoloMap(void);
 void SetMapPicking(UniverseID holomapid, bool enable);
@@ -82,13 +86,20 @@ local function pickedSlot()
     end
 end
 
+local function stateKey()
+    local state = ffi.new("HoloMapState")
+    C.GetMapState(holo.holomap, state)
+    local o = state.offset
+    return string.format("%.1f,%.1f,%.1f,%.4f,%.4f,%.4f,%.1f", o.x, o.y, o.z, o.yaw, o.pitch, o.roll, state.cameradistance), state
+end
+
 local function highlight(slots, why)
     if holo.holomap == 0 then return end
+    if why then log("highlight", { why = why, slots = #slots }) end
     if #slots == 0 then C.ClearSelectedMapMacroSlots(holo.holomap); return end
     local buffer = ffi.new("size_t[?]", #slots)
     for i, slot in ipairs(slots) do buffer[i - 1] = slot end
     C.SetSelectedMapMacroSlots(holo.holomap, holo.ship, 0, holo.macro, false, "turret", buffer, #slots)
-    if why then log("highlight", { why = why, slots = #slots }) end
 end
 
 function menu.onShowMenu()
@@ -101,7 +112,7 @@ function menu.display()
     -- clearDataForRefresh, not clearMenu: clearMenu also drops onUpdate.
     Helper.clearDataForRefresh(menu)
     local width = Helper.scaleX(700)
-    local rtHeight = Helper.scaleY(380)
+    local rtHeight = Helper.scaleY(460)
     local frame = Helper.createFrameHandle(menu, { layer = LAYER, x = math.floor((Helper.viewWidth - width) / 2),
         y = Helper.scaleY(60), width = width, standardButtons = { close = true } })
     menu.frame = frame
@@ -172,8 +183,24 @@ function menu.onUpdate()
             local text = entry and (entry.groupLabel .. "; " .. entry.name) or (kind and (kind .. " " .. tostring(slot)) or "")
             if text ~= holo.hover then
                 holo.hover = text
-                if text ~= "" then log("hover", { kind = kind, slot = slot, text = text }) end
+                if text ~= "" then
+                    -- Calibration pair for drawing our own markers: which slot
+                    -- is under the mouse, where the mouse is (-1..1), and the
+                    -- camera state at that moment.
+                    local mx, my = GetRenderTargetMousePosition(holo.map)
+                    log("hover", { kind = kind, slot = slot, text = text,
+                        component = entry and tostring(entry.component) or "",
+                        mouse = string.format("%.4f,%.4f", mx or 0, my or 0), state = stateKey() })
+                end
                 menu.frame:update()
+            end
+        end
+        if now >= (holo.nextState or 0) then
+            holo.nextState = now + 0.5
+            local key = stateKey()
+            if key ~= holo.lastState then
+                holo.lastState = key
+                log("state", { offset_and_distance = key })
             end
         end
         if holo.flash and now >= (holo.nextFlash or 0) then
@@ -198,7 +225,19 @@ end
 function menu.onRenderTargetRightMouseDown() if holo.holomap ~= 0 then C.StartPanMap(holo.holomap) end end
 function menu.onRenderTargetRightMouseUp() if holo.holomap ~= 0 then C.StopPanMap(holo.holomap) end end
 function menu.onRenderTargetCombinedScrollDown(step) if holo.holomap ~= 0 then C.ZoomMap(holo.holomap, step) end end
-function menu.onRenderTargetCombinedScrollUp(step) if holo.holomap ~= 0 then C.ZoomMap(holo.holomap, -step) end end
+function menu.onRenderTargetCombinedScrollUp(step)
+    if holo.holomap == 0 then return end
+    local before = select(2, stateKey()).cameradistance
+    C.ZoomMap(holo.holomap, -step)
+    local _, state = stateKey()
+    -- ZoomMap may apply over later frames; only intervene when it did nothing.
+    if math.abs(state.cameradistance - before) < 0.01 then
+        state.cameradistance = before * 0.85
+        C.SetMapState(holo.holomap, state)
+        local _, after = stateKey()
+        log("zoom_past_limit", { before = before, requested = before * 0.85, after = after.cameradistance })
+    end
+end
 
 -- A click is a short press without movement (vanilla's 0.2 s / 2 px rule).
 function menu.onRenderTargetSelect()
