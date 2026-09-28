@@ -1107,9 +1107,12 @@ local function turretMapBody(tableView, frameX, frameY)
     rotate[1]:setColSpan(2):createText("Yaw", small)
     rotate[3]:setColSpan(4):createSliderCell({ min = -180, max = 180, start = turretMap.yaw or 0, step = 5, height = Helper.standardTextHeight })
     rotate[3].handlers.onSliderCellChanged = function(_, value) turretMap.yaw = value; turretMapDraw3D() end
-    rotate[7]:setColSpan(2):createText("Pitch", small)
-    rotate[9]:setColSpan(5):createSliderCell({ min = -90, max = 90, start = turretMap.pitch or 25, step = 5, height = Helper.standardTextHeight })
-    rotate[9].handlers.onSliderCellChanged = function(_, value) turretMap.pitch = value; turretMapDraw3D() end
+    -- One slider cell per row: X4 rejects a second one ("Slidercell defined
+    -- although excluded by other row content") and reloads the whole UI.
+    local tilt = tableView:addRow("tm_tilt", {})
+    tilt[1]:setColSpan(2):createText("Pitch", small)
+    tilt[3]:setColSpan(4):createSliderCell({ min = -90, max = 90, start = turretMap.pitch or 25, step = 5, height = Helper.standardTextHeight })
+    tilt[3].handlers.onSliderCellChanged = function(_, value) turretMap.pitch = value; turretMapDraw3D() end
     -- Preset quarter views from 30 degrees above. Viewer sits at ship-local
     -- (z, x) = (-sin yaw, -cos yaw), so yaw 0 looks from port, bow right.
     local presets = tableView:addRow("tm_presets", {})
