@@ -855,7 +855,7 @@ local function turretMapDrawPoints(range)
             local dz = jitter * (((k * 53) % 7) - 3) / 3
             local dy = jitter * (((k * 61) % 7) - 3) / 3
             drawn[#drawn + 1] = {
-                id = base.id, name = base.name .. " #" .. k .. " (synthetic)",
+                id = base.id, name = base.name,
                 groupName = base.groupName, macro = base.macro, isMissile = base.isMissile,
                 x = base.x + dx, y = base.y + dy, z = base.z + dz,
                 selected = base.selected, state = base.state, sourceIndex = base.sourceIndex,
@@ -876,12 +876,12 @@ end
 -- circle markers). Two replacements are probed side by side:
 --   * a compact table-icon grid: function-valued icon colour and hover text
 --     that frame:update() re-evaluates without a rebuild; clickable;
---   * a 3D view drawn with the widget system's shapes (Helper.drawCircle /
+--   * a 3D view drawn with the widget system's shapes (Helper.drawRectangle /
 --     drawLine, as menu_encyclopedia/menu_timeline use): exact positions, any
 --     colour, no hover or click. Shape pools: 100 circles, 1000 rectangles.
 -- Tables cap at 13 columns (helper.lua maxTableCols).
 local TURRETMAP_COLS, TURRETMAP_ROWS, TURRETMAP_CELL = 13, 3, 20
-local TURRETMAP_MAX_CIRCLES = 95
+local TURRETMAP_OVERLAY_ROWS, TURRETMAP_OVERLAY_CELL = 7, 24
 local TURRETMAP_RANK = { unselected = 1, idle = 2, fired = 3, hit = 4 }
 
 local function turretMapColors()
@@ -924,14 +924,52 @@ local function turretMapCellState(list)
     return best
 end
 
--- Compact grid: columns stern -> bow, rows by the second axis.
-local function turretMapAddGrid(tableView, title, points, norm, axisB, flipB)
+-- Hover text: "Group; Turret", repeats collapsed to a count, no state.
+-- (X4's font has no em dash; it rendered as a box.)
+local function turretMapHover(list)
+    local order, counts = {}, {}
+    for _, p in ipairs(list) do
+        local line = p.groupName .. "; " .. p.name
+        if not counts[line] then order[#order + 1] = line end
+        counts[line] = (counts[line] or 0) + 1
+    end
+    for i, line in ipairs(order) do
+        if counts[line] > 1 then order[i] = line .. " x" .. counts[line] end
+    end
+    return table.concat(order, "\n")
+end
+
+-- A hidden button that hovers the cell's turrets and cycles the camera
+-- through them on repeated clicks.
+local function turretMapCellButton(cell, key, list, height, icon)
+    local colors = turretMapColors()
+    local button = cell:createButton({ height = height,
+        bgColor = Color["button_background_hidden"], highlightColor = Color["button_highlight_default"],
+        borderColor = Color["button_border_hidden"], mouseOverText = turretMapHover(list) })
+    if icon then
+        button:setIcon(icon, { color = function() return colors[turretMapCellState(list)] end })
+        if #list > 1 then button:setText(tostring(#list), { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 8) }) end
+    end
+    cell.handlers.onClick = function()
+        local nextIndex = ((turretMap.cycle[key] or 0) % #list) + 1
+        turretMap.cycle[key] = nextIndex
+        local real = turretMap.points[list[nextIndex].sourceIndex]
+        if not real then return end
+        local ok, reason = api().enterCamera({ componentID = real.componentID, cameraSupported = true })
+        log("turretmap", { action = "click", cell = key, turret = real.id, cycle = nextIndex .. "/" .. #list, ok = tostring(ok), reason = tostring(reason or "") })
+    end
+end
+
+-- Compact grid: column 1 names the row, columns 2..13 run stern -> bow.
+local function turretMapAddGrid(tableView, title, points, norm, axisB, flipB, rowNames)
+    local small = { fontsize = Helper.scaleFont(Helper.standardFont, 8) }
     local titleRow = tableView:addRow(false, {})
     titleRow[1]:setColSpan(TURRETMAP_COLS):createText(title, { fontsize = Helper.scaleFont(Helper.standardFont, 9) })
+    local positions = TURRETMAP_COLS - 1
     local cells = {}
     for _, p in ipairs(points) do
         if p.x then
-            local col = math.floor((norm(p, "z") + 1) / 2 * (TURRETMAP_COLS - 1) + 0.5) + 1
+            local col = math.floor((norm(p, "z") + 1) / 2 * (positions - 1) + 0.5) + 2
             local b = norm(p, axisB) * (flipB and -1 or 1)
             local row = TURRETMAP_ROWS - math.floor((b + 1) / 2 * (TURRETMAP_ROWS - 1) + 0.5)
             local key = row * 100 + col
@@ -939,79 +977,62 @@ local function turretMapAddGrid(tableView, title, points, norm, axisB, flipB)
             table.insert(cells[key], p)
         end
     end
-    local colors, shared = turretMapColors(), 0
+    local shared = 0
     for r = 1, TURRETMAP_ROWS do
         local row = tableView:addRow(true, { bgColor = Color["row_background_blue"] })
-        for c = 1, TURRETMAP_COLS do
+        row[1]:createText(rowNames[r], small)
+        for c = 2, TURRETMAP_COLS do
             local list = cells[r * 100 + c]
             if list then
                 if #list > 1 then shared = shared + 1 end
-                local key = title .. ":" .. r .. ":" .. c
-                local button = row[c]:createButton({ height = TURRETMAP_CELL,
-                    bgColor = Color["button_background_hidden"], highlightColor = Color["button_highlight_default"],
-                    borderColor = Color["button_border_hidden"],
-                    mouseOverText = function()
-                        local lines = {}
-                        for _, p in ipairs(list) do lines[#lines + 1] = p.name .. " — " .. p.groupName .. " [" .. p.state .. "]" end
-                        return table.concat(lines, "\n")
-                    end })
-                button:setIcon(turretMap.typeIcons and turretMapIcon(list[1].macro) or "ency_timeline_dot_01",
-                    { color = function() return colors[turretMapCellState(list)] end })
-                if #list > 1 then button:setText(tostring(#list), { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 8) }) end
-                row[c].handlers.onClick = function()
-                    -- Repeated clicks cycle through every turret in the cell.
-                    local nextIndex = ((turretMap.cycle[key] or 0) % #list) + 1
-                    turretMap.cycle[key] = nextIndex
-                    local real = turretMap.points[list[nextIndex].sourceIndex]
-                    if not real then return end
-                    local ok, reason = api().enterCamera({ componentID = real.componentID, cameraSupported = true })
-                    log("turretmap", { action = "click", view = title, turret = real.id, cycle = nextIndex .. "/" .. #list, ok = tostring(ok), reason = tostring(reason or "") })
-                end
+                turretMapCellButton(row[c], title .. ":" .. r .. ":" .. c, list, TURRETMAP_CELL,
+                    turretMap.typeIcons and turretMapIcon(list[1].macro) or "ency_timeline_dot_01")
             else
                 row[c]:createText("", { minRowHeight = TURRETMAP_CELL })
             end
         end
     end
     local ends = tableView:addRow(false, {})
-    ends[1]:setColSpan(3):createText("STERN", { fontsize = Helper.scaleFont(Helper.standardFont, 8) })
-    ends[11]:setColSpan(3):createText("BOW", { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 8) })
+    ends[2]:setColSpan(3):createText("STERN", small)
+    ends[11]:setColSpan(3):createText("BOW", { halign = "right", fontsize = small.fontsize })
     return shared
 end
 
--- Orthographic 3D view with yaw/pitch from the sliders, true proportions,
--- scaled to fit. X4 ship-local axes: x starboard, y dorsal, z bow. At yaw 0 the
--- bow points right and pitch tilts the camera down onto the deck, so port is
--- the near side. A generic grey hull outline on the y = 0 plane rotates with
--- the view: pointed bow, thick port edge.
-turretMapDraw3D = function()
-    HideAllCircles(); HideAllRects()
-    local area = turretMap and turretMap.area3d
-    if not area then return end
-    local yaw, pitch = math.rad(turretMap.yaw or 0), math.rad(turretMap.pitch or 25)
-    local cy_, sy_, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+-- Orthographic 3D projection with yaw/pitch, true proportions, fitted to
+-- the area. Ship-local axes: x starboard, y dorsal, z bow. Viewer sits at
+-- ship-local (z, x) = (-sin yaw, -cos yaw); pitch looks down onto the deck.
+-- Everything but turret state is drawn in neutral greys.
+local function turretMapProject(area, points, yawDeg, pitchDeg)
+    local yaw, pitch = math.rad(yawDeg), math.rad(pitchDeg)
+    local cyaw, syaw, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
     local function view(x, y, z)
-        local h = z * cy_ - x * sy_
-        local d = z * sy_ + x * cy_          -- + = away from the viewer at yaw 0
+        local h = z * cyaw - x * syaw
+        local d = z * syaw + x * cyaw
         return h, y * cp + d * sp, d * cp - y * sp
     end
     local turrets = {}
-    local zlo, zhi, wmax = math.huge, -math.huge, 10
-    for _, p in ipairs(area.points) do
+    local zlo, zhi, w = math.huge, -math.huge, 10
+    for _, p in ipairs(points) do
         if p.x then
             turrets[#turrets + 1] = p
-            zlo, zhi, wmax = math.min(zlo, p.z), math.max(zhi, p.z), math.max(wmax, math.abs(p.x) * 1.1)
+            zlo, zhi, w = math.min(zlo, p.z), math.max(zhi, p.z), math.max(w, math.abs(p.x) * 1.15)
         end
     end
-    if #turrets == 0 then return end
+    if #turrets == 0 then return nil end
     local len = math.max(zhi - zlo, 20)
-    local sternZ, shoulderZ, bowZ = zlo - 0.05 * len, zlo + 0.75 * len, zhi + 0.12 * len
-    local hull = { { -wmax, sternZ }, { wmax, sternZ }, { wmax, shoulderZ }, { 0, bowZ }, { -wmax, shoulderZ } }
-    -- Fit: project everything once, then scale the bounding box into the area.
+    local s0, bow = zlo - 0.06 * len, zhi + 0.18 * len
+    local L = bow - s0
+    -- Generic hull on the y = 0 deck: flat stern, parallel sides, tapered bow.
+    local hull = { { -0.8 * w, s0 }, { 0.8 * w, s0 }, { w, s0 + 0.1 * L }, { w, s0 + 0.68 * L },
+        { 0.35 * w, s0 + 0.93 * L }, { 0, bow }, { -0.35 * w, s0 + 0.93 * L }, { -w, s0 + 0.68 * L }, { -w, s0 + 0.1 * L } }
+    local labels = { { "BOW", 0, bow + 0.1 * L }, { "STERN", 0, s0 - 0.1 * L },
+        { "PORT", -2.2 * w, s0 + 0.45 * L }, { "STBD", 2.2 * w, s0 + 0.45 * L } }
     local hlo, hhi, vlo, vhi = math.huge, -math.huge, math.huge, -math.huge
     local function extend(h, v) hlo, hhi, vlo, vhi = math.min(hlo, h), math.max(hhi, h), math.min(vlo, v), math.max(vhi, v) end
     for _, c in ipairs(hull) do extend(view(c[1], 0, c[2])) end
+    for _, l in ipairs(labels) do extend(view(l[2], 0, l[3])) end
     for _, p in ipairs(turrets) do extend(view(p.x, p.y, p.z)) end
-    local pad = 14
+    local pad = 10
     local scale = math.min((area.w - 2 * pad) / math.max(hhi - hlo, 1), (area.h - 2 * pad) / math.max(vhi - vlo, 1))
     local ox = area.x + area.w / 2 - (hlo + hhi) / 2 * scale
     local oy = area.y + area.h / 2 + (vlo + vhi) / 2 * scale
@@ -1019,38 +1040,88 @@ turretMapDraw3D = function()
         local h, v, d = view(x, y, z)
         return ox + h * scale, oy - v * scale, d
     end
-    local function line(ax, ay, bx, by, color, thickness)
-        Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness or 1, nil, color, true)
+    local result = { hull = {}, keel = {}, labels = {}, marks = {}, fill = {} }
+    for _, c in ipairs(hull) do result.hull[#result.hull + 1] = { screen(c[1], 0, c[2]) } end
+    result.keel = { { screen(0, 0, s0) }, { screen(0, 0, bow) } }
+    -- Faint fill: lines across the beam every few percent of the length.
+    local function halfWidthAt(z)
+        local t = (z - s0) / L
+        if t < 0.1 then return 0.8 * w + 0.2 * w * t / 0.1 end
+        if t <= 0.68 then return w end
+        if t <= 0.93 then return w - 0.65 * w * (t - 0.68) / 0.25 end
+        return 0.35 * w * (1 - (t - 0.93) / 0.07)
     end
-    local outline, faint = Color["text_inactive"], Color["row_background_blue"]
-    for i, c in ipairs(hull) do
-        local n = hull[i % #hull + 1]
-        local ax, ay = screen(c[1], 0, c[2])
-        local bx, by = screen(n[1], 0, n[2])
-        -- Edges 5->1 and 4->5 lie on the port (-x) side.
-        local port = (i == 4) or (i == 5)
-        line(ax, ay, bx, by, outline, port and 3 or 1)
+    for i = 1, 24 do
+        local z = s0 + L * (i - 0.5) / 24
+        local hw = halfWidthAt(z)
+        result.fill[#result.fill + 1] = { { screen(-hw, 0, z) }, { screen(hw, 0, z) } }
     end
-    local kx, ky = screen(0, 0, sternZ)
-    local bx, by = screen(0, 0, bowZ)
-    line(kx, ky, bx, by, faint, 1)
-
-    local colors = turretMapColors()
-    local radius = (#turrets > 40) and 4 or 7
-    local projected = {}
+    for _, l in ipairs(labels) do
+        local sx, sy = screen(l[2], 0, l[3])
+        result.labels[#result.labels + 1] = { text = l[1], sx = sx, sy = sy }
+    end
     for _, p in ipairs(turrets) do
         local sx, sy, depth = screen(p.x, p.y, p.z)
         local fx, fy = screen(p.x, 0, p.z)
-        projected[#projected + 1] = { p = p, sx = sx, sy = sy, fx = fx, fy = fy, depth = depth }
+        result.marks[#result.marks + 1] = { p = p, sx = sx, sy = sy, fx = fx, fy = fy, depth = depth }
     end
-    table.sort(projected, function(a, b) return a.depth > b.depth end) -- far first
-    for index, q in ipairs(projected) do
-        line(q.sx, q.sy, q.fx, q.fy, faint, 1)
-        if index <= TURRETMAP_MAX_CIRCLES then
-            Helper.drawCircle(radius, q.sx, q.sy, nil, colors[q.p.state], true)
-        else
-            -- Circle pool exhausted: fall back to squares from the rectangle pool.
-            Helper.drawRectangle(radius * 2, radius * 2, q.sx - radius, q.sy - radius, 0, nil, colors[q.p.state], true)
+    table.sort(result.marks, function(a, b) return a.depth > b.depth end) -- far first
+    return result
+end
+
+turretMapDraw3D = function(reproject)
+    HideAllCircles(); HideAllRects()
+    local area = turretMap and turretMap.area3d
+    if not area then return end
+    if reproject or not area.projection then
+        area.projection = turretMapProject(area, area.points, turretMap.yaw, turretMap.pitch)
+    end
+    local proj = area.projection
+    if not proj then return end
+    local function line(a, b, color, thickness)
+        Helper.drawLine({ x = a[1], y = a[2] }, { x = b[1], y = b[2] }, thickness, nil, color, true)
+    end
+    for _, f in ipairs(proj.fill) do line(f[1], f[2], Color["row_background_blue"], 3) end
+    for i, c in ipairs(proj.hull) do line(c, proj.hull[i % #proj.hull + 1], Color["text_inactive"], 3) end
+    line(proj.keel[1], proj.keel[2], Color["text_inactive"], 1)
+    local colors = turretMapColors()
+    local size = (#proj.marks > 40) and 7 or 11
+    for _, m in ipairs(proj.marks) do
+        line({ m.sx, m.sy }, { m.fx, m.fy }, Color["text_inactive"], 1)
+        -- Diamond from the rectangle pool: circle shapes render as smeared
+        -- 3D cylinders in the widget scene.
+        Helper.drawRectangle(size, size, m.sx - size / 2, m.sy - size / 2, 45, nil, colors[m.p.state], true)
+    end
+end
+
+-- Hover/click/label layer over the 3D view: a hidden table-cell grid whose
+-- cells take the turrets (and axis labels) projected into them.
+local function turretMapAddOverlay(tableView, area)
+    local proj = area.projection
+    local cellW = area.w / TURRETMAP_COLS
+    local cellH = area.h / TURRETMAP_OVERLAY_ROWS
+    local function cellOf(sx, sy)
+        local c = math.max(1, math.min(TURRETMAP_COLS, math.floor((sx - area.x) / cellW) + 1))
+        local r = math.max(1, math.min(TURRETMAP_OVERLAY_ROWS, math.floor((sy - area.y) / cellH) + 1))
+        return r * 100 + c
+    end
+    local cells, labels = {}, {}
+    for _, m in ipairs(proj and proj.marks or {}) do
+        local key = cellOf(m.sx, m.sy)
+        cells[key] = cells[key] or {}
+        table.insert(cells[key], m.p)
+    end
+    for _, l in ipairs(proj and proj.labels or {}) do labels[cellOf(l.sx, l.sy)] = l.text end
+    local small = { fontsize = Helper.scaleFont(Helper.standardFont, 9), halign = "center", minRowHeight = TURRETMAP_OVERLAY_CELL }
+    for r = 1, TURRETMAP_OVERLAY_ROWS do
+        local row = tableView:addRow(true, {})
+        for c = 1, TURRETMAP_COLS do
+            local key = r * 100 + c
+            if cells[key] then
+                turretMapCellButton(row[c], "3d:" .. key, cells[key], TURRETMAP_OVERLAY_CELL, nil)
+            else
+                row[c]:createText(labels[key] or "", small)
+            end
         end
     end
 end
@@ -1100,21 +1171,19 @@ local function turretMapBody(tableView, frameX, frameY)
     local drawPoints = turretMapDrawPoints(turretMapAxisRange(rangeSeed, 10))
     local norm = turretMapNormaliser(drawPoints)
 
-    -- 3D view: reserve an empty block; shapes are drawn over it after display.
-    local label3d = tableView:addRow(false, {})
-    label3d[1]:setColSpan(cols):createText("3D (shapes; no hover/click). Pointed end = BOW, thick edge = PORT. Drag sliders to rotate.", small)
     local rotate = tableView:addRow("tm_rotate", {})
     rotate[1]:setColSpan(2):createText("Yaw", small)
-    rotate[3]:setColSpan(4):createSliderCell({ min = -180, max = 180, start = turretMap.yaw or 0, step = 5, height = Helper.standardTextHeight })
-    rotate[3].handlers.onSliderCellChanged = function(_, value) turretMap.yaw = value; turretMapDraw3D() end
+    rotate[3]:setColSpan(5):createSliderCell({ min = -180, max = 180, start = turretMap.yaw, step = 5, height = Helper.standardTextHeight })
+    rotate[3].handlers.onSliderCellChanged = function(_, value) turretMap.yaw = value; turretMapDraw3D(true) end
+    -- Rebuild once the drag ends so hover cells and labels follow the view.
+    rotate[3].handlers.onSliderCellDeactivated = function() menu.display() end
     -- One slider cell per row: X4 rejects a second one ("Slidercell defined
     -- although excluded by other row content") and reloads the whole UI.
     local tilt = tableView:addRow("tm_tilt", {})
     tilt[1]:setColSpan(2):createText("Pitch", small)
-    tilt[3]:setColSpan(4):createSliderCell({ min = -90, max = 90, start = turretMap.pitch or 25, step = 5, height = Helper.standardTextHeight })
-    tilt[3].handlers.onSliderCellChanged = function(_, value) turretMap.pitch = value; turretMapDraw3D() end
-    -- Preset quarter views from 30 degrees above. Viewer sits at ship-local
-    -- (z, x) = (-sin yaw, -cos yaw), so yaw 0 looks from port, bow right.
+    tilt[3]:setColSpan(5):createSliderCell({ min = -90, max = 90, start = turretMap.pitch, step = 5, height = Helper.standardTextHeight })
+    tilt[3].handlers.onSliderCellChanged = function(_, value) turretMap.pitch = value; turretMapDraw3D(true) end
+    tilt[3].handlers.onSliderCellDeactivated = function() menu.display() end
     local presets = tableView:addRow("tm_presets", {})
     for index, preset in ipairs({ { "Port-bow", -45 }, { "Stbd-bow", -135 }, { "Port-stern", 45 }, { "Stbd-stern", 135 } }) do
         local cell = presets[(index - 1) * 3 + 1]
@@ -1125,14 +1194,18 @@ local function turretMapBody(tableView, frameX, frameY)
             menu.display()
         end
     end
+
+    -- 3D view: shapes drawn after display over a hidden hover/click/label grid.
     local areaTop = tableView:getFullHeight()
-    local areaH = Helper.scaleY(170)
-    tableView:addEmptyRow(areaH, false)
+    local areaH = TURRETMAP_OVERLAY_ROWS * (Helper.scaleY(TURRETMAP_OVERLAY_CELL) + Helper.borderSize)
     turretMap.area3d = { x = frameX + tableView.properties.x, y = frameY + tableView.properties.y + areaTop,
         w = tableView.properties.width, h = areaH, points = drawPoints }
+    turretMap.area3d.projection = turretMapProject(turretMap.area3d, drawPoints, turretMap.yaw, turretMap.pitch)
+    turretMapAddOverlay(tableView, turretMap.area3d)
+    local actualH = tableView:getFullHeight() - areaTop
 
-    local sharedTop = turretMapAddGrid(tableView, "Grid top view (hover/click; upper row = PORT)", drawPoints, norm, "x", true)
-    local sharedSide = turretMapAddGrid(tableView, "Grid side view (upper row = DORSAL)", drawPoints, norm, "y", false)
+    local sharedTop = turretMapAddGrid(tableView, "Grid top view", drawPoints, norm, "x", true, { "PORT", "CTR", "STBD" })
+    local sharedSide = turretMapAddGrid(tableView, "Grid side view", drawPoints, norm, "y", false, { "DORSAL", "MID", "VENTRAL" })
 
     local renderKey = tostring(turretMap.typeIcons) .. ":" .. tostring(turretMap.synthetic) .. ":" .. tostring(turretMap.preview)
     if renderKey ~= turretMap.lastRenderKey then
@@ -1140,7 +1213,8 @@ local function turretMapBody(tableView, frameX, frameY)
         log("turretmap", { action = "render", renderer = "grid+shapes", icons = tostring(turretMap.typeIcons),
             synthetic = tostring(turretMap.synthetic), preview = tostring(turretMap.preview), points = #drawPoints,
             shared_cells_top = sharedTop, shared_cells_side = sharedSide,
-            area = string.format("%d,%d,%dx%d", turretMap.area3d.x, turretMap.area3d.y, turretMap.area3d.w, turretMap.area3d.h) })
+            area = string.format("%d,%d,%dx%d", turretMap.area3d.x, turretMap.area3d.y, turretMap.area3d.w, turretMap.area3d.h),
+            overlay_actual_h = actualH })
     end
 end
 
