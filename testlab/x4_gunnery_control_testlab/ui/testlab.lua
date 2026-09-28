@@ -1110,6 +1110,18 @@ local function turretMapBody(tableView, frameX, frameY)
     rotate[7]:setColSpan(2):createText("Pitch", small)
     rotate[9]:setColSpan(5):createSliderCell({ min = -90, max = 90, start = turretMap.pitch or 25, step = 5, height = Helper.standardTextHeight })
     rotate[9].handlers.onSliderCellChanged = function(_, value) turretMap.pitch = value; turretMapDraw3D() end
+    -- Preset quarter views from 30 degrees above. Viewer sits at ship-local
+    -- (z, x) = (-sin yaw, -cos yaw), so yaw 0 looks from port, bow right.
+    local presets = tableView:addRow("tm_presets", {})
+    for index, preset in ipairs({ { "Port-bow", -45 }, { "Stbd-bow", -135 }, { "Port-stern", 45 }, { "Stbd-stern", 135 } }) do
+        local cell = presets[(index - 1) * 3 + 1]
+        cell:setColSpan(index == 4 and 4 or 3):createButton({}):setText(preset[1])
+        cell.handlers.onClick = function()
+            turretMap.yaw, turretMap.pitch = preset[2], 30
+            log("turretmap", { action = "view", preset = preset[1] })
+            menu.display()
+        end
+    end
     local areaTop = tableView:getFullHeight()
     local areaH = Helper.scaleY(170)
     tableView:addEmptyRow(areaH, false)
