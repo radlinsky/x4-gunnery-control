@@ -929,7 +929,8 @@ end
 local function turretMapHover(list)
     local order, counts = {}, {}
     for _, p in ipairs(list) do
-        local line = p.groupName .. "; " .. p.name
+        -- "Front Lower Left: Ion Pulse Turret" -> "Front Lower Left"
+        local line = (tostring(p.groupName):match("^([^:]+)") or p.groupName) .. "; " .. p.name
         if not counts[line] then order[#order + 1] = line end
         counts[line] = (counts[line] or 0) + 1
     end
@@ -1362,8 +1363,15 @@ function menu.display()
     local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
     title[1]:setColSpan(4):createText(text(1), Helper.headerRowCenteredProperties)
     local tmRow = tableView:addRow("tm_open", {})
-    tmRow[1]:setColSpan(4):createButton({}):setText("Turret map probe")
+    tmRow[1]:setColSpan(2):createButton({}):setText("Turret map probe")
     tmRow[1].handlers.onClick = function() startTurretMapProbe() end
+    tmRow[3]:setColSpan(2):createButton({}):setText("Turret hologram probe")
+    tmRow[3].handlers.onClick = function()
+        -- ui/turretholo.lua; closing stops onCloseElement reopening Gunnery.
+        closing = true
+        cleanup("hologram probe", false)
+        Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTurretHolo", { 0, 0 }, true)
+    end
     local reloadRow = tableView:addRow("reload", {})
     for index, spec in ipairs({ { text(22), "ui" }, { text(23), "md" }, { text(24), "ai" } }) do
         local label, kind = spec[1], spec[2]
