@@ -805,21 +805,29 @@ local function cleanup(reason, clearSweep)
 end
 
 local function startTurretMapProbe()
-    local ship, reason = api() and api().getCurrentShipSweep()
-    if not ship then
-        turretMap = { failReason = tostring(reason or "no API"), points = {} }
-        log("turretmap", { action = "on", ok = "false", reason = tostring(reason or "no API") })
+    -- Read the live session, not getCurrentShipSweep(): that one requires the
+    -- gunner chair, and Gunnery Control is also opened onboard (docked menu).
+    local session = api() and api().getSession and api().getSession()
+    if not session or not session.shipID then
+        local reason = api() and "no Gunnery session" or "no API"
+        turretMap = { failReason = reason, points = {} }
+        log("turretmap", { action = "on", ok = "false", reason = reason })
         menu.display()
         return
     end
+    local ship = { id = tostring(session.shipID) }
     local points = {}
-    for _, group in ipairs(ship.groups or {}) do
+    for _, group in ipairs(session.groups or {}) do
         for _, member in ipairs(group.members or {}) do
-            points[#points + 1] = {
-                id = member.id, name = member.name, groupName = group.name,
-                macro = member.macro, isMissile = tostring(member.macro or ""):find("missile") ~= nil,
-                state = "idle", sourceIndex = #points + 1,
-            }
+            if member.operational then
+                local macro = tostring(GetComponentData(ConvertStringTo64Bit(tostring(member.componentID)), "macro") or "")
+                points[#points + 1] = {
+                    id = tostring(member.componentID), componentID = member.componentID,
+                    name = member.displayName or "?", groupName = group.displayName or "?",
+                    macro = macro, isMissile = macro:find("missile") ~= nil,
+                    state = "idle", sourceIndex = #points + 1,
+                }
+            end
         end
     end
     turretMap = {
@@ -960,7 +968,8 @@ local function turretMapOnClick(view)
         end
         local real = turretMap and turretMap.points[resolved.sourceIndex]
         if not real then return end
-        local ok, reason = api().focusTestTurret(real.id)
+        -- enterCamera, not focusTestTurret: the latter requires the gunner chair.
+        local ok, reason = api().enterCamera({ componentID = real.componentID, cameraSupported = true })
         log("turretmap", { action = "click", view = view, resolved = "true", turret = real.id, ok = tostring(ok), reason = tostring(reason or "") })
     end
 end
@@ -971,7 +980,7 @@ local function turretMapBody(tableView)
 
     if not turretMap.ship then
         local row = tableView:addRow(false, {})
-        row[1]:setColSpan(4):createText("getCurrentShipSweep failed: " .. tostring(turretMap.failReason))
+        row[1]:setColSpan(4):createText("Turret map probe failed: " .. tostring(turretMap.failReason))
         local off = tableView:addRow("tm_off", {})
         off[1]:setColSpan(4):createButton({}):setText("Probe: OFF")
         off[1].handlers.onClick = function() turretMap = nil; menu.display() end
