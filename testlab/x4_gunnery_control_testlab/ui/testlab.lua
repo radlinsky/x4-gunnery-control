@@ -101,22 +101,6 @@ end
 local turretMap = nil
 local turretMapGraphPoints = {} -- graph handle -> recordIndex -> ordered list of points (click resolution)
 
-local ICON_DOT = "ency_timeline_dot_01"
-local function iconForMacro(macro)
-    local m = tostring(macro or "")
-    if m:find("missile") then return ICON_DOT end
-    if m:find("_beam_") then return "weapon_beam_mk1" end
-    if m:find("_plasma_") then return "weapon_plasma_mk1" end
-    if m:find("_ion_") then return "weapon_ion_mk1" end
-    if m:find("_gatling_") then return "weapon_gatling_mk1" end
-    if m:find("_shotgun_") or m:find("_flak_") then return "weapon_shotgun_mk1" end
-    if m:find("_railgun_") then return "weapon_railgun_mk1" end
-    if m:find("_cannon_") then return "weapon_cannon_mk1" end
-    if m:find("_laser_") then return "weapon_laser_mk1" end
-    if m:find("_arc_") then return "weapon_bor_arc_mk1" end
-    return ICON_DOT
-end
-
 -- MD may stringify a length with a unit suffix ("12.5m"); pull the leading
 -- number out tolerantly rather than assume tonumber() handles it directly.
 local function parseLength(s)
@@ -831,7 +815,7 @@ local function startTurretMapProbe()
         end
     end
     turretMap = {
-        ship = ship, points = points, style = "halo", typeIcons = false, synthetic = false,
+        ship = ship, points = points, style = "state", synthetic = false,
         nextShuffle = getElapsedTime() + 1, renderCount = 0, shuffleCount = 0, lastRenderKey = nil,
     }
     log("turretmap", { action = "on", ok = "true", points = #points })
@@ -880,7 +864,12 @@ local function turretMapAxisRange(values, minExtent)
     return extent * 1.15
 end
 
-local function turretMapBuildGraph(cell, points, coordA, coordB, style, typeIcons)
+-- X4 9.00 graph limits (widget_fullscreen.lua config.graph): at most 5 icons
+-- and 200 data points per graph, and hovering a point shows its RECORD's
+-- mouseOverText. So: no icons, one record per turret mark, name on the record.
+local TURRETMAP_MAX_POINTS = 200
+
+local function turretMapBuildGraph(cell, points, coordA, coordB, style)
     local graph = cell:createGraph({ height = Helper.scaleY(400), scaling = false })
     local avals, bvals = {}, {}
     for _, point in ipairs(points) do
@@ -898,55 +887,26 @@ local function turretMapBuildGraph(cell, points, coordA, coordB, style, typeIcon
     graph:setYAxis({ startvalue = -rangeB, endvalue = rangeB, granularity = rangeB / 4, gridcolor = Color["graph_grid"] })
 
     local stateColor = { idle = Color["text_inactive"], fired = Color["text_warning"], hit = Color["text_positive"] }
-    local haloColor = { idle = Color["icon_normal"], fired = Color["text_warning"], hit = Color["text_positive"] }
-    local records = { idle = nil, fired = nil, hit = nil }
-    local pointsByRecord = {}
-    local function recordFor(state)
-        if not records[state] then
-            records[state] = graph:addDataRecord({ markertype = "square", markersize = (style == "badge") and 4 or 10, markercolor = stateColor[state] })
-            pointsByRecord[records[state]] = {}
-        end
-        return records[state]
-    end
-    local iconRecord
-    if style ~= "marker" then
-        iconRecord = graph:addDataRecord({})
-        pointsByRecord[iconRecord] = {}
-    end
-    local aRange, bRange = rangeA, rangeB
-    for _, point in ipairs(points) do
-        if point.x then
+    -- Shape carries the type (circle = missile, square = gun); only these two exist.
+    local byText, used, perPoint = {}, 0, (style == "ring") and 2 or 1
+    for index, point in ipairs(points) do
+        if point.x and used + perPoint <= TURRETMAP_MAX_POINTS then
             local a, b = coordA(point), coordB(point)
-            if style == "halo" then
-                local rec = recordFor(point.state)
-                rec:addData(a, b)
-                table.insert(pointsByRecord[rec], point)
-            elseif style == "badge" then
-                local rec = recordFor(point.state)
-                rec:addData(a + aRange * 0.04, b + bRange * 0.04)
-                table.insert(pointsByRecord[rec], point)
+            local shape = point.isMissile and "circle" or "square"
+            local hover = "#" .. index .. " " .. turretMapPointName(point)
+            byText[hover] = point
+            if style == "ring" then
+                -- Big state-colored square behind a small neutral type marker.
+                graph:addDataRecord({ markertype = "square", markersize = 16, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
+                graph:addDataRecord({ markertype = shape, markersize = 7, markercolor = Color["icon_normal"], mouseOverText = hover }):addData(a, b)
+            else
+                graph:addDataRecord({ markertype = shape, markersize = 10, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
             end
-            if iconRecord then
-                local icon = typeIcons and iconForMacro(point.macro) or ICON_DOT
-                iconRecord:addData(a, b, icon, turretMapPointName(point))
-                table.insert(pointsByRecord[iconRecord], point)
-            elseif style == "marker" then
-                local rec = recordFor(point.state)
-                rec:addData(a, b)
-                table.insert(pointsByRecord[rec], point)
-            end
+            used = used + perPoint
         end
     end
-
-    local recordIndexOf = {}
-    for i, dr in ipairs(graph.datarecords or {}) do recordIndexOf[dr] = i end
-    local orderedByIndex = {}
-    for dr, pts in pairs(pointsByRecord) do
-        local i = recordIndexOf[dr]
-        if i then orderedByIndex[i] = pts end
-    end
-    turretMapGraphPoints[graph] = orderedByIndex
-    return graph
+    turretMapGraphPoints[graph] = byText
+    return graph, used
 end
 
 local function turretMapOnClick(view)
@@ -954,13 +914,10 @@ local function turretMapOnClick(view)
         for key, value in pairs(data or {}) do
             log("turretmap", { action = "click", view = view, style = turretMap and turretMap.style or "?", key = tostring(key), value = tostring(value) })
         end
-        local recordIdx, dataIdx = data and data[3], data and data[4]
+        -- widget_fullscreen passes data[1] = the record's mouseOverText.
         local resolved
-        for graph, byRecord in pairs(turretMapGraphPoints) do
-            if byRecord[recordIdx] and byRecord[recordIdx][dataIdx] then
-                resolved = byRecord[recordIdx][dataIdx]
-                break
-            end
+        for _, byText in pairs(turretMapGraphPoints) do
+            resolved = resolved or byText[data and data[1]]
         end
         if not resolved then
             log("turretmap", { action = "click", view = view, resolved = "false" })
@@ -992,20 +949,14 @@ local function turretMapBody(tableView)
     controls[1].handlers.onClick = function() turretMap = nil; menu.display() end
     controls[2]:createButton({}):setText("State style: " .. turretMap.style)
     controls[2].handlers.onClick = function()
-        local order = { halo = "badge", badge = "marker", marker = "halo" }
+        local order = { state = "ring", ring = "state" }
         turretMap.style = order[turretMap.style]
         turretMap.lastRenderKey = nil
         log("turretmap", { action = "style", style = turretMap.style })
         menu.display()
     end
-    controls[3]:createButton({}):setText("Icons: " .. (turretMap.typeIcons and "type" or "dot"))
+    controls[3]:createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
     controls[3].handlers.onClick = function()
-        turretMap.typeIcons = not turretMap.typeIcons
-        turretMap.lastRenderKey = nil
-        menu.display()
-    end
-    controls[4]:createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
-    controls[4].handlers.onClick = function()
         turretMap.synthetic = not turretMap.synthetic
         turretMap.lastRenderKey = nil
         menu.display()
@@ -1032,18 +983,21 @@ local function turretMapBody(tableView)
     local graphRow = tableView:addRow(false, {})
     local topCell = graphRow[1]:setColSpan(2)
     local sideCell = graphRow[3]:setColSpan(2)
-    local topGraph = turretMapBuildGraph(topCell, drawPoints,
-        function(p) return p.x end, function(p) return p.z end, turretMap.style, turretMap.typeIcons)
+    local topGraph, used = turretMapBuildGraph(topCell, drawPoints,
+        function(p) return p.x end, function(p) return p.z end, turretMap.style)
     topGraph.handlers.onClick = turretMapOnClick("top")
     local sideGraph = turretMapBuildGraph(sideCell, drawPoints,
-        function(p) return p.z end, function(p) return p.y end, turretMap.style, turretMap.typeIcons)
+        function(p) return p.z end, function(p) return p.y end, turretMap.style)
     sideGraph.handlers.onClick = turretMapOnClick("side")
+    local noteRow = tableView:addRow(false, {})
+    noteRow[1]:setColSpan(4):createText("graph points used " .. used .. " / " .. TURRETMAP_MAX_POINTS
+        .. " per view (" .. #drawPoints .. " turrets; ring uses 2 per turret)")
 
-    local renderKey = turretMap.style .. ":" .. tostring(turretMap.typeIcons) .. ":" .. tostring(turretMap.synthetic)
+    local renderKey = turretMap.style .. ":" .. tostring(turretMap.synthetic)
     if renderKey ~= turretMap.lastRenderKey then
         turretMap.lastRenderKey = renderKey
-        log("turretmap", { action = "render", style = turretMap.style, icons = tostring(turretMap.typeIcons),
-            synthetic = tostring(turretMap.synthetic), points = #drawPoints })
+        log("turretmap", { action = "render", style = turretMap.style,
+            synthetic = tostring(turretMap.synthetic), points = #drawPoints, graph_points = used })
     end
 end
 
