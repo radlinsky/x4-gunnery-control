@@ -375,6 +375,8 @@
               <debug_text text="'[X4GC TEST HOLOSIZE] ship=' + $Ship + ' macro=' + $Ship.macro
                 + ' size=' + $Ship.size + ' length=' + $Ship.length + ' width=' + $Ship.width + ' height=' + $Ship.height
                 + ' bbox_max=' + @$Ship.macro.boundingbox.max + ' bbox_center=' + @$Ship.macro.boundingbox.center"/>
+              <!-- The fitted holomap distance unit is size / 2 (bounding-sphere radius). -->
+              <raise_lua_event name="'X4GunneryTestLab.HoloSize'" param="'x4ghs1:' + $Ship.size"/>
             </do_if>
           </actions>
         </cue>

@@ -103,19 +103,21 @@ local function highlight(slots, why)
 end
 
 -- Our own turret markers over the hologram. Camera model fitted offline to
--- the 2026-09-28 Ray scans (13 slot centroids, rms 0.019 in -1..1 units):
--- orbit around the ship origin, camera at yaw/pitch from GetMapState,
--- vertical tan(fov/2) = 0.798, one cameradistance unit = HOLO_SCALE metres.
--- ponytail: HOLO_SCALE is the Ray's fitted value; the per-ship rule (likely
--- one of the MD bounding-box sizes logged below) is not known yet.
-local HOLO_SCALE, HOLO_TANHALF = 521.4, 0.798
+-- 2026-09-28 Ray refine scans (18 slot centroids, rms 0.0069 in -1..1
+-- units): orbit around the ship origin (within ~1 m), camera at yaw/pitch
+-- from GetMapState, vertical tan(fov/2) = 0.7716 (~75 deg), and one
+-- cameradistance unit = half the MD bounding-box diagonal ($ship.size / 2).
+-- The size rule fits as well as a free scale on the Ray; a second ship size
+-- still has to confirm it.
+local HOLO_TANHALF = 0.7716
 local STATE_COLORS = function()
     return { unselected = Color["text_inactive"], idle = Color["icon_normal"],
         fired = Color["text_warning"], hit = Color["text_positive"] }
 end
 
 local function projectTurret(entry, state)
-    local yaw, pitch, d = state.offset.yaw, state.offset.pitch, state.cameradistance * HOLO_SCALE
+    if not holo.scale then return nil end
+    local yaw, pitch, d = state.offset.yaw, state.offset.pitch, state.cameradistance * holo.scale
     local cp = math.cos(pitch)
     local cam = { -cp * math.sin(yaw) * d, -math.sin(pitch) * d, -cp * math.cos(yaw) * d }
     local fl = math.sqrt(cam[1] ^ 2 + cam[2] ^ 2 + cam[3] ^ 2)
@@ -179,7 +181,7 @@ local MARKERS = {
 
 local function dimmed(colors)
     local out = {}
-    for k, c in pairs(colors) do out[k] = { r = c.r, g = c.g, b = c.b, a = math.floor((c.a or 100) * 0.35), glow = c.glow } end
+    for k, c in pairs(colors) do out[k] = { r = c.r, g = c.g, b = c.b, a = math.floor((c.a or 100) * 0.15), glow = c.glow } end
     return out
 end
 
@@ -205,7 +207,8 @@ local function drawMarkers(force)
             if mx and math.abs(mx) <= 1 and math.abs(my) <= 1 then
                 local cx = rt.x + (mx + 1) / 2 * rt.w
                 local cy = rt.y + (1 - my) / 2 * rt.h
-                MARKERS[entry.state](cx, cy, size, far and faded or colors, segs)
+                -- Far side: 15% opacity and 70% size.
+                MARKERS[entry.state](cx, cy, far and size * 0.7 or size, far and faded or colors, segs)
             end
         end
     end
@@ -239,6 +242,12 @@ local function onPosition(_, param)
     entry.x, entry.y, entry.z = num(x), num(y), num(z)
     log("position", { slot = entry.slot, component = tostring(entry.component), x = entry.x, y = entry.y, z = entry.z })
     holo.lastMarkerKey = nil
+end
+
+local function onSize(_, param)
+    local size = tonumber(tostring(param or ""):match("^x4ghs1:%s*([-+]?[%d%.]+)"))
+    if size and size > 0 then holo.scale = size / 2; holo.lastMarkerKey = nil end
+    log("size", { raw = tostring(param), scale = tostring(holo.scale) })
 end
 
 -- Scan: walk a virtual mouse over a grid, one point per frame, and ask the
@@ -317,7 +326,7 @@ end
 
 function menu.onShowMenu()
     holo.closing, holo.flash, holo.scan = false, false, nil
-    holo.markers, holo.preview = true, true
+    holo.markers, holo.preview, holo.scale = true, true, nil
     if not readSlots() then log("no_session") else
         requestPositions()
         AddUITriggeredEvent("X4GunneryTestLabObserve", "holo_size", { ship = ConvertStringToLuaID(tostring(holo.ship)) })
@@ -524,6 +533,7 @@ local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
     if Helper then Helper.registerMenu(menu) end
     RegisterEvent("X4GunneryTestLab.TurretMapPosition", onPosition)
+    RegisterEvent("X4GunneryTestLab.HoloSize", onSize)
 end
 
 init()
