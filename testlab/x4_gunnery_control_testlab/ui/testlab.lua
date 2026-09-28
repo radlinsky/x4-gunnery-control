@@ -99,7 +99,6 @@ end
 -- turret map? nil = probe off. See docs comment above menu.display() for the
 -- probe-only body it triggers.
 local turretMap = nil
-local turretMapGraphPoints = {} -- graph handle -> recordIndex -> ordered list of points (click resolution)
 
 -- MD may stringify a length with a unit suffix ("12.5m"); pull the leading
 -- number out tolerantly rather than assume tonumber() handles it directly.
@@ -818,7 +817,7 @@ local function startTurretMapProbe()
         end
     end
     turretMap = {
-        ship = ship, points = points, style = "state", fit = "stretch", synthetic = false,
+        ship = ship, points = points, typeIcons = true, synthetic = false,
         nextShuffle = getElapsedTime() + 1, renderCount = 0, shuffleCount = 0, lastRenderKey = nil,
     }
     log("turretmap", { action = "on", ok = "true", points = #points })
@@ -867,179 +866,157 @@ local function turretMapAxisRange(values, minExtent)
     return extent * 1.15
 end
 
--- X4 9.00 graph limits (widget_fullscreen.lua config.graph): at most 5 icons
--- and 200 data points per graph, and hovering a point shows its RECORD's
--- mouseOverText. So: no icons, one record per turret mark, name on the record.
-local TURRETMAP_MAX_POINTS = 200
+-- The X4 graph widget failed live (5-icon cap, smeared circle markers, no
+-- per-point colour). Table icon cells instead take function-valued icon,
+-- colour and hover text that frame:update() re-evaluates without a rebuild.
+-- Tables cap at 13 columns (helper.lua maxTableCols).
+local TURRETMAP_COLS, TURRETMAP_ROWS = 13, 5
+local TURRETMAP_RANK = { unselected = 1, idle = 2, fired = 3, hit = 4 }
 
--- ponytail: fixed aspect guess for a ~540x400 cell; measure it if skewed.
-local TURRETMAP_ASPECT = 540 / 400
 local function turretMapColors()
     return { unselected = Color["text_inactive"], idle = Color["icon_normal"],
         fired = Color["text_warning"], hit = Color["text_positive"] }
 end
 
--- "stretch" fills the graph by scaling each axis to the bounding box on its
--- own (a schematic, like a subway map); "true" keeps one scale for both.
-local function turretMapAxes(avals, bvals, fit)
-    local function box(values)
-        local lo, hi = math.huge, -math.huge
-        for _, v in ipairs(values) do lo, hi = math.min(lo, v), math.max(hi, v) end
-        if lo > hi then lo, hi = -10, 10 end
-        if hi - lo < 10 then local mid = (lo + hi) / 2; lo, hi = mid - 5, mid + 5 end
-        return lo, hi
+local function turretMapIcon(macro)
+    local m = tostring(macro or "")
+    for _, rule in ipairs({ { "_beam_", "weapon_beam_mk1" }, { "_plasma_", "weapon_plasma_mk1" },
+            { "_ion_", "weapon_ion_mk1" }, { "_gatling_", "weapon_gatling_mk1" },
+            { "_shotgun_", "weapon_shotgun_mk1" }, { "_flak_", "weapon_shotgun_mk1" },
+            { "_disruptor_", "weapon_bor_disruptor_mk1" }, { "_railgun_", "weapon_railgun_mk1" },
+            { "_cannon_", "weapon_cannon_mk1" }, { "_laser_", "weapon_laser_mk1" },
+            { "_arc_", "weapon_bor_arc_mk1" } }) do
+        if m:find(rule[1], 1, true) then return rule[2] end
     end
-    local aLo, aHi = box(avals)
-    local bLo, bHi = box(bvals)
-    if fit == "true" then
-        local half = math.max((aHi - aLo) / TURRETMAP_ASPECT, bHi - bLo) / 2
-        local aMid, bMid = (aLo + aHi) / 2, (bLo + bHi) / 2
-        aLo, aHi = aMid - half * TURRETMAP_ASPECT, aMid + half * TURRETMAP_ASPECT
-        bLo, bHi = bMid - half, bMid + half
-    end
-    local aPad, bPad = (aHi - aLo) * 0.08, (bHi - bLo) * 0.08
-    return aLo - aPad, aHi + aPad, bLo - bPad, bHi + bPad
+    return "ency_timeline_dot_01"
 end
 
-local function turretMapBuildGraph(cell, points, coordA, coordB, style, fit)
-    local graph = cell:createGraph({ height = Helper.scaleY(400), scaling = false })
-    local avals, bvals = {}, {}
-    for _, point in ipairs(points) do
-        if point.x then
-            avals[#avals + 1] = coordA(point)
-            bvals[#bvals + 1] = coordB(point)
+-- Bucket turrets into a COLS x ROWS grid stretched over their bounding box.
+local function turretMapGrid(points, coordA, coordB)
+    local aLo, aHi, bLo, bHi = math.huge, -math.huge, math.huge, -math.huge
+    for _, p in ipairs(points) do
+        if p.x then
+            aLo, aHi = math.min(aLo, coordA(p)), math.max(aHi, coordA(p))
+            bLo, bHi = math.min(bLo, coordB(p)), math.max(bHi, coordB(p))
         end
     end
-    local aLo, aHi, bLo, bHi = turretMapAxes(avals, bvals, fit)
-    graph:setXAxis({ startvalue = aLo, endvalue = aHi, granularity = (aHi - aLo) / 4, gridcolor = Color["graph_grid"] })
-    graph:setYAxis({ startvalue = bLo, endvalue = bHi, granularity = (bHi - bLo) / 4, gridcolor = Color["graph_grid"] })
+    local function slot(v, lo, hi, n)
+        if hi - lo < 1 then return math.ceil(n / 2) end
+        return math.floor((v - lo) / (hi - lo) * (n - 1) + 0.5) + 1
+    end
+    local cells = {}
+    for _, p in ipairs(points) do
+        if p.x then
+            local col = slot(coordA(p), aLo, aHi, TURRETMAP_COLS)
+            local row = TURRETMAP_ROWS + 1 - slot(coordB(p), bLo, bHi, TURRETMAP_ROWS)
+            local key = row * 100 + col
+            cells[key] = cells[key] or {}
+            table.insert(cells[key], p)
+        end
+    end
+    return cells
+end
 
-    local stateColor = turretMapColors()
-    -- Bigger marks for small ships, smaller when crowded.
-    local size = math.max(8, math.min(20, math.floor(240 / math.sqrt(#points))))
-    local byText, used, perPoint = {}, 0, (style == "ring") and 2 or 1
-    for index, point in ipairs(points) do
-        if point.x and used + perPoint <= TURRETMAP_MAX_POINTS then
-            local a, b = coordA(point), coordB(point)
-            local hover = "#" .. index .. " " .. turretMapPointName(point)
-            byText[hover] = point
-            if style == "ring" then
-                -- Big state-colored circle behind a small neutral core.
-                graph:addDataRecord({ markertype = "circle", markersize = size, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
-                graph:addDataRecord({ markertype = "circle", markersize = math.floor(size / 2), markercolor = Color["frame_background_default"] or Color["text_inactive"], mouseOverText = hover }):addData(a, b)
+local function turretMapCellState(list)
+    local best = "unselected"
+    for _, p in ipairs(list) do
+        if TURRETMAP_RANK[p.state] > TURRETMAP_RANK[best] then best = p.state end
+    end
+    return best
+end
+
+local function turretMapAddGrid(tableView, title, points, coordA, coordB)
+    local titleRow = tableView:addRow(false, {})
+    titleRow[1]:setColSpan(TURRETMAP_COLS):createText(title)
+    local cells, colors = turretMapGrid(points, coordA, coordB), turretMapColors()
+    local size = 44 -- button heights are scaled by Helper itself
+    local crowded = 0
+    for r = 1, TURRETMAP_ROWS do
+        local row = tableView:addRow(true, { bgColor = Color["row_background_blue"] })
+        for c = 1, TURRETMAP_COLS do
+            local list = cells[r * 100 + c]
+            if list then
+                if #list > 1 then crowded = crowded + 1 end
+                local names = {}
+                for _, p in ipairs(list) do names[#names + 1] = p.name .. " — " .. p.groupName end
+                local button = row[c]:createButton({ height = size,
+                    bgColor = Color["button_background_hidden"], highlightColor = Color["button_highlight_default"],
+                    borderColor = Color["button_border_hidden"],
+                    mouseOverText = function() return table.concat(names, "\n") .. "\n[" .. turretMapCellState(list) .. "]" end })
+                button:setIcon(turretMap.typeIcons and turretMapIcon(list[1].macro) or "ency_timeline_dot_01",
+                    { color = function() return colors[turretMapCellState(list)] end })
+                if #list > 1 then button:setText(tostring(#list), { halign = "right", fontsize = Helper.scaleFont(Helper.standardFont, 9) }) end
+                row[c].handlers.onClick = function()
+                    local real = turretMap and turretMap.points[list[1].sourceIndex]
+                    if not real then return end
+                    local ok, reason = api().enterCamera({ componentID = real.componentID, cameraSupported = true })
+                    log("turretmap", { action = "click", view = title, turret = real.id, cell_turrets = #list, ok = tostring(ok), reason = tostring(reason or "") })
+                end
             else
-                graph:addDataRecord({ markertype = "circle", markersize = size, markercolor = stateColor[point.state], mouseOverText = hover }):addData(a, b)
+                row[c]:createText("", { minRowHeight = size })
             end
-            used = used + perPoint
         end
     end
-    turretMapGraphPoints[graph] = byText
-    return graph, used
-end
-
-local function turretMapOnClick(view)
-    return function(_, data)
-        for key, value in pairs(data or {}) do
-            log("turretmap", { action = "click", view = view, style = turretMap and turretMap.style or "?", key = tostring(key), value = tostring(value) })
-        end
-        -- widget_fullscreen passes data[1] = the record's mouseOverText.
-        local resolved
-        for _, byText in pairs(turretMapGraphPoints) do
-            resolved = resolved or byText[data and data[1]]
-        end
-        if not resolved then
-            log("turretmap", { action = "click", view = view, resolved = "false" })
-            return
-        end
-        local real = turretMap and turretMap.points[resolved.sourceIndex]
-        if not real then return end
-        -- enterCamera, not focusTestTurret: the latter requires the gunner chair.
-        local ok, reason = api().enterCamera({ componentID = real.componentID, cameraSupported = true })
-        log("turretmap", { action = "click", view = view, resolved = "true", turret = real.id, ok = tostring(ok), reason = tostring(reason or "") })
-    end
+    return crowded
 end
 
 local function turretMapBody(tableView)
+    local cols = TURRETMAP_COLS
     local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
-    title[1]:setColSpan(4):createText("Turret map probe (issue #205)", Helper.headerRowCenteredProperties)
+    title[1]:setColSpan(cols):createText("Turret map probe (issue #205)", Helper.headerRowCenteredProperties)
 
     if not turretMap.ship then
         local row = tableView:addRow(false, {})
-        row[1]:setColSpan(4):createText("Turret map probe failed: " .. tostring(turretMap.failReason))
+        row[1]:setColSpan(cols):createText("Turret map probe failed: " .. tostring(turretMap.failReason))
         local off = tableView:addRow("tm_off", {})
-        off[1]:setColSpan(4):createButton({}):setText("Probe: OFF")
+        off[1]:setColSpan(cols):createButton({}):setText("Probe: OFF")
         off[1].handlers.onClick = function() turretMap = nil; menu.display() end
         return
     end
 
     local controls = tableView:addRow("tm_controls", {})
-    controls[1]:createButton({}):setText("Probe: OFF")
+    controls[1]:setColSpan(3):createButton({}):setText("Probe: OFF")
     controls[1].handlers.onClick = function() turretMap = nil; menu.display() end
-    controls[2]:createButton({}):setText("State style: " .. turretMap.style)
-    controls[2].handlers.onClick = function()
-        local order = { state = "ring", ring = "state" }
-        turretMap.style = order[turretMap.style]
+    controls[4]:setColSpan(3):createButton({}):setText("Icons: " .. (turretMap.typeIcons and "weapon type" or "dot"))
+    controls[4].handlers.onClick = function()
+        turretMap.typeIcons = not turretMap.typeIcons
         turretMap.lastRenderKey = nil
-        log("turretmap", { action = "style", style = turretMap.style })
         menu.display()
     end
-    controls[3]:createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
-    controls[3].handlers.onClick = function()
+    controls[7]:setColSpan(3):createButton({}):setText("Synthetic 101: " .. (turretMap.synthetic and "ON" or "OFF"))
+    controls[7].handlers.onClick = function()
         turretMap.synthetic = not turretMap.synthetic
         turretMap.lastRenderKey = nil
         menu.display()
     end
 
-    local fitRow = tableView:addRow("tm_fit", {})
-    fitRow[1]:createButton({}):setText("Fit: " .. turretMap.fit)
-    fitRow[1].handlers.onClick = function()
-        turretMap.fit = (turretMap.fit == "stretch") and "true" or "stretch"
-        turretMap.lastRenderKey = nil
-        menu.display()
-    end
     local colors = turretMapColors()
-    for col, spec in ipairs({ { "unselected", "not selected" }, { "idle", "selected, not firing" }, { "fired", "firing" } }) do
-        fitRow[col + 1]:createText(spec[2], { color = colors[spec[1]] })
+    local legend = tableView:addRow(false, {})
+    for index, spec in ipairs({ { "unselected", "not selected" }, { "idle", "selected, idle" }, { "fired", "firing" }, { "hit", "hitting" } }) do
+        legend[(index - 1) * 3 + 1]:setColSpan(3):createText(spec[2], { color = colors[spec[1]] })
     end
-    local legend2 = tableView:addRow(false, {})
-    legend2[4]:createText("hitting", { color = colors.hit })
 
     local received, total = turretMapReceivedCount(), #turretMap.points
     local statusRow = tableView:addRow(false, {})
-    statusRow[1]:setColSpan(4):createText("positions received " .. received .. " / " .. total)
-
+    statusRow[1]:setColSpan(cols):createText("positions received " .. received .. " / " .. total)
     if received < total then return end
 
-    turretMapGraphPoints = {}
-    -- Jitter for synthetic padding scales with the real ship's extent rather
-    -- than a placeholder minimum.
     local rangeSeed = {}
     for _, point in ipairs(turretMap.points) do
         if point.x then rangeSeed[#rangeSeed + 1] = point.x; rangeSeed[#rangeSeed + 1] = point.y; rangeSeed[#rangeSeed + 1] = point.z end
     end
     local drawPoints = turretMapDrawPoints(turretMapAxisRange(rangeSeed, 10))
+    local crowdedTop = turretMapAddGrid(tableView, "Top (forward right, port up)", drawPoints,
+        function(p) return p.z end, function(p) return -p.x end)
+    local crowdedSide = turretMapAddGrid(tableView, "Side (forward right, dorsal up)", drawPoints,
+        function(p) return p.z end, function(p) return p.y end)
 
-    local titleRow = tableView:addRow(false, {})
-    titleRow[1]:setColSpan(2):createText("Top (forward right, port up)")
-    titleRow[3]:setColSpan(2):createText("Side (forward right, dorsal up)")
-    local graphRow = tableView:addRow(false, {})
-    local topCell = graphRow[1]:setColSpan(2)
-    local sideCell = graphRow[3]:setColSpan(2)
-    local topGraph, used = turretMapBuildGraph(topCell, drawPoints,
-        function(p) return p.z end, function(p) return -p.x end, turretMap.style, turretMap.fit)
-    topGraph.handlers.onClick = turretMapOnClick("top")
-    local sideGraph = turretMapBuildGraph(sideCell, drawPoints,
-        function(p) return p.z end, function(p) return p.y end, turretMap.style, turretMap.fit)
-    sideGraph.handlers.onClick = turretMapOnClick("side")
-    local noteRow = tableView:addRow(false, {})
-    noteRow[1]:setColSpan(4):createText("graph points used " .. used .. " / " .. TURRETMAP_MAX_POINTS
-        .. " per view (" .. #drawPoints .. " turrets; ring uses 2 per turret)")
-
-    local renderKey = turretMap.style .. ":" .. turretMap.fit .. ":" .. tostring(turretMap.synthetic)
+    local renderKey = tostring(turretMap.typeIcons) .. ":" .. tostring(turretMap.synthetic)
     if renderKey ~= turretMap.lastRenderKey then
         turretMap.lastRenderKey = renderKey
-        log("turretmap", { action = "render", style = turretMap.style,
-            synthetic = tostring(turretMap.synthetic), points = #drawPoints, graph_points = used })
+        log("turretmap", { action = "render", renderer = "table", icons = tostring(turretMap.typeIcons),
+            synthetic = tostring(turretMap.synthetic), points = #drawPoints,
+            shared_cells_top = crowdedTop, shared_cells_side = crowdedSide })
     end
 end
 
@@ -1139,17 +1116,21 @@ function menu.onShowMenu()
 end
 
 function menu.display()
+    if turretMap then
+        -- Not Helper.clearMenu: it also drops the menu's onUpdate ticker
+        -- (onUpdateHandler = nil), which stopped the probe's 1 Hz refresh.
+        Helper.clearDataForRefresh(menu)
+        local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(1100), height = Helper.scaleY(760), standardButtons = { close = true } })
+        local tableView = frame:addTable(TURRETMAP_COLS, { tabOrder = 1, width = Helper.scaleX(1080) })
+        turretMapBody(tableView)
+        frame:display()
+        menu.turretMapFrame = frame
+        return
+    end
     Helper.clearMenu(menu)
     -- Leave the camera unobscured during the mandatory five-second visual check.
     -- The menu remains registered, so onUpdate continues to poll its stability.
     if sweep and sweep.phase == "inspecting" then return end
-    if turretMap then
-        local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(1100), height = Helper.scaleY(640), standardButtons = { close = true } })
-        local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(1080) })
-        turretMapBody(tableView)
-        frame:display()
-        return
-    end
     local frame = Helper.createFrameHandle(menu, { width = Helper.scaleX(900), height = Helper.scaleY(520), standardButtons = { close = true } })
     local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(880) })
     local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
@@ -1278,9 +1259,10 @@ function menu.onUpdate()
         turretMap.nextShuffle = now + 1
         turretMap.shuffleCount = turretMap.shuffleCount + 1
         if turretMap.shuffleCount % 10 == 0 then
-            log("turretmap", { action = "render", reason = "shuffle", redraws = turretMap.shuffleCount })
+            log("turretmap", { action = "update", reason = "shuffle", updates = turretMap.shuffleCount })
         end
-        menu.display()
+        -- Function-valued colours/hover re-evaluate here; no menu rebuild.
+        if menu.turretMapFrame then menu.turretMapFrame:update() end
     end
     if not sweep or sweep.phase ~= "inspecting" then return end
     local item = State.current(sweep)
