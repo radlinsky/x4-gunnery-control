@@ -63,17 +63,17 @@ end
 local function clearShapes(v)
     for _, shape in ipairs(v.shapes) do HideRect(shape) end
     for _, shape in ipairs(v.stale) do HideRect(shape) end
-    v.shapes, v.stale = {}, {}
+    v.shapes, v.stale, v.staleIDs = {}, {}, {}
 end
 
 local function retireShapes(v)
-    for _, shape in ipairs(v.shapes) do v.stale[#v.stale + 1] = shape end
+    for _, shape in ipairs(v.shapes) do v.stale[#v.stale + 1] = shape; v.staleIDs[shape] = true end
     v.shapes = {}
 end
 
 local function hideStale(v)
     for _, shape in ipairs(v.stale) do HideRect(shape) end
-    v.stale = {}
+    v.stale, v.staleIDs = {}, {}
 end
 
 local function releaseRender(v, keepShapes)
@@ -108,7 +108,7 @@ function H.mount(menu, frame, session, rect, combat, onClick)
     H.refresh()
     sequence = sequence + 1
     local v = { menu = menu, session = session, layer = frame.properties.layer or 4,
-        rect = rect, combat = combat, onClick = onClick, shapes = {}, stale = {}, entries = {}, bySlot = {},
+        rect = rect, combat = combat, onClick = onClick, shapes = {}, stale = {}, staleIDs = {}, entries = {}, bySlot = {},
         nonce = tostring(GetCurRealTime()) .. "-" .. tostring(sequence), hover = "", nextDraw = 0 }
     v.ship = ConvertStringTo64Bit(tostring(session.shipID))
     v.macro = GetComponentData(v.ship, "macro") or ""
@@ -223,7 +223,12 @@ local function draw(v, state)
     local function line(ax, ay, bx, by, color, thickness)
         if failed or #v.shapes >= budget then return end
         local shape = Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness or 2, nil, color, true)
-        if shape == nil then failed = true else v.shapes[#v.shapes + 1] = shape end
+        if shape == nil then failed = true; return end
+        -- A reissued id means the engine already freed every tracked rectangle
+        -- (HideAllShapes on view close); hiding the stale ids now would hide
+        -- these new markers.
+        if v.staleIDs[shape] then v.stale, v.staleIDs = {}, {} end
+        v.shapes[#v.shapes + 1] = shape
     end
     for _, point in ipairs(visible) do
         if #v.shapes + limit > budget or failed then break end

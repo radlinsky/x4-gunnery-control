@@ -14,18 +14,20 @@ Helper.getRelativeRenderTargetSize = function() return -1, -0.5, 0, 1 end
 Helper.callLoadoutFunction = function(_, _, fn) fn({}) end
 Helper.viewWidth, Helper.viewHeight = 1600, 400
 local camera = { yaw = 0, pitch = 0, distance = 1 }
-local removed, shapeID, draws = 0, 0, {}
+local removed, shapeID, draws, free = 0, 0, {}, {}
 local live = { [9999] = true } -- A foreign rectangle must survive every refresh.
 local function color(r,g,b) return { r=r, g=g, b=b, a=100 } end
 Color.text_inactive, Color.icon_normal = color(100,100,100), color(255,255,255)
 Color.text_warning, Color.text_positive = color(255,150,0), color(0,255,0)
 Helper.drawLine = function(a,b,thickness,_,c)
-    shapeID = shapeID + 1
-    live[shapeID] = true
+    -- The engine rectangle pool is a LIFO free list: a freed id is reissued first.
+    local id = table.remove(free)
+    if not id then shapeID = shapeID + 1; id = shapeID end
+    live[id] = true
     draws[#draws+1] = { color=c, a=a, b=b }
-    return shapeID
+    return id
 end
-HideRect = function(id) assert(live[id], "hide only a live owned shape"); live[id] = nil end
+HideRect = function(id) assert(live[id], "hide only a live owned shape"); live[id] = nil; free[#free+1] = id end
 C.AddHoloMap = function(_,_,_,_,_,aspect) assert(aspect == 2); return 7 end
 C.RemoveHoloMap = function() removed = removed + 1 end
 C.GetMapState = function(_, state)
@@ -111,6 +113,12 @@ local shown=countOwned()
 H.refresh(); mount(true)
 assert(countOwned()==shown, "rebuild does not hide markers before the new view draws")
 tick(); tick()
+-- The engine frees every drawn rectangle at once (HideAllShapes on view close);
+-- the next redraw is then handed our old ids back for its new markers.
+local n=countOwned()
+for id in pairs(live) do if id~=9999 then live[id]=nil; free[#free+1]=id end end
+camera.yaw=0.3; tick(); tick()
+assert(countOwned()==n, "an engine shape wipe must not make the next redraw hide its own markers")
 camera.yaw,camera.pitch,camera.distance=0.7,0.3,0.85
 H.close()
 assert(countOwned()==0 and live[9999] and removed>=1, "teardown releases only owned resources")
