@@ -118,20 +118,23 @@ follow chained `.pdata` ranges, and stop at the relevant icon/matrix path.
 
 ### Rectangle handles allow a hologram to release only its own markers
 - X4: 9.00 build 611726
-- Status: shipped-source
-- Source: `ui/addons/ego_detailmonitorhelper/helper.lua:2441–2505` and
-  `ui/widget/lua/widget_fullscreen.lua:18135–18315`; current `08.cat` MD5s
+- Status: live-tested
+- Source: `ui/addons/ego_detailmonitorhelper/helper.lua:2441–2595` and
+  `ui/widget/lua/widget_fullscreen.lua:18135–18315, 18842–18851`; current `08.cat` MD5s
   verified 2026-09-29 (`24d93d512c5df7f7ed659b12b0107a01` and
   `2ff7e833887516a41fce99eed471da71` respectively)
-- Live test: no — production resource lifecycle untested as of 2026-09-29
+- Live test: yes — production hologram on a 101-turret Split Raptor, 2026-09-29.
+  The owner saw no blinking, every marker drawn, and fills in front of borders.
+  The engine log since the final reload has no `Cannot find rectangle` or
+  pool-exhaustion errors and logs `visible=101 rectangles=303`.
 - Finding: `Helper.drawLine` and `Helper.drawRectangle` return the handle from
   the rectangle draw queue. `HideRect(handle)` releases that rectangle; the
   global hide-all function also clears shapes owned by other callers. The
   widget rectangle pool has 1000 slots shared across callers, and exhaustion
   returns no handle. Track successful handles and stop when allocation fails.
   An 800-rectangle local cap leaves headroom but cannot reserve it against
-  another extension. Coarse marker geometry is an implementation budget, not
-  a new engine limit or a live performance result.
+  another extension. The marker budgets below are implementation choices,
+  not engine limits.
 - Finding (timing): `DrawRect` only takes an element from the pool and queues
   it. The element is positioned and switched to its `active` slide in
   `widgetSystem.updateShapes()`, which the widget update calls before
@@ -140,8 +143,8 @@ follow chained `.pdata` ranges, and stop at the relevant icon/matrix path.
   therefore renders one frame with neither. To avoid that blink, draw the
   replacements first and hide the old handles on the next update, which needs
   room in the pool for both sets. Pool sizes: 1000 rectangles, 100 circles and
-  100 triangles (`config.shapes`). The blink itself was live-observed on
-  2026-09-29; the double-buffered cure is untested.
+  100 triangles (`config.shapes`). Both the blink and the double-buffered cure
+  were live-observed on 2026-09-29.
 - Finding (id reuse): the pool is a LIFO free list, so `HideRect` returns an
   element and the next `DrawRect` hands out that same id. `HideAllShapes()`
   frees every drawn rectangle for all callers. `widgetSystem.onViewClose`
@@ -153,6 +156,28 @@ follow chained `.pdata` ranges, and stop at the relevant icon/matrix path.
   explains most markers disappearing on a 101-turret ship after an overlay
   rebuild (live 2026-09-29). Treat any id you are still tracking that
   `DrawRect` returns again as proof that the tracked set was wiped.
+- Finding (stacking): shapes that overlap are ordered by the `z` argument
+  (`position.z`), and a lower z renders in front. The widget system itself
+  moves the popup menu to `z - layerOffset` and puts dropdown borders at -0.05
+  over their background at -0.035. Live-confirmed 2026-09-29: a fill at z
+  -0.001 renders over a border at z 0, and a dot at -0.002 renders over both.
+  Vanilla menus never overlap shapes, so do not rely on drawing order.
+- Finding (circles and triangles): `DrawCircle`/`HideCircle` and
+  `DrawTriangle`/`HideTriangle` share the draw queue, the immediate hide, the
+  LIFO reuse and the `HideAllShapes` wipe described above, but have pools of
+  only 100 each. They draw filled shapes only, so an outline must be built from
+  rectangle line segments. The helpers are `Helper.drawCircle(radius, centerx,
+  centery, z, color, noscaling)` and `Helper.drawTriangle(width, height,
+  offsetx, offsety, angle, z, color, noscaling)`.
+- Budget arithmetic for per-turret markers: a blink-free redraw keeps two sets
+  alive for one update, so one set may use at most half of the pool space left
+  after other callers. Circles and triangles therefore allow at most 50 markers,
+  fewer than the 101 turrets of a Split Raptor (the most of any vanilla ship).
+  Per-turret markers should be built from rectangles. The production hologram
+  (`ui/gunnery_hologram.lua`, the comment above `draw()`) uses 450 rectangles
+  per set, 3 per marker (black border diamond, state fill, centre dot), which
+  allows 150 visible markers. A diamond is one `Helper.drawLine` of length `a`
+  at 45 degrees with thickness `a`.
 
 ### The production and calibration holograms share the validated projection
 - X4: 9.00 build 611726
