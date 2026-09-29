@@ -78,6 +78,9 @@ not give it a higher classification.
   external-source investigation or source-coverage audit.
 - Read [references/ui-lua-menu-camera.md](references/ui-lua-menu-camera.md)
   for UI FFI, menus, camera, input-frame, target, and surface findings.
+- Read [references/object-configuration-map-anchors.md](references/object-configuration-map-anchors.md)
+  for holomap slot pivots, effective camera matrices, capture identity and
+  picking-measurement limits before repeating a configuration-map search.
 - Read [references/md-ai.md](references/md-ai.md) for MD/XSD lookup and AI
   semantics.
 - Read [references/tooling.md](references/tooling.md) before using XRCatTool.

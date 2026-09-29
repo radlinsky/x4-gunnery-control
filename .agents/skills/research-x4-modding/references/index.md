@@ -10,6 +10,7 @@ before relying on any claim.
 | Source hierarchy and classification | [source-policy.md](source-policy.md) | Rules and claim record shape |
 | External and local source routes | [source-registry.md](source-registry.md) | Official wiki/forums, installed sources, public mods, and community leads |
 | UI, menu, camera, targeting | [ui-lua-menu-camera.md](ui-lua-menu-camera.md) | X4 9.00 shipped-source findings |
+| Object-configuration-map slot anchors | [object-configuration-map-anchors.md](object-configuration-map-anchors.md) | Build-pinned native inference: slot-icon pivot/camera/matrix interception contract, current export inventory correction, exact identity and LIVE limits; shipped widget-bounds route |
 | External-menu lifecycle and persistent Gunnery overlay | [external-menu-lifecycle.md](external-menu-lifecycle.md) | X4 9.00 source-backed custom-view overlay and fullscreen takeover boundary, plus live-tested normal `InteractMenu` overlay and normal Map takeover/restore |
 | MD, AI, and XSD | [md-ai.md](md-ai.md) | X4 9.00 lookup and combat findings; shipped turret and turretloop transition graph in `libraries/animation_sequences.xml` |
 | Catalog tool | [tooling.md](tooling.md) | Verified XRCatTool v1.11 interface and limits |

@@ -66,7 +66,7 @@ function names. No executable bytes or disassembly are committed.
 | Returned distance | `GetMapState` export `0x0022DFC0`, read `0x0022E057–0x0022E074` | Returns map `+0x3DC` directly. |
 | Written distance | `SetMapState` export `0x00234CF0`, `0x00234F16–0x00234F76` | Supplied distance is written directly to current/target distance. There is no minimum clamp here. The ordinary wheel has separate limits. |
 | FOV | Map render-object constructor `0x00979160`, read at `0x009793F4` from `0x029F70F8`, store at `0x009793FC` to `+0x85C` | Binary32 FOV is `1.2870022058486938` radians = float(2 atan(0.75)). |
-| Use of FOV | `0x00979D71–0x00979DAF` computes half-angle tangent for map use; render-argument preparation reads FOV at `0x009846AF`, forwards it at `0x00984872` | The constant is used by the map camera/render route; it is not fitted from turret measurements. |
+| Use of FOV | `0x00979D71–0x00979DAF` updates effective FOV and computes its half-angle tangent; Task 4 follows the active descriptor writer `0x00983A00` → `0x00F414C0` | Constructor default is source-derived. Effective FOV has mode/object branches and must be captured; earlier `0x009846AF/0x00984872` reads format debug text, not render arguments. See [Task 4 measurement research](slot-anchor-measurement.md). |
 | Angles | `GetMapState` reconstructs Euler angles from the map orientation rows `+0x360/+0x370/+0x380`; `SetMapState` reconstructs and writes those rows | Radians and the current yaw/pitch convention agree with the captures. All captures have zero roll and pan; arbitrary roll/pan is outside this result. |
 
 The existing source-backed box record is
