@@ -87,6 +87,18 @@ contains the complete ABI, identity, precision and LIVE controls.
   Lua-style orbit model reproduced engine NDC within 1e-6 on every capture;
   `tan = 0.7716` erred up to 0.026 NDC. Inputs, not the model, set accuracy.
 
+### X4Native re-initializes extension DLLs on every UI reload
+- X4: 9.00 build 611726; X4Native host `fc4b8e26d74365ca332c3b0749eb9bbe167c76a1`
+- Status: live-tested
+- Source: host log `x4native/x4native.log` ("UI reloaded — DLL re-initialized
+  with fresh Lua state") and the capture probe's native sequence counter
+- Live test: yes — 2026-09-29, one X4 process: sequence ran 1–12, then
+  restarted at 1 after a Test Lab Reload UI on the same thread
+- Finding: a UI reload reloads each X4Native extension DLL, so DLL globals
+  (counters, armed state) do not survive it, although detours reinstall.
+  Treat a UI reload as a new native lifetime when checking native identity or
+  sequence uniqueness in one debug.log.
+
 ### Render-target bounds must come from the actual widget
 - X4: 9.00
 - Status: shipped-source
