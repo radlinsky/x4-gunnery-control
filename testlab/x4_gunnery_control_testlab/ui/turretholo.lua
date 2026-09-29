@@ -96,6 +96,7 @@ end
 
 -- Temporary Task 5 equipment. No native code is required unless explicitly armed.
 local anchorSequence = 0
+local projectTurret, HOLO_TANHALF  -- defined with the marker code below
 local function uid(value) return tostring(ffi.cast("uint64_t", value)):gsub("ULL$", "") end
 local function exactState()
     local state = ffi.new("HoloMapState")
@@ -152,12 +153,21 @@ local function finishAnchor(reason, native)
     if a.before and json(a.before) ~= json(after) then reason = reason or "lua_camera_changed" end
     if a.widget and (not bounds or json(a.widget) ~= json(bounds)) then reason = reason or "widget_changed" end
     if not sameLoadout() then reason = reason or "loadout_changed" end
+    local probe = {}
+    local entry = a.slot and holo.bySlot and holo.bySlot[a.slot]
+    if entry and entry.x then
+        local _, state = stateKey()
+        local mx, my, far = projectTurret(entry, state)
+        if mx then probe = { ndc = { mx, my }, far_side = far and true or false, position = { entry.x, entry.y, entry.z },
+            scale = holo.scale, aspect = holo.aspect, tanhalf = HOLO_TANHALF } end
+    end
     local record = { request = a.id, sequence = a.sequence, valid = reason == nil, live_verified = false,
         reason = reason or "structural_checks_passed_live_validation_required", ship = uid(holo.ship), macro = holo.macro,
         holomap = uid(holo.holomap), fixture_sha = "2cd5bab427a79790431dc7347ca6a6abc77d3414",
         fixture_sha_role = "unchanged_accepted_fixture_source", fixture_spec = a.spec or "none",
         slot = a.slot or 0, component = a.component or "none", positions = a.positions or {},
         public_turret_slots = holo.slotCount,
+        probe_projection = probe,
         ship_radius = a.radius or 0,
         before = a.before or after, after = after, widget_before = a.widget or bounds or {}, widget_after = bounds or {},
         add_holomap = holo.addInputs or {}, requested_state = holo.requestedState or {},
@@ -307,20 +317,19 @@ local function highlight(slots, why)
     C.SetSelectedMapMacroSlots(holo.holomap, holo.ship, 0, holo.macro, false, "turret", buffer, #slots)
 end
 
--- Our own turret markers over the hologram. Camera model fitted offline to
--- 2026-09-28 Ray refine scans (18 slot centroids, rms 0.0069 in -1..1
--- units): orbit around the ship origin (within ~1 m), camera at yaw/pitch
--- from GetMapState, vertical tan(fov/2) = 0.7716 (~75 deg), and one
--- cameradistance unit = half the MD bounding-box diagonal ($ship.size / 2).
--- The size rule fits as well as a free scale on the Ray; a second ship size
--- still has to confirm it.
-local HOLO_TANHALF = 0.7716
+-- Our own turret markers over the hologram. Camera orbits the ship origin at
+-- yaw/pitch from GetMapState; one cameradistance unit = half the MD
+-- bounding-box diagonal ($ship.size / 2); vertical tan(FOV/2) = 0.75 and x is
+-- divided by the render-target aspect. Confirmed against engine view-projection
+-- matrices captured 2026-09-29 on XL and M ships (issue 205), error below
+-- 1e-5 NDC with the MD string-route positions.
+HOLO_TANHALF = 0.75
 local STATE_COLORS = function()
     return { unselected = Color["text_inactive"], idle = Color["icon_normal"],
         fired = Color["text_warning"], hit = Color["text_positive"] }
 end
 
-local function projectTurret(entry, state)
+function projectTurret(entry, state)
     if not holo.scale then return nil end
     local yaw, pitch, d = state.offset.yaw, state.offset.pitch, state.cameradistance * holo.scale
     local cp = math.cos(pitch)

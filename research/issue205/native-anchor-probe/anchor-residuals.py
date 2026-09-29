@@ -28,6 +28,10 @@ for line in open(sys.argv[1], errors='replace'):
     for name, pos, rad, t in (('fixed', piv, n['radius'][0], .75), ('fixed_mdint', md['position'], md['radius'], .75), ('current', piv, n['radius'][0], .7716)):
         mx, my = model(pos, st, rad, w / h, t)
         out[name] = (mx-ex, my-ey, (mx-ex)*w/2, (my-ey)*h/2)
+    pp = j.get('probe_projection') or {}
+    if pp.get('ndc'):
+        mx, my = pp['ndc']
+        out['probe'] = (mx-ex, my-ey, (mx-ex)*w/2, (my-ey)*h/2)
     rows.append(out)
 for name in ('fixed', 'fixed_mdint', 'current'):
     print(f"\n{name}: model - engine (NDC dx, dy | px dx, dy)")
@@ -35,3 +39,11 @@ for name in ('fixed', 'fixed_mdint', 'current'):
         dx, dy, px, py = o[name]
         print(f"  {o['ship']} slot {o['slot']:>2} d={o['d']:.4f} engine=({o['engine'][0]:+.4f},{o['engine'][1]:+.4f})  {dx:+.6f} {dy:+.6f} | {px:+7.2f} {py:+7.2f}")
     print(f"  max |NDC|: x {max(abs(o[name][0]) for o in rows):.6f}  y {max(abs(o[name][1]) for o in rows):.6f}")
+
+print("\nprobe_projection (running Lua) - engine")
+prows = [o for o in rows if 'probe' in o]
+for o in prows:
+    dx, dy, px, py = o['probe']
+    print(f"  {o['ship']} slot {o['slot']:>2} d={o['d']:.4f}  {dx:+.6f} {dy:+.6f} | {px:+7.2f} {py:+7.2f}")
+if prows:
+    print(f"  max |NDC|: x {max(abs(o['probe'][0]) for o in prows):.6f}  y {max(abs(o['probe'][1]) for o in prows):.6f}")

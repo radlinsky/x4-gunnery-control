@@ -1516,7 +1516,7 @@ whole-object, engine, shield, turret, and station-module surface tests.
   interpolation, selector inheritance, instantaneous phase, or barrel endpoint
   selection. Those require separate evidence.
 
-### MD length values reach Lua `raise_lua_event` handlers truncated to whole metres
+### MD length `raise_lua_event` params truncate to whole metres; string params keep ~6 digits
 - X4: 9.00 build 611726
 - Status: live-tested
 - Source: Test Lab `holo_anchor_geometry` cue raising `$Turret.relativeposition.{$Ship}`
@@ -1526,7 +1526,9 @@ whole-object, engine, shield, turret, and station-module surface tests.
   ship radii on an XL and an M ship
 - Finding: every value arrived as a Lua number truncated toward zero:
   -295.700 → -295, 118.886 → 118, 1315.25 → 1315, 86.92 → 86, -35.08 → -35.
-  Whether the loss happens in the event transport or in the length-typed MD
-  expression was not isolated. Do not use these params for sub-metre geometry;
-  on the M ship at zoom 0.65 the truncation alone moved projected markers
-  0.024 NDC (~5 px). A unitless conversion is a candidate fix but is untested.
+  The same lengths concatenated into a string param (`'x4gtm1:' + $Pos.x`,
+  `'x4ghs1:' + $Ship.size`) arrived as -295.7, 118.886, 808.636 and 2630.5:
+  about six significant digits, so the MD expression itself is precise and the
+  loss is in the numeric param conversion. On the M ship at zoom 0.65 the
+  truncated values moved projected markers 0.024 NDC (~5 px); the string values
+  stayed within 3e-6 NDC. Send sub-metre geometry as a string.
