@@ -6,6 +6,7 @@
     <dependency name="kuertee_ui_extensions"/>
     <file name="ui/gunnery_state.lua"/>
     <file name="ui/gunnery_persistence.lua"/>
+    <file name="ui/gunnery_hologram.lua"/>
     <file name="ui/gunnery_control.lua"/>
   </environment>
 </addon>

@@ -141,6 +141,12 @@ do
         return State.encode(State.saveState(source))
     end
 
+    local function lastPersistenceControl()
+        for i = #fix.uiTriggeredEvents, 1, -1 do
+            local event = fix.uiTriggeredEvents[i]
+            if event.screen == "X4GunneryControl" then return event.control end
+        end
+    end
     local modeWrites59, armedWrites59 = 0, 0
     C.SetTurretGroupMode2 = function() modeWrites59 = modeWrites59 + 1 end
     C.SetTurretGroupArmed = function() armedWrites59 = armedWrites59 + 1 end
@@ -151,7 +157,7 @@ do
         "56 Auto missing camera: restored session must release to the console")
     assert(modeWrites59 == 0 and armedWrites59 == 0,
         "56 Auto missing camera: safe fallback must not write turret settings")
-    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+    assert(lastPersistenceControl() == "session_end",
         "56 Auto missing camera: safe fallback must clear MD persistence")
 
     fix.resetUITriggeredEvents()
@@ -161,7 +167,7 @@ do
         "57 Direct missing camera: restored session must release to the console")
     assert(modeWrites59 == 1 and armedWrites59 == 1,
         "57 Direct missing camera: saved snapshot must be restored exactly once")
-    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+    assert(lastPersistenceControl() == "session_end",
         "57 Direct missing camera: safe fallback must clear MD persistence")
 
     modeWrites59, armedWrites59 = 0, 0
@@ -172,7 +178,7 @@ do
         "58 Direct target-select: restored session must release to the console")
     assert(modeWrites59 == 1 and armedWrites59 == 1,
         "58 Direct target-select: saved snapshot must be restored before console handoff")
-    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+    assert(lastPersistenceControl() == "session_end",
         "58 Direct target-select: release must clear MD persistence")
 
     modeWrites59, armedWrites59 = 0, 0
@@ -183,7 +189,7 @@ do
         "59 Direct: no usable restored camera must return to the console")
     assert(modeWrites59 == 1 and armedWrites59 == 1,
         "59 Direct: saved snapshot must be restored exactly once")
-    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+    assert(lastPersistenceControl() == "session_end",
         "59 Direct: failed restored engagement must clear MD persistence")
 
     modeWrites59, armedWrites59 = 0, 0
@@ -194,7 +200,7 @@ do
         "59 Auto: no usable restored camera must return to the console")
     assert(modeWrites59 == 0 and armedWrites59 == 0,
         "59 Auto: no-camera restore must not write a turret setting")
-    assert(fix.uiTriggeredEvents[#fix.uiTriggeredEvents].control == "session_end",
+    assert(lastPersistenceControl() == "session_end",
         "59 Auto: failed restored engagement must clear MD persistence")
 
     C.GetNumUpgradeGroups, C.GetUpgradeGroups2 = savedNumGroups, savedGroups2

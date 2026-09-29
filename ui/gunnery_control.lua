@@ -4,6 +4,7 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
+local Hologram = X4GunneryHologram
 ffi.cdef[[
 typedef uint64_t UniverseID;
 typedef struct { UniverseID softtargetID; const char* softtargetConnectionName; uint32_t messageID; } SofttargetDetails2;
@@ -459,6 +460,8 @@ end
 
 local function hideEngagedOverlayForTakeover()
     if suspendedOverlayRegistration or not findEngagedOverlayRegistration() then return end
+    Hologram.close()
+    engagedOverlayRefreshPending = true
     removeEngagedOverlay(false)
     logSession("engaged overlay hidden for fullscreen takeover")
 end
@@ -561,10 +564,10 @@ local function readGroups(ship)
     end
     local labelCounts = {}
     for index, entry in ipairs(groups) do
+        entry.positionLabel = State.turretGroupLabel(entry.group) or (text(4) .. " " .. tostring(index))
         if entry.kind == "group" then
-            local position = State.turretGroupLabel(entry.group)
             local equipment = (entry.macro ~= "" and GetMacroData(entry.macro, "shortname")) or ""
-            local base = position or (text(4) .. " " .. tostring(index))
+            local base = entry.positionLabel
             if equipment ~= "" then base = base .. ": " .. equipment end
             labelCounts[base] = (labelCounts[base] or 0) + 1
             entry.displayName = base .. (labelCounts[base] > 1 and (" · " .. tostring(labelCounts[base])) or "")
@@ -817,6 +820,7 @@ end
 -- removed its frame. Keep it separate from endSession(), which additionally
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
+    Hologram.close()
     if not session then return end
     removeEngagedUpdater()
     cameraMismatchLogged = false
@@ -913,6 +917,7 @@ function menu.cleanup()
     end
     menu.frame = nil
     menu.elementFrame = nil
+    Hologram.close()
     if session and not endingSession and session.lifecycle == State.lifecycle.owned then
         -- Do not destroy immediately: X4 may still be finishing a same-tick
         -- view replacement. The global watchdog confirms that ownership did
@@ -2273,6 +2278,7 @@ end
 -- Test Lab parks the live session in `reopening` while this menu is closed.
 -- Close/Abort reopen Gunnery; teardown paths suppress that handoff.
 local function openTestLab()
+    Hologram.close()
     if session then
         -- The reload buttons live behind this menu, and a reload wipes all Lua
         -- state. Park the session now so there is something to come back to,
@@ -2387,6 +2393,7 @@ function menu.display()
         engagedOverlayRefreshPending = true
         return
     end
+    Hologram.refresh()
     -- Entering the persistent engaged overlay replaces, rather than refreshes, the
     -- normal console/browser frame. Remove only that Gunnery-owned Helper view;
     -- clearDataForRefresh() deliberately leaves its registration intact.
@@ -2411,7 +2418,7 @@ function menu.display()
     -- Every call path into display() holds a live session: callers either guard
     -- with `if session then` or return early when it is nil. Stated once here so
     -- nothing below has to repeat the check.
-    if not session then return end
+    if not session then Hologram.close(); return end
     if session.phase == "engaged" then
         engagedOverlayRefreshPending = false
         installEngagedUpdater()
@@ -2421,6 +2428,7 @@ function menu.display()
         local controlsWidth = Helper.scaleX(460)
         local elemWidth = Helper.scaleX(680)
         local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil
+        if not hasElementPanel then Hologram.close() end
         local width = controlsWidth
         session.viewSofttargetKey = softtargetKey()
         local viewFrame = Helper.createFrameHandle(menu, {
@@ -2447,10 +2455,9 @@ function menu.display()
             tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize,
             width = controlsWidth - 2 * Helper.borderSize,
         })
-        -- Header row: current turret name + its group name.
+        -- Header row uses the same position/name label as the list and hover.
         local cm, cmGroup = cameraMember()
-        local headerText = (cm and cm.displayName or text(29))
-            .. (cmGroup and (": " .. cmGroup.displayName) or "")
+        local headerText = cm and State.turretLabel(cmGroup, cm) or text(29)
         local headerRow = controls:addRow(false, { bgColor = Color["row_title_background"] })
         headerRow[1]:setColSpan(2):createText(headerText, { halign = "center" })
         -- Six buttons in three rows of two (step 7).
@@ -2585,8 +2592,19 @@ function menu.display()
             elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
             overlayLayers[#overlayLayers + 1] = elementFrameLayer
             overlayFrames[elementFrameLayer] = elemFrame
+            local holoHeight = Helper.scaleY(220)
+            Hologram.mount(menu, elemFrame, session, {
+                x = Helper.borderSize, y = Helper.borderSize,
+                w = elemWidth - 2 * Helper.borderSize, h = holoHeight,
+            }, true, function(member)
+                if member.operational and member.cameraSupported then
+                    session.cameraMemberID = member.componentID
+                    session.povAnchor, session.povMode = "turret", "manual"
+                    if enterCamera(member) then persistSession(); menu.display() end
+                end
+            end)
             local elemTable = elemFrame:addTable(5, {
-                tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
+                tabOrder = 2, x = Helper.borderSize, y = holoHeight + Helper.standardTextHeight + 2 * Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
             -- Header: target name (falls back to text(51) when empty).
@@ -2739,7 +2757,8 @@ function menu.display()
     removeEngagedUpdater()
 
     local targetBrowser = session.phase == "target_select"
-    local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
+    if targetBrowser then Hologram.close() end
+    local frameWidth = math.min(Helper.viewWidth, Helper.scaleX(targetBrowser and 760 or 1500))
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)
     local frame = Helper.createFrameHandle(menu, {
         width = frameWidth, height = frameHeight,
@@ -2759,6 +2778,22 @@ function menu.display()
     -- edge; the console frame starts at x = 0.
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
+    if not targetBrowser then
+        local holoWidth = math.min(Helper.scaleX(420), frameWidth * 0.30)
+        tableWidth = tableWidth - holoWidth - tablePad
+        Hologram.mount(menu, frame, session, {
+            x = tablePad + tableWidth + tablePad, y = Helper.scaleY(70),
+            w = holoWidth, h = Helper.scaleY(350),
+        }, false, function(_, group)
+            if State.canMutate(group) then
+                local staged = session.staged and session.staged[group.key]
+                local armed = group.armed
+                if staged then armed = staged.armed end
+                State.toggleGroup(session, group.key, armed)
+                menu.display()
+            end
+        end)
+    end
 
     if session.phase == "target_select" then
         local tableView = frame:addTable(12, { tabOrder = 1, x = tablePad, width = tableWidth })
@@ -2954,7 +2989,7 @@ function menu.display()
             for _, member in ipairs(group.members) do
                 local memberRow = tableView:addRow(member.componentKey, { bgColor = Color["row_background_unselectable"] })
                 memberRow[1]:createText("")
-                memberRow[2]:setColSpan(3):createText("  " .. member.displayName)
+                memberRow[2]:setColSpan(3):createText("  " .. State.turretLabel(group, member))
                 memberRow[5]:createText(member.operational and text(8) or text(10))
                 memberRow[6]:setColSpan(3):createText("")
             end
@@ -3000,7 +3035,8 @@ function menu.display()
     frame:display()
 end
 
-function menu.viewCreated()
+function menu.viewCreated(layer, ...)
+    Hologram.viewCreated(layer, ...)
     -- Helper invokes this only after X4 created the replacement frame. It is
     -- the nearest available confirmation that an Engage transition obtained
     -- visible input ownership.
@@ -3120,6 +3156,7 @@ function menu.onUpdate()
         if not engagedUpdaterInstalled then engagedOnUpdate() end
         return
     end
+    Hologram.update()
     updateSessionRuntime()
 end
 
@@ -3132,9 +3169,16 @@ engagedOnUpdate = function()
         hideEngagedOverlayForTakeover()
     else
         restoreEngagedOverlayAfterTakeover()
+        Hologram.update()
     end
     updateSessionRuntime()
 end
+
+function menu.onRenderTargetMouseDown() Hologram.mouseDown() end
+function menu.onRenderTargetMouseUp() Hologram.mouseUp() end
+function menu.onRenderTargetSelect() Hologram.select() end
+function menu.onRenderTargetCombinedScrollDown(step) Hologram.zoom(step) end
+function menu.onRenderTargetCombinedScrollUp(step) Hologram.zoom(-step) end
 
 function menu.onCloseElement(dueToClose)
     local externalMenu = activeExternalMenuName()

@@ -115,3 +115,49 @@ When reusing a focused ignored UI cache, compare every cached file with the
 latest installed catalog entry before searching it; a cache directory named
 for a version does not prove current contents. Keep native scratch ignored,
 follow chained `.pdata` ranges, and stop at the relevant icon/matrix path.
+
+### Rectangle handles allow a hologram to release only its own markers
+- X4: 9.00 build 611726
+- Status: shipped-source
+- Source: `ui/addons/ego_detailmonitorhelper/helper.lua:2441–2505` and
+  `ui/widget/lua/widget_fullscreen.lua:18135–18315`; current `08.cat` MD5s
+  verified 2026-09-29 (`24d93d512c5df7f7ed659b12b0107a01` and
+  `2ff7e833887516a41fce99eed471da71` respectively)
+- Live test: no — production resource lifecycle untested as of 2026-09-29
+- Finding: `Helper.drawLine` and `Helper.drawRectangle` return the handle from
+  the rectangle draw queue. `HideRect(handle)` releases that rectangle; the
+  global hide-all function also clears shapes owned by other callers. The
+  widget rectangle pool has 1000 slots shared across callers, and exhaustion
+  returns no handle. Track successful handles and stop when allocation fails.
+  An 800-rectangle local cap leaves headroom but cannot reserve it against
+  another extension. Coarse marker geometry is an implementation budget, not
+  a new engine limit or a live performance result.
+
+### The production and calibration holograms share the validated projection
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: engine-capture evidence in the radius-scaled-orbit record above;
+  `research/issue205/native-anchor-probe/README.md`
+- Live test: yes — Test Lab on 2026-09-29; production integration remains untested
+- Finding: the accepted Test Lab camera model uses `tan(FOV/2)=0.75`, ship
+  radius, full-precision orbit state and actual widget aspect. The running
+  probe agreed with captured engine projection within 3.1e-5 NDC on M/XL;
+  hollow markers were visually centred on occupied slot icons. Production
+  `gunnery_hologram.lua` now owns the function used by the retained Test Lab
+  scan/refine wrapper. This refactor does not establish production layout,
+  click routing, activity transport, Ray alignment or frame cost as live-tested.
+
+### Weapon firing and impact events expose different identities
+- X4: 9.00 build 611726
+- Status: shipped-source
+- Source: `libraries/common.xsd:13040–13069,16836–16847` and
+  `md/cinematiccamera.xml:3212`; current base-catalog MD5s verified 2026-09-29
+  (`de2c08eabd2f3e22d705ed473b7940ce`, `e5fd6463519f14a0f679803cc36e883f`)
+- Live test: no — the production snapshot transport is untested as of 2026-09-29
+- Finding: `event_weapon_fired` names the emitting weapon in `event.object`
+  and its projectile in `event.param`; group-scoped registration is shipped.
+  Ship-scoped `event_object_attacked_object` names the victim in `event.param`
+  and provides `[attacked component, weapon]` in `event.param3`. Match the
+  explicitly selected runtime weapon and current target/component rather than
+  treating any ship damage event as a hit by the selected turret. No launcher
+  inference for missile impacts is established by these declarations.

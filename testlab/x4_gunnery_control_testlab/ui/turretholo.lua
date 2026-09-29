@@ -47,7 +47,7 @@ end
 local function api() return X4GunneryControlAPI end
 local function sameID(a, b) return tostring(ConvertStringTo64Bit(tostring(a))) == tostring(ConvertStringTo64Bit(tostring(b))) end
 
--- slot -> { component, name, groupLabel, ticked } from the live Gunnery session.
+-- slot -> { component, label, ticked } from the live Gunnery session.
 local function readSlots()
     holo.slots, holo.bySlot = {}, {}
     local session = api() and api().getSession and api().getSession()
@@ -59,13 +59,11 @@ local function readSlots()
     for slot = 1, count do
         local component = C.GetUpgradeSlotCurrentComponent(holo.ship, "turret", slot)
         if component ~= 0 then
-            local entry = { slot = slot, component = component, name = "?", groupLabel = "?", ticked = false }
+            local entry = { slot = slot, component = component, label = "?", ticked = false }
             for _, group in ipairs(session.groups or {}) do
                 for _, member in ipairs(group.members or {}) do
                     if sameID(member.componentID, component) then
-                        entry.name = member.displayName or "?"
-                        -- "Front Lower Left: Ion Pulse Turret" -> "Front Lower Left"
-                        entry.groupLabel = tostring(group.displayName or "?"):match("^([^:]+)") or "?"
+                        entry.label = X4GunneryState.turretLabel(group, member)
                         entry.ticked = session.checkedGroupKeys and session.checkedGroupKeys[group.key] and true or false
                         entry.componentID = member.componentID
                     end
@@ -330,29 +328,7 @@ local STATE_COLORS = function()
 end
 
 function projectTurret(entry, state)
-    if not holo.scale then return nil end
-    local yaw, pitch, d = state.offset.yaw, state.offset.pitch, state.cameradistance * holo.scale
-    local cp = math.cos(pitch)
-    local cam = { -cp * math.sin(yaw) * d, -math.sin(pitch) * d, -cp * math.cos(yaw) * d }
-    local fl = math.sqrt(cam[1] ^ 2 + cam[2] ^ 2 + cam[3] ^ 2)
-    local f = { -cam[1] / fl, -cam[2] / fl, -cam[3] / fl }
-    local r = { -f[3], 0, f[1] }                      -- f x (0,1,0)
-    local rl = math.sqrt(r[1] ^ 2 + r[3] ^ 2)
-    if rl < 1e-6 then return nil end
-    r = { r[1] / rl, 0, r[3] / rl }
-    local u = { r[2] * f[3] - r[3] * f[2], r[3] * f[1] - r[1] * f[3], r[1] * f[2] - r[2] * f[1] }
-    local rel = { entry.x - cam[1], entry.y - cam[2], entry.z - cam[3] }
-    local z = rel[1] * f[1] + rel[2] * f[2] + rel[3] * f[3]
-    if z <= 1 then return nil end
-    local mx = -(rel[1] * r[1] + rel[3] * r[3]) / z / HOLO_TANHALF / holo.aspect
-    local my = (rel[1] * u[1] + rel[2] * u[2] + rel[3] * u[3]) / z / HOLO_TANHALF
-    -- Far side = back-facing: the turret's outward direction, taken as away
-    -- from the keel line (x, y, 0), points away from the camera. The
-    -- hologram's slot picking sees through the hull, so true occlusion is not
-    -- available. ponytail: keel-line normal; read each mount's
-    -- relativerotation once if odd hulls misjudge.
-    local farSide = (entry.x * (cam[1] - entry.x) + entry.y * (cam[2] - entry.y)) < 0
-    return mx, my, farSide
+    return X4GunneryHologram.project(entry, state, holo.scale, holo.aspect)
 end
 
 local function line(ax, ay, bx, by, color, thickness)
@@ -451,8 +427,7 @@ local function requestPositions()
     end
 end
 
--- Same reply the turret-map probe parses; testlab.lua ignores it while its
--- own probe is off.
+-- Position replies for the retained scan/refine calibration tool.
 local function onPosition(_, param)
     local idx, x, y, z = tostring(param or ""):match("^x4gtm1:([%d%.]+):([^:]+):([^:]+):([^:]+)$")
     local entry = idx and holo.slots and holo.slots[math.floor(tonumber(idx))]
@@ -679,7 +654,7 @@ function menu.onUpdate()
             holo.nextPick = now + 0.1
             local kind, slot = pickedSlot()
             local entry = kind == "turret" and holo.bySlot[slot]
-            local text = entry and (entry.groupLabel .. "; " .. entry.name) or (kind and (kind .. " " .. tostring(slot)) or "")
+            local text = entry and entry.label or (kind and (kind .. " " .. tostring(slot)) or "")
             if text ~= holo.hover then
                 holo.hover = text
                 if text ~= "" then
