@@ -124,8 +124,13 @@ After the experiment, exit X4, delete only `extensions/x4_config_anchor_probe`,
 run `prepare-host.py remove --host .x4-research-cache/x4native`, and rebuild the
 local host if it will remain installed. Do not keep the two resolver entries.
 
-Still requires LIVE proof: successful loader/hook installation; actual native
-ABI and thread match; public-slot/native-pair identity; numeric MD precision
-and event order; complete log/event delivery; correct same-call association; effective projection variant,
-final viewport convention and artwork/pivot coincidence. No new finding is
-`live-tested`. A mismatch must be diagnosed before any projection change.
+LIVE 2026-09-29 (probe `7e6fe35`, logs in ignored
+`.x4-research-cache/issue205-live/2026-09-29-7e6fe35/`): 12 captures passed
+`validate-capture.py` on the XL and M fixture ships at three distances each.
+Hooks, thread match, public-slot/native-pair identity, same-call association
+and log delivery held. The first attempts exposed a wrong `+0x798`-only
+connection branch, fixed in `7e6fe35`. MD numeric precision failed: positions
+and radius arrive truncated to whole metres. `anchor-residuals.py` shows the
+orbit model with tan(FOV/2) 0.75 matches the captured view-projection within
+1e-6 NDC given exact inputs. Still unproven: final viewport convention and
+artwork/pivot coincidence.

@@ -26,7 +26,11 @@ contains the complete ABI, identity, precision and LIVE controls.
 - Source: pinned executable; `ShowObjectConfigurationMap2` RVA `0x00237B30`,
   configuration-view vtable `0x02C2CB60`, slot pass `0x00E176B0`, icon submission
   `0x00DA7A50`, helper `0x00DA69A0`, descriptor writers `0x00F40560`/`0x00F414C0`
-- Live test: no — untested as of 2026-09-28
+- Live test: yes — 2026-09-29, probe `7e6fe35`, 12 structurally valid captures
+  (XL `ship_arg_xl_carrier_02_a_macro` slots 12/16, M
+  `ship_arg_m_frigate_01_a_macro` slots 1/4, three distances each); hooks,
+  same-thread association, public-slot/native-pair join and one icon per armed
+  pass held on every capture
 - Finding: caller-filtered function-entry interception can associate a slot
   transform with camera pose and the effective render-helper descriptor in one
   slot-pass invocation. Slot-pass caller continuation is `0x00E1669A`; icon
@@ -48,11 +52,40 @@ contains the complete ABI, identity, precision and LIVE controls.
   The FOV reads at `0x009846AF/0x00984872` are debug-string formatting;
   active matrix evidence comes from descriptor writers and geometry consumer
   `0x00FB33B0`. No final raster convention or artwork centering is proved.
-- Limitations: practicality is static inference. Existing X4Native capture
+- Limitations: artwork centering on the pivot and the final raster/viewport
+  convention remain unproven; the LIVE captures validate the matrix route only.
+  Earlier static-only limitations follow. Practicality was static inference. Existing X4Native capture
   demonstrates a reusable third-party host, not these hooks. ABI, frame/slot
   association, descriptor variant and visible-pivot correspondence need LIVE
   verification before accepting subpixel residuals. Dense picks can measure
   sampling bias but cannot alone establish rendered-anchor coincidence.
+
+### Slot pass selects the connection vector by macro class guard
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: pinned executable; slot pass `0x00E17738–0x00E17788`, class table
+  RVA `0x0256D038`, checked casts `0x007A8680` and `0x0059BDB0`
+- Live test: yes — 2026-09-29, XL and M ship macros above, probe `7e6fe35`
+- Finding: macro class is the int at macro `+0x44`. If class-table entry
+  `+0x1c & 0xc0` is set, the pass reads the all-connections vector at
+  (macro `+0x18`) `+0x798`; otherwise the second cast requires entry
+  `+0x8 & 0xc0` and uses `+0xce0`. Both ship macros are class 94 (`+0x1c` = 1,
+  `+0x8` = 0x40) and take `+0xce0`; an earlier `+0x798` "ship branch" label was
+  wrong. Entries are 16-byte {owner, connection} pairs; view `+0x520` held the
+  picked all-connections ordinal (34 connections, ordinal 12 for XL slot 12).
+
+### Holomap camera is an exact radius-scaled orbit with tan(FOV/2) 0.75
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: captured view/projection matrices from the capture probe above
+- Live test: yes — 2026-09-29, same 12 captures; distances 1, 0.85, 0.2725
+  (XL) and 0.650228 (M; wheel zoom stopped there)
+- Finding: projection is row-vector (`clip = [p,1]·VP`) with
+  `1/tan(FOV/2) = 1.3333334` and x scale divided by the widget aspect
+  (610/403). The camera orbits the ship origin at native radius × map-state
+  distance using `GetMapState` yaw/pitch. With exact pivot and radius, the
+  Lua-style orbit model reproduced engine NDC within 1e-6 on every capture;
+  `tan = 0.7716` erred up to 0.026 NDC. Inputs, not the model, set accuracy.
 
 ### Render-target bounds must come from the actual widget
 - X4: 9.00

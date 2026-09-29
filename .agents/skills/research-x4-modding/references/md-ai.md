@@ -1515,3 +1515,18 @@ whole-object, engine, shield, turret, and station-module surface tests.
 - Boundary: the transition graph does not establish ANI channel composition,
   interpolation, selector inheritance, instantaneous phase, or barrel endpoint
   selection. Those require separate evidence.
+
+### MD length values reach Lua `raise_lua_event` handlers truncated to whole metres
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: Test Lab `holo_anchor_geometry` cue raising `$Turret.relativeposition.{$Ship}`
+  `.x/.y/.z` and `$Ship.size / 2` as separate `raise_lua_event` params; debug.log
+  compared with native engine values captured in the same frames
+- Live test: yes — 2026-09-29, 12 records, 8 distinct turret positions and two
+  ship radii on an XL and an M ship
+- Finding: every value arrived as a Lua number truncated toward zero:
+  -295.700 → -295, 118.886 → 118, 1315.25 → 1315, 86.92 → 86, -35.08 → -35.
+  Whether the loss happens in the event transport or in the length-typed MD
+  expression was not isolated. Do not use these params for sub-metre geometry;
+  on the M ship at zoom 0.65 the truncation alone moved projected markers
+  0.024 NDC (~5 px). A unitless conversion is a candidate fix but is untested.
