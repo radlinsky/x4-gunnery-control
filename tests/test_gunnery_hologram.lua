@@ -106,18 +106,18 @@ assert(countOwned()==0, "late geometry from the previous subscription cannot ren
 H.close()
 -- Crowded unselected roster: every turret receives a coarse marker within budget.
 local many={}
-for i=1,100 do many[i]={componentID=100+i,displayName="Turret"} end
+for i=1,101 do many[i]={componentID=100+i,displayName="Turret"} end
 group.members=many
 session.checkedGroupKeys={}
-C.GetNumUpgradeSlots=function() return 100 end
+C.GetNumUpgradeSlots=function() return 101 end
 camera.yaw,camera.pitch,camera.distance=0,0,1
 session.shipID=6
 mount(false)
 nonce=latestOpen()
 reply(nonce,"size:2000")
-for i=1,100 do reply(nonce,"position:"..i..":0:0:0") end
+for i=1,101 do reply(nonce,"position:"..i..":0:0:0") end
 tick()
-assert(countOwned()==800 and live[9999], "100 turrets stay inside the shared pool with room left over")
+assert(countOwned()==707 and live[9999], "all 101 turrets get a marker inside the shared pool")
 local current=latestOpen()
 session.checkedGroupKeys={a=true}; mount(true)
 assert(latestOpen()~=current, "selection/combat changes replace the MD subscription")

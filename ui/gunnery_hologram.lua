@@ -180,8 +180,11 @@ function H.receive(_, payload)
     v.drawKey = nil
 end
 
--- Coarse fallback costs at most eight rectangles per turret, leaving 200 of
--- the shared 1000-slot pool for other UI at 100 turrets. Stop on pool exhaustion.
+-- Every visible marker fits the 800-rectangle budget, leaving 200 of the shared
+-- 1000-slot pool for other UI: rings lose segments and the hit reticle loses its
+-- ticks as the count grows. Stop on pool exhaustion.
+-- ponytail: discs (6) and bursts (4) keep their shape; past ~130 visible markers
+-- the budget check drops the remainder.
 local function draw(v, state)
     clearShapes(v)
     local visible = {}
@@ -193,15 +196,16 @@ local function draw(v, state)
             end
         end
     end
-    local cost = #visible > 60 and 8 or 12
     local budget, failed = 800, false
+    local limit = math.min(12, math.floor(budget / math.max(#visible, 1)))
+    local cost = math.min(#visible > 60 and 8 or 12, limit)
     local function line(ax, ay, bx, by, color, thickness)
         if failed or #v.shapes >= budget then return end
         local shape = Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness or 2, nil, color, true)
         if shape == nil then failed = true else v.shapes[#v.shapes + 1] = shape end
     end
     for _, point in ipairs(visible) do
-        if #v.shapes + cost > budget or failed then break end
+        if #v.shapes + limit > budget or failed then break end
         local entry, rt = point.entry, v.bounds
         local status = entry.selected and entry.activity or "unselected"
         local color = Color[status == "hit" and "text_positive" or status == "fired" and "text_warning" or status == "idle" and "icon_normal" or "text_inactive"]
@@ -217,11 +221,11 @@ local function draw(v, state)
                     local dx, dy = math.cos(a) * size, math.sin(a) * size
                     line(cx - dx, cy - dy, cx + dx, cy + dy, color)
                 end
-            elseif status == "hit" then -- square reticle with four inward ticks
+            elseif status == "hit" then -- square reticle, with four inward ticks when the budget allows
                 for _, d in ipairs({ { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } }) do
                     local x, y = d[1] * size, d[2] * size
                     line(cx + x - y, cy + y + x, cx + x + y, cy + y - x, color)
-                    line(cx + x, cy + y, cx + x * 0.5, cy + y * 0.5, color)
+                    if limit >= 8 then line(cx + x, cy + y, cx + x * 0.5, cy + y * 0.5, color) end
                 end
             elseif status == "idle" then -- filled disc from horizontal strips
                 for i = 0, 5 do
@@ -241,7 +245,7 @@ local function draw(v, state)
     if counts ~= v.lastCounts then
         v.lastCounts = counts
         DebugError("[X4GC HOLO] markers nonce=" .. v.nonce .. " visible=" .. tostring(#visible)
-            .. " rectangles=" .. tostring(#v.shapes) .. " coarse=" .. tostring(cost == 8)
+            .. " rectangles=" .. tostring(#v.shapes) .. " coarse=" .. tostring(cost < 12)
             .. " exhausted=" .. tostring(failed))
     end
 end
