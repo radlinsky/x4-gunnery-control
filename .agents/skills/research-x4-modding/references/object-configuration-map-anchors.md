@@ -142,6 +142,17 @@ follow chained `.pdata` ranges, and stop at the relevant icon/matrix path.
   room in the pool for both sets. Pool sizes: 1000 rectangles, 100 circles and
   100 triangles (`config.shapes`). The blink itself was live-observed on
   2026-09-29; the double-buffered cure is untested.
+- Finding (id reuse): the pool is a LIFO free list, so `HideRect` returns an
+  element and the next `DrawRect` hands out that same id. `HideAllShapes()`
+  frees every drawn rectangle for all callers. `widgetSystem.onViewClose`
+  calls it, and so does `Helper.clearMenu` (`helper.lua:1613`). After such a
+  wipe a caller's saved ids are stale: hiding them logs `Widget system error.
+  Cannot find rectangle with id N` while they are free, and once they have
+  been handed out again it silently hides whoever now owns them. With a
+  deferred hide that owner is the caller's own replacement markers. That
+  explains most markers disappearing on a 101-turret ship after an overlay
+  rebuild (live 2026-09-29). Treat any id you are still tracking that
+  `DrawRect` returns again as proof that the tracked set was wiped.
 
 ### The production and calibration holograms share the validated projection
 - X4: 9.00 build 611726
