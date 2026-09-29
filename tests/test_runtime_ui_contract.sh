@@ -151,7 +151,7 @@ grep -Fq 'standardButtons = { back = true, close = true }' "$main"
 # smoke tests cannot see this: their table stub returns a generic cell for any
 # index and ignores setColSpan, so this grep is the only guard.
 grep -Fq 'row[2]:setColSpan(3):createText(label' "$main"
-grep -Fq 'memberRow[2]:setColSpan(3):createText("  " .. State.turretLabel(group, member))' "$main"
+grep -Fq 'memberRow[2]:setColSpan(3):createText("  " .. member.displayName)' "$main"
 # Direct target details keep their own upper-left frame on their own layer; the
 # controls keep the upper-right layer-0 frame. Both descriptors are merged into
 # the single custom X4GunneryOverlay registration.

@@ -107,6 +107,28 @@ do
         "wrong-ship handoff replacement must own the current ship console")
 end
 
+-- ── Teleport off a ship with Gunnery hidden: Map entry on the new ship
+--    replaces the stale session instead of being silently refused ─────────
+do
+    local fix = dofile("tests/support/runtime_fixture.lua").load()
+    State = X4GunneryState
+    ownPlayerShip()
+    installOneGroup(fix)
+    fix.fireEvent("X4GunneryControl.OpenOnboard", 42)
+    fix.gcMenu.onShowMenu()
+    local stale = fix.API.getSession()
+    assert(stale and stale.lifecycle == State.lifecycle.owned, "precondition: owned session on ship 42")
+    fix.gcMenu.shown = false
+    fix.C.GetContextByClass = function() return 43 end
+    fix.API.runSessionWatchdog()
+    assert(fix.API.getSession() == stale, "a hidden session is not ended by the watchdog alone")
+    fix.fireEvent("X4GunneryControl.OpenOnboard", 43)
+    local s = fix.API.getSession()
+    assert(s and s ~= stale and s.shipID == 43, "Map entry on the new ship must replace the stale session")
+    fix.fireEvent("X4GunneryControl.OpenOnboard", 43)
+    assert(fix.API.getSession() == s, "a valid session is never replaced")
+end
+
 -- ── onOpenOnboard: no crash when MapMenu is unavailable ───────────────────────
 do
     local fix = dofile("tests/support/runtime_fixture.lua").load()

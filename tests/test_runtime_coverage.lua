@@ -255,3 +255,26 @@ do
 end
 
 print("runtime coverage tests passed")
+
+-- M in the target browser opens the Map, which closes Gunnery. The session
+-- parks and the same browser returns once the Map closes.
+do
+    local fix, _, session = fresh()
+    session.phase, session.controlMode = "target_select", "direct"
+    local map = { name = "MapMenu", shown = true }
+    Menus[#Menus + 1] = map
+    local opened
+    OpenMenu = function(name) opened = name end
+    fix.gcMenu.onCloseElement("close")
+    fix.gcMenu.shown = false
+    assert(fix.API.getSession() == session and session.phase == "target_select",
+        "an external menu must not end the session or leave the target browser")
+    fix.API.runSessionWatchdog()
+    assert(opened == nil, "Gunnery must not reopen over the Map")
+    map.shown = false
+    fix.API.runSessionWatchdog()
+    assert(opened == "X4GunneryMenu", "Gunnery must reopen once the Map closes")
+    fix.gcMenu.onShowMenu()
+    assert(fix.API.getSession() == session and session.lifecycle == "owned",
+        "the reopened menu must resume the same session")
+end

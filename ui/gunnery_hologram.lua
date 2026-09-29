@@ -130,6 +130,10 @@ function H.mount(menu, frame, session, rect, combat, onClick)
     frame:addRenderTarget({ x = rect.x, y = rect.y, width = rect.w, height = rect.h, scaling = false, alpha = 100 })
     local hover = frame:addTable(1, { tabOrder = 0, x = rect.x, y = rect.y + rect.h, width = rect.w })
     hover:addRow(false, {})[1]:createText(function() return v.hover end)
+    if not combat then
+        hover:addRow(false, {})[1]:createText("Click a turret to toggle its group for Direct-control. Left-drag rotates; wheel zooms.",
+            { wordwrap = true, color = Color["text_inactive"] })
+    end
     if not reuse then
         AddUITriggeredEvent("X4GunneryHologram", "open", { nonce = v.nonce, ship = luaID(v.ship),
             target = combat and luaID(session.aimTargetID or session.targetObjectID) or nil,
@@ -306,7 +310,21 @@ function H.mouseDown()
     C.StartRotateMap(view.map)
 end
 function H.mouseUp() if view and view.map then C.StopRotateMap(view.map) end end
-function H.zoom(step) if view and view.map then C.ZoomMap(view.map, step) end end
+function H.zoom(step)
+    local v = view
+    if not v or not v.map then return end
+    local state = ffi.new("HoloMapState")
+    C.GetMapState(v.map, state)
+    local before = tonumber(state.cameradistance)
+    C.ZoomMap(v.map, step)
+    if step >= 0 then return end
+    -- The wheel stops at vanilla's limit; push closer ourselves (Test Lab probe c126407).
+    C.GetMapState(v.map, state)
+    if math.abs(state.cameradistance - before) < 0.01 then
+        state.cameradistance = math.max(0.1, before * 0.85)
+        C.SetMapState(v.map, state)
+    end
+end
 function H.select()
     local v = view
     if not v or not v.press or not v.picked then return end

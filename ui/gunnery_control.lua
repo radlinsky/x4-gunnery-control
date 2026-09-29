@@ -566,9 +566,8 @@ local function readGroups(ship)
     for index, entry in ipairs(groups) do
         entry.positionLabel = State.turretGroupLabel(entry.group) or (text(4) .. " " .. tostring(index))
         if entry.kind == "group" then
-            local equipment = (entry.macro ~= "" and GetMacroData(entry.macro, "shortname")) or ""
+            -- Position only; member rows carry the turret names.
             local base = entry.positionLabel
-            if equipment ~= "" then base = base .. ": " .. equipment end
             labelCounts[base] = (labelCounts[base] or 0) + 1
             entry.displayName = base .. (labelCounts[base] > 1 and (" · " .. tostring(labelCounts[base])) or "")
         end
@@ -906,6 +905,7 @@ end
 -- ownership as a safety event, never as an active gunnery session.
 function menu.cleanup()
     local externalMenu = activeExternalMenuName and activeExternalMenuName()
+    if session then logSession("menu cleanup; external=" .. tostring(externalMenu)) end
     if session and not endingSession and session.phase == "engaged"
             and (externalMenu or fullscreenTakeoverDisplayed()) then
         -- A legitimate external overlay/takeover does not surrender the active
@@ -2779,11 +2779,11 @@ function menu.display()
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
     if not targetBrowser then
-        local holoWidth = math.min(Helper.scaleX(420), frameWidth * 0.30)
+        local holoWidth = math.min(Helper.scaleX(600), frameWidth * 0.40)
         tableWidth = tableWidth - holoWidth - tablePad
         Hologram.mount(menu, frame, session, {
             x = tablePad + tableWidth + tablePad, y = Helper.scaleY(70),
-            w = holoWidth, h = Helper.scaleY(350),
+            w = holoWidth, h = Helper.scaleY(520),
         }, false, function(_, group)
             if State.canMutate(group) then
                 local staged = session.staged and session.staged[group.key]
@@ -2989,7 +2989,7 @@ function menu.display()
             for _, member in ipairs(group.members) do
                 local memberRow = tableView:addRow(member.componentKey, { bgColor = Color["row_background_unselectable"] })
                 memberRow[1]:createText("")
-                memberRow[2]:setColSpan(3):createText("  " .. State.turretLabel(group, member))
+                memberRow[2]:setColSpan(3):createText("  " .. member.displayName)
                 memberRow[5]:createText(member.operational and text(8) or text(10))
                 memberRow[6]:setColSpan(3):createText("")
             end
@@ -3191,6 +3191,17 @@ function menu.onCloseElement(dueToClose)
         return
     end
     if session and not State.isOwned(session) then return end
+    if session and externalMenu then
+        -- Another menu is replacing the console or target browser (M opens the
+        -- Map from the browser, which keeps player controls). Park like the
+        -- Test Lab handoff; the watchdog reopens this view once no external
+        -- menu remains. Handling it as Back redrew the console under the Map
+        -- and left a hidden session that refused every later entry.
+        transitionLifecycle(State.lifecycle.reopening, "parked for " .. externalMenu)
+        resumePending = true
+        Helper.closeMenu(menu, "close", false, false)
+        return
+    end
     if session and session.phase == "engaged" then
         -- Target brackets call CloseMenusUponMouseClick() as they change the
         -- soft target. Re-register the transparent/compact frame for that
@@ -3257,6 +3268,16 @@ completeReleasedOnboardHandoff = function(reason)
     return true
 end
 
+-- Validity is checked only while Gunnery updates, so a session hidden behind
+-- another menu survives a teleport and would block every later entry. Only an
+-- explicit new entry replaces it, never an external menu or takeover (#117).
+local function clearStaleSession(route)
+    if session and not sessionContextValid() then
+        endSession("stale session replaced by " .. route)
+    end
+    return session == nil
+end
+
 redirectDockedMenu = function()
     -- A late DockedMenu callback after release only rechecks the handoff; while
     -- DockedMenu is still visible completion waits for vanilla playerGetUp
@@ -3275,7 +3296,7 @@ redirectDockedMenu = function()
         redirectPending = false
         -- Leave the gunner control position through vanilla's Get Up path.
         -- X4's playerGetUp event confirms completion and starts the handoff.
-        if isInGunnerChair() and sameID(playerShip(), ship) and not session then
+        if isInGunnerChair() and sameID(playerShip(), ship) and clearStaleSession("physical console") then
             if C.GetUp() then physicalIngressPendingShip = ship end
         end
     end, false, getElapsedTime() + 0.05)
@@ -3443,13 +3464,14 @@ TestAPI.sessionContextValid = function() return sessionContextValid() end
 -- Map-origin ingress is revalidated in Lua before a fresh onboard session is
 -- parked. This is pre-open handoff, not suspension of an active engagement.
 local function onOpenOnboard(_, shipComponent)
-    if session then return end
+    local function ignored(reason) log("onboard ingress ignored: " .. reason) end
+    if not clearStaleSession("Map entry") then return ignored("session already open") end
     local ship = id(shipComponent)
-    if ship == 0 then return end
-    if not sameID(playerShip(), ship) then return end
-    if not ownedByPlayer(ship) then return end
+    if ship == 0 then return ignored("no ship") end
+    if not sameID(playerShip(), ship) then return ignored("player not aboard") end
+    if not ownedByPlayer(ship) then return ignored("not player-owned") end
     local groups = readGroups(ship)
-    if #groups == 0 then return end
+    if #groups == 0 then return ignored("no turret groups") end
     session = newSession(ship, "onboard")
     session.groups = groups
     -- Seed now: the pre-open handoff treats this as a resume and skips
