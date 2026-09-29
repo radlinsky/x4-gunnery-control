@@ -206,12 +206,13 @@ local markerFill = {
     hit = { r = 120, g = 255, b = 0, a = 100 },
 }
 local markerBorder = { r = 0, g = 0, b = 0, a = 100 }
+local markerDot = { r = 0, g = 0, b = 0, a = 100 }
 
 -- Every marker is a black-bordered diamond whose fill carries the state (grey
--- unselected, white idle, orange firing, green hitting): two rectangles each.
--- A marker set fits a 450-rectangle budget so the old and new sets fit the shared
--- 1000-slot pool during the one-update double-buffer overlap (up to 225 visible
--- markers). Stop on pool exhaustion.
+-- unselected, white idle, orange firing, green hitting): three rectangles each
+-- (border, fill, centre dot). A set fits 450 rectangles, so both double-buffered
+-- sets fit the shared 1000-slot pool during the one-update overlap (up to 150
+-- visible markers). Stop on pool exhaustion.
 local function draw(v, state)
     retireShapes(v)
     v.carriedUntil = nil
@@ -241,13 +242,14 @@ local function draw(v, state)
         line(cx - h, cy - h, cx + h, cy + h, color, a, z)
     end
     for _, point in ipairs(visible) do
-        if #v.shapes + 2 > budget or failed then break end
+        if #v.shapes + 3 > budget or failed then break end
         local entry, rt = point.entry, v.bounds
         local status = entry.selected and entry.activity or "unselected"
-        local fill, border = markerFill[status], markerBorder
+        local fill, border, dot = markerFill[status], markerBorder, markerDot
         if point.far then
             fill = { r = fill.r, g = fill.g, b = fill.b, a = (fill.a or 100) * 0.2 }
             border = { r = border.r, g = border.g, b = border.b, a = (border.a or 100) * 0.2 }
+            dot = { r = dot.r, g = dot.g, b = dot.b, a = (dot.a or 100) * 0.2 }
         end
         local size = math.max(5, math.min(12, 7 / math.sqrt(math.max(tonumber(state.cameradistance), 0.05))))
         if point.far then size = size * 0.7 end
@@ -255,9 +257,10 @@ local function draw(v, state)
         -- Keep the entire marker inside its render target.
         local reach = (1.2 * size + 3) / math.sqrt(2)
         if cx - reach >= rt.x and cx + reach <= rt.x + rt.w and cy - reach >= rt.y and cy + reach <= rt.y + rt.h then
-            -- Lower z renders in front: border behind, fill on top.
+            -- Lower z renders in front: border behind, fill over it, centre dot in front of everything.
             diamond(cx, cy, 1.2 * size + 3, border, 0)
             diamond(cx, cy, 1.2 * size, fill, -0.001)
+            diamond(cx, cy, 2.5, dot, -0.002)
         end
     end
     local counts = tostring(#visible) .. ":" .. tostring(#v.shapes) .. ":" .. tostring(failed)
