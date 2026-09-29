@@ -72,7 +72,8 @@ local function assertMarker(k,n,fill,why,alpha)
     assert(border.color.r==0 and border.color.g==0 and border.color.b==0, why..": black border first")
     assert(f.color.r==fill[1] and f.color.g==fill[2] and f.color.b==fill[3], why..": state fill on top")
     assert(f.z<border.z, why..": fill renders in front of border")
-    assert(dot.color.r==0 and dot.color.g==0 and dot.color.b==0 and dot.color.a==alpha and border.color.a==alpha and f.color.a==alpha, why..": black centre dot dimmed exactly like border and fill")
+    local d=fill[1]==150 and 0 or 150 -- black dot on the grey unselected fill, grey on brighter fills
+    assert(dot.color.r==d and dot.color.g==d and dot.color.b==d and dot.color.a==alpha and border.color.a==alpha and f.color.a==alpha, why..": fill-contrast centre dot dimmed exactly like border and fill")
     assert(dot.z<f.z, why..": centre dot renders in front of fill")
 end
 local function countOwned()

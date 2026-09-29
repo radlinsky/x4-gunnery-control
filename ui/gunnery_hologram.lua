@@ -206,7 +206,13 @@ local markerFill = {
     hit = { r = 120, g = 255, b = 0, a = 100 },
 }
 local markerBorder = { r = 0, g = 0, b = 0, a = 100 }
-local markerDot = { r = 0, g = 0, b = 0, a = 100 }
+-- Centre dot: black on the grey unselected fill, grey on the brighter fills.
+local markerDot = {
+    unselected = { r = 0, g = 0, b = 0, a = 100 },
+    idle = { r = 150, g = 150, b = 150, a = 100 },
+    fired = { r = 150, g = 150, b = 150, a = 100 },
+    hit = { r = 150, g = 150, b = 150, a = 100 },
+}
 
 -- Every marker is a black-bordered diamond whose fill carries the state (grey
 -- unselected, white idle, orange firing, green hitting): three rectangles each
@@ -245,7 +251,7 @@ local function draw(v, state)
         if #v.shapes + 3 > budget or failed then break end
         local entry, rt = point.entry, v.bounds
         local status = entry.selected and entry.activity or "unselected"
-        local fill, border, dot = markerFill[status], markerBorder, markerDot
+        local fill, border, dot = markerFill[status], markerBorder, markerDot[status]
         if point.far then
             fill = { r = fill.r, g = fill.g, b = fill.b, a = (fill.a or 100) * 0.2 }
             border = { r = border.r, g = border.g, b = border.b, a = (border.a or 100) * 0.2 }
