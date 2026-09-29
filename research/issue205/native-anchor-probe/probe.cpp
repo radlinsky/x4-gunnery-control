@@ -61,7 +61,7 @@ StateFn g_state;
 ComponentFn g_component;
 Request g_request{};
 Capture g_capture{};  // One record; duplicate target submissions are rejected.
-struct JoinDiag { const char* step; int64_t picked_slot, macro_type, class_flags, connections, models, ordinal; };
+struct JoinDiag { const char* step; int64_t picked_slot, macro_type, class_flags, connections, models, ordinal, base_flags, vector; };
 JoinDiag g_join{};  // Last public-pick join attempt; -1 = not reached.
 volatile LONG g_phase = 0;  // idle / armed / inside pass / result ready
 volatile LONG g_cancel = 0;
@@ -179,9 +179,18 @@ bool connections(uintptr_t view, uintptr_t& begin, size_t& count, uintptr_t& mac
     if (!read(g_api->exe_base + 0x256d038 + static_cast<size_t>(type) * 8, table) ||
         !read(table + 0x1c, flags)) { g_join.step = "connections_class_flags"; return false; }
     g_join.class_flags = static_cast<int64_t>(flags);
-    if (!(flags & 0xc0)) { g_join.step = "connections_class_flags"; return false; }
+    uintptr_t vector = 0x798;  // Engine 0x00E1775A: class +0x1c bit selects the +0x798 connection vector.
+    if (!(flags & 0xc0)) {
+        uint8_t base_flags;
+        // Otherwise the engine's checked cast (0x0059BDB0) requires class +0x8 and uses +0xce0.
+        if (!read(table + 0x8, base_flags)) { g_join.step = "connections_base_flags"; return false; }
+        g_join.base_flags = static_cast<int64_t>(base_flags);
+        if (!(base_flags & 0xc0)) { g_join.step = "connections_base_flags"; return false; }
+        vector = 0xce0;
+    }
+    g_join.vector = static_cast<int64_t>(vector);
     if (!read(macro + 0x18, data)) { g_join.step = "connections_data_read"; return false; }
-    if (!read(data + 0x798, begin) || !read(data + 0x7a0, end) || end < begin || (end - begin) % 16) {
+    if (!read(data + vector, begin) || !read(data + vector + 8, end) || end < begin || (end - begin) % 16) {
         g_join.step = "connections_vector"; return false;
     }
     if (!read(view + 0x4c0, models) || !read(view + 0x4c8, models_end) || models_end < models ||
@@ -450,7 +459,9 @@ void result() {
         ",\"class_flags\":" + std::to_string(g_join.class_flags) +
         ",\"connections\":" + std::to_string(g_join.connections) +
         ",\"models\":" + std::to_string(g_join.models) +
-        ",\"ordinal\":" + std::to_string(g_join.ordinal) + "}";
+        ",\"ordinal\":" + std::to_string(g_join.ordinal) +
+        ",\"base_flags\":" + std::to_string(g_join.base_flags) +
+        ",\"vector\":" + std::to_string(g_join.vector) + "}";
     if (c.error) json += std::string(",\"reason\":\"") + c.error + "\"";
     else {
         json += ",\"view\":" + pointer(g_request.view) + ",\"map\":" + pointer(g_request.map) +
@@ -518,7 +529,7 @@ void command(const char*, void* data, void*) {
         }
         g_request = request;
         g_capture = {};
-        g_join = {nullptr, -1, -1, -1, -1, -1, -1};
+        g_join = {nullptr, -1, -1, -1, -1, -1, -1, -1, -1};
         InterlockedExchange(&g_cancel, 0);
         if (!view_ok(request.view) || g_component(request.ship_id, "turret", request.slot) != request.component_id) {
             reply(id, "invalid", "{\"reason\":\"arm_view_or_component\"}"); return;

@@ -164,10 +164,16 @@ successful public `{type, slot}` beside that exact native pair. This optional
 third hook avoids assigning type enums or slot IDs from spelling or proximity.
 Fail closed on missing, duplicate or conflicting identity joins.
 
-For the supported ship-macro branch, `0x00E17760–0x00E17765` resolves the
-all-connections vector through macro `+0x18`, then `+0x798`; entries are
-16-byte pairs (connection is the second pointer). Resolve this branch under
-the same class guard as the engine; reject an unfamiliar macro branch.
+The pass selects the all-connections vector by class guard: when class-table
+(`0x0256D038`) entry `+0x1c & 0xc0` is set, a checked cast (`0x007A8680`)
+returns macro `+0x18` and the vector is at `+0x798`; otherwise a second
+checked cast (`0x0059BDB0`, guard entry `+0x8 & 0xc0`) returns the same macro
+`+0x18` and the vector is at `+0xce0`. LIVE 2026-09-29
+(`ship_arg_xl_carrier_02_a_macro`): macro class 94 has `+0x1c` flags `1`, so
+this XL ship takes the `+0xce0` branch; the earlier `+0x798` 'ship-macro'
+label was an inference error. Entries are 16-byte pairs (connection is the
+second pointer). Resolve the branch under the same class guard as the engine;
+reject a macro that satisfies neither guard.
 Match each icon's transform pointer to the connection's override/inline
 transform pointer, then record its exact pair and zero-based vector ordinal.
 Require a unique match and consistent vector size; no new accessor call is
