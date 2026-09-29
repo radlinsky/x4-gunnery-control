@@ -426,8 +426,13 @@ local function drawMarkers(force)
             if mx and math.abs(mx) <= 1 and math.abs(my) <= 1 then
                 local cx = rt.x + (mx + 1) / 2 * rt.w
                 local cy = rt.y + (1 - my) / 2 * rt.h
-                -- Far side: 10% opacity and 70% size.
-                MARKERS[entry.state](cx, cy, far and size * 0.7 or size, far and faded or colors, segs)
+                -- Issue 205 alignment gate only: hollow ring + gapped cross so the
+                -- green slot icon stays visible underneath. Restore MARKERS[entry.state] after the gate.
+                local c, s = (far and faded or colors).fired, size * 0.6
+                ring(cx, cy, s, c, segs, 1)
+                for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+                    line(cx + d[1] * s * 0.4, cy + d[2] * s * 0.4, cx + d[1] * s * 1.3, cy + d[2] * s * 1.3, c, 1)
+                end
             end
         end
     end
