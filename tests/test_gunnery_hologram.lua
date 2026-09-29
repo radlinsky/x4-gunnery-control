@@ -89,12 +89,28 @@ assert(clicks==1, "rotation drag must not toggle or change camera")
 mx=0
 H.refresh(); mount(true)
 assert(latestOpen()==nonce, "cosmetic rebuild retains geometry and activity subscription")
-tick()
+tick(); tick() -- The second update hides the markers carried over the rebuild.
 assert(countOwned()==12 and live[9999], "rebuild retains activity and foreign shapes")
-reply(nonce,"activity:22"); tick()
+reply(nonce,"activity:22"); tick(); tick() -- Second update hides the replaced set.
 assert(countOwned()==14, "missile hit code falls back to idle, never a hit reticle")
-reply(nonce,"activity:2"); tick()
+reply(nonce,"activity:2"); tick(); tick()
 assert(countOwned()==14, "reject incomplete snapshots atomically")
+-- Flicker: a redraw shows the new markers before hiding the old ones, and a
+-- rebuild keeps the markers on screen until the remounted view draws.
+local old={}
+for id in pairs(live) do if id~=9999 then old[#old+1]=id end end
+camera.yaw=0.2; tick()
+local stillLive=0
+for _, id in ipairs(old) do if live[id] then stillLive=stillLive+1 end end
+assert(stillLive==#old and countOwned()>#old, "redraw keeps previous markers until the new set is shown")
+tick()
+stillLive=0
+for _, id in ipairs(old) do if live[id] then stillLive=stillLive+1 end end
+assert(stillLive==0 and countOwned()==#old, "previous markers are hidden one update later")
+local shown=countOwned()
+H.refresh(); mount(true)
+assert(countOwned()==shown, "rebuild does not hide markers before the new view draws")
+tick(); tick()
 camera.yaw,camera.pitch,camera.distance=0.7,0.3,0.85
 H.close()
 assert(countOwned()==0 and live[9999] and removed>=1, "teardown releases only owned resources")
@@ -117,7 +133,7 @@ nonce=latestOpen()
 reply(nonce,"size:2000")
 for i=1,101 do reply(nonce,"position:"..i..":0:0:0") end
 tick()
-assert(countOwned()==707 and live[9999], "all 101 turrets get a marker inside the shared pool")
+assert(countOwned()==404 and live[9999], "all 101 turrets get a marker inside the shared pool")
 local current=latestOpen()
 session.checkedGroupKeys={a=true}; mount(true)
 assert(latestOpen()~=current, "selection/combat changes replace the MD subscription")

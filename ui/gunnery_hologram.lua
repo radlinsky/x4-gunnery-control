@@ -56,12 +56,27 @@ function H.project(entry, state, radius, aspect)
     return x, y, entry.x * (cam[1] - entry.x) + entry.y * (cam[2] - entry.y) < 0
 end
 
+-- X4 hides a rectangle at once but shows a new one only at its next shape
+-- update, which runs before this module's update each frame. Draw the
+-- replacement first and hide the old markers one update later; otherwise every
+-- redraw renders a frame without markers.
 local function clearShapes(v)
     for _, shape in ipairs(v.shapes) do HideRect(shape) end
+    for _, shape in ipairs(v.stale) do HideRect(shape) end
+    v.shapes, v.stale = {}, {}
+end
+
+local function retireShapes(v)
+    for _, shape in ipairs(v.shapes) do v.stale[#v.stale + 1] = shape end
     v.shapes = {}
 end
 
-local function releaseRender(v)
+local function hideStale(v)
+    for _, shape in ipairs(v.stale) do HideRect(shape) end
+    v.stale = {}
+end
+
+local function releaseRender(v, keepShapes)
     if v.map and v.map ~= 0 then
         local state = ffi.new("HoloMapState")
         C.GetMapState(v.map, state)
@@ -69,13 +84,15 @@ local function releaseRender(v)
         C.StopRotateMap(v.map)
         C.RemoveHoloMap()
     end
-    clearShapes(v)
+    if keepShapes then hideStale(v) else clearShapes(v) end
     v.map, v.widget, v.press, v.picked = nil, nil, nil, nil
     v.drawKey = nil
 end
 
+-- A menu rebuild keeps the markers on screen; the following mount reuses them
+-- until its first draw, or close hides them.
 function H.refresh()
-    if view then releaseRender(view) end
+    if view then releaseRender(view, true) end
 end
 
 function H.close()
@@ -91,7 +108,7 @@ function H.mount(menu, frame, session, rect, combat, onClick)
     H.refresh()
     sequence = sequence + 1
     local v = { menu = menu, session = session, layer = frame.properties.layer or 4,
-        rect = rect, combat = combat, onClick = onClick, shapes = {}, entries = {}, bySlot = {},
+        rect = rect, combat = combat, onClick = onClick, shapes = {}, stale = {}, entries = {}, bySlot = {},
         nonce = tostring(GetCurRealTime()) .. "-" .. tostring(sequence), hover = "", nextDraw = 0 }
     v.ship = ConvertStringTo64Bit(tostring(session.shipID))
     v.macro = GetComponentData(v.ship, "macro") or ""
@@ -123,6 +140,8 @@ function H.mount(menu, frame, session, rect, combat, onClick)
             local old = previous.entries[index]
             entry.x, entry.y, entry.z, entry.activity = old.x, old.y, old.z, old.activity
         end
+        v.shapes, previous.shapes = previous.shapes, {}
+        v.carriedUntil = GetCurRealTime() + 1
     else
         H.close()
     end
@@ -180,13 +199,15 @@ function H.receive(_, payload)
     v.drawKey = nil
 end
 
--- Every visible marker fits the 800-rectangle budget, leaving 200 of the shared
--- 1000-slot pool for other UI: rings lose segments and the hit reticle loses its
--- ticks as the count grows. Stop on pool exhaustion.
--- ponytail: discs (6) and bursts (4) keep their shape; past ~130 visible markers
--- the budget check drops the remainder.
+-- Each marker set fits a 450-rectangle budget, so the old and new sets together
+-- stay inside 900 of the shared 1000-slot pool during the one-update overlap.
+-- Every shape scales with the per-marker allowance; at 101 visible turrets each
+-- marker gets four rectangles. Stop on pool exhaustion.
+-- ponytail: past 112 visible markers the 4-line hit square exceeds the allowance
+-- and the budget check drops the remainder.
 local function draw(v, state)
-    clearShapes(v)
+    retireShapes(v)
+    v.carriedUntil = nil
     local visible = {}
     for _, entry in ipairs(v.entries) do
         if not v.combat or entry.selected then
@@ -196,7 +217,7 @@ local function draw(v, state)
             end
         end
     end
-    local budget, failed = 800, false
+    local budget, failed = 450, false
     local limit = math.min(12, math.floor(budget / math.max(#visible, 1)))
     local cost = math.min(#visible > 60 and 8 or 12, limit)
     local function line(ax, ay, bx, by, color, thickness)
@@ -216,8 +237,9 @@ local function draw(v, state)
         -- Keep the entire marker inside its render target.
         if cx - size >= rt.x and cx + size <= rt.x + rt.w and cy - size >= rt.y and cy + size <= rt.y + rt.h then
             if status == "fired" then -- burst, distinguishable without color
-                for i = 0, 3 do
-                    local a = i * math.pi / 4
+                local spokes = math.min(4, limit)
+                for i = 0, spokes - 1 do
+                    local a = i * math.pi / spokes
                     local dx, dy = math.cos(a) * size, math.sin(a) * size
                     line(cx - dx, cy - dy, cx + dx, cy + dy, color)
                 end
@@ -228,10 +250,11 @@ local function draw(v, state)
                     if limit >= 8 then line(cx + x, cy + y, cx + x * 0.5, cy + y * 0.5, color) end
                 end
             elseif status == "idle" then -- filled disc from horizontal strips
-                for i = 0, 5 do
-                    local y = -size + (i + 0.5) * size / 3
+                local strips = math.min(6, limit)
+                for i = 0, strips - 1 do
+                    local y = -size + (i + 0.5) * 2 * size / strips
                     local w = math.sqrt(size * size - y * y)
-                    line(cx - w, cy + y, cx + w, cy + y, color, size / 3 + 1)
+                    line(cx - w, cy + y, cx + w, cy + y, color, 2 * size / strips + 1)
                 end
             else -- hollow ring
                 for i = 0, cost - 1 do
@@ -253,7 +276,10 @@ end
 function H.update()
     local v = view
     if not v then return end
+    hideStale(v)
     local now = GetCurRealTime()
+    -- Markers carried across a rebuild must not outlive a view that never draws.
+    if v.carriedUntil and now >= v.carriedUntil then retireShapes(v); v.carriedUntil = nil end
     if not v.nextHeartbeat or now >= v.nextHeartbeat then
         v.nextHeartbeat = now + 1
         AddUITriggeredEvent("X4GunneryHologram", "heartbeat", { nonce = v.nonce })
