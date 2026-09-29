@@ -61,6 +61,8 @@ StateFn g_state;
 ComponentFn g_component;
 Request g_request{};
 Capture g_capture{};  // One record; duplicate target submissions are rejected.
+struct JoinDiag { const char* step; int64_t picked_slot, macro_type, class_flags, connections, models, ordinal; };
+JoinDiag g_join{};  // Last public-pick join attempt; -1 = not reached.
 volatile LONG g_phase = 0;  // idle / armed / inside pass / result ready
 volatile LONG g_cancel = 0;
 uint64_t g_sequence = 0;
@@ -170,15 +172,27 @@ bool connections(uintptr_t view, uintptr_t& begin, size_t& count, uintptr_t& mac
     uintptr_t table, data, end, models, models_end;
     int32_t type;
     uint8_t flags;
-    if (!read(view + 0x250, macro) || !read(macro + 0x44, type) || type < 0 || type >= 0x79 ||
-        !read(g_api->exe_base + 0x256d038 + static_cast<size_t>(type) * 8, table) ||
-        !read(table + 0x1c, flags) || !(flags & 0xc0) || !read(macro + 0x18, data) ||
-        !read(data + 0x798, begin) || !read(data + 0x7a0, end) || end < begin ||
-        (end - begin) % 16 || !read(view + 0x4c0, models) ||
-        !read(view + 0x4c8, models_end) || models_end < models || (models_end - models) % 8)
-        return false;
+    if (!read(view + 0x250, macro)) { g_join.step = "connections_macro_read"; return false; }
+    if (!read(macro + 0x44, type)) { g_join.step = "connections_macro_type"; return false; }
+    g_join.macro_type = static_cast<int64_t>(type);
+    if (type < 0 || type >= 0x79) { g_join.step = "connections_macro_type"; return false; }
+    if (!read(g_api->exe_base + 0x256d038 + static_cast<size_t>(type) * 8, table) ||
+        !read(table + 0x1c, flags)) { g_join.step = "connections_class_flags"; return false; }
+    g_join.class_flags = static_cast<int64_t>(flags);
+    if (!(flags & 0xc0)) { g_join.step = "connections_class_flags"; return false; }
+    if (!read(macro + 0x18, data)) { g_join.step = "connections_data_read"; return false; }
+    if (!read(data + 0x798, begin) || !read(data + 0x7a0, end) || end < begin || (end - begin) % 16) {
+        g_join.step = "connections_vector"; return false;
+    }
+    if (!read(view + 0x4c0, models) || !read(view + 0x4c8, models_end) || models_end < models ||
+        (models_end - models) % 8) { g_join.step = "connections_models"; return false; }
     count = (end - begin) / 16;
-    return begin && count > 0 && count <= kMaxConnections && count == (models_end - models) / 8;
+    g_join.connections = static_cast<int64_t>(count);
+    g_join.models = static_cast<int64_t>((models_end - models) / 8);
+    if (!(begin && count > 0 && count <= kMaxConnections && count == (models_end - models) / 8)) {
+        g_join.step = "connections_count"; return false;
+    }
+    return true;
 }
 bool view_ok(uintptr_t view) {
     uintptr_t vtable, map, back;
@@ -217,12 +231,38 @@ bool join_pick(bool ok, uint64_t map, uint64_t ship, uint64_t module,
     uintptr_t begin, native_macro;
     size_t count, ordinal;
     Pair pair{};
-    if (!read(reinterpret_cast<uintptr_t>(result), picked) || !same_string(picked.type, "turret") ||
-        picked.slot != g_request.slot || !view_ok(g_request.view) ||
-        !connections(g_request.view, begin, count, native_macro) ||
-        !read(g_request.view + 0x520, ordinal) || ordinal >= count ||
-        !read(begin + ordinal * 16, pair) || !pair.connection) {
-        g_capture.error = "public_slot_join_rejected";
+    if (!read(reinterpret_cast<uintptr_t>(result), picked)) {
+        g_capture.error = "join_pick_result_unreadable";
+        return true;
+    }
+    if (!same_string(picked.type, "turret")) {
+        g_capture.error = "join_pick_type";
+        return true;
+    }
+    g_join.picked_slot = static_cast<int64_t>(picked.slot);
+    if (picked.slot != g_request.slot) {
+        g_capture.error = "join_pick_slot";
+        return true;
+    }
+    if (!view_ok(g_request.view)) {
+        g_capture.error = "join_view";
+        return true;
+    }
+    if (!connections(g_request.view, begin, count, native_macro)) {
+        g_capture.error = g_join.step ? g_join.step : "join_connections";
+        return true;
+    }
+    if (!read(g_request.view + 0x520, ordinal)) {
+        g_capture.error = "join_ordinal_unreadable";
+        return true;
+    }
+    g_join.ordinal = static_cast<int64_t>(ordinal);
+    if (ordinal >= count) {
+        g_capture.error = "join_ordinal_range";
+        return true;
+    }
+    if (!read(begin + ordinal * 16, pair) || !pair.connection) {
+        g_capture.error = "join_pair";
         return true;
     }
     if (g_request.joined && (!equal(pair, g_request.pair) || ordinal != g_request.ordinal)) {
@@ -232,6 +272,7 @@ bool join_pick(bool ok, uint64_t map, uint64_t ship, uint64_t module,
         g_request.pair = pair;
         g_request.ordinal = ordinal;
         g_request.joined = true;
+        g_join.step = "joined";
     }
     return false;
 }
@@ -403,6 +444,13 @@ void result() {
         "\",\"ship_id\":\"" + std::to_string(g_request.ship_id) + "\",\"component_id\":\"" + std::to_string(g_request.component_id) +
         "\",\"pass_caller_rva\":\"0xe1669a\",\"icon_caller_rva\":\"0xe1814b\"";
     json += ",\"before\":" + floats(c.before.value, 7) + ",\"after\":" + floats(c.after.value, 7);
+    json += std::string(",\"join\":{\"step\":\"") + (g_join.step ? g_join.step : "none") +
+        "\",\"picked_slot\":" + std::to_string(g_join.picked_slot) +
+        ",\"macro_type\":" + std::to_string(g_join.macro_type) +
+        ",\"class_flags\":" + std::to_string(g_join.class_flags) +
+        ",\"connections\":" + std::to_string(g_join.connections) +
+        ",\"models\":" + std::to_string(g_join.models) +
+        ",\"ordinal\":" + std::to_string(g_join.ordinal) + "}";
     if (c.error) json += std::string(",\"reason\":\"") + c.error + "\"";
     else {
         json += ",\"view\":" + pointer(g_request.view) + ",\"map\":" + pointer(g_request.map) +
@@ -470,6 +518,7 @@ void command(const char*, void* data, void*) {
         }
         g_request = request;
         g_capture = {};
+        g_join = {nullptr, -1, -1, -1, -1, -1, -1};
         InterlockedExchange(&g_cancel, 0);
         if (!view_ok(request.view) || g_component(request.ship_id, "turret", request.slot) != request.component_id) {
             reply(id, "invalid", "{\"reason\":\"arm_view_or_component\"}"); return;
