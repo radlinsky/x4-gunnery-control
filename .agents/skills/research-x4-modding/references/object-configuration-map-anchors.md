@@ -132,6 +132,16 @@ follow chained `.pdata` ranges, and stop at the relevant icon/matrix path.
   An 800-rectangle local cap leaves headroom but cannot reserve it against
   another extension. Coarse marker geometry is an implementation budget, not
   a new engine limit or a live performance result.
+- Finding (timing): `DrawRect` only takes an element from the pool and queues
+  it. The element is positioned and switched to its `active` slide in
+  `widgetSystem.updateShapes()`, which the widget update calls before
+  `CallUpdateScripts()`. `HideRect` switches to `inactive` immediately. Hiding
+  the old shapes and drawing their replacements in the same addon update
+  therefore renders one frame with neither. To avoid that blink, draw the
+  replacements first and hide the old handles on the next update, which needs
+  room in the pool for both sets. Pool sizes: 1000 rectangles, 100 circles and
+  100 triangles (`config.shapes`). The blink itself was live-observed on
+  2026-09-29; the double-buffered cure is untested.
 
 ### The production and calibration holograms share the validated projection
 - X4: 9.00 build 611726
