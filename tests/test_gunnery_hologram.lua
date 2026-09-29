@@ -19,12 +19,12 @@ local live = { [9999] = true } -- A foreign rectangle must survive every refresh
 local function color(r,g,b) return { r=r, g=g, b=b, a=100 } end
 Color.text_inactive, Color.icon_normal = color(100,100,100), color(255,255,255)
 Color.text_warning, Color.text_positive = color(255,150,0), color(0,255,0)
-Helper.drawLine = function(a,b,thickness,_,c)
+Helper.drawLine = function(a,b,thickness,z,c)
     -- The engine rectangle pool is a LIFO free list: a freed id is reissued first.
     local id = table.remove(free)
     if not id then shapeID = shapeID + 1; id = shapeID end
     live[id] = true
-    draws[#draws+1] = { color=c, a=a, b=b }
+    draws[#draws+1] = { color=c, a=a, b=b, z=z }
     return id
 end
 HideRect = function(id) assert(live[id], "hide only a live owned shape"); live[id] = nil; free[#free+1] = id end
@@ -61,6 +61,17 @@ local function latestOpen()
 end
 local function reply(nonce,data) H.receive(nil,"x4gh1:"..nonce..":"..data) end
 local function tick() now=now+0.1; H.update() end
+-- The k-th of n markers in the latest draw is a border rectangle then a fill rectangle.
+local function marker(k,n)
+    local i=#draws-2*(n-k)
+    return draws[i-1], draws[i]
+end
+local function assertMarker(k,n,fill,why)
+    local border,f=marker(k,n)
+    assert(border.color.r==0 and border.color.g==0 and border.color.b==0, why..": black border first")
+    assert(f.color.r==fill[1] and f.color.g==fill[2] and f.color.b==fill[3], why..": state fill on top")
+    assert(f.z<border.z, why..": fill renders in front of border")
+end
 local function countOwned()
     local n=0; for id in pairs(live) do if id~=9999 then n=n+1 end end; return n
 end
@@ -76,14 +87,15 @@ reply(nonce,"position:1.0:75.125m:0m:0m")
 reply(nonce,"position:2.0:-75.125m:0m:0m")
 reply(nonce,"activity:21")
 tick()
-assert(countOwned()==12, "ordinary hit reticle and missile firing burst are distinct")
-assert(draws[1].color.g==255 and draws[#draws].color.r==255, "hit green and firing orange")
+assert(countOwned()==4, "each marker is a border and a fill rectangle")
+assertMarker(1,2,{120,255,0},"hit")
+assertMarker(2,2,{255,153,0},"fired")
 local drawCount=#draws
 tick()
 assert(#draws==drawCount, "unchanged view does not redraw static shapes")
 local oldRemoved=removed
 H.viewCreated(3,"replacement-widget"); tick()
-assert(removed==oldRemoved+1 and countOwned()==12, "recreated widget rebinds its map without losing activity")
+assert(removed==oldRemoved+1 and countOwned()==4, "recreated widget rebinds its map without losing activity")
 H.mouseDown(); now=now+0.05; H.select()
 assert(clicks==1, "short stationary click dispatches the exact turret and group")
 H.mouseDown(); mx=10; H.select()
@@ -92,11 +104,15 @@ mx=0
 H.refresh(); mount(true)
 assert(latestOpen()==nonce, "cosmetic rebuild retains geometry and activity subscription")
 tick(); tick() -- The second update hides the markers carried over the rebuild.
-assert(countOwned()==12 and live[9999], "rebuild retains activity and foreign shapes")
+assert(countOwned()==4 and live[9999], "rebuild retains activity and foreign shapes")
 reply(nonce,"activity:22"); tick(); tick() -- Second update hides the replaced set.
-assert(countOwned()==14, "missile hit code falls back to idle, never a hit reticle")
+assert(countOwned()==4, "replaced set is hidden")
+assertMarker(1,2,{120,255,0},"hit")
+assertMarker(2,2,{255,255,255},"missile hit code falls back to idle, never the hit fill")
 reply(nonce,"activity:2"); tick(); tick()
-assert(countOwned()==14, "reject incomplete snapshots atomically")
+assert(countOwned()==4, "incomplete snapshot keeps the marker count")
+assertMarker(1,2,{120,255,0},"incomplete snapshot leaves colors unchanged")
+assertMarker(2,2,{255,255,255},"incomplete snapshot leaves colors unchanged")
 -- Flicker: a redraw shows the new markers before hiding the old ones, and a
 -- rebuild keeps the markers on screen until the remounted view draws.
 local old={}
@@ -141,7 +157,8 @@ nonce=latestOpen()
 reply(nonce,"size:2000")
 for i=1,101 do reply(nonce,"position:"..i..":0:0:0") end
 tick()
-assert(countOwned()==404 and live[9999], "all 101 turrets get a marker inside the shared pool")
+assert(countOwned()==202 and live[9999], "all 101 turrets get a marker inside the shared pool")
+assertMarker(1,101,{150,150,150},"unselected")
 local current=latestOpen()
 session.checkedGroupKeys={a=true}; mount(true)
 assert(latestOpen()~=current, "selection/combat changes replace the MD subscription")

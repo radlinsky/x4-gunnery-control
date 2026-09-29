@@ -199,12 +199,19 @@ function H.receive(_, payload)
     v.drawKey = nil
 end
 
--- Each marker set fits a 450-rectangle budget, so the old and new sets together
--- stay inside 900 of the shared 1000-slot pool during the one-update overlap.
--- Every shape scales with the per-marker allowance; at 101 visible turrets each
--- marker gets four rectangles. Stop on pool exhaustion.
--- ponytail: past 112 visible markers the 4-line hit square exceeds the allowance
--- and the budget check drops the remainder.
+local markerFill = {
+    unselected = { r = 150, g = 150, b = 150, a = 100 },
+    idle = { r = 255, g = 255, b = 255, a = 100 },
+    fired = { r = 255, g = 153, b = 0, a = 100 },
+    hit = { r = 120, g = 255, b = 0, a = 100 },
+}
+local markerBorder = { r = 0, g = 0, b = 0, a = 100 }
+
+-- Every marker is a black-bordered diamond whose fill carries the state (grey
+-- unselected, white idle, orange firing, green hitting): two rectangles each.
+-- A marker set fits a 450-rectangle budget so the old and new sets fit the shared
+-- 1000-slot pool during the one-update double-buffer overlap (up to 225 visible
+-- markers). Stop on pool exhaustion.
 local function draw(v, state)
     retireShapes(v)
     v.carriedUntil = nil
@@ -218,11 +225,9 @@ local function draw(v, state)
         end
     end
     local budget, failed = 450, false
-    local limit = math.min(12, math.floor(budget / math.max(#visible, 1)))
-    local cost = math.min(#visible > 60 and 8 or 12, limit)
-    local function line(ax, ay, bx, by, color, thickness)
+    local function line(ax, ay, bx, by, color, thickness, z)
         if failed or #v.shapes >= budget then return end
-        local shape = Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness or 2, nil, color, true)
+        local shape = Helper.drawLine({ x = ax, y = ay }, { x = bx, y = by }, thickness or 2, z, color, true)
         if shape == nil then failed = true; return end
         -- A reissued id means the engine already freed every tracked rectangle
         -- (HideAllShapes on view close); hiding the stale ids now would hide
@@ -230,51 +235,36 @@ local function draw(v, state)
         if v.staleIDs[shape] then v.stale, v.staleIDs = {}, {} end
         v.shapes[#v.shapes + 1] = shape
     end
+    -- A diamond of side a: one line of length a at 45 degrees, thickness a.
+    local function diamond(cx, cy, a, color, z)
+        local h = a / (2 * math.sqrt(2))
+        line(cx - h, cy - h, cx + h, cy + h, color, a, z)
+    end
     for _, point in ipairs(visible) do
-        if #v.shapes + limit > budget or failed then break end
+        if #v.shapes + 2 > budget or failed then break end
         local entry, rt = point.entry, v.bounds
         local status = entry.selected and entry.activity or "unselected"
-        local color = Color[status == "hit" and "text_positive" or status == "fired" and "text_warning" or status == "idle" and "icon_normal" or "text_inactive"]
-        if point.far then color = { r = color.r, g = color.g, b = color.b, a = (color.a or 100) * 0.2, glow = color.glow } end
+        local fill, border = markerFill[status], markerBorder
+        if point.far then
+            fill = { r = fill.r, g = fill.g, b = fill.b, a = (fill.a or 100) * 0.2 }
+            border = { r = border.r, g = border.g, b = border.b, a = (border.a or 100) * 0.2 }
+        end
         local size = math.max(5, math.min(12, 7 / math.sqrt(math.max(tonumber(state.cameradistance), 0.05))))
         if point.far then size = size * 0.7 end
         local cx, cy = rt.x + (point.x + 1) * rt.w / 2, rt.y + (1 - point.y) * rt.h / 2
         -- Keep the entire marker inside its render target.
-        if cx - size >= rt.x and cx + size <= rt.x + rt.w and cy - size >= rt.y and cy + size <= rt.y + rt.h then
-            if status == "fired" then -- burst, distinguishable without color
-                local spokes = math.min(4, limit)
-                for i = 0, spokes - 1 do
-                    local a = i * math.pi / spokes
-                    local dx, dy = math.cos(a) * size, math.sin(a) * size
-                    line(cx - dx, cy - dy, cx + dx, cy + dy, color)
-                end
-            elseif status == "hit" then -- square reticle, with four inward ticks when the budget allows
-                for _, d in ipairs({ { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } }) do
-                    local x, y = d[1] * size, d[2] * size
-                    line(cx + x - y, cy + y + x, cx + x + y, cy + y - x, color)
-                    if limit >= 8 then line(cx + x, cy + y, cx + x * 0.5, cy + y * 0.5, color) end
-                end
-            elseif status == "idle" then -- filled disc from horizontal strips
-                local strips = math.min(6, limit)
-                for i = 0, strips - 1 do
-                    local y = -size + (i + 0.5) * 2 * size / strips
-                    local w = math.sqrt(size * size - y * y)
-                    line(cx - w, cy + y, cx + w, cy + y, color, 2 * size / strips + 1)
-                end
-            else -- hollow ring
-                for i = 0, cost - 1 do
-                    local a, b = i * 2 * math.pi / cost, (i + 1) * 2 * math.pi / cost
-                    line(cx + size * math.cos(a), cy + size * math.sin(a), cx + size * math.cos(b), cy + size * math.sin(b), color)
-                end
-            end
+        local reach = (1.2 * size + 3) / math.sqrt(2)
+        if cx - reach >= rt.x and cx + reach <= rt.x + rt.w and cy - reach >= rt.y and cy + reach <= rt.y + rt.h then
+            -- Lower z renders in front: border behind, fill on top.
+            diamond(cx, cy, 1.2 * size + 3, border, 0)
+            diamond(cx, cy, 1.2 * size, fill, -0.001)
         end
     end
     local counts = tostring(#visible) .. ":" .. tostring(#v.shapes) .. ":" .. tostring(failed)
     if counts ~= v.lastCounts then
         v.lastCounts = counts
         DebugError("[X4GC HOLO] markers nonce=" .. v.nonce .. " visible=" .. tostring(#visible)
-            .. " rectangles=" .. tostring(#v.shapes) .. " coarse=" .. tostring(cost < 12)
-            .. " exhausted=" .. tostring(failed))
+            .. " rectangles=" .. tostring(#v.shapes) .. " exhausted=" .. tostring(failed))
     end
 end
 
