@@ -54,6 +54,9 @@ def validate(record):
 def main():
     seen, sequences, failures = set(), set(), []
     for line_number, line in enumerate(Path(sys.argv[1]).read_text(errors="replace").splitlines(), 1):
+        if "[X4GC] UI initialized" in line:
+            sequences = set()  # X4Native re-initializes the DLL on UI reload; its sequence restarts.
+            continue
         if "ANCHOR_RECORD " not in line:
             continue
         try:

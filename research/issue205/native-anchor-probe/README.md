@@ -132,5 +132,10 @@ and log delivery held. The first attempts exposed a wrong `+0x798`-only
 connection branch, fixed in `7e6fe35`. MD numeric precision failed: positions
 and radius arrive truncated to whole metres. `anchor-residuals.py` shows the
 orbit model with tan(FOV/2) 0.75 matches the captured view-projection within
-1e-6 NDC given exact inputs. Still unproven: final viewport convention and
-artwork/pivot coincidence.
+1e-6 NDC given exact inputs. Task 6 gate at `b426be8` (logs in
+`.x4-research-cache/issue205-live/2026-09-29-b426be8-gate/`): the running
+probe's own projection matched the engine within 3.1e-5 NDC on XL slot 17
+(d=0.6141) and M slot 1 (d=0.5220); hollow markers sat centred on the green
+icons at close zoom. The X4Native host re-initializes this DLL on every UI
+reload, so native `sequence` restarts; the validator resets its duplicate
+check at each `[X4GC] UI initialized`.
