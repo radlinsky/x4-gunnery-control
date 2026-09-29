@@ -90,6 +90,39 @@ demonstrates the same fact, or `live-tested` when a recorded build/save
 reproduces it. Note in the record which analyst labels are your own and which
 are real native names.
 
+## Diagnosing a hung X4 process
+
+- X4: 9.00 build 611726 (SHA-256 above)
+- Status: live-tested (technique); inference (event-queue semantics)
+- Source: attached read-only to a hung `X4.exe` from WSL through
+  `powershell.exe` on 2026-09-29; RTTI strings and `.pdata` bounds from the
+  pinned executable
+- Finding:
+  - Check the windows of the X4 process before reading anything else. An
+    allocation failure shows a modal `X4 - PANIC` dialog (class `#32770`,
+    for example `SMem::Allocate() failed allocating ...`) that can sit
+    hidden behind the fullscreen game, so the owner sees a frozen game.
+  - Compare CPU use per thread over a few seconds to find the hot thread.
+    Sample its instruction pointer with `SuspendThread`/`GetThreadContext`
+    (CONTEXT_CONTROL, `Rip` at `+0xF8`) and map it to a module offset.
+  - Unwind with dbghelp `StackWalk64`: `SymInitialize(process, null, true)`,
+    with `SymFunctionTableAccess64` and `SymGetModuleBase64` as callbacks, so
+    the `.pdata` unwind data is used. Do not name callers from a raw scan of
+    stack values that fall inside modules. On 2026-09-29 that scan showed
+    stale `lua51_64.dll` and UI-looking frames, while the proper unwind
+    showed an engine worker thread with no Lua frames at all.
+- Observed runaway, cause unknown (experimental): a worker thread spun in
+  `0x0099ABE0`, called from `0x0099BB50`. `0x0099BB50` reads the
+  thread-local current time and walks a global time-ordered map at
+  `0x02F6A9C0`. `0x0099ABE0` swaps out a pending command list under a lock
+  and processes entries of types 0–5, casting to the RTTI types
+  `U::EventSource`, `U::EventListener` and `U::UniverseID`. For each entry
+  it allocates a node and inserts it into an unbalanced tree keyed by a
+  double. The process grew from 17.7 to 32.6 GB, then raised the `PANIC`
+  dialog above. Treat this as the engine's event-subscription queue (MD
+  event conditions and AI handlers register such listeners); the name is
+  inference. What flooded the queue was not established.
+
 ## Recorded native findings
 
 | Subject | Reference |
