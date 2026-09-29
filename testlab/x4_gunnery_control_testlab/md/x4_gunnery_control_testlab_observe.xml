@@ -408,6 +408,35 @@
           </actions>
         </cue>
 
+        <!-- Disposable issue 205 anchor capture. One serialized request; values
+             cross as numbers, never through MD's rounded string conversion. -->
+        <cue name="HoloAnchorGeometry" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'holo_anchor_geometry'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <set_value name="$Turret" exact="@event.param3.$turret"/>
+            <set_value name="$Request" exact="event.param3.$request"/>
+            <set_value name="$Slot" exact="event.param3.$slot"/>
+            <do_if value="$Ship? and $Ship.exists and $Turret? and $Turret.exists">
+              <set_value name="$Position" exact="$Turret.relativeposition.{$Ship}"/>
+              <set_value name="$Spec" exact="if md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? then md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId else 'none'"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryHeader'" param="$Request + ':' + $Slot + ':' + $Spec"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryShip'" param="$Ship"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryTurret'" param="$Turret"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Ship.size / 2"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.x"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.y"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.z"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryEnd'" param="$Request"/>
+            </do_if>
+            <do_else>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryEnd'" param="$Request + ':fail'"/>
+            </do_else>
+          </actions>
+        </cue>
+
         <!-- ObserveArm
              The gate.  Its children only exist while it has fired, so switching
              logging off genuinely detaches both listeners rather than leaving

@@ -38,6 +38,13 @@ contains the complete ABI, identity, precision and LIVE controls.
   interesting arguments alone are not a valid detour signature. Native
   all-connections ordinal differs from public type-filtered slot numbering.
   Preserve exact connection/transform identity, not position/spelling matches.
+  The public holomap ID can be associated with the native map by the exact
+  read-only lookup used in `GetMapState` (`0x0022DFDE–0x0022DFEA`): registry
+  pointer at RVA `0x06CF1500`, lookup `0x000CED70` with type argument 4; map
+  `+0x2C0` is the view and view `+0x10` points back. This closes the ID/pointer
+  join without inventing an ID from a pointer. Task-specific implementation is
+  in [the disposable capture probe](../../../../research/issue205/native-anchor-probe/README.md);
+  its thread and call-role guards still require LIVE proof.
   The FOV reads at `0x009846AF/0x00984872` are debug-string formatting;
   active matrix evidence comes from descriptor writers and geometry consumer
   `0x00FB33B0`. No final raster convention or artwork centering is proved.
