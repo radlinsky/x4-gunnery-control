@@ -148,7 +148,7 @@ Auto-next is on by default. Every automatic replacement must be attackable and h
 
 Only the target-browser stage has a **three-attempt limit**. Each fresh scan attempt counts, including failed or incomplete scans; selection requires complete results except for the top-ranked early engagement above. With no eligible enemy/hostile candidates, return immediately to manual selection without scanning. After three attempts without a replacement, leave the browser open for manual selection. Same-root surface pages and the original hull follow their established order without that limit.
 
-Attack eligibility and selected operational turret membership are rechecked before engagement. A candidate that is lost after a complete scan is skipped; the other candidates keep that scan’s results. Manual engagement, disabling Auto-next, returning to the console, or ending the session cancels the automatic process. These mod rules do not change X4’s per-turret fallback behavior in Table 3.
+Attack eligibility and selected operational turret membership are rechecked before engagement. A candidate that is lost after a complete scan is skipped; the other candidates keep that scan’s results. Auto-next keeps the camera POV the player had (Turret or Target, manual or cinematic). The browser shows Turret POV manual while it scans; a manual pick from the browser starts in Turret POV manual. Manual engagement, disabling Auto-next, returning to the console, or ending the session cancels the automatic process. These mod rules do not change X4’s per-turret fallback behavior in Table 3.
 
 ---
 

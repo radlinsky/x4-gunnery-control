@@ -287,5 +287,29 @@ GetComponentData = function(target, ...)
 end
 API.updateAimTarget(); assert(s.targetFallback == nil and #choices == 0)
 GetComponentData = oldData
+-- Auto-next restores the player's POV after the browser's Turret POV; a manual pick does not.
+local function lostWithPov(anchor, mode)
+    s = setup(false)
+    ships, alive[101] = { 101 }, true
+    s.phase, s.aimTargetID, s.targetObjectID = "engaged", 500, 500
+    s.povAnchor, s.povMode, soft = anchor, mode, 500
+    events = {}
+    API.updateAimTarget()
+    assert(s.phase == "target_select" and s.povAnchor == "turret" and s.povMode == "manual")
+end
+lostWithPov("target", "manual")
+finish("1")
+assert(s.aimTargetID == 101 and s.povAnchor == "target" and s.povMode == "manual",
+    "Auto-next must keep Target POV")
+lostWithPov("target", "cinematic")
+local stops = 0
+for _, e in ipairs(events) do if e.control == "cutscene_aim_stop" then stops = stops + 1 end end
+assert(stops >= 1, "the loss must stop the running cutscene")
+finish("1")
+assert(s.aimTargetID == 101 and s.povAnchor == "target" and s.povMode == "cinematic",
+    "Auto-next must keep the cinematic Target POV")
+lostWithPov("target", "cinematic")
+assert(API.engageTarget(101))
+assert(s.povAnchor == "turret" and s.povMode == "manual", "a manual pick starts in Turret POV manual")
 menu.display = originalDisplay
 print("runtime Auto-next IN RANGE tests passed")

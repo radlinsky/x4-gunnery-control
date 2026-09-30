@@ -1220,6 +1220,7 @@ local function engageTarget(targetID)
     session.targetObjectID = targetRoot(target)
     Range.cancelAutomatic()
     session.targetFallback = nil
+    session.autoNextPov = nil
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
@@ -2020,6 +2021,7 @@ local function automaticTargetAllowed(component)
 end
 
 local function fallbackToBrowser()
+    session.autoNextPov = nil
     session.aimTargetID, session.targetObjectID = nil, nil
     session.povAnchor, session.povMode = "turret", "manual"
     Range.cancelAutomatic()
@@ -2069,8 +2071,11 @@ local function startBrowserAutoNext()
 end
 
 local function handleObjectLoss()
+    local pov = { anchor = session.povAnchor, mode = session.povMode }
     fallbackToBrowser()
     if session.autoNextTarget == false then return end
+    -- The browser shows Turret POV manual; Auto-next restores the player's view.
+    session.autoNextPov = pov
     startBrowserAutoNext()
 end
 
@@ -2122,10 +2127,16 @@ local function topAutomaticCandidate(fb)
 end
 
 local function engageAutomaticReplacement(chosen)
+    local pov = session.autoNextPov
+    if pov then session.povAnchor, session.povMode = pov.anchor, pov.mode end
+    if (session.povMode or "manual") == "cinematic" then
+        -- enterCamera must validate the turret view before the cinematic restarts
+        -- (its finish() applies the POV). Not yet seen, so the watcher cannot read
+        -- the gap as the player's Esc.
+        sendCutsceneAimStop()
+        session.cinematicSeen = nil
+    end
     if engageTarget(chosen) then
-        if (session.povMode or "manual") == "cinematic" then
-            sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
-        end
         logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
     else fallbackToBrowser() end
 end
@@ -3150,7 +3161,8 @@ local function updateSessionRuntime()
         if session.phase == "engaged" and (session.povMode or "manual") == "cinematic" then
             if C.IsFullscreenCutsceneActive() then
                 session.cinematicSeen = true
-            elseif session.cinematicSeen then
+            -- An Auto-next fallback owns the camera: MD stops the cutscene when its target dies.
+            elseif session.cinematicSeen and not session.targetFallback then
                 session.cinematicSeen = nil
                 session.povAnchor, session.povMode = "turret", "manual"
                 applyPov()
