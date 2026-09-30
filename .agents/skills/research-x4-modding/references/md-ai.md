@@ -523,6 +523,14 @@
   - CONSEQUENCE for an ENGAGEABLE-style per-module fallback (#62): mirroring the vanilla `ismodular` fallback but running it against a player-selected SURFACE ELEMENT over-counts, because that element's `.defensible` is the whole modular station, so any weapon that can see ANY station module gets counted as engageable against the one element. Fix: gate the fallback on `$target == $target.defensible` (whole root only). Extending the gate with `or @$target.canhaveattackablemodules` (always `@`-guarded — the property errors on a non-ship, so a station root must read it via `@`) admits the rare capital ships that embed a defence module, matching vanilla target selection; it is inert where a ship's defence modules are not exposed through `.modules.operational.list`.
   - Subsystem taxonomy (Allectus mod, community `third-party-technique`, corroborates the engine grouping): SHIP subsystems are engines, missile launchers, S/M turrets, L/XL turrets, shield generators, and main (fixed) batteries; STATION subsystems are dock/storage/production/defence/shipyard modules. The mod also notes capital attackers only accept subsystems within line of sight at order start — the same LOS constraint this project models in ENGAGEABLE.
 
+### Reading `maxspeed` on a wrecked ship fails the lookup in MD
+- X4: 9.00
+- Status: live-tested
+- Source: owner's X4 debug log, 2026-09-29 (game time 249077.26): `Error in MD cue md.X4GunneryControl.InRangeCommit: Property lookup failed: $speedship.maxspeed` with `$speedship` a `class=ship_s, state=wreck` drone. Live log observation only, not engine source.
+- Live test: yes, one log observation (#208); the `@` guard is not yet live-confirmed to silence it.
+- Finding:
+  - Reading `maxspeed` on a ship in `state=wreck` raises "Property lookup failed" in MD. The `do_if` evaluates false and the action block continues (the same cue completed its Lua pass normally). Guard such reads with `@`, e.g. `@$speedship.maxspeed gt 0`, as with `@$target.canhaveattackablemodules` above.
+
 ## Per-turret attribution from MD events
 
 ### `event_object_attacked_object` documents a firing WEAPON, but the runtime value is kill-method-dependent
