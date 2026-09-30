@@ -79,6 +79,7 @@ X4 replaces debug.log every time it launches, so save or send the log before sta
 [*]X4 Foundations 9.00 or newer.[/*]
 [*][url=https://www.nexusmods.com/x4foundations/mods/552]kuertee UI Extensions and HUD[/url].[/*]
 [*][url=https://www.nexusmods.com/x4foundations/mods/2191]Print Extension List[/url].[/*]
+[*]Optional: [url=https://www.nexusmods.com/x4foundations/mods/503]SirNukes Mod Support APIs[/url], to open Gunnery Control from the Map while on foot aboard your ship.[/*]
 [/list]
 
 This extension replaces no vanilla game files, UI Extensions files, or combat AI scripts.
