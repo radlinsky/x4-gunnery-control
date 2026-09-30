@@ -241,7 +241,8 @@ objectSetup(); late = pending(); s.controlMode, s.phase = nil, "console"
 reply(late, "1"); API.updateAimTarget()
 assert(s.targetFallback == nil and s.phase == "console" and #choices == 0)
 
--- Test Lab parking cancels the sweep even though it retains the same session.
+-- Parking cancels the sweep even though it retains the same session; the
+-- resumed browser starts a fresh one.
 objectSetup(); late = pending()
 local labOpened = false
 API.registerTestLab({ open = function() labOpened = true end })
@@ -251,6 +252,14 @@ lab.handlers.onClick()
 assert(labOpened and s.targetFallback == nil)
 reply(late, "1")
 assert(#choices == 0, "parked session must reject a late positive")
+-- This stubbed ship has no readable turret groups; keep the session's groups.
+local retainSelection = X4GunneryState.retainSelection
+X4GunneryState.retainSelection = function() end
+menu.onShowMenu()
+X4GunneryState.retainSelection = retainSelection
+assert(API.getSession() == s and s.phase == "target_select")
+assert(pending() ~= late and s.targetFallback.attempts == 1, "resume must start a fresh Auto-next scan")
+finish("1"); assert(s.aimTargetID == 101 and #choices == 1)
 API.registerTestLab(nil)
 
 -- Destruction and ownership changes invalidate a complete sweep before selection.

@@ -269,6 +269,7 @@ local function transitionLifecycle(nextLifecycle, reason, quiet)
     if nextLifecycle ~= State.lifecycle.owned and session.targetFallback then
         Range.cancelAutomatic()
         session.targetFallback = nil
+        session.autoNextParked = true
     end
     State.setLifecycle(session, nextLifecycle)
     if not quiet then
@@ -2061,12 +2062,16 @@ local function startFallbackScan(fb)
     Range.startAutomatic(fb.scanIDs)
 end
 
-local function handleObjectLoss()
-    fallbackToBrowser()
-    if session.autoNextTarget == false then return end
+local function startBrowserAutoNext()
     local fb = { stage = "objects", attempts = 0 }
     session.targetFallback = fb
     startFallbackScan(fb)
+end
+
+local function handleObjectLoss()
+    fallbackToBrowser()
+    if session.autoNextTarget == false then return end
+    startBrowserAutoNext()
 end
 
 local function startTargetFallback(lostID, root)
@@ -2385,6 +2390,13 @@ function menu.onShowMenu()
         session.repointResumeRetry = session.aimTargetID
     end
     menu.display()
+    -- Parking cancelled a browser Auto-next scan; start a fresh one.
+    local restartAutoNext = resuming and session.autoNextParked
+    session.autoNextParked = nil
+    if restartAutoNext and session.phase == "target_select"
+            and session.controlMode == "direct" and session.autoNextTarget ~= false then
+        startBrowserAutoNext()
+    end
 end
 
 function menu.display()
