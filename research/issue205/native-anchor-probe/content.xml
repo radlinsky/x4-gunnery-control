@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<content version="900" id="x4_config_anchor_probe" name="Configuration Slot Anchor Probe" description="Disposable issue 205 measurement equipment; not required by Gunnery Control." author="X4 Gunnery Control research" date="2026-09-28" save="0" enabled="1">
+  <dependency id="x4native" optional="false"/>
+</content>

@@ -577,6 +577,11 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   "no such function exists" conclusion in this knowledge base was derived from
   what vanilla *declares*, not from what the engine *exposes*, and must be read
   with that scope.
+- Inventory correction 2026-09-28: the installed executable pinned in
+  [native-analysis.md](native-analysis.md) has **2,378 named exports**. The
+  historical 2493/1885/609 counts above are stale; the undeclared-call count
+  was not reproduced. See [object-configuration-map-anchors.md](object-configuration-map-anchors.md)
+  for the current scoped export/Lua search. Names still do not establish ABI.
 - Notable undeclared camera exports, absent from vanilla and from
   kuertee-ui-extensions-all alike: `SetPlayerCameraExternalView` and
   `SetPlayerCameraFloatingView`. Also undeclared and relevant to this project:

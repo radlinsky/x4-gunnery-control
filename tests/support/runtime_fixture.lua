@@ -376,6 +376,7 @@ function M.load()
 
     -- ── 6. Helper stub ───────────────────────────────────────────────────────
     local Helper = {
+        standardTextHeight = 20,
         registerMenu            = function() end,
         clearDataForRefresh     = function()
             frameCount        = 0
@@ -415,6 +416,7 @@ function M.load()
                     record.background = true
                     return self
                 end,
+                addRenderTarget = function() end,
                 properties = setmetatable({ layer = layer }, {
                     __newindex = function(t, k, v) rawset(t, k, v) end,
                     __index    = function() return 0 end,
@@ -594,6 +596,7 @@ function M.load()
     -- (line 5: local State = X4GunneryState).
     X4GunneryState = dofile("ui/gunnery_state.lua")
     X4GunneryPersistence = dofile("ui/gunnery_persistence.lua")
+    X4GunneryHologram = dofile("ui/gunnery_hologram.lua")
     -- The control module deliberately reuses this table in game across a UI
     -- reload. A fixture load promises a fresh environment instead, so discard
     -- the previous test's closures before loading the next module instance.

@@ -1,4 +1,4 @@
--- Automatic replacement must use fresh complete range evidence at every stage.
+-- Automatic replacement uses fresh range evidence; only the top-ranked candidate may select before the sweep completes.
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local API, menu, C = fix.API, fix.gcMenu, fix.C
 local now, soft = 100, 0
@@ -87,7 +87,7 @@ local function finish(bits)
     API.updateAimTarget()
 end
 
--- Size precedes distance, count never ranks, and a partial positive cannot select.
+-- Size precedes distance, count never ranks, and a partial positive on a lower-ranked candidate cannot select.
 local s = setup(true, 3)
 -- Start again after setting metadata so the production enumeration sorts it.
 s.targetFallback = nil
@@ -95,9 +95,9 @@ sizes[702], sizes[703], sizes[704] = "L", "M", "L"
 distances[702], distances[704] = 2000, 1000
 API.updateAimTarget()
 assert(events[#events - 3].params.target == 704, "largest then nearest surface must scan first")
-reply(pending(), "100")
+reply(pending(), "010")
 API.updateAimTarget()
-assert(#choices == 0, "partial positive cannot engage")
+assert(#choices == 0, "a partial positive on a lower-ranked surface cannot engage")
 pass("110")
 API.updateAimTarget()
 assert(s.aimTargetID == 704 and #choices == 1, "first qualifying surface wins over higher count")
@@ -107,17 +107,17 @@ s = setup(true, 2)
 reply(pending(), "01"); pass("01"); API.updateAimTarget()
 assert(s.aimTargetID == 703, "zero-range surface must never win its metadata rank")
 
--- Original-root retries have no three-attempt cap and cannot reuse old positives.
+-- Original-root retries have no three-attempt cap.
 s = setup(true, 1)
 for _ = 1, 4 do
-    reply(pending(), "1") -- one turret positive, second never replies
+    reply(pending(), "0") -- second turret never replies
     API.runRangeSweep(now)
     now = now + 2.1
     API.runRangeSweep(now); API.updateAimTarget()
     assert(s.targetFallback.stage == "surfaces" and #choices == 0)
 end
 finish("0")
-assert(s.targetFallback.stage == "hull", "fresh zero sweep must discard earlier partial positives")
+assert(s.targetFallback.stage == "hull", "a complete zero sweep moves on to the hull")
 for _ = 1, 4 do
     now = now + 2.1; API.runRangeSweep(now); API.updateAimTarget()
     assert(s.targetFallback.stage == "hull", "hull retries must not consume browser budget")
@@ -168,14 +168,20 @@ local function objectSetup(count)
     API.updateAimTarget()
     assert(s.phase == "target_select" and s.targetFallback.attempts == 1)
 end
--- A whole-browser attempt spans transport batches, never selects a partial page.
+-- A whole-browser attempt spans transport batches; a farther partial positive waits for the sweep.
 objectSetup(21)
+distances[121] = 500
 reply(pending(), string.rep("1", 20))
 API.updateAimTarget(); assert(#choices == 0)
 pass("0")
 API.updateAimTarget(); assert(#choices == 0, "second turret still required")
 pass(string.rep("0", 20)); pass("0")
 API.updateAimTarget(); assert(s.aimTargetID == 101)
+
+-- The nearest candidate engages on its first IN RANGE turret without waiting for the sweep.
+objectSetup(2); distances[102] = 500
+reply(pending(), "01"); API.updateAimTarget()
+assert(s.aimTargetID == 102 and #choices == 1, "top-ranked positive must engage early")
 
 -- Neutral candidates do not start a browser scan, and a disabled option scans nothing.
 s = setup(false)
@@ -207,9 +213,16 @@ finish("0")
 assert(s.targetFallback.attempts == 3)
 now = now + 2.1; API.runRangeSweep(now); API.updateAimTarget()
 assert(s.phase == "target_select" and s.targetFallback == nil and #choices == 0)
+
 local begins = 0
 for _, event in ipairs(events) do if event.control == "in_range_begin" then begins = begins + 1 end end
 assert(begins == 4, "two failed attempts and one two-turret sweep, never a fourth attempt")
+
+-- A failed attempt's positive cannot feed the next attempt's early exit.
+objectSetup(); reply(pending(), "1")                 -- turret 1 positive on the sole (top) candidate
+API.runRangeSweep(now); now = now + 2.1; API.runRangeSweep(now) -- turret 2 times out: attempt fails
+API.updateAimTarget(); API.updateAimTarget()         -- consume the failure, then re-rank on attempt 2
+assert(#choices == 0 and s.targetFallback.attempts == 2, "a failed attempt's positive must not select")
 
 -- Disabling Auto-next, changing membership, manual engagement, and a new session reject late replies.
 objectSetup(); late = pending(); s.autoNextTarget = false
@@ -241,7 +254,8 @@ objectSetup(); late = pending(); s.controlMode, s.phase = nil, "console"
 reply(late, "1"); API.updateAimTarget()
 assert(s.targetFallback == nil and s.phase == "console" and #choices == 0)
 
--- Test Lab parking cancels the sweep even though it retains the same session.
+-- Parking cancels the sweep even though it retains the same session; the
+-- resumed browser starts a fresh one.
 objectSetup(); late = pending()
 local labOpened = false
 API.registerTestLab({ open = function() labOpened = true end })
@@ -251,9 +265,25 @@ lab.handlers.onClick()
 assert(labOpened and s.targetFallback == nil)
 reply(late, "1")
 assert(#choices == 0, "parked session must reject a late positive")
+-- This stubbed ship has no readable turret groups; keep the session's groups.
+local retainSelection = X4GunneryState.retainSelection
+X4GunneryState.retainSelection = function() end
+menu.onShowMenu()
+X4GunneryState.retainSelection = retainSelection
+assert(API.getSession() == s and s.phase == "target_select")
+assert(pending() ~= late and s.targetFallback.attempts == 1, "resume must start a fresh Auto-next scan")
+finish("1"); assert(s.aimTargetID == 101 and #choices == 1)
 API.registerTestLab(nil)
 
--- Destruction and ownership changes invalidate a complete sweep before selection.
+-- A candidate lost after a complete sweep is skipped; the other results still select.
+objectSetup(2); reply(pending(), "01"); pass("01"); alive[101] = false
+API.updateAimTarget()
+assert(s.aimTargetID == 102 and #choices == 1, "a lost browser candidate must not discard the sweep")
+s = setup(true, 2); reply(pending(), "11"); pass("11"); alive[702] = false
+API.updateAimTarget()
+assert(s.aimTargetID == 703 and #choices == 1, "a lost surface must not discard the page")
+
+-- A lost or unattackable sole candidate cannot be selected.
 objectSetup(); reply(pending(), "1"); pass("1"); alive[101] = false
 API.updateAimTarget(); assert(s.targetFallback == nil and #choices == 0)
 objectSetup(); reply(pending(), "1"); pass("1")
@@ -264,5 +294,29 @@ GetComponentData = function(target, ...)
 end
 API.updateAimTarget(); assert(s.targetFallback == nil and #choices == 0)
 GetComponentData = oldData
+-- Auto-next restores the player's POV after the browser's Turret POV; a manual pick does not.
+local function lostWithPov(anchor, mode)
+    s = setup(false)
+    ships, alive[101] = { 101 }, true
+    s.phase, s.aimTargetID, s.targetObjectID = "engaged", 500, 500
+    s.povAnchor, s.povMode, soft = anchor, mode, 500
+    events = {}
+    API.updateAimTarget()
+    assert(s.phase == "target_select" and s.povAnchor == "turret" and s.povMode == "manual")
+end
+lostWithPov("target", "manual")
+finish("1")
+assert(s.aimTargetID == 101 and s.povAnchor == "target" and s.povMode == "manual",
+    "Auto-next must keep Target POV")
+lostWithPov("target", "cinematic")
+local stops = 0
+for _, e in ipairs(events) do if e.control == "cutscene_aim_stop" then stops = stops + 1 end end
+assert(stops >= 1, "the loss must stop the running cutscene")
+finish("1")
+assert(s.aimTargetID == 101 and s.povAnchor == "target" and s.povMode == "cinematic",
+    "Auto-next must keep the cinematic Target POV")
+lostWithPov("target", "cinematic")
+assert(API.engageTarget(101))
+assert(s.povAnchor == "turret" and s.povMode == "manual", "a manual pick starts in Turret POV manual")
 menu.display = originalDisplay
 print("runtime Auto-next IN RANGE tests passed")

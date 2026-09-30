@@ -165,7 +165,7 @@
                   <set_value name="$extra" exact="0m"/>
                   <set_value name="$speedship" exact="InRangeService.$speedships.{$index}"/>
                   <do_if value="not $beam and typeof $speedship == datatype.component">
-                    <do_if value="$speedship.maxspeed gt 0">
+                    <do_if value="@$speedship.maxspeed gt 0">
                       <set_value name="$extra" exact="[$range * 1.1, 500m].min"/>
                     </do_if>
                   </do_if>

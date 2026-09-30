@@ -825,6 +825,14 @@ function menu.display()
     local tableView = frame:addTable(4, { tabOrder = 1, width = Helper.scaleX(880) })
     local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
     title[1]:setColSpan(4):createText(text(1), Helper.headerRowCenteredProperties)
+    local tmRow = tableView:addRow("tm_open", {})
+    tmRow[1]:setColSpan(4):createButton({}):setText("Turret hologram probe")
+    tmRow[1].handlers.onClick = function()
+        -- ui/turretholo.lua; closing stops onCloseElement reopening Gunnery.
+        closing = true
+        cleanup("hologram probe", false)
+        Helper.closeMenuAndOpenNewMenu(menu, "X4GunneryTurretHolo", { 0, 0 }, true)
+    end
     local reloadRow = tableView:addRow("reload", {})
     for index, spec in ipairs({ { text(22), "ui" }, { text(23), "md" }, { text(24), "ai" } }) do
         local label, kind = spec[1], spec[2]

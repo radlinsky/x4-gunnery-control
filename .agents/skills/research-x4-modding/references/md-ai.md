@@ -523,6 +523,14 @@
   - CONSEQUENCE for an ENGAGEABLE-style per-module fallback (#62): mirroring the vanilla `ismodular` fallback but running it against a player-selected SURFACE ELEMENT over-counts, because that element's `.defensible` is the whole modular station, so any weapon that can see ANY station module gets counted as engageable against the one element. Fix: gate the fallback on `$target == $target.defensible` (whole root only). Extending the gate with `or @$target.canhaveattackablemodules` (always `@`-guarded — the property errors on a non-ship, so a station root must read it via `@`) admits the rare capital ships that embed a defence module, matching vanilla target selection; it is inert where a ship's defence modules are not exposed through `.modules.operational.list`.
   - Subsystem taxonomy (Allectus mod, community `third-party-technique`, corroborates the engine grouping): SHIP subsystems are engines, missile launchers, S/M turrets, L/XL turrets, shield generators, and main (fixed) batteries; STATION subsystems are dock/storage/production/defence/shipyard modules. The mod also notes capital attackers only accept subsystems within line of sight at order start — the same LOS constraint this project models in ENGAGEABLE.
 
+### Reading `maxspeed` on a wrecked ship fails the lookup in MD
+- X4: 9.00
+- Status: live-tested
+- Source: owner's X4 debug log, 2026-09-29 (game time 249077.26): `Error in MD cue md.X4GunneryControl.InRangeCommit: Property lookup failed: $speedship.maxspeed` with `$speedship` a `class=ship_s, state=wreck` drone. Live log observation only, not engine source.
+- Live test: yes, one log observation (#208); the `@` guard is not yet live-confirmed to silence it.
+- Finding:
+  - Reading `maxspeed` on a ship in `state=wreck` raises "Property lookup failed" in MD. The `do_if` evaluates false and the action block continues (the same cue completed its Lua pass normally). Guard such reads with `@`, e.g. `@$speedship.maxspeed gt 0`, as with `@$target.canhaveattackablemodules` above.
+
 ## Per-turret attribution from MD events
 
 ### `event_object_attacked_object` documents a firing WEAPON, but the runtime value is kill-method-dependent
@@ -1515,3 +1523,20 @@ whole-object, engine, shield, turret, and station-module surface tests.
 - Boundary: the transition graph does not establish ANI channel composition,
   interpolation, selector inheritance, instantaneous phase, or barrel endpoint
   selection. Those require separate evidence.
+
+### MD length `raise_lua_event` params truncate to whole metres; string params keep ~6 digits
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: Test Lab `holo_anchor_geometry` cue raising `$Turret.relativeposition.{$Ship}`
+  `.x/.y/.z` and `$Ship.size / 2` as separate `raise_lua_event` params; debug.log
+  compared with native engine values captured in the same frames
+- Live test: yes — 2026-09-29, 12 records, 8 distinct turret positions and two
+  ship radii on an XL and an M ship
+- Finding: every value arrived as a Lua number truncated toward zero:
+  -295.700 → -295, 118.886 → 118, 1315.25 → 1315, 86.92 → 86, -35.08 → -35.
+  The same lengths concatenated into a string param (`'x4gtm1:' + $Pos.x`,
+  `'x4ghs1:' + $Ship.size`) arrived as -295.7, 118.886, 808.636 and 2630.5:
+  about six significant digits, so the MD expression itself is precise and the
+  loss is in the numeric param conversion. On the M ship at zoom 0.65 the
+  truncated values moved projected markers 0.024 NDC (~5 px); the string values
+  stayed within 3e-6 NDC. Send sub-metre geometry as a string.

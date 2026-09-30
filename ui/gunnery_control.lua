@@ -4,6 +4,7 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
+local Hologram = X4GunneryHologram
 ffi.cdef[[
 typedef uint64_t UniverseID;
 typedef struct { UniverseID softtargetID; const char* softtargetConnectionName; uint32_t messageID; } SofttargetDetails2;
@@ -268,6 +269,7 @@ local function transitionLifecycle(nextLifecycle, reason, quiet)
     if nextLifecycle ~= State.lifecycle.owned and session.targetFallback then
         Range.cancelAutomatic()
         session.targetFallback = nil
+        session.autoNextParked = true
     end
     State.setLifecycle(session, nextLifecycle)
     if not quiet then
@@ -459,6 +461,8 @@ end
 
 local function hideEngagedOverlayForTakeover()
     if suspendedOverlayRegistration or not findEngagedOverlayRegistration() then return end
+    Hologram.close()
+    engagedOverlayRefreshPending = true
     removeEngagedOverlay(false)
     logSession("engaged overlay hidden for fullscreen takeover")
 end
@@ -562,10 +566,9 @@ local function readGroups(ship)
     local labelCounts = {}
     for index, entry in ipairs(groups) do
         if entry.kind == "group" then
-            local position = State.turretGroupLabel(entry.group)
-            local equipment = (entry.macro ~= "" and GetMacroData(entry.macro, "shortname")) or ""
-            local base = position or (text(4) .. " " .. tostring(index))
-            if equipment ~= "" then base = base .. ": " .. equipment end
+            entry.positionLabel = State.turretGroupLabel(entry.group) or (text(4) .. " " .. tostring(index))
+            -- Position only; member rows carry the turret names.
+            local base = entry.positionLabel
             labelCounts[base] = (labelCounts[base] or 0) + 1
             entry.displayName = base .. (labelCounts[base] > 1 and (" · " .. tostring(labelCounts[base])) or "")
         end
@@ -817,6 +820,7 @@ end
 -- removed its frame. Keep it separate from endSession(), which additionally
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
+    Hologram.close()
     if not session then return end
     removeEngagedUpdater()
     cameraMismatchLogged = false
@@ -902,6 +906,7 @@ end
 -- ownership as a safety event, never as an active gunnery session.
 function menu.cleanup()
     local externalMenu = activeExternalMenuName and activeExternalMenuName()
+    if session then logSession("menu cleanup; external=" .. tostring(externalMenu)) end
     if session and not endingSession and session.phase == "engaged"
             and (externalMenu or fullscreenTakeoverDisplayed()) then
         -- A legitimate external overlay/takeover does not surrender the active
@@ -913,6 +918,7 @@ function menu.cleanup()
     end
     menu.frame = nil
     menu.elementFrame = nil
+    Hologram.close()
     if session and not endingSession and session.lifecycle == State.lifecycle.owned then
         -- Do not destroy immediately: X4 may still be finishing a same-tick
         -- view replacement. The global watchdog confirms that ownership did
@@ -1214,6 +1220,7 @@ local function engageTarget(targetID)
     session.targetObjectID = targetRoot(target)
     Range.cancelAutomatic()
     session.targetFallback = nil
+    session.autoNextPov = nil
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
@@ -2014,6 +2021,7 @@ local function automaticTargetAllowed(component)
 end
 
 local function fallbackToBrowser()
+    session.autoNextPov = nil
     session.aimTargetID, session.targetObjectID = nil, nil
     session.povAnchor, session.povMode = "turret", "manual"
     Range.cancelAutomatic()
@@ -2056,12 +2064,19 @@ local function startFallbackScan(fb)
     Range.startAutomatic(fb.scanIDs)
 end
 
-local function handleObjectLoss()
-    fallbackToBrowser()
-    if session.autoNextTarget == false then return end
+local function startBrowserAutoNext()
     local fb = { stage = "objects", attempts = 0 }
     session.targetFallback = fb
     startFallbackScan(fb)
+end
+
+local function handleObjectLoss()
+    local pov = { anchor = session.povAnchor, mode = session.povMode }
+    fallbackToBrowser()
+    if session.autoNextTarget == false then return end
+    -- The browser shows Turret POV manual; Auto-next restores the player's view.
+    session.autoNextPov = pov
+    startBrowserAutoNext()
 end
 
 local function startTargetFallback(lostID, root)
@@ -2085,12 +2100,46 @@ end
 
 local function onDirectTargetLost()
     local lostID, root = session.aimTargetID, session.targetObjectID
+    session.targetLostAt = getElapsedTime()
     if session.autoNextTarget ~= false and not isNullID(lostID) and not isNullID(root)
             and not sameID(lostID, root) and automaticTargetAllowed(root) then
         startTargetFallback(lostID, root)
     else
         handleObjectLoss()
     end
+end
+
+-- The candidate nothing else can outrank: the nearest attackable object, or the
+-- first attackable entry in surface/hull order.
+local function topAutomaticCandidate(fb)
+    local top, nearest = nil, math.huge
+    for _, target in ipairs(fb.scanIDs) do
+        if automaticTargetAllowed(target) then
+            if fb.stage ~= "objects" then return target end
+            local distance = tonumber(C.GetDistanceBetween(session.shipID, id(target))) or -1
+            if distance < 0 then distance = math.huge end
+            if not top or distance < nearest or (distance == nearest
+                    and State.normID(target) < State.normID(top)) then
+                top, nearest = target, distance
+            end
+        end
+    end
+    return top
+end
+
+local function engageAutomaticReplacement(chosen)
+    local pov = session.autoNextPov
+    if pov then session.povAnchor, session.povMode = pov.anchor, pov.mode end
+    if (session.povMode or "manual") == "cinematic" then
+        -- enterCamera must validate the turret view before the cinematic restarts
+        -- (its finish() applies the POV). Not yet seen, so the watcher cannot read
+        -- the gap as the player's Esc.
+        sendCutsceneAimStop()
+        session.cinematicSeen = nil
+    end
+    if engageTarget(chosen) then
+        logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
+    else fallbackToBrowser() end
 end
 
 local function updateTargetFallback()
@@ -2111,24 +2160,31 @@ local function updateTargetFallback()
         if table.concat(parts, ",") ~= Range.signature then
             Range.active, Range.status = nil, "failed"
         end
-        if Range.status == "pending" then return end
+        if Range.status == "pending" then
+            -- ponytail: re-rank once per MD request rather than every frame.
+            if fb.earlySerial == Range.serial then return end
+            fb.earlySerial = Range.serial
+            local top = topAutomaticCandidate(fb)
+            local result = top and Range.rangeResult(top)
+            if not (result and result.count > 0) then return end
+            log("event=auto_next action=choose stage=" .. fb.stage
+                .. " early=true chosen=" .. tostring(top))
+            engageAutomaticReplacement(top)
+            return
+        end
         log("event=auto_next action=result stage=" .. fb.stage
             .. " attempt=" .. tostring(fb.attempts or 0)
             .. " status=" .. tostring(Range.status))
         if Range.status == "complete" then
             -- Recheck eligibility immediately before normal engagement. A lost
-            -- candidate invalidates this sweep, including its zero readings.
-            for _, target in ipairs(fb.scanIDs) do
-                if not automaticTargetAllowed(target) then
-                    if fb.stage == "surfaces" then startTargetFallback(fb.lostID, fb.root)
-                    else startFallbackScan(fb) end
-                    return
-                end
-            end
-            local chosen, nearest = nil, math.huge
+            -- candidate is skipped; the others keep this sweep's fresh results.
+            local chosen, nearest, positive, lost = nil, math.huge, 0, 0
             for _, target in ipairs(fb.scanIDs) do
                 local result = Range.rangeResult(target)
-                if result and result.count > 0 then
+                if not automaticTargetAllowed(target) then
+                    lost = lost + 1
+                elseif result and result.count > 0 then
+                    positive = positive + 1
                     if fb.stage ~= "objects" then chosen = target; break end
                     -- Measure again after the sweep: moving candidates may
                     -- have exchanged places while the turrets were scanned.
@@ -2140,13 +2196,11 @@ local function updateTargetFallback()
                     end
                 end
             end
+            log("event=auto_next action=choose stage=" .. fb.stage
+                .. " positive=" .. positive .. " lost=" .. lost
+                .. " chosen=" .. tostring(chosen))
             if chosen then
-                if engageTarget(chosen) then
-                    if (session.povMode or "manual") == "cinematic" then
-                        sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
-                    end
-                    logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
-                else fallbackToBrowser() end
+                engageAutomaticReplacement(chosen)
                 return
             end
         else
@@ -2273,6 +2327,7 @@ end
 -- Test Lab parks the live session in `reopening` while this menu is closed.
 -- Close/Abort reopen Gunnery; teardown paths suppress that handoff.
 local function openTestLab()
+    Hologram.close()
     if session then
         -- The reload buttons live behind this menu, and a reload wipes all Lua
         -- state. Park the session now so there is something to come back to,
@@ -2379,6 +2434,13 @@ function menu.onShowMenu()
         session.repointResumeRetry = session.aimTargetID
     end
     menu.display()
+    -- Parking cancelled a browser Auto-next scan; start a fresh one.
+    local restartAutoNext = resuming and session.autoNextParked
+    session.autoNextParked = nil
+    if restartAutoNext and session.phase == "target_select"
+            and session.controlMode == "direct" and session.autoNextTarget ~= false then
+        startBrowserAutoNext()
+    end
 end
 
 function menu.display()
@@ -2387,6 +2449,7 @@ function menu.display()
         engagedOverlayRefreshPending = true
         return
     end
+    Hologram.refresh()
     -- Entering the persistent engaged overlay replaces, rather than refreshes, the
     -- normal console/browser frame. Remove only that Gunnery-owned Helper view;
     -- clearDataForRefresh() deliberately leaves its registration intact.
@@ -2411,7 +2474,7 @@ function menu.display()
     -- Every call path into display() holds a live session: callers either guard
     -- with `if session then` or return early when it is nil. Stated once here so
     -- nothing below has to repeat the check.
-    if not session then return end
+    if not session then Hologram.close(); return end
     if session.phase == "engaged" then
         engagedOverlayRefreshPending = false
         installEngagedUpdater()
@@ -2421,6 +2484,7 @@ function menu.display()
         local controlsWidth = Helper.scaleX(460)
         local elemWidth = Helper.scaleX(680)
         local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil
+        if not hasElementPanel then Hologram.close() end
         local width = controlsWidth
         session.viewSofttargetKey = softtargetKey()
         local viewFrame = Helper.createFrameHandle(menu, {
@@ -2447,10 +2511,9 @@ function menu.display()
             tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize,
             width = controlsWidth - 2 * Helper.borderSize,
         })
-        -- Header row: current turret name + its group name.
+        -- Header row uses the same position/name label as the list and hover.
         local cm, cmGroup = cameraMember()
-        local headerText = (cm and cm.displayName or text(29))
-            .. (cmGroup and (": " .. cmGroup.displayName) or "")
+        local headerText = cm and State.turretLabel(cmGroup, cm) or text(29)
         local headerRow = controls:addRow(false, { bgColor = Color["row_title_background"] })
         headerRow[1]:setColSpan(2):createText(headerText, { halign = "center" })
         -- Six buttons in three rows of two (step 7).
@@ -2585,8 +2648,19 @@ function menu.display()
             elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
             overlayLayers[#overlayLayers + 1] = elementFrameLayer
             overlayFrames[elementFrameLayer] = elemFrame
+            local holoHeight = Helper.scaleY(220)
+            Hologram.mount(menu, elemFrame, session, {
+                x = Helper.borderSize, y = Helper.borderSize,
+                w = elemWidth - 2 * Helper.borderSize, h = holoHeight,
+            }, true, function(member)
+                if member.operational and member.cameraSupported then
+                    session.cameraMemberID = member.componentID
+                    session.povAnchor, session.povMode = "turret", "manual"
+                    if enterCamera(member) then persistSession(); menu.display() end
+                end
+            end)
             local elemTable = elemFrame:addTable(5, {
-                tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
+                tabOrder = 2, x = Helper.borderSize, y = holoHeight + Helper.standardTextHeight + 2 * Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
             -- Header: target name (falls back to text(51) when empty).
@@ -2739,7 +2813,8 @@ function menu.display()
     removeEngagedUpdater()
 
     local targetBrowser = session.phase == "target_select"
-    local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
+    if targetBrowser then Hologram.close() end
+    local frameWidth = math.min(Helper.viewWidth, Helper.scaleX(targetBrowser and 760 or 1500))
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)
     local frame = Helper.createFrameHandle(menu, {
         width = frameWidth, height = frameHeight,
@@ -2759,6 +2834,22 @@ function menu.display()
     -- edge; the console frame starts at x = 0.
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
+    if not targetBrowser then
+        local holoWidth = math.min(Helper.scaleX(600), frameWidth * 0.40)
+        tableWidth = tableWidth - holoWidth - tablePad
+        Hologram.mount(menu, frame, session, {
+            x = tablePad + tableWidth + tablePad, y = Helper.scaleY(70),
+            w = holoWidth, h = Helper.scaleY(520),
+        }, false, function(_, group)
+            if State.canMutate(group) then
+                local staged = session.staged and session.staged[group.key]
+                local armed = group.armed
+                if staged then armed = staged.armed end
+                State.toggleGroup(session, group.key, armed)
+                menu.display()
+            end
+        end)
+    end
 
     if session.phase == "target_select" then
         local tableView = frame:addTable(12, { tabOrder = 1, x = tablePad, width = tableWidth })
@@ -3000,7 +3091,8 @@ function menu.display()
     frame:display()
 end
 
-function menu.viewCreated()
+function menu.viewCreated(layer, ...)
+    Hologram.viewCreated(layer, ...)
     -- Helper invokes this only after X4 created the replacement frame. It is
     -- the nearest available confirmation that an Engage transition obtained
     -- visible input ownership.
@@ -3072,9 +3164,13 @@ local function updateSessionRuntime()
                 session.cinematicSeen = true
             elseif session.cinematicSeen then
                 session.cinematicSeen = nil
-                session.povAnchor, session.povMode = "turret", "manual"
-                applyPov()
-                menu.display()
+                -- MD stops the cutscene itself when its target dies; only a stop
+                -- later than that is the player's Esc.
+                if not (session.targetLostAt and now - session.targetLostAt < 1) then
+                    session.povAnchor, session.povMode = "turret", "manual"
+                    applyPov()
+                    menu.display()
+                end
             end
         end
         -- Only while the camera is meant to be ON the turret. Target POV points
@@ -3120,6 +3216,7 @@ function menu.onUpdate()
         if not engagedUpdaterInstalled then engagedOnUpdate() end
         return
     end
+    Hologram.update()
     updateSessionRuntime()
 end
 
@@ -3132,9 +3229,16 @@ engagedOnUpdate = function()
         hideEngagedOverlayForTakeover()
     else
         restoreEngagedOverlayAfterTakeover()
+        Hologram.update()
     end
     updateSessionRuntime()
 end
+
+function menu.onRenderTargetMouseDown() Hologram.mouseDown() end
+function menu.onRenderTargetMouseUp() Hologram.mouseUp() end
+function menu.onRenderTargetSelect() Hologram.select() end
+function menu.onRenderTargetCombinedScrollDown(step) Hologram.zoom(step) end
+function menu.onRenderTargetCombinedScrollUp(step) Hologram.zoom(-step) end
 
 function menu.onCloseElement(dueToClose)
     local externalMenu = activeExternalMenuName()
@@ -3147,6 +3251,17 @@ function menu.onCloseElement(dueToClose)
         return
     end
     if session and not State.isOwned(session) then return end
+    if session and externalMenu then
+        -- Another menu is replacing the console or target browser (M opens the
+        -- Map from the browser, which keeps player controls). Park like the
+        -- Test Lab handoff; the watchdog reopens this view once no external
+        -- menu remains. Handling it as Back redrew the console under the Map
+        -- and left a hidden session that refused every later entry.
+        transitionLifecycle(State.lifecycle.reopening, "parked for " .. externalMenu)
+        resumePending = true
+        Helper.closeMenu(menu, "close", false, false)
+        return
+    end
     if session and session.phase == "engaged" then
         -- Target brackets call CloseMenusUponMouseClick() as they change the
         -- soft target. Re-register the transparent/compact frame for that
@@ -3213,6 +3328,16 @@ completeReleasedOnboardHandoff = function(reason)
     return true
 end
 
+-- Validity is checked only while Gunnery updates, so a session hidden behind
+-- another menu survives a teleport and would block every later entry. Only an
+-- explicit new entry replaces it, never an external menu or takeover (#117).
+local function clearStaleSession(route)
+    if session and not sessionContextValid() then
+        endSession("stale session replaced by " .. route)
+    end
+    return session == nil
+end
+
 redirectDockedMenu = function()
     -- A late DockedMenu callback after release only rechecks the handoff; while
     -- DockedMenu is still visible completion waits for vanilla playerGetUp
@@ -3231,7 +3356,7 @@ redirectDockedMenu = function()
         redirectPending = false
         -- Leave the gunner control position through vanilla's Get Up path.
         -- X4's playerGetUp event confirms completion and starts the handoff.
-        if isInGunnerChair() and sameID(playerShip(), ship) and not session then
+        if isInGunnerChair() and sameID(playerShip(), ship) and clearStaleSession("physical console") then
             if C.GetUp() then physicalIngressPendingShip = ship end
         end
     end, false, getElapsedTime() + 0.05)
@@ -3399,13 +3524,14 @@ TestAPI.sessionContextValid = function() return sessionContextValid() end
 -- Map-origin ingress is revalidated in Lua before a fresh onboard session is
 -- parked. This is pre-open handoff, not suspension of an active engagement.
 local function onOpenOnboard(_, shipComponent)
-    if session then return end
+    local function ignored(reason) log("onboard ingress ignored: " .. reason) end
+    if not clearStaleSession("Map entry") then return ignored("session already open") end
     local ship = id(shipComponent)
-    if ship == 0 then return end
-    if not sameID(playerShip(), ship) then return end
-    if not ownedByPlayer(ship) then return end
+    if ship == 0 then return ignored("no ship") end
+    if not sameID(playerShip(), ship) then return ignored("player not aboard") end
+    if not ownedByPlayer(ship) then return ignored("not player-owned") end
     local groups = readGroups(ship)
-    if #groups == 0 then return end
+    if #groups == 0 then return ignored("no turret groups") end
     session = newSession(ship, "onboard")
     session.groups = groups
     -- Seed now: the pre-open handoff treats this as a resume and skips

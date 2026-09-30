@@ -1,0 +1,5 @@
+{
+  "library": "native\\x4_config_anchor_probe.dll",
+  "priority": 100,
+  "min_api_version": 1
+}

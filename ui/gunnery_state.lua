@@ -3,6 +3,15 @@
 X4GunneryState = X4GunneryState or {}
 local State = X4GunneryState
 
+-- Shared by the member list, hologram hover, and camera header. Keep position
+-- separate from the group's equipment-bearing display name.
+function State.turretLabel(group, member)
+    local position = group and (group.positionLabel or State.turretGroupLabel(group.group))
+    local name = member and member.displayName or ""
+    if position and position ~= "" and name ~= "" then return position .. "; " .. name end
+    return name ~= "" and name or position or ""
+end
+
 function State.singleKey(componentID)
     return "single:" .. tostring(componentID)
 end
@@ -267,7 +276,7 @@ end
 function State.newSurfaceBrowser(rootID)
     return {
         rootID = rootID, generation = 0, filterSignature = "",
-        page = 1, pageSize = 20, orderedIDs = {}, metadataByID = {},
+        page = 1, pageSize = 10, orderedIDs = {}, metadataByID = {},
         pinnedRefreshAt = nil,
     }
 end

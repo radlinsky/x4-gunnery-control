@@ -3,7 +3,7 @@ local fix = dofile("tests/support/runtime_fixture.lua").load()
 -- staged by that same derivation. Use the real form here so the fixture cannot
 -- pass while the production key derivations disagree.
 local groupKey = X4GunneryState.groupKey(5, "p", "g")
-local group = fix.makeGroup{ displayName = "Group",
+local group = fix.makeGroup{ displayName = "Group", positionLabel = "Front",
     members = { { componentID = 27, displayName = "Turret", operational = true, cameraSupported = true } } }
 fix.gcMenu.onShowMenu()
 local session = fix.API.getSession()
@@ -11,6 +11,11 @@ session.groups, session.checkedGroupKeys = { group }, { [groupKey] = true }
 session.phase, session.controlMode, session.cameraMemberID = "engaged", "auto", 27
 fix.C.GetExternalTargetViewComponent = function() return 27 end
 fix.gcMenu.display()
+local sharedHeader = false
+for _, entry in ipairs(fix.getCreatedTexts()) do
+    if entry.text == "Front; Turret" then sharedHeader = true end
+end
+assert(sharedHeader, "camera header must use the shared group-position/turret label")
 for _, label in ipairs({ fix.LABEL.nextTurret, fix.LABEL.prevTurret }) do
     local entry = fix.buttonByText(label)
     assert(entry and entry.handlers and type(entry.handlers.onClick) == "function",

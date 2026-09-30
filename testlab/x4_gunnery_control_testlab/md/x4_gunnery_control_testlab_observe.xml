@@ -352,6 +352,91 @@
           </actions>
         </cue>
 
+        <!-- TurretMapPosition
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position",
+               {ship =, turret =, idx =})
+             Throwaway issue #205 feasibility probe for a graph-widget turret
+             map. Lua has no MD-free route to a turret's real mount position;
+             relativeposition.{$component} is the same primitive the existing
+             ObserveMark snapshot already uses for $Aimed.relativeposition.{...}.
+             One event per turret, answered once, synchronously; the Lua side
+             counts replies against its point list to know when it can draw. -->
+        <!-- HoloSize (issue #205 hologram probe): the object-configuration
+             holomap's camera distance unit was fitted as 521 m on the Ray;
+             log every bounding-box size MD exposes so a second ship can show
+             which one that unit follows. -->
+        <cue name="HoloSize" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'holo_size'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <do_if value="$Ship? and $Ship.exists">
+              <debug_text text="'[X4GC TEST HOLOSIZE] ship=' + $Ship + ' macro=' + $Ship.macro
+                + ' size=' + $Ship.size + ' length=' + $Ship.length + ' width=' + $Ship.width + ' height=' + $Ship.height
+                + ' bbox_max=' + @$Ship.macro.boundingbox.max + ' bbox_center=' + @$Ship.macro.boundingbox.center"/>
+              <!-- The fitted holomap distance unit is size / 2 (bounding-sphere radius). -->
+              <raise_lua_event name="'X4GunneryTestLab.HoloSize'" param="'x4ghs1:' + $Ship.size"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="TurretMapPosition" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'turretmap_position'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <set_value name="$Turret" exact="@event.param3.$turret"/>
+            <set_value name="$Idx" exact="event.param3.$idx"/>
+            <do_if value="$Ship? and $Ship.exists and $Turret? and $Turret.exists">
+              <set_value name="$Pos" exact="$Turret.relativeposition.{$Ship}"/>
+              <debug_text text="'[X4GC TEST TURRETMAP] idx=' + $Idx
+                + ' turret=' + $Turret
+                + ' macro=' + $Turret.macro
+                + ' x=' + $Pos.x
+                + ' y=' + $Pos.y
+                + ' z=' + $Pos.z"/>
+              <raise_lua_event name="'X4GunneryTestLab.TurretMapPosition'"
+                param="'x4gtm1:' + $Idx + ':' + $Pos.x + ':' + $Pos.y + ':' + $Pos.z"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST TURRETMAP] idx=' + $Idx + ' failed: ship or turret missing'"/>
+              <raise_lua_event name="'X4GunneryTestLab.TurretMapPosition'"
+                param="'x4gtm1:' + $Idx + ':fail'"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <!-- Disposable issue 205 anchor capture. One serialized request; values
+             cross as numbers, never through MD's rounded string conversion. -->
+        <cue name="HoloAnchorGeometry" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'holo_anchor_geometry'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <set_value name="$Turret" exact="@event.param3.$turret"/>
+            <set_value name="$Request" exact="event.param3.$request"/>
+            <set_value name="$Slot" exact="event.param3.$slot"/>
+            <do_if value="$Ship? and $Ship.exists and $Turret? and $Turret.exists">
+              <set_value name="$Position" exact="$Turret.relativeposition.{$Ship}"/>
+              <set_value name="$Spec" exact="if md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? then md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId else 'none'"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryHeader'" param="$Request + ':' + $Slot + ':' + $Spec"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryShip'" param="$Ship"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryTurret'" param="$Turret"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Ship.size / 2"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.x"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.y"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.z"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryEnd'" param="$Request"/>
+            </do_if>
+            <do_else>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryEnd'" param="$Request + ':fail'"/>
+            </do_else>
+          </actions>
+        </cue>
+
         <!-- ObserveArm
              The gate.  Its children only exist while it has fired, so switching
              logging off genuinely detaches both listeners rather than leaving

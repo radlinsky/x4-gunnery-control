@@ -11,5 +11,6 @@
     <file name="ui/testlab_state.lua"/>
     <file name="ui/scenario_spec.lua"/>
     <file name="ui/testlab.lua"/>
+    <file name="ui/turretholo.lua"/>
   </environment>
 </addon>
