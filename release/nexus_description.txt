@@ -10,20 +10,24 @@ Makes the Access Gunnery Control chair worth sitting in. Instead of the vanilla 
 
 Sitting down opens the console. Every turret group gets a checkbox, or you can use Select all. You can also change each group's Mode and Armed state from the same screen.
 
+The console and Direct-control view include a rotatable, zoomable ship hologram. Click a turret to select its group in the console or switch turret cameras during Direct-control. Markers show selection, firing and hits; missile turrets do not report hits.
+
+With SirNukes Mod Support APIs installed, you can also open Gunnery Control while on foot aboard your own ship: Map → right-click that ship → Gunnery Control.
+
 Once you select at least one group, two controls become available.
 
 [b]Auto-engage[/b] issues no fire orders. Your turrets still choose their own targets. The camera cycles only through turrets in the selected groups.
 
-[b]Direct-control[/b] lets you tell the selected groups what to shoot. Select Engagement Target lists ships and stations in radar range, along with class/type, distance, and an N / total ENGAGEABLE count. Fully ENGAGEABLE candidates are listed first. Select a ship or station to engage its hull, or switch to one of its surface elements.
+[b]Direct-control[/b] lets you tell the selected groups what to shoot. Select Engagement Target lists ships and stations in radar range, along with class/type, distance, and an N / total IN RANGE count. Candidates with every evaluated turret IN RANGE are listed first. Select a ship or station to engage its hull, or switch to one of its surface elements.
 
-While engaged, the surface element browser keeps the current aim point pinned and lets you switch between the parent hull and operational turret, shield, and engine surface elements. You can filter by Turret / Shield / Engine. Surface elements are ordered largest-first (XL → L → M → S → XS), then by type and distance, and are paged 20 at a time. Each surface element shows distance and its own ENGAGEABLE count. The pinned aim point also shows shield and hull status. You can refresh manually or enable an optional 10-second automatic refresh.
+While engaged, the surface element browser keeps the current aim point pinned and lets you switch between the parent hull and operational turret, shield, and engine surface elements. You can filter by Turret / Shield / Engine. Surface elements are ordered largest-first (XL → L → M → S → XS), then by type and distance, and are paged 10 at a time. Each surface element shows distance and its own IN RANGE count. The pinned aim point also shows shield and hull status. You can refresh manually or enable an optional 10-second automatic refresh.
 
-The ENGAGEABLE count is a geometry check, not a guarantee that a turret will fire. A turret counts as ENGAGEABLE when its known traverse arc covers the aim direction, the target is within weapon range, and the line of fire from the muzzle is clear past your own ship. Turrets with unknown arc data stay in the denominator and are reported as UNKNOWN. Readiness, fire authorization, intercept, and actual firing are separate.
+IN RANGE estimates weapon reach for the operational turrets in your selected groups. It uses turret-origin distance to the target’s bounding box and current weapon range, with an allowance for non-beam ammunition against moving-capable ships or their engines. It does not test bearing, line of fire, intercept, readiness, or authorization. Displayed distance is measured from your ship’s origin to the target’s origin, separately from the range estimate. Counts update automatically; list refresh controls are separate.
 
-For example, 3 / 4 ENGAGEABLE means 3 of the 4 selected/evaluated turrets currently pass that geometry check.
+For example, 3 / 4 IN RANGE means three of four selected operational turrets pass the range estimate.
 
 [list]
-[*]Auto-next Target when destroyed is on by default. When the current target dies, the turrets and camera automatically select the next target (or surface element). Turn it off if you prefer to choose the next one yourself.[/*]
+[*]Auto-next Target when destroyed is on by default. On surface loss, it tries other surfaces on the same ship/station by size, type, then distance, followed by the original hull. If those fail, or a whole ship/station is lost, it visibly opens the target browser and chooses the closest attackable enemy or hostile object. Every replacement needs at least one selected operational turret IN RANGE from a fresh, complete scan. The browser allows at most three scan attempts before returning to manual selection; no eligible candidates means manual selection immediately. Turn Auto-next off to choose replacements yourself.[/*]
 [*]Next Target / Previous Target step through the same candidate list without reopening the browser.[/*]
 [*]Choose the Direct-control turret mode, on the main console or the Direct-control panel: [b]Attack all enemies[/b] keeps your target as the preferred target with the other enemies in range as fallback, or [b]Attack my current enemy[/b] sticks strictly to your selected target (turrets that cannot engage it may sit idle).[/*]
 [/list]
@@ -46,8 +50,8 @@ Saving and loading keeps your seat. Save while engaged and loading that save put
 [*]This is not manual aiming. Direct-control tells the turrets what to hit, not how to aim.[/*]
 [*]Some S/M ships use a ship camera instead of a turret camera. When a turret camera is not available, Gunnery Control uses a ship camera instead. This is often the case for S/M ships. Direct-control, target selection, and Auto-engage still work normally.[/*]
 [*]Turret POV cinematic can clip the camera into your own hull. Target POV cinematic usually looks better.[/*]
-[*]The confirmation popup that appears when you stand up also works around an X4 bug that can leave Esc unresponsive after a camera session. If help texts are disabled in the game options, that workaround is also disabled. Opening and closing another menu, such as the map, restores Esc.[/*]
-[*]ENGAGEABLE is a targeting aid, not a firing guarantee. A turret can pass the geometry check and still hold fire because it is not ready, lacks authorization, or cannot solve the intercept. UNKNOWN turrets may still fire when their arc data are unavailable to the mod.[/*]
+[*]The confirmation popup shown when you stand up works around an X4 bug that can leave Esc unresponsive after a camera session. Opening and closing another menu, such as the map, also restores Esc.[/*]
+[*]IN RANGE is an estimate, not a firing guarantee. X4 may hold fire despite a positive count, or fire beyond the estimate because it also checks muzzle-to-aim-point distance.[/*]
 [*]Duplicate-named groups can mislabel members in the UI. Commands still reach the correct group.[/*]
 [/list]
 

@@ -2,22 +2,39 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.32] - 2026-09-29
 
-- Add onboard Map ingress for Gunnery Control (#68). While on foot aboard the
-  exact player-owned ship, Map → right-click that ship → **Gunnery Control**
-  opens the existing console without requiring a gunner chair. The chair path
-  remains unchanged, no remote action is offered for other ships, and onboard
-  sessions persist across Reload UI and end if the player leaves the ship or it
-  is no longer player-owned.
-
-- Correct missile-turret ENGAGEABLE geometry (#65). A missile turret with
-  affirmatively guided loaded ammunition now retains the bearing and range
-  gates without requiring a direct muzzle-to-target line. Unguided missile
-  turrets, including ammunition without affirmative guidance data, retain the
-  direct-line gate but exclude their own ship, so external obstructions still
-  mask the shot. Conventional turrets remain own-hull-aware, and the same policy
-  applies to whole-target and per-module fallback checks.
+- Add a shared ship configuration hologram to the console and Direct-control
+  surface panel (#205). Support rotation, zoom, per-ship camera memory,
+  group selection and turret-camera selection. MD transports occupied turret
+  positions and changed-only firing/hit states with bounded marker allocation,
+  stale-reply guards and listener cleanup. Missile turrets never report hits.
+- Replace production ENGAGEABLE prediction with bounded, automatic IN RANGE
+  sweeps (#197). Count unique selected operational turrets using turret-origin
+  distance to the target bounding box and weapon range, with a non-beam
+  moving-ship allowance. Remove production bearing, muzzle and line-of-fire
+  prediction machinery; retain research evidence outside the shipped extension.
+  Include the selected target in browser sweeps and show ten surface alternatives
+  per browsing page.
+- Rebuild Auto-next around fresh range evidence. Preserve same-root surface,
+  hull and other-object priority; rank eligible objects by current distance.
+  Permit early engagement only for the top-ranked candidate with a positive
+  range result. Limit object scans to three attempts, cancel or resume scans
+  with session navigation, and preserve camera POV on automatic replacement.
+  Retain complete results when another candidate disappears (#197, #207, #209).
+- Exclude wrecked ships from the moving-target range allowance (#208).
+- Add onboard Map ingress through optional SirNukes Mod Support APIs (#68).
+  Offer it only while on foot aboard the exact player-owned ship, restore
+  onboard sessions across Reload UI, and end them on departure or ownership loss.
+- Synchronize Direct-control with eligible hostile world-click targets (#116).
+  Park and restore Gunnery views around external menus and repair overlay
+  registration, frame ownership and close navigation (#110, #117).
+- Correct physical chair entry and handoff lifecycle (#118), and preserve staged
+  settings on unchecked groups while the Direct-control target browser is open
+  (#149).
+- Expand source-backed turret research and reusable Test Lab fixtures, loadout
+  preflight, geometry analysis and tooling contracts. Remove obsolete production
+  geometry and coverage tests and fixture-specific permanent assertions.
 
 ## [0.31] - 2026-08-20
 
