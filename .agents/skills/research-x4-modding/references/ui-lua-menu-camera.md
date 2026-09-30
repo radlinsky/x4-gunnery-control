@@ -824,7 +824,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   `ships-comp-dlc-9.00`, `dlc-{terran,split,boron,pirate}-comp-xl-9.00`,
   `dlc-timelines-comp-9.00`, `dlc-mini0{1,2}-comp-9.00`; 135 component files
 - Live test: partial — the label output is confirmed by an in-game screenshot
-  (`release/main_menu.png`, Boron hull, 2026-08-07); the collision list itself
+  (`b4d6f7e:release/main_menu.png`, Boron hull, 2026-08-07); the collision list itself
   is source-derived and untested in game as of 2026-08-07
 - Finding: distinct raw group identifiers on one hull can humanize to one
   string, because the labeller drops information three ways: token order is
@@ -859,7 +859,7 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   ship_bor_l_destroyer_01.xml`, which contains `group="group_front_up_left "`,
   `group=" group_front_up_mid "`, `group="  group_front_down_mid "` and even
   `group="  "`; the same padding appears across the base-game hulls
-- Live test: partial — `release/main_menu.png` (2026-08-07) shows this project's
+- Live test: partial — `b4d6f7e:release/main_menu.png` (2026-08-07) shows this project's
   console rendering "Front Upper Left", "Center Lower Left" and "Front Center
   Lower" on a Boron hull
 - Finding: the `group=` attribute on turret connections is not a clean token. It
