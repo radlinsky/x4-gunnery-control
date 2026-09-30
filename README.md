@@ -76,6 +76,7 @@ X4 replaces `debug.log` every time it launches, so save or send the log before s
 - X4 Foundations 9.00 or newer.
 - Nexus: [UI Extensions and HUD](https://www.nexusmods.com/x4foundations/mods/552) and [Print Extension List](https://www.nexusmods.com/x4foundations/mods/2191).
 - Steam: [UI Extensions and HUD](https://steamcommunity.com/sharedfiles/filedetails/?id=3477279743) and [Print Extension List](https://steamcommunity.com/sharedfiles/filedetails/?id=3770927339).
+- Optional: SirNukes Mod Support APIs ([Nexus](https://www.nexusmods.com/x4foundations/mods/503) / [Steam](https://steamcommunity.com/sharedfiles/filedetails/?id=2042901274)), to open Gunnery Control from the Map while on foot aboard your ship.
 
 This extension replaces no vanilla game files, UI Extensions files, or combat AI scripts.
 
