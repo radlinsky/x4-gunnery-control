@@ -262,7 +262,15 @@ assert(pending() ~= late and s.targetFallback.attempts == 1, "resume must start 
 finish("1"); assert(s.aimTargetID == 101 and #choices == 1)
 API.registerTestLab(nil)
 
--- Destruction and ownership changes invalidate a complete sweep before selection.
+-- A candidate lost after a complete sweep is skipped; the other results still select.
+objectSetup(2); reply(pending(), "01"); pass("01"); alive[101] = false
+API.updateAimTarget()
+assert(s.aimTargetID == 102 and #choices == 1, "a lost browser candidate must not discard the sweep")
+s = setup(true, 2); reply(pending(), "11"); pass("11"); alive[702] = false
+API.updateAimTarget()
+assert(s.aimTargetID == 703 and #choices == 1, "a lost surface must not discard the page")
+
+-- A lost or unattackable sole candidate cannot be selected.
 objectSetup(); reply(pending(), "1"); pass("1"); alive[101] = false
 API.updateAimTarget(); assert(s.targetFallback == nil and #choices == 0)
 objectSetup(); reply(pending(), "1"); pass("1")

@@ -2127,18 +2127,14 @@ local function updateTargetFallback()
             .. " status=" .. tostring(Range.status))
         if Range.status == "complete" then
             -- Recheck eligibility immediately before normal engagement. A lost
-            -- candidate invalidates this sweep, including its zero readings.
-            for _, target in ipairs(fb.scanIDs) do
-                if not automaticTargetAllowed(target) then
-                    if fb.stage == "surfaces" then startTargetFallback(fb.lostID, fb.root)
-                    else startFallbackScan(fb) end
-                    return
-                end
-            end
-            local chosen, nearest = nil, math.huge
+            -- candidate is skipped; the others keep this sweep's fresh results.
+            local chosen, nearest, positive, lost = nil, math.huge, 0, 0
             for _, target in ipairs(fb.scanIDs) do
                 local result = Range.rangeResult(target)
-                if result and result.count > 0 then
+                if not automaticTargetAllowed(target) then
+                    lost = lost + 1
+                elseif result and result.count > 0 then
+                    positive = positive + 1
                     if fb.stage ~= "objects" then chosen = target; break end
                     -- Measure again after the sweep: moving candidates may
                     -- have exchanged places while the turrets were scanned.
@@ -2150,6 +2146,9 @@ local function updateTargetFallback()
                     end
                 end
             end
+            log("event=auto_next action=choose stage=" .. fb.stage
+                .. " positive=" .. positive .. " lost=" .. lost
+                .. " chosen=" .. tostring(chosen))
             if chosen then
                 if engageTarget(chosen) then
                     if (session.povMode or "manual") == "cinematic" then
