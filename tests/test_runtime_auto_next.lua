@@ -1,4 +1,4 @@
--- Automatic replacement must use fresh complete range evidence at every stage.
+-- Automatic replacement uses fresh range evidence; only the top-ranked candidate may select before the sweep completes.
 local fix = dofile("tests/support/runtime_fixture.lua").load()
 local API, menu, C = fix.API, fix.gcMenu, fix.C
 local now, soft = 100, 0
@@ -87,7 +87,7 @@ local function finish(bits)
     API.updateAimTarget()
 end
 
--- Size precedes distance, count never ranks, and a partial positive cannot select.
+-- Size precedes distance, count never ranks, and a partial positive on a lower-ranked candidate cannot select.
 local s = setup(true, 3)
 -- Start again after setting metadata so the production enumeration sorts it.
 s.targetFallback = nil
@@ -95,9 +95,9 @@ sizes[702], sizes[703], sizes[704] = "L", "M", "L"
 distances[702], distances[704] = 2000, 1000
 API.updateAimTarget()
 assert(events[#events - 3].params.target == 704, "largest then nearest surface must scan first")
-reply(pending(), "100")
+reply(pending(), "010")
 API.updateAimTarget()
-assert(#choices == 0, "partial positive cannot engage")
+assert(#choices == 0, "a partial positive on a lower-ranked surface cannot engage")
 pass("110")
 API.updateAimTarget()
 assert(s.aimTargetID == 704 and #choices == 1, "first qualifying surface wins over higher count")
@@ -107,17 +107,17 @@ s = setup(true, 2)
 reply(pending(), "01"); pass("01"); API.updateAimTarget()
 assert(s.aimTargetID == 703, "zero-range surface must never win its metadata rank")
 
--- Original-root retries have no three-attempt cap and cannot reuse old positives.
+-- Original-root retries have no three-attempt cap.
 s = setup(true, 1)
 for _ = 1, 4 do
-    reply(pending(), "1") -- one turret positive, second never replies
+    reply(pending(), "0") -- second turret never replies
     API.runRangeSweep(now)
     now = now + 2.1
     API.runRangeSweep(now); API.updateAimTarget()
     assert(s.targetFallback.stage == "surfaces" and #choices == 0)
 end
 finish("0")
-assert(s.targetFallback.stage == "hull", "fresh zero sweep must discard earlier partial positives")
+assert(s.targetFallback.stage == "hull", "a complete zero sweep moves on to the hull")
 for _ = 1, 4 do
     now = now + 2.1; API.runRangeSweep(now); API.updateAimTarget()
     assert(s.targetFallback.stage == "hull", "hull retries must not consume browser budget")
@@ -168,14 +168,20 @@ local function objectSetup(count)
     API.updateAimTarget()
     assert(s.phase == "target_select" and s.targetFallback.attempts == 1)
 end
--- A whole-browser attempt spans transport batches, never selects a partial page.
+-- A whole-browser attempt spans transport batches; a farther partial positive waits for the sweep.
 objectSetup(21)
+distances[121] = 500
 reply(pending(), string.rep("1", 20))
 API.updateAimTarget(); assert(#choices == 0)
 pass("0")
 API.updateAimTarget(); assert(#choices == 0, "second turret still required")
 pass(string.rep("0", 20)); pass("0")
 API.updateAimTarget(); assert(s.aimTargetID == 101)
+
+-- The nearest candidate engages on its first IN RANGE turret without waiting for the sweep.
+objectSetup(2); distances[102] = 500
+reply(pending(), "01"); API.updateAimTarget()
+assert(s.aimTargetID == 102 and #choices == 1, "top-ranked positive must engage early")
 
 -- Neutral candidates do not start a browser scan, and a disabled option scans nothing.
 s = setup(false)

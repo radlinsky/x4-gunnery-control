@@ -2103,6 +2103,33 @@ local function onDirectTargetLost()
     end
 end
 
+-- The candidate nothing else can outrank: the nearest attackable object, or the
+-- first attackable entry in surface/hull order.
+local function topAutomaticCandidate(fb)
+    local top, nearest = nil, math.huge
+    for _, target in ipairs(fb.scanIDs) do
+        if automaticTargetAllowed(target) then
+            if fb.stage ~= "objects" then return target end
+            local distance = tonumber(C.GetDistanceBetween(session.shipID, id(target))) or -1
+            if distance < 0 then distance = math.huge end
+            if not top or distance < nearest or (distance == nearest
+                    and State.normID(target) < State.normID(top)) then
+                top, nearest = target, distance
+            end
+        end
+    end
+    return top
+end
+
+local function engageAutomaticReplacement(chosen)
+    if engageTarget(chosen) then
+        if (session.povMode or "manual") == "cinematic" then
+            sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
+        end
+        logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
+    else fallbackToBrowser() end
+end
+
 local function updateTargetFallback()
     local fb = session.targetFallback
     if not fb then return end
@@ -2121,7 +2148,18 @@ local function updateTargetFallback()
         if table.concat(parts, ",") ~= Range.signature then
             Range.active, Range.status = nil, "failed"
         end
-        if Range.status == "pending" then return end
+        if Range.status == "pending" then
+            -- ponytail: re-rank once per MD request rather than every frame.
+            if fb.earlySerial == Range.serial then return end
+            fb.earlySerial = Range.serial
+            local top = topAutomaticCandidate(fb)
+            local result = top and Range.rangeResult(top)
+            if not (result and result.count > 0) then return end
+            log("event=auto_next action=choose stage=" .. fb.stage
+                .. " early=true chosen=" .. tostring(top))
+            engageAutomaticReplacement(top)
+            return
+        end
         log("event=auto_next action=result stage=" .. fb.stage
             .. " attempt=" .. tostring(fb.attempts or 0)
             .. " status=" .. tostring(Range.status))
@@ -2150,12 +2188,7 @@ local function updateTargetFallback()
                 .. " positive=" .. positive .. " lost=" .. lost
                 .. " chosen=" .. tostring(chosen))
             if chosen then
-                if engageTarget(chosen) then
-                    if (session.povMode or "manual") == "cinematic" then
-                        sendCutsceneAimStop(); sendCutsceneAimStart(session.povAnchor or "turret")
-                    end
-                    logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
-                else fallbackToBrowser() end
+                engageAutomaticReplacement(chosen)
                 return
             end
         else
