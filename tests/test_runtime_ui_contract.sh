@@ -42,80 +42,50 @@ if grep -Fq 'controlGroup() == "gunnertrigger"' "$main"; then
 fi
 grep -Fq 'C.GetContextByClass(C.GetPlayerID(), "container", false)' "$main"
 grep -Fq 'C.IsComponentClass(ship, "ship")' "$main"
-# A frame that hides the HUD never gets it back: only the fullscreen console
-# (no playerControls) may do so, and it does that by being the non-targetBrowser
-# case of keepHUDVisible = targetBrowser.
+# Every Gunnery frame builder must keep the HUD visible. X4 does not reliably
+# restore it when successive frames from the same menu disagree.
 if grep -Fq 'keepHUDVisible = false' "$main"; then
   echo "no frame may set keepHUDVisible = false; the HUD is not restored afterwards" >&2
   exit 1
 fi
-# Every frame must agree on it; a browser(true) -> console(false) sequence
-# leaves the standing player with no HUD.
+frame_builders=$(grep -c 'Helper.createFrameHandle(menu, {' "$main")
 hud_true=$(grep -c 'keepHUDVisible = true' "$main")
-if [ "$hud_true" -ne 3 ]; then
-  echo "all 3 frames must set keepHUDVisible = true; found $hud_true" >&2
+if [ "$hud_true" -ne "$frame_builders" ]; then
+  echo "every Gunnery frame builder must set keepHUDVisible = true; found $hud_true for $frame_builders frame builders" >&2
   exit 1
 fi
 grep -Fq 'showTickerPermanently = false' "$main"
-grep -Fq 'State.beginTargetSelection(session, group, member)' "$main"
 grep -Fq 'GetContainedShips' "$main"
 grep -Fq 'readSurfaceTargets' "$main"
-grep -Fq 'RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)' "$main"
-grep -Fq 'RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)' "$main"
-grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_member"' "$main"
-grep -Fq 'AddUITriggeredEvent("X4GunneryControl", "engageability_target"' "$main"
-grep -Fq 'State.checkedGroups(session)' "$main"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityService'])" "engageability service cue count"
-# The own-hull-aware muzzle-origin probe fires twice: once at the target root,
-# then (issue #60) as the per-module fallback when a large ship/station root's
-# bbox-centre aim point self-blocks the ray. Both keep the barrel offset and
-# excludeself='false' so the firing ship's own hull can mask the shot.
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'][@target='\$target'])" "engageability service root muzzle-origin line-of-fire check count"
-assert_md_xpath "1" "count(//check_line_of_sight[@object='\$weapon'][@objectoffset='\$weapon.barrelposition'][@excludeself='false'][@useaimtarget='true'][@target='\$module'])" "engageability service module-fallback muzzle-origin line-of-fire check count"
-assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityResult'\"])" "engageability result event count"
-assert_md_xpath "1" "count(//raise_lua_event[@name=\"'X4GunneryControl.EngageabilityBatchComplete'\"])" "engageability batch-complete event count"
-grep -Fq "EngageabilityService.\$targetids.{\$targetindex} + ':' + \$engageable + ':' + \$known + ':' + EngageabilityService.\$expectedmembers" "$md"
-grep -Fq "\$target.relativeposition.{\$weapon}.rotation.pitch" "$md"
-grep -Fq "EngageabilityService.\$arcmins.{\$weaponindex} * 1deg" "$md"
-grep -Fq "EngageabilityService.\$arcmaxs.{\$weaponindex} * 1deg" "$md"
-# Issue #54 Task 2: the firing-range gate mirrors shipped combat-AI
-# reachability — bounding-box distance, no size term
-# (move.attack.object.capital.xml:656,680; md-ai.md).
-# The negative is scoped to the old EngageabilityService weapon-reach
-# predicate — point distance plus half the target's size, the
-# asteroid-mining approach form. Unrelated point-distance calculations
-# elsewhere in this MD (e.g. camera framing) stay legal.
-grep -Fq "\$weapon.bboxdistanceto.{\$target} le \$weapon.maxfirerange" "$md"
-if grep -Eq "\\\$weapon\.distanceto\.\{\\\$target\}[[:space:]]*\+[[:space:]]*\(?[[:space:]]*\\\$target\.size[[:space:]]*/[[:space:]]*2" "$md"; then
-  echo "production MD reintroduced the point-distance (distanceto + target.size/2) firing-range predicate" >&2
-  exit 1
-fi
-assert_md_xpath "1" "count(//check_line_of_sight[parent::do_if[contains(@value, 'bboxdistanceto')][contains(@value, 'aimpitch')]])" "arc and range rejection wrap line-of-fire check"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityMember']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'weapons.count lt')][contains(@value, 'not EngageabilityService.\$weapons.indexof')])" "member nonce/count/duplicate guards"
-assert_md_xpath "1" "count(//cue[@name='EngageabilityTarget']//do_if[contains(@value, '\$nonce == EngageabilityService.\$nonce')][contains(@value, 'targets.count lt')][contains(@value, 'not EngageabilityService.\$targets.indexof')])" "target nonce/count/duplicate guards"
-grep -Fq "[@event.param3.\$targets, 20].min" "$md"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$range'][@exact='InRangeService.\$weapon.maxfirerange'])" "one range read per turret pass"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//set_value[@name='\$beam'][@exact='InRangeService.\$weapon.isbeam'])" "one beam read per turret pass"
+assert_md_xpath "1" "count(//cue[@name='InRangeCommit']//do_if[@value='not \$beam and typeof \$speedship == datatype.component']/do_if[@value='@\$speedship.maxspeed gt 0']/set_value[@name='\$extra'][@exact='[\$range * 1.1, 500m].min'])" "non-beam moving-target allowance uses MD speed"
+assert_md_xpath "1" "count(//cue[@name='InRangeService']//do_if[contains(@value, '\$target.bboxdistanceto.{InRangeService.\$weapon} lt \$range + \$extra')])" "target-box to turret-origin strict range gate"
+assert_md_xpath "3" "count(//cue[@name='InRangeBegin']//do_if[@value='typeof InRangeService.\$weapon != datatype.component and InRangeService.\$weapon'] | //cue[@name='InRangeTarget']//do_if[@value='typeof \$target != datatype.component and \$target'] | //cue[@name='InRangeTarget']//do_if[@value='typeof \$speedship != datatype.component and \$speedship'])" "in-range turret, target and speed-source conversion"
+assert_md_xpath "1" "count(//cue[@name='InRangeCommit']//do_if[contains(@value, 'InRangeService.\$targets.count == InRangeService.\$expected')][contains(@value, 'typeof InRangeService.\$weapon == datatype.component')]/raise_lua_event[@name=\"'X4GunneryControl.InRangeResult'\"])" "compact result requires complete target pass"
 grep -Fq 'Helper.clearDataForRefresh(menu)' "$main"
-grep -Fq 'State.surfaceAlternatives(allSurfaces, pinnedID,' "$main"
-grep -Fq 'State.surfaceMacroOptions(allSurfaces, session.surfaceTypeFilter)' "$main"
-grep -Fq 'local elemRefresh = elemTable:addRow("surface_refresh", {})' "$main"
 grep -Fq 'local surfaceCrossTypePolicy = "size_first"' "$main"
-grep -Fq 'State.surfacePage(ordered, browser.page, browser.pageSize)' "$main"
-grep -Fq 'State.surfacePageKey(browser.generation, pageEntries)' "$main"
-grep -Fq 'requestEngageability(pinnedID, "surface_pinned")' "$main"
-grep -Fq 'requestEngageabilities(pageIDs, "surface_page")' "$main"
+grep -Fq 'Range.setRangeTargets(pageIDs, pinnedID)' "$main"
+grep -Fq 'Range.runRangeSweep(now)' "$main"
 grep -Fq 'local parentHullRow = elemTable:addRow("surface_parent_hull", {})' "$main"
-grep -Fq 'local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})' "$main"
-grep -Fq 'browser.nextAutoRefreshAt = browser.autoRefresh and (getElapsedTime() + 10) or nil' "$main"
-grep -Fq 'menu.elementFrame:update()' "$main"
 grep -Fq 'returnToConsole("Watch closed")' "$main"
 grep -Fq 'openTargetBrowser()' "$main"
 grep -Fq 'softtargetKey() ~= previousTarget' "$main"
 grep -Fq 'isEligibleEngagementTarget(current.softtargetID)' "$main"
-grep -Fq 'State.turretGroupLabel(entry.group)' "$main"
 grep -Fq 'State.isEngagementTargetAllowed(session and session.shipID, object)' "$main"
-grep -Fq 'local activeExternalMenuName' "$main"
-grep -Fq 'activeExternalMenuName = function()' "$main"
-grep -Fq 'State.lifecycle.suspendingMap' "$main"
+# The old Map-named suspension lifecycle must not return; menu names are not an
+# allowlist for active-session preservation.
+for obsolete_menu_lifecycle in \
+  'State.lifecycle.suspendingMap' \
+  'State.lifecycle.suspendedMap' \
+  'reopenSuspendedSession' \
+  'map.registerCallback("on_menu_cleanup"' \
+  'externalMenu == "MapMenu" and State.isOwned(session)'; do
+  if grep -Fq "$obsolete_menu_lifecycle" "$main"; then
+    echo "obsolete Map-specific external-menu lifecycle remains: $obsolete_menu_lifecycle" >&2
+    exit 1
+  fi
+done
 grep -Fq 'sameSession(expectedSession, expectedEpoch)' "$main"
 grep -Fq 'currentSession(expectedSession, expectedEpoch)' "$main"
 grep -Fq 'sessionEpoch = sessionEpoch + 1' "$main"
@@ -123,21 +93,8 @@ if grep -Eq '^[[:space:]]*Helper\.clearMenu\(menu\)' "$main"; then
   echo "raw clearMenu bypasses X4 tracked-menu cleanup" >&2
   exit 1
 fi
-grep -Fq 'local function sessionWatchdog()' "$main"
-grep -Fq 'reopenSuspendedSession("returned to " .. tostring(mode))' "$main"
-grep -Fq 'State.lifecycle.suspendedMap' "$main"
-grep -Fq 'map.registerCallback("on_menu_cleanup"' "$main"
-grep -Fq 'externalMenu == "MapMenu" and State.isOwned(session)' "$main"
 grep -Fq 'C.SetTrackedMenuFullscreen(menu.name, false)' "$main"
 grep -Fq 'bool IsGamePaused(void)' "$main"
-# Phase rename: "watch"/"direct" are gone; "engaged" + controlMode replace them.
-grep -Fq 'session.phase == "engaged"' "$main"
-grep -Fq 'session.controlMode' "$main"
-# New lifecycle entry point replaces beginWatch/beginDirect.
-grep -Fq 'State.beginEngaged' "$main"
-# Baseline: directSnapshots renamed to committedBaseline; staged buffer added.
-grep -Fq 'committedBaseline' "$main"
-grep -Fq 'session.staged' "$main"
 # The adapter commits one atomic table. Its session half remains an encoded
 # string because raise_lua_event returns only one scalar; the paired component
 # target travels separately and is buffered before control receives an envelope.
@@ -172,11 +129,6 @@ if grep -Fq 'session.phase == "direct"' "$main"; then
   echo 'residual session.phase == "direct" found in main file' >&2
   exit 1
 fi
-# Shape, not value: a dated build id must exist so a debug log identifies the
-# build. Pinning the literal only forced a test edit on every bump.
-grep -Eq 'local runtimeBuild = "[0-9]{4}-[0-9]{2}-[0-9]{2}-[^"]+"' "$main"
-grep -Fq 'UI initialized; build=" .. runtimeBuild' "$main"
-
 for removed_log in \
   'watchdog state changed' \
   'raw group id carries padding' \
@@ -200,7 +152,22 @@ grep -Fq 'standardButtons = { back = true, close = true }' "$main"
 # index and ignores setColSpan, so this grep is the only guard.
 grep -Fq 'row[2]:setColSpan(3):createText(label' "$main"
 grep -Fq 'memberRow[2]:setColSpan(3):createText("  " .. member.displayName)' "$main"
-grep -Fq 'viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize' "$main"
+# Direct target details keep their own upper-left frame on their own layer; the
+# controls keep the upper-right layer-0 frame. Both descriptors are merged into
+# the single custom X4GunneryOverlay registration.
+grep -Fq 'local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil' "$main"
+grep -Fq 'local elementFrameLayer = 3' "$main"
+grep -Fq 'local elemTable = elemFrame:addTable(5, {' "$main"
+grep -Fq 'viewFrame.properties.height = controlsHeight' "$main"
+grep -Fq 'elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize' "$main"
+grep -Fq 'claimEngagedOverlayRegistration(overlayLayers, overlayFrames)' "$main"
+# The element frame must never become a second persistent View registration:
+# the only direct View.registerMenu call is the fullscreen overlay restore.
+if [ "$(grep -Fc 'View.registerMenu(' "$main")" != "1" ] \
+    || ! grep -Fq 'View.registerMenu(engagedOverlayID' "$main"; then
+  echo "the element frame must not get its own persistent View registration" >&2
+  exit 1
+fi
 grep -Fq 'endSession("global movement event")' "$main"
 grep -Fq 'endSession("left chair or ship")' "$main"
 grep -Fq 'C.SetPlayerCameraCockpitView(true)' "$main"
@@ -213,16 +180,18 @@ if grep -Fq 'Helper.closeMenu(menu, "back", nil, false)' "$main"; then
   echo "camera view still uses auto-returning menu close" >&2
   exit 1
 fi
-grep -Fq 'Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu"' "$main"
 grep -Fq 'local function registerUIHooks()' "$main"
-grep -Fq 'if isInGunnerChair() and not menu.shown and not activeExternalMenuName()' "$main"
 grep -Fq 'redirectDockedMenu()' "$main"
 grep -Fq 'Helper.closeMenuAndOpenNewMenu(main, "X4GunneryTestLab"' "$testlab"
 
 grep -Fq 'local seatLeaving = false' "$main"
-grep -Fq 'if not seatLeaving then C.SetPlayerCameraCockpitView(true) end' "$main"
-if grep -A20 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCameraCockpitView(true)' && \
-   ! grep -A20 'local function discardSession' "$main" | grep -Fq 'if not seatLeaving then C.SetPlayerCameraCockpitView(true) end'; then
+# discardSession restores the chair camera only when NOT leaving the seat (the
+# notify path covers the seat-exit case), and routes the onboard exit through
+# restoreStandingCamera() instead of a bare cockpit restore (#68 Task 3).
+grep -Fq 'local function restoreStandingCamera()' "$main"
+grep -Fq 'elseif not seatLeaving then' "$main"
+if grep -A30 'local function discardSession' "$main" | grep -Fq 'C.SetPlayerCameraCockpitView(true)' && \
+   ! grep -A30 'local function discardSession' "$main" | grep -Fq 'elseif not seatLeaving then'; then
   echo "unguarded C.SetPlayerCameraCockpitView(true) found inside discardSession" >&2
   exit 1
 fi
@@ -324,19 +293,6 @@ grep -Fq 'X4GC_Shoulder_Cam' cutscenes/x4gc_shoulder_cam.xml
 # Group row checkbox wired to session.checkedGroupKeys via State.toggleGroup.
 grep -Fq 'createCheckBox' "$main"
 grep -Fq 'State.toggleGroup' "$main"
-# Camera roster drives Next/Prev and is queried to gate those buttons.
-grep -Fq 'State.cameraRoster' "$main"
-# Turret cycling is the only way to move through a multi-member roster.
-grep -Fq 'State.cycleCamera' "$main"
-# applyPov() replaces the old applyEngagePov/setEngagePov pair. It is declared
-# as a forward reference and assigned after sendCutsceneAimStart/Stop.
-grep -Fq 'applyPov' "$main"
-# Auto-retarget: chooseAimTarget picks the nearest operational hostile.
-grep -Fq 'local function chooseAimTarget' "$main"
-# povMode and aimTargetID are live session fields used in the UI and retarget.
-grep -Fq 'session.povMode' "$main"
-grep -Fq 'session.aimTargetID' "$main"
-
 # Auto-next Target lives on the compact direct-control panel and decides what
 # happens when the engaged object dies: re-engage, or reset the view and hand
 # the choice back at the target browser.
@@ -384,19 +340,14 @@ if grep -n 'memberRow' "$main" | grep -Eq '(startAutoEngage|startTargetSelection
   exit 1
 fi
 
-# Task 2: cycleEntry and cycleTarget
-grep -Fq 'State.cycleEntry' "$main"
-grep -Eq '(local function cycleTarget|local [a-zA-Z_, ]*cycleTarget|cycleTarget = function)' "$main"
-# Task 4: element frame for target display, unregistered when it goes away
-grep -Fq 'menu.elementFrame' "$main"
-grep -Fq 'Helper.clearFrame(menu, elementFrameLayer)' "$main"
 # Select-all checkbox over the group column.
 grep -Fq 'State.toggleAllGroups(session)' "$main"
 grep -Fq 'State.allGroupsChecked(session)' "$main"
-# Every frame gets a semi-transparent background so cell text stays legible.
+# Every current frame builder gets a semi-transparent background so cell text
+# stays legible over the live view.
 bg_calls=$(grep -c 'setBackground("solid"' "$main")
-if [ "$bg_calls" -ne 3 ]; then
-  echo "all 3 frames must set a semi-transparent background; found $bg_calls" >&2
+if [ "$bg_calls" -ne "$frame_builders" ]; then
+  echo "every Gunnery frame builder must set a semi-transparent background; found $bg_calls for $frame_builders frame builders" >&2
   exit 1
 fi
 # Teardown order: Helper.closeMenu() untracks the menu before its views are

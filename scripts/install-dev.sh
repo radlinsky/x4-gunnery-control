@@ -8,6 +8,17 @@ if [[ ! -d "$game/extensions" || ( ! -f "$game/X4.exe" && ! -f "$game/X4" ) ]]; 
   echo "Not an X4 installation: $game" >&2
   exit 2
 fi
+
+if [[ -n "${X4GC_INSTALL_TESTLAB:-}" ]]; then
+  roots=$(.agents/skills/research-x4-modding/scripts/discover-x4-roots.sh)
+  extracted_root=$(sed -n 's/^extracted_root=//p' <<<"$roots")
+  if [[ -z "$extracted_root" || ! -d "$extracted_root" ]]; then
+    echo "Test Lab preflight requires complete official X4 XML source sets at .x4-research-cache/official-source-sets in the main checkout." >&2
+    exit 3
+  fi
+  python3 scripts/preflight_testlab_loadouts.py --source-root "$extracted_root"
+fi
+
 target="$game/extensions/x4_gunnery_control"
 # target is an explicitly constructed subdirectory under a validated X4 installation;
 # the extension root ($game/extensions) must never be removed — only $target is wiped.
@@ -23,5 +34,10 @@ if [[ -n "${X4GC_INSTALL_TESTLAB:-}" ]]; then
   rm -rf "$testlab"
   mkdir -p "$testlab"
   cp -R testlab/x4_gunnery_control_testlab/. "$testlab/"
-  echo "Installed loose Test Lab files to $testlab"
+  # The committed spec stays enabled=false so the offline suite passes; a dev
+  # install is always for a live run, so enable only the installed copy.
+  spec="$testlab/ui/scenario_spec.lua"
+  sed -i 's/^    enabled = false,/    enabled = true,/' "$spec"
+  grep -q '^    enabled = true,' "$spec" || { echo "Failed to enable installed Test Lab spec" >&2; exit 3; }
+  echo "Installed loose Test Lab files to $testlab (spec enabled)"
 fi

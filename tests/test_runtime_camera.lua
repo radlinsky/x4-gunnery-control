@@ -312,4 +312,27 @@ do
     getElapsedTime = oldElapsed58
 end
 
+-- ── 149. target browser holds unchecked Direct-baseline groups in staged mode ─
+do
+    local checked = fix.makeGroup{ group = "ga" }
+    local unchecked = fix.makeGroup{ group = "gb" }
+    gcMenu.onShowMenu()
+    local sess = API.getSession()
+    sess.groups = { checked, unchecked }
+    sess.checkedGroupKeys = { [checked.key] = true }
+    sess.staged = { [unchecked.key] = { mode = "defend", armed = false } }
+    sess.committedBaseline = { { kind = "group", shipID = sess.shipID, contextID = 5, path = "p",
+        group = "gb", mode = "attackenemies", armed = false } }
+    sess.phase = "console"
+    C.GetExternalTargetViewComponent = function() return 27 end
+    local lastMode
+    C.SetTurretGroupMode2 = function(_, _, _, group, mode) if group == "gb" then lastMode = mode end end
+    fix.resetUITriggeredEvents()
+    assert(API.startTargetSelection({ checked }) == true, "149: target selection must start")
+    assert(lastMode == "defend", "149: unchecked group must be held in its staged mode; got " .. tostring(lastMode))
+    local committed = false
+    for _, e in ipairs(fix.uiTriggeredEvents) do committed = committed or e.control == "session_commit" end
+    assert(committed, "149: holding must persist via session_commit")
+end
+
 print("runtime camera tests passed")

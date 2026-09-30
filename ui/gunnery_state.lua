@@ -3,6 +3,15 @@
 X4GunneryState = X4GunneryState or {}
 local State = X4GunneryState
 
+-- Shared by the member list, hologram hover, and camera header. Keep position
+-- separate from the group's equipment-bearing display name.
+function State.turretLabel(group, member)
+    local position = group and (group.positionLabel or State.turretGroupLabel(group.group))
+    local name = member and member.displayName or ""
+    if position and position ~= "" and name ~= "" then return position .. "; " .. name end
+    return name ~= "" and name or position or ""
+end
+
 function State.singleKey(componentID)
     return "single:" .. tostring(componentID)
 end
@@ -101,12 +110,10 @@ function State.isReturnablePlayerView(mode)
 end
 
 -- Lifecycle is deliberately independent from the visible Gunnery Control
--- phase. X4 can remove a Helper frame when another menu opens; retaining a
--- phase alone must never be interpreted as retaining input/view ownership.
+-- phase. `reopening` is reserved for explicit pre-open/restore/Test Lab
+-- handoffs; an already-engaged overlay remains owned across external menus.
 State.lifecycle = {
     owned = "owned",
-    suspendingMap = "suspending_map",
-    suspendedMap = "suspended_map",
     reopening = "reopening",
 }
 
@@ -118,15 +125,14 @@ function State.isOwned(session)
     return session ~= nil and session.lifecycle == State.lifecycle.owned
 end
 
-function State.isMapSuspended(session)
-    return session ~= nil and (session.lifecycle == State.lifecycle.suspendingMap
-        or session.lifecycle == State.lifecycle.suspendedMap
-        or session.lifecycle == State.lifecycle.reopening)
-end
-
-function State.newSession(shipID, controlGroup)
+function State.newSession(shipID, controlGroup, origin)
     return {
         active = true, shipID = shipID, controlGroup = controlGroup,
+        -- Session ingress origin: "chair" (physical gunnercontrol seat) or
+        -- "onboard" (standing aboard the same ship, no seat). Drives context
+        -- validity and physical exit behaviour; the legacy controlGroup field
+        -- above stays for save-compat and is deliberately never read.
+        origin = origin or "chair",
         lifecycle = State.lifecycle.owned,
         phase = "console", groups = {}, expanded = {},
         checkedGroupKeys = {}, controlMode = nil,
@@ -250,25 +256,6 @@ function State.surfaceAlternatives(surfaces, pinnedID, typeFilter, macroFilter)
     return alternatives
 end
 
--- Pure same-root surface-element fallback selection (Issue #45). `surfaces` is
--- the already-operational same-root list readSurfaceTargets() supplies, so no
--- operational-state or enumeration logic is repeated here. When the lost ID is
--- the root itself (compared normalized) this was an ordinary object-level
--- target loss, not a surface-element loss, and there is no same-root
--- fallback to hand back. Otherwise the best remaining surface under the
--- caller's cross-type policy wins; the lost surface is excluded by
--- surfaceAlternatives, and neither the supplied list nor its entries is
--- mutated, because surfaceAlternatives works on a copy.
-function State.nextSameRootSurface(surfaces, lostTargetID, targetRootID, crossTypePolicy)
-    if State.isNullID(lostTargetID) or State.isNullID(targetRootID) then return nil end
-    if normID(lostTargetID) == normID(targetRootID) then return nil end
-    local alternatives = State.surfaceAlternatives(surfaces, lostTargetID, "any", "any")
-    table.sort(alternatives, function(a, b)
-        return State.surfaceMetadataLess(a, b, crossTypePolicy)
-    end)
-    return alternatives[1] and alternatives[1].componentID or nil
-end
-
 function State.surfacePage(entries, page, pageSize)
     pageSize = math.max(1, math.floor(tonumber(pageSize) or 20))
     local pageCount = math.max(1, math.ceil(#(entries or {}) / pageSize))
@@ -286,83 +273,11 @@ function State.surfacePageKey(generation, entries)
     return tostring(generation or 0) .. ":" .. table.concat(ids, ",")
 end
 
--- Pure OFFLINE planner for the ENGAGEABLE-aware fallback sequence
--- (Issue #45 Task 4): ranked same-root surfaces in pages, then the target's
--- hull, then ranked other objects. stage is "surfaces", "hull", or
--- "objects"; orderedIDs are the ranked IDs for that stage (any ID form; the
--- result lookup is normalized); page/pageSize address the current page of
--- orderedIDs (pageSize defaults to 20 through surfacePage) and are ignored
--- for "hull", which plans all supplied IDs as one batch; results maps
--- normalized ID -> accepted ENGAGEABLE result.
---
--- The runtime owns epoch/signature validation and timeouts: only ACCEPTED
--- results may reach this planner. A stale, signature-mismatched, or timed-out
--- reading must arrive as an absent or pending entry so it yields wait, never
--- a manufactured zero. An incomplete-coverage reading is unresolved in the
--- same sense: an accepted engageable == 0 is a proven zero only when total ==
--- 0 or known and total are both numeric and known == total; a zero with
--- known < total, a missing known while total > 0, or any other incomplete
--- coverage waits instead of masquerading as a proven zero. A positive
--- engages even when known < total, because engageable > 0 has already proven
--- at least one ENGAGEABLE.
--- Within the current page/batch the first ranked ID
--- with a settled engageable > 0 is engaged; the largest count never wins.
--- Inputs are never mutated.
---
--- Returns exactly one action table:
---   { action = "wait" }       a current-page/batch result is missing, pending,
---                             lacks a numeric engageable count, or is a zero
---                             with incomplete coverage
---   { action = "engage", targetID = id }   first ranked positive ID, verbatim
---   { action = "next_page" }  all-zero page with ranked entries remaining
---   { action = "hull" }       surfaces exhausted (final all-zero page)
---   { action = "objects" }    hull settled with zero engageable
---   { action = "none" }       objects exhausted (final all-zero batch)
-function State.planEngageFallback(stage, orderedIDs, page, pageSize, results)
-    if stage ~= "surfaces" and stage ~= "hull" and stage ~= "objects" then
-        error("unknown fallback stage: " .. tostring(stage))
-    end
-    local batch, currentPage, pageCount
-    if stage == "hull" then
-        batch, currentPage, pageCount = {}, 1, 1
-        for _, id in ipairs(orderedIDs or {}) do batch[#batch + 1] = id end
-    else
-        batch, currentPage, pageCount = State.surfacePage(orderedIDs, page, pageSize)
-    end
-    local results = results or {}
-    -- Classifies one accepted result. "positive": engageable > 0, proven even
-    -- under partial coverage. "zero": engageable == 0 with complete coverage
-    -- (total == 0, or known and total numeric with known == total). "wait":
-    -- missing, pending, nonnumeric, negative, or an incomplete-coverage zero.
-    local function classify(id)
-        local result = results[normID(id)]
-        if result == nil or result.pending then return "wait" end
-        local engageable = tonumber(result.engageable)
-        if engageable == nil or engageable < 0 then return "wait" end
-        if engageable > 0 then return "positive" end
-        local known = tonumber(result.known)
-        local total = tonumber(result.total)
-        if total == 0 then return "zero" end
-        if known ~= nil and total ~= nil and known == total then return "zero" end
-        return "wait"
-    end
-    for _, id in ipairs(batch) do
-        if classify(id) == "wait" then return { action = "wait" } end
-    end
-    for _, id in ipairs(batch) do
-        if classify(id) == "positive" then return { action = "engage", targetID = id } end
-    end
-    if stage == "hull" then return { action = "objects" } end
-    if currentPage < pageCount then return { action = "next_page" } end
-    return { action = stage == "surfaces" and "hull" or "none" }
-end
-
 function State.newSurfaceBrowser(rootID)
     return {
         rootID = rootID, generation = 0, filterSignature = "",
-        autoRefresh = false, nextAutoRefreshAt = nil,
-        page = 1, pageSize = 20, orderedIDs = {}, metadataByID = {},
-        pageResults = {}, pinnedResult = nil, pinnedRefreshAt = nil,
+        page = 1, pageSize = 10, orderedIDs = {}, metadataByID = {},
+        pinnedRefreshAt = nil,
     }
 end
 
@@ -926,6 +841,9 @@ function State.saveState(session)
         povMode = session.povMode or "manual",
         autoNextTarget = flag(session.autoNextTarget ~= false),
         directMode = session.directMode or "attackenemies",
+        -- Ingress origin must survive a Reload-UI so an onboard console does not
+        -- come back as a chair session (which would then demand the seat).
+        origin = session.origin or "chair",
         shipID = tostring(session.shipID),
         -- Which ship this payload belongs to. shipID cannot answer that after a
         -- load, because a load reassigns it; the name survives.
@@ -1048,6 +966,11 @@ local function validSessionRecord(record)
     -- When present it must be one of the two known values; anything else is corruption.
     if record.directMode ~= nil then
         if record.directMode ~= "attackenemies" and record.directMode ~= "autoassist" then return false end
+    end
+    -- origin: optional; absent in legacy payloads (defaults to "chair"). When
+    -- present it must be one of the two known ingress kinds.
+    if record.origin ~= nil then
+        if record.origin ~= "chair" and record.origin ~= "onboard" then return false end
     end
     return validCameraLocation(record)
 end
@@ -1267,6 +1190,9 @@ function State.restoreState(session, records, liveGroups)
     -- the caller's candidate; on any refusal above, it is byte-for-byte the
     -- object that onRestoreEnvelope created before it considered a swap.
     session.phase = head.phase
+    -- Legacy payloads predate origin; treat an absent/unknown value as chair so
+    -- an old save never resurrects as an onboard session.
+    session.origin = (head.origin == "onboard") and "onboard" or "chair"
     session.controlMode = (head.controlMode ~= "" and head.controlMode) or nil
     session.povAnchor = head.povAnchor
     session.povMode = head.povMode

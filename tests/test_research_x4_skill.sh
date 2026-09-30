@@ -14,6 +14,10 @@ if rg -n 'TODO' "$skill"; then
   echo 'skill still contains TODO markers' >&2
   exit 1
 fi
+if rg -n '^\|.*#[0-9]+\b' "$skill/references/index.md"; then
+  echo 'research index contains GitHub issue/task labels' >&2
+  exit 1
+fi
 for classification in documented-public shipped-source third-party-technique inference live-tested; do
   grep -Fq "\`$classification\`" "$skill/SKILL.md"
 done
@@ -28,6 +32,17 @@ fi
 grep -Fq 'mayattack' "$skill/references/md-ai.md"
 grep -Fq 'before object-event registration' "$skill/references/md-ai.md"
 grep -Fq 'Rename a cue when moving it across the hierarchy' "$skill/references/md-ai.md"
+grep -Fq 'A remote operational station can receive exact turret and shield equipment synchronously' "$skill/references/md-ai.md"
+grep -Fq 'documented as either a ship or a station module' "$skill/references/md-ai.md"
+grep -Fq 'md/setup.xml:85-99' "$skill/references/md-ai.md"
+scenario_skill_dir=.agents/skills/spawn-gunnery-scenario
+scenario_equipment="$scenario_skill_dir/references/equipment.md"
+grep -Fq 'references that exact id directly' "$scenario_equipment"
+grep -Fq 'not add a Lua whitelist or an MD branch for it' "$scenario_equipment"
+if rg -n -F "apply_loadout object=\"\$Station\"" "$scenario_skill_dir"; then
+  echo 'scenario guidance still applies a station loadout to the station root' >&2
+  exit 1
+fi
 grep -Fq 'XTools_1.11.zip!Readme.txt' "$skill/references/tooling.md"
 grep -Fq 'documented-public' "$skill/references/tooling.md"
 grep -Fq 'English X4 Scripts and Modding' "$skill/references/source-registry.md"
@@ -97,9 +112,9 @@ grep -Fqx "root=$tmp/extracted" <<<"$search_dry"
 "$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle >/dev/null
 search_glob=$("$scripts/search-x4.sh" --extracted "$tmp/extracted" --extensions "$tmp/extensions" -- needle -g '*.lua')
 grep -Fq "$tmp/extensions/example/source.lua" <<<"$search_glob"
-search_root=$(X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" --dry-run -- root-discovered)
+search_root=$(X4GC_X4_ROOT="$tmp/game" "$scripts/search-x4.sh" --dry-run -- root-discovered)
 grep -Fqx "root=$tmp/game/extensions" <<<"$search_root"
-X4GC_X4_ROOT="$tmp/game" X4GC_EXTRACTED_ROOT="$tmp/extracted" "$scripts/search-x4.sh" -- root-discovered >/dev/null
+X4GC_X4_ROOT="$tmp/game" "$scripts/search-x4.sh" -- root-discovered >/dev/null
 
 index_dry=$("$scripts/index-lua-ffi.sh" --source "$tmp/extracted" --dry-run)
 grep -Fqx "source=$tmp/extracted" <<<"$index_dry"

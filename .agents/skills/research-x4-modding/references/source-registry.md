@@ -14,7 +14,7 @@ them.
 | Egosoft forums | [English X4 Scripts and Modding](https://forum.egosoft.com/viewforum.php?f=181), other language modding forums, and targeted `site:forum.egosoft.com` search | Lead by default, including staff posts; corroborate with shipped source, current official docs, or a live test. Direct automated access may hit the Anubis bot checkpoint, so record that limitation and use indexed results or user-provided permalinks. |
 | Public mod sources | GitHub/GitLab upstream repositories, X4 Modding Wiki, Nexus descriptions/files, Steam Workshop descriptions/discussions | Lead or `third-party-technique`. Prefer upstream source plus release/version metadata. Download only with permission; inspect outside tracked paths. |
 | Community discussion | Discord, Reddit, videos, comments, and private messages | Lead only. Discord requires user access/authority; request a permalink or transcript and record author/date. Never promote chat testimony without reproduction or stronger evidence. |
-| Live game | Disposable save, Test Lab, build marker, debug log, and explicit matrix | `live-tested` only after reproduction with the conditions in `testing-experiments.md`. |
+| Live game | Disposable save, Test Lab, build marker, debug log, and explicit matrix | `live-tested` only after reproduction with a controlled run and correlated log review. |
 
 ## External lookup procedure
 

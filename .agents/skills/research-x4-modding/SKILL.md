@@ -16,8 +16,15 @@ for it.
   `references/`.
 - On implicit use to answer a question, do not mutate the repository. Return
   proposed findings with classification, source, version, and live-test need.
-- Keep user observations experimental until reproduced. Never upgrade them to
-  a durable claim from a report alone.
+- Keep `references/index.md` technical; omit GitHub issue/task/workstream labels
+  from index rows and keep that project-management history in GitHub.
+- Design live tests source-first: inspect current shipped source before probing,
+  then use a controlled fixture that isolates the mechanism under test and
+  includes discriminating controls.
+- Keep user observations, hypotheses, failed-fixture diagnoses, and provisional
+  conclusions experimental in the issue/log. Promote to `live-tested` only
+  after reproduction and your own review of the correlated engine log; a user
+  report alone is never enough. Record only what the accepted controls establish.
 - Never copy unpacked game files, third-party extension files, catalogs, or
   data files into tracked repository paths. Use the ignored
   `.x4-research-cache/` or an explicit external temporary directory.
@@ -62,19 +69,35 @@ not give it a higher classification.
 
 ## Read the focused reference
 
+- Read [../../../docs/TURRET_ASSET_KINEMATICS.md](../../../docs/TURRET_ASSET_KINEMATICS.md)
+  before tracing turret assets, mounts, runtime instances, ANI descriptors, or
+  muzzle endpoints; it is the canonical identity vocabulary.
 - Read [references/source-policy.md](references/source-policy.md) for source
   order, classification, and KB update criteria.
 - Read [references/source-registry.md](references/source-registry.md) for every
   external-source investigation or source-coverage audit.
 - Read [references/ui-lua-menu-camera.md](references/ui-lua-menu-camera.md)
   for UI FFI, menus, camera, input-frame, target, and surface findings.
+- Read [references/object-configuration-map-anchors.md](references/object-configuration-map-anchors.md)
+  for holomap slot pivots, effective camera matrices, capture identity and
+  picking-measurement limits before repeating a configuration-map search.
 - Read [references/md-ai.md](references/md-ai.md) for MD/XSD lookup and AI
-  semantics.
+  semantics. Before adding periodic MD work, read its resetting-cue warning:
+  a self-resetting poll needs a `delay`; `checkinterval` does not pace resets.
+  For weapon activity, check the exact firing/attack event attribution in
+  `common.xsd` and keep missile launch attribution separate from impact attribution.
 - Read [references/tooling.md](references/tooling.md) before using XRCatTool.
+- Read [references/native-analysis.md](references/native-analysis.md) before
+  analysing `X4.exe`. It pins the installed executable and its SHA-256, holds
+  verified RVAs and struct offsets, and carries the PE/`.pdata`/Capstone recipe,
+  the native-search rules, and the native prompt/output convention.
 - Read [references/debug-logging.md](references/debug-logging.md) for X4
   `-logfile` argument form, log location, and missing-log diagnosis.
-- Read [references/testing-experiments.md](references/testing-experiments.md)
-  for live-test design and evidence promotion.
+- Search [references/testing-experiments.md](references/testing-experiments.md)
+  only when a prior live experiment is relevant to the current mechanism or
+  failure mode. It is a historical archive, not default reading for live-test
+  design or evidence promotion; prefer a narrower focused reference when one
+  already covers the fact.
 
 ## Use the helpers safely
 
@@ -84,9 +107,9 @@ the current working directory is the skill directory. Invoke every helper as
 `"$SKILL_DIR/scripts/<helper>"`.
 
 - Run `"$SKILL_DIR/scripts/discover-x4-roots.sh" --help` before relying on
-  default paths.
-  Prefer `X4GC_X4_ROOT` and `X4GC_EXTRACTED_ROOT` or explicit options; do not
-  use a home-directory variable as a target.
+  default paths. The complete reusable XML corpus lives at the main checkout's
+  `.x4-research-cache/official-source-sets/`; linked worktrees share that same
+  directory. Use explicit root options only for one-off research.
 - Run `"$SKILL_DIR/scripts/search-x4.sh" --help`. Search with
   `"$SKILL_DIR/scripts/search-x4.sh" --dry-run -- PATTERN`; the `--` before the
   pattern is mandatory. It searches the KB/project and discovered or selected

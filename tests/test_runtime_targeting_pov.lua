@@ -131,12 +131,13 @@ assert(sess23.aimTargetID ~= nil, "precondition: updateAimTarget must pick a tar
 assert(fix.getLastFrameProps() ~= nil,
     "acquiring an aim target in manual mode must rebuild the panel frame")
 
--- ── 27. engaged/direct with targetObjectID creates TWO frames ────────────────
--- The left element panel is only shown when controlMode=="direct" AND
--- session.targetObjectID is set.
+-- ── 27. engaged/direct builds two frames under one overlay registration ───
+-- Compact controls stay upper right on layer 0; the surface-element browser
+-- stays upper left on layer 3. Both descriptors belong to the single custom
+-- X4GunneryOverlay registration.
 gcMenu.onShowMenu()
 local sess27 = API.getSession()
-assert(sess27 ~= nil, "expected session for two-frame test")
+assert(sess27 ~= nil, "expected session for engaged overlay test")
 sess27.groups = { grp27 }
 sess27.checkedGroupKeys = { ["grp27"] = true }
 sess27.phase = "engaged"
@@ -149,14 +150,46 @@ sess27.aimTargetID = 500
 local ok27, err27 = pcall(function() gcMenu.display() end)
 assert(ok27, "display() raised in engaged/direct+targetObjectID: " .. tostring(err27))
 assert(fix.getFrameCount() == 2,
-    "engaged/direct with targetObjectID must create TWO frames; got " .. tostring(fix.getFrameCount()))
--- frame:display() registers a view keyed by layer (helper.lua onFrameHandleView
--- Created / View.registerMenu("Helper" .. layer)). Two frames sharing the
--- default layer 4 means the second silently replaces the first on screen.
+    "engaged/direct with targetObjectID must create two frames; got " .. tostring(fix.getFrameCount()))
 local fp = fix.getFrameProps()
-assert(fp[1].layer ~= fp[2].layer,
-    "the two engaged/direct frames must sit on different layers; both had "
-    .. tostring(fp[1].layer))
+assert(fp[1].layer == 0 and fp[1].viewHelperType == "X4GunneryOverlay",
+    "engaged/direct controls must use the layer-0 X4GunneryOverlay frame; got layer "
+    .. tostring(fp[1].layer) .. " type " .. tostring(fp[1].viewHelperType))
+assert(fp[1].x == Helper.viewWidth - fp[1].width - 32 and fp[1].y == 32,
+    "engaged controls must sit in the upper-right corner; got x " .. tostring(fp[1].x))
+assert(fp[2].layer == 3,
+    "the Direct surface browser must keep its own layer-3 frame; got layer " .. tostring(fp[2].layer))
+assert(fp[2].x == 32 and fp[2].y == 32,
+    "the Direct surface browser must sit in the upper-left corner; got x " .. tostring(fp[2].x))
+local overlay27, helperViews27 = nil, 0
+for _, entry in ipairs(fix.View.menus) do
+    if entry.id == "X4GunneryOverlay" then overlay27 = entry end
+    if entry.name == gcMenu.name and entry.id ~= "X4GunneryOverlay" then
+        helperViews27 = helperViews27 + 1
+    end
+end
+assert(overlay27 ~= nil and helperViews27 == 0,
+    "both engaged frames must be owned by the single X4GunneryOverlay registration")
+assert(overlay27.framedescriptors[0] ~= nil and overlay27.framedescriptors[3] ~= nil,
+    "the X4GunneryOverlay registration must own the layer-0 and layer-3 descriptors")
+assert(overlay27.numframes == 2 and #overlay27.frames == 2
+        and overlay27.layers[0] ~= nil and overlay27.layers[3] ~= nil,
+    "the merged View entry must account for both owned descriptors and runtime frames")
+assert(fix.View.currentFrames == 2,
+    "two engaged descriptors must consume exactly two View frames; got "
+    .. tostring(fix.View.currentFrames))
+for cycle = 1, 3 do
+    gcMenu.display()
+    assert(fix.View.currentFrames == 2,
+        "engaged redraw cycle " .. cycle .. " must return to exactly two View frames; got "
+        .. tostring(fix.View.currentFrames))
+end
+local surfacePanelFound27 = false
+for _, entry in ipairs(fix.getCreatedTexts()) do
+    if entry.row == "surface_header" then surfacePanelFound27 = true end
+end
+assert(surfacePanelFound27,
+    "engaged/direct with targetObjectID must render the surface-element panel in the layer-3 frame")
 
 -- ── 28. engaged/auto creates ONE frame ───────────────────────────────────────
 gcMenu.onShowMenu()
@@ -302,21 +335,6 @@ gcMenu.display()
 assert(povButton(75) == nil and povButton(76) == nil,
     "Auto-engage must not offer the target cycling buttons at all")
 
--- ── 33. leaving direct mode unregisters the element panel's frame ────────────
--- clearDataForRefresh() does not touch menu.frames, so a frame left over from a
--- previous display() stays registered as its own view ("Helper" .. layer) and
--- keeps rendering. Only Helper.clearFrame() unregisters it.
-sess30.controlMode = "direct"
-sess30.targetObjectID = 500
-fix.resetClearedFrames()
-gcMenu.display()
-assert(#fix.getClearedFrames() == 0, "nothing to clear while the element panel is shown")
-sess30.phase = "target_select"
-gcMenu.display()
-assert(fix.getClearedFrames()[1] == 3,
-    "leaving the element panel must clearFrame its layer; cleared "
-    .. tostring(fix.getClearedFrames()[1]))
-
 -- ── 39. Auto-next Target on: a dead target takes the turrets along ───────────
 -- The old behaviour moved only session.aimTargetID, so the camera followed the
 -- next ship while the groups stayed armed against a wreck: the soft target and
@@ -358,8 +376,21 @@ GetComponentData = function(component, ...)
     return unpack(vals)
 end
 -- The engaged target 500 is destroyed; 98 is the only survivor.
+C.IsComponentClass = function(component, class) return tostring(component) == "98" and class == "ship" end
 C.IsComponentOperational = function(cid) return tostring(cid) == "98" end
+local rangeRequest
+local savedAdd39 = AddUITriggeredEvent
+AddUITriggeredEvent = function(screen, control, params)
+    if control == "in_range_begin" then rangeRequest = params end
+    return savedAdd39(screen, control, params)
+end
 X4GunneryControlAPI.updateAimTarget()
+assert(sess39.phase == "target_select" and rangeRequest,
+    "object loss must open the browser and begin a fresh range sweep")
+fix.fireEvent("X4GunneryControl.InRangeResult", "x4gcr2:" .. rangeRequest.nonce
+    .. ":" .. rangeRequest.weaponid .. ":1")
+X4GunneryControlAPI.updateAimTarget()
+AddUITriggeredEvent = savedAdd39
 assert(tostring(sess39.aimTargetID) == "98",
     "auto-next must move the aim to the survivor; got " .. tostring(sess39.aimTargetID))
 assert(tostring(sess39.targetObjectID) == "98",
@@ -370,13 +401,11 @@ assert(sess39.phase == "engaged",
 
 -- ── 40. engaged/direct session toggles have independent defaults ────────────
 gcMenu.display()
-assert(#fix.getCreatedCheckBoxes() == 2,
-    "the engaged/direct panel must offer Auto-next and surface auto-refresh; got "
+assert(#fix.getCreatedCheckBoxes() == 1,
+    "the engaged/direct panel must offer Auto-next alone; got "
     .. tostring(#fix.getCreatedCheckBoxes()))
 assert(fix.getCreatedCheckBoxes()[1].checked == true,
     "the Auto-next Target checkbox must be checked while session.autoNextTarget is on")
-assert(fix.getCreatedCheckBoxes()[2].checked == false,
-    "surface auto-refresh must default unchecked")
 
 -- ── 41. Auto-next Target off: a dead target returns to the picker ────────────
 -- Reset the view first: one Esc's worth of state, so whatever cinematic was on

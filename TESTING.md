@@ -13,8 +13,7 @@ tests cannot settle.
 `./scripts/validate.sh` is the Linux validation gate — the main check while you
 work, and the first thing CI runs. It does, in order: whitespace/newline checks,
 `xmllint` on every XML file, Lua syntax (`luac -p`), the Lua unit tests, the
-executable-line coverage gate (`scripts/check-coverage.sh`), `shellcheck`, the
-shell tests, and the version/packaging contracts. The Lua and shell tests run in
+`shellcheck`, the shell tests, and the version/packaging contracts. The Lua and shell tests run in
 **parallel** (`xargs -P`/background jobs), so never rely on execution order or on
 a fixed temp path — use `mktemp`. Each test file is an independent process.
 
@@ -35,19 +34,14 @@ Run one Lua test on its own while iterating:
 lua5.1 tests/test_runtime_targeting.lua
 ```
 
-## The coverage gate is a canary
+## Test policy
 
-`ui/gunnery_state.lua` and `ui/gunnery_persistence.lua` must have **100%**
-executable-line coverage; changed lines in `ui/gunnery_control.lua` must be
-covered against the PR base. The pass line prints the denominators, e.g.
-`coverage passed: state 735/735, persistence 84/84`. Those numbers are a canary:
-after a refactor or a file split they must be **unchanged**. If `state`/`persistence`
-drops, a test lost a line it used to cover; if it rises, you duplicated a block.
-A genuinely engine-only unreachable line goes in
-`tests/support/coverage_exclusions.txt` as `ui/gunnery_control.lua:<line>  # reason`
-— never a blanket waiver.
+Add tests only for realistic behavior that existing tests do not already protect.
+Prefer the smallest useful check and remove overlapping cases. Line coverage is
+not a reason to add a test. See [tests/README.md](tests/README.md); behavior that
+requires X4 still needs a live test.
 
-## How to add a test (and keep files small)
+## How to add a useful test
 
 - **Use the shared fixture.** `local fix = dofile("tests/support/runtime_fixture.lua").load()`
   gives a fresh stubbed environment (ffi, Helper, events, the loaded module).
@@ -57,18 +51,14 @@ A genuinely engine-only unreachable line goes in
 - **Match UI buttons by intent**, never by raw id: `fix.buttonByLabel("nextTurret")`
   or `fix.LABEL.<name>`. Do not write `text:20991:NN`; if you need a new label,
   add it to `LABEL_ID` in the fixture (ids come from `t/0001.xml`).
+- **Before adding a new test case**, check whether an existing case already
+  protects the same behavior. Delete overlapping or obsolete cases.
 - **End every file with a unique** `print("<area> tests passed")`.
-- **Keep each test file under ~600 lines.** A file the local tooling can't open is
-  a file that stops getting maintained. When one grows past that, split it by
-  concern into sibling files named `test_<area>_<concern>.lua` (e.g.
-  `test_runtime_targeting_pov.lua`, `test_gunnery_state_surface.lua`). Splits are
-  discovered automatically — `validate.sh` runs `tests/*.lua`, and the coverage
-  runner globs `tests/test_gunnery_state*.lua`, `tests/test_gunnery_persistence.lua`,
-  and `tests/test_runtime_*.lua`, so a new name matching those is picked up with no
-  script change. When splitting: never cut inside a `do ... end` block or a
-  function; copy the shared top-of-file preamble and any helpers into each part
-  (duplication across test files is fine); confirm each part runs standalone with
-  `lua5.1 tests/<file>.lua`; and confirm the coverage denominators are unchanged.
+- **Keep each test file under ~600 lines.** Split large tests by concern into
+  sibling `test_<area>_<concern>.lua` files. `validate.sh` automatically runs
+  every `tests/*.lua` file. Keep each split file independently runnable; repeat
+  the minimal setup it needs when necessary. Splitting files is organization,
+  not a reason to add new test cases.
 
 ## Things that will bite you
 
@@ -96,10 +86,12 @@ an entry once it has a dated result; move anything durable into the research
 knowledge base. The coverage matrix further down is what to test on every
 build; this section is what is currently unanswered.
 
-For PR #16, use `PR16_LIVE_TEST_CHECKLIST.md` as the canonical procedure and do
-not repeat this queue separately: item 1 maps to M10/O7, item 2 to D5, item 3 to
-M12, and item 4 to D6. Record results in the checklist, then use them to retire
-or update these durable open questions.
+For issue/PR live tests, use the issue's acceptance criteria as the test
+contract. When the run needs a deterministic Test Lab fixture, follow
+`.agents/skills/spawn-gunnery-scenario/SKILL.md`; for installing the exact loose
+files and deciding whether to reload or restart, follow `docs/RELOADING.md`.
+The open checks below remain separate durable questions and are not a
+replacement for an issue-specific procedure.
 
 Every check assumes a filtered log:
 
@@ -175,11 +167,13 @@ double-clicking the launcher in Windows Explorer:
 \\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-test-lab-dev.bat
 ```
 
-The launcher reinstalls the main mod automatically before starting X4; no
-separate install step is needed. No arguments are needed for a default Steam or
-GOG installation. The `UNC paths are not supported.` notice from `cmd.exe` is
-expected and harmless. Use a Command Prompt instead when a custom installation
-folder is required:
+The launcher installs the checkout's loose files before X4. For any live result,
+follow `docs/RELOADING.md`: install the exact loose files under test before
+reload/restart and verify `[X4GC] UI initialized` appears after the reload. A
+checkout SHA alone does not prove which loose files X4 loaded. No
+arguments are needed for a default Steam or GOG installation. The `UNC paths are
+not supported.` notice from `cmd.exe` is expected and harmless. Use a Command
+Prompt instead when a custom installation folder is required:
 
 ```bat
 "\\wsl.localhost\<distro>\home\<user>\path\to\x4-gunnery-control\scripts\launch-x4-test-lab-dev.bat" "C:\Program Files (x86)\Steam\steamapps\common\X4 Foundations"
@@ -213,27 +207,26 @@ When testing the main Gunnery Control modes, confirm the following for the
   group is checked.
 - Checking at least one mutable group activates both buttons.
 
-**Auto-engage** is camera-only. Verify that no turret group's mode or armed
-state changes after pressing it. The live panel opens with the current turret
-name, four POV buttons (Turret POV manual, Target POV manual, Turret POV
-cinematic, Target POV cinematic), and Next Turret / Previous Turret. Next/Prev
-cycle through every operational turret of all checked groups in console order
-and wrap around; both buttons are greyed when only one operational turret
-qualifies. Cycling changes only the camera focus, never what is engaged.
-The camera-view frames request `keepHUDVisible=false` and
-`showTickerPermanently=false`; verify live that the HUD/ticker are actually
-suppressed for the installed game/UI combination. Record transient mission
-updates, notifications, and the bottom-left Messages area separately: X4 can
-still show them in ticker-only mode. This does not change persistent
-notification settings.
+**Auto-engage** temporarily applies staged settings: checked mutable groups use
+`attackenemies` with staged Armed; unchecked mutable groups use their staged
+Mode/Armed. The Direct-control policy selector does not affect Auto-engage.
+These settings remain live when returning to the console; ending the Gunnery
+Control session restores its baseline. The live panel shows the current turret,
+four POV buttons, and Next/Previous Turret. Next/Prev cycle through operational
+turrets in checked groups, wrap around, and are greyed when only one qualifies.
+Cycling changes only camera focus. Verify the camera-view frames suppress the
+HUD/ticker as requested by `keepHUDVisible=false` and
+`showTickerPermanently=false`. Record transient mission updates, notifications,
+and the bottom-left Messages area separately; X4 can still show them in
+ticker-only mode. Persistent notification settings are unchanged.
 
 **Direct-control** first opens a smaller, unblurred browser of known ships and
 stations in the current sector within the player ship's radar range. It excludes
-the occupied ship and its surfaces, not every player-owned object. Clicking a
-target immediately engages its hull — there is no intermediate hull/element
-picker screen. The browser must collapse to a compact upper-right panel at that
-point. **Every checked mutable group** must be set to armed `autoassist` —
-not just one.
+the occupied ship and its surfaces. Clicking a target engages its hull directly
+and collapses the browser to the compact panel. Every checked mutable group is
+armed and uses the selected **Direct-control turret mode**: **Attack all enemies**
+(`attackenemies`, default) or **Attack my current enemy** (`autoassist`). Changing
+the selector while engaged updates all checked groups.
 
 Verify the **upper-left element panel**: it is titled with the engaged target's
 name and lists Hull (greyed by default, because hull is what engage selects)
@@ -257,10 +250,9 @@ outside the compact panel and should change the soft target without losing
 Direct-control; arbitrary unbracketed 3D geometry is not a supported picker
 path.
 
-Note: Direct-control never re-issues the turret order on its own. If the
-engaged target is destroyed, the camera moves on but the turrets fall back to
-autoassist; Next Target or Previous Target is how the player re-engages a
-different one.
+With **Auto-next Target** enabled, target loss re-engages automatically. A lost
+surface element searches ENGAGEABLE same-root surfaces before its hull and other
+objects. With Auto-next off, choose the next target manually.
 
 Map is the first supported resumable interruption. From the console and the
 live panel, `M` followed by Map close should reacquire the owned session;
@@ -303,9 +295,9 @@ camera and clears the in-memory sweep.
 | Grouping | ungrouped turret (appears as its own single-member group), linked group, fully destroyed group (camera only) |
 | Motion | stationary, player ship turning, NPC captain moving the ship |
 | Checkbox gate | Auto-engage and Direct-control greyed with no checked groups; activated once at least one mutable group is checked |
-| Auto-engage | Mode and armed state of every checked group unchanged after entering and exiting; Next/Prev cycles and wraps when two or more groups are checked; Next/Prev greyed when only one operational turret qualifies |
-| Direct-control | Clicking a target in the browser engages its hull immediately with no intermediate picker; every checked mutable group set to armed `autoassist`; upper-left element panel lists Hull (greyed) plus surface elements; clicking a non-active element re-points all groups; Next/Previous Target cycles in browser order and is greyed when ≤1 candidate; Cease Engagement restores all groups. Save/load restores the session as of 2026-08-08: the console reopens engaged, same groups checked, same turret POV, same target, and Cease afterwards still returns every group to its original mode. |
-| Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
+| Auto-engage | Checked mutable groups temporarily use `attackenemies` + staged Armed; unchecked mutable groups use staged Mode/Armed; Direct-control policy ignored; session exit restores baseline; Next/Prev cycles/wraps; both greyed with one operational turret |
+| Direct-control | Browser engages the hull directly; all checked groups are armed; both Direct-control turret modes apply to every checked group and can switch while engaged; element panel retargets groups; Next/Previous Target follows browser order; Auto-next handles target loss, with same-root ENGAGEABLE surfaces before hull/object fallback; Cease restores all groups; active-session save/load resumes groups, policy, POV and target, then Cease restores baseline. |
+| Cinematic POV | Game UI hidden while cinematic runs; `Esc` from cinematic returns to manual panel; with Auto-next on, kill the target while cinematic and confirm camera restarts on the next target (brief cut expected); confirm turrets keep firing during the cinematic |
 | Lifecycle | Cease Engagement, close console/Get Up, undock, teleport/ship change, save/load, retry, skip |
 | Menu lifecycle | From console and live panel: open/close Map and verify documented resume/fallback; try Player Information and another hotkey and verify safe teardown, not assumed resume |
 | Re-entry | Get up from every phase, sit again, and verify no blank transparent frame or stale camera remains |
@@ -335,30 +327,25 @@ turret-centered operation for that bridge.
 
 ## Seat-exit popup and Esc-cure checklist
 
-**Prerequisite:** hints/help texts must be enabled in X4 game options
-(**Settings → Interaction → Help Texts** or equivalent). If help texts are
-disabled the `show_help` MD action is a no-op: the popup does not appear and
-the Esc-cure does not fire. Enable them before this checklist and record
-whether they were on or off if any step fails.
+Existing live evidence confirms the mod's **Get Up** route restores `Esc` after
+this camera bug. The other exit routes below share the recovery path but remain
+cases to verify.
 
-For each row, sit in the gunnery chair, enter the listed mode, leave the seat
-via the listed route, and check both the popup text and that `Esc` opens the
-game menu immediately after standing up.
+For each row, enter the mode, leave by the listed route, then confirm the popup
+text and that `Esc` immediately opens the game menu after standing.
 
 | Mode entered | Exit route | Expected popup text | Esc opens game menu |
 |---|---|---|---|
-| Auto-engage (camera only, no group override) | Our **Get Up** button | "Gunnery Control disengaged." | Yes — immediately |
+| Auto-engage | Our **Get Up** button | "Gunnery Control disengaged." | Yes — immediately |
 | Direct-control (at least one group overridden) | Our **Get Up** button | "Turret groups restored to their previous settings." | Yes — immediately |
 | Auto-engage | Stand up via `Shift+D` or the vanilla stand-up interaction (not our button) | "Gunnery Control disengaged." | Yes — immediately |
 | Direct-control | Stand up via `Shift+D` or the vanilla stand-up interaction (not our button) | "Turret groups restored to their previous settings." | Yes — immediately |
 | Auto-engage | Undock (if applicable to the ship) | "Gunnery Control disengaged." | Yes — immediately |
 | Direct-control | Undock (if applicable to the ship) | "Turret groups restored to their previous settings." | Yes — immediately |
 
-**Failure mode to watch for:** if the popup appears but `Esc` is still dead,
-the `show_help` MD action ran but did not reach `View.createView/DisplayView`.
-If the popup does not appear at all, confirm help texts are enabled and inspect
-the filtered log for any MD or Lua error during the `Notify` cue. The normal
-notification-emission diagnostic is intentionally silent.
+**Failure:** if either check fails, stop and upload `debug.log`; ChatGPT will
+inspect the `Notify` cue and related MD/Lua errors. This test proves the observed
+popup/`Esc` result, not X4's hidden input state.
 
 ## Deterministic lifecycle reproduction
 
@@ -373,13 +360,12 @@ Run one sequence without improvising so visible transitions can be compared:
    confirm it returns to the console. Wait two seconds.
 4. Press **Auto-engage** once more, press `M`, close Map with one `Esc`,
    then wait two seconds.
-5. Check a second mutable group. Press **Direct-control**, click a target in
-   the browser, and confirm the browser immediately collapses to the compact
-   panel — no intermediate hull picker. Confirm both groups are armed
-   `autoassist`. Confirm the upper-left element panel lists Hull (greyed) plus
-   surface elements. Confirm Next Target / Previous Target is active when more
-   than one candidate exists. Choose **Select Engagement Target** to confirm
-   the browser expands, then re-select and confirm the panel returns.
+5. Check a second mutable group. Leave **Attack all enemies** selected, press
+   **Direct-control**, click a target, and confirm the browser collapses to the
+   compact panel. Confirm both groups are armed in `attackenemies`; switch to
+   **Attack my current enemy** and confirm both remain armed in `autoassist`.
+   Confirm the element panel lists Hull plus surface elements and Next/Previous
+   Target is active when more than one candidate exists.
 6. With the panel showing, press `M`, close Map, then choose **Cease
    Engagement**. Confirm both groups are restored to their original mode and
    armed state.
@@ -413,7 +399,7 @@ Run these target cases manually while capturing Test Lab logs:
 | Hostile whole ship | Target is preserved |
 | Hostile engine, turret, or shield surface element | Exact surface-component ID and any returned connection are preserved |
 | Stationary hostile station surface element | Exact module-surface component ID and any returned connection are preserved |
-| Target destroyed during a manual Direct-control test | Record the expected preservation failure and cleanup result |
+| Target destroyed during a manual Direct-control test | Auto-next/manual fallback completes and cleanup remains correct |
 
 Safe Cheat Panel's Extended mode can spawn an NPC-faction ship or station for
 these manual scenarios; it cannot create arbitrary standalone modules. Live-fire

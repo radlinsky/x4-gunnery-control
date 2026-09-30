@@ -6,13 +6,13 @@ usage() {
 Usage: discover-x4-roots.sh [--x4-root DIR] [--extracted-root DIR] [--format lines|shell]
 
 Report existing X4 installation and unpacked-source roots without modifying them.
-Use X4GC_X4_ROOT and X4GC_EXTRACTED_ROOT to configure defaults. The script also
-checks common Steam paths on Linux/WSL when no explicit value is supplied.
+Explicit root options are for one-off research. Otherwise unpacked source is the
+main checkout's .x4-research-cache/official-source-sets directory.
 EOF
 }
 
 x4_root=${X4GC_X4_ROOT:-}
-extracted_root=${X4GC_EXTRACTED_ROOT:-}
+extracted_root=
 format=lines
 
 while (($#)); do
@@ -44,8 +44,16 @@ if [[ -z "$x4_root" ]]; then
     '/mnt/c/GOG Games/X4 Foundations' \
     "$PWD/X4 Foundations" || true)
 fi
+
 if [[ -z "$extracted_root" ]]; then
-  extracted_root=$(find_root "$PWD/x4-extracted" "$PWD/.x4-research-cache/extracted" || true)
+  script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+  repo_dir=$(CDPATH= cd -- "$script_dir/../../../.." && pwd)
+  git_common_dir=$(git -C "$repo_dir" rev-parse --path-format=absolute --git-common-dir)
+  main_repo_dir=$(dirname "$git_common_dir")
+  candidate="$main_repo_dir/.x4-research-cache/official-source-sets"
+  if [[ -d "$candidate" ]]; then
+    extracted_root=$candidate
+  fi
 fi
 
 if [[ "$format" == shell ]]; then

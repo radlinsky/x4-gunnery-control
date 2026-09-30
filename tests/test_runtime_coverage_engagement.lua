@@ -24,6 +24,40 @@ assert(fix.API.engageTarget(99), "Direct entry must accept an external target")
 assert(session.phase == "engaged" and session.controlMode == "direct",
     "Direct entry must build the engaged session")
 
+-- Test Lab may identify the exact qualified component, but it must not write
+-- any target or enter Direct control. The callback runs only after the owner
+-- manually selects the marked root and then the marked exact surface.
+do
+    session.phase, session.controlMode = "console", nil
+    session.checkedGroupKeys = { g = true }
+    session.staged = { g = { mode = "autoassist", armed = true } }
+    session.groups[1].mode, session.groups[1].armed = "attack", false
+    local targetWrites, writtenTargets, callbackResult = 0, {}, nil
+    local originalSetSofttarget = fix.C.SetSofttarget
+    fix.C.SetSofttarget = function(component)
+        targetWrites = targetWrites + 1
+        writtenTargets[#writtenTargets + 1] = tonumber(component)
+        return true
+    end
+    assert(fix.API.suggestTestEngagement(99, function(ok, reason)
+        callbackResult = { ok = ok, reason = reason }
+    end), "Test Lab must be able to mark an eligible exact component")
+    assert(targetWrites == 0 and callbackResult == nil
+            and session.phase == "console" and session.controlMode == nil,
+        "marking a Test Lab component must not designate or enter Direct control")
+    assert(fix.API.engageTarget(98), "the owner's marked-root click must work normally")
+    assert(targetWrites == 1 and writtenTargets[1] == 98 and callbackResult == nil,
+        "the root click must not complete an exact-surface recommendation")
+    assert(fix.API.engageTarget(99), "the owner's marked-surface click must work normally")
+    assert(targetWrites == 2 and writtenTargets[2] == 99
+            and callbackResult and callbackResult.ok == true,
+        "only the exact manual surface click may complete the Test Lab recommendation")
+    assert(session.phase == "engaged" and session.controlMode == "direct"
+            and tostring(session.aimTargetID) == "99",
+        "the manual surface click must leave Direct control aimed at the exact component")
+    fix.C.SetSofttarget = originalSetSofttarget
+end
+
 -- The refusal branch: a player-owned root is rejected, so entering Direct
 -- against one leaves the existing engagement untouched.
 GetComponentData = function(_, key)
@@ -33,20 +67,8 @@ end
 assert(not fix.API.engageTarget(99), "Direct entry must refuse a player-owned target")
 GetComponentData = function() return nil end
 
--- Live test result, 2026-08-10 (conclusive): under Direct-control with the
--- player's pilot actively fighting (aicommandraw="attackobject"), weaponmode
--- "attackenemies" DOES honour the mod's supplied preferred target and fallback
--- list. The long-held fear that vanilla's fight script overwrites our list is
--- DISPROVEN by observation. Direct-control therefore always uses attackenemies
--- (State.TICK_MODE), regardless of the pilot's command state.
---
--- Behavioural invariant: engageTarget with an actively fighting pilot must
---   (a) succeed,
---   (b) leave checked mutable groups in mode "attackenemies" (State.TICK_MODE),
---   (c) raise the "direct_fallback" UI-triggered event.
--- (c) is load-bearing: under the old autoassist branch, emitDirectFallback
--- returned early for a fighting pilot, so no fallback list was ever issued and
--- a turret with no firing solution on the preferred target tracked in silence.
+-- Regression: with an attacking pilot, the attackenemies policy must still
+-- issue the preferred-target fallback list (observed live on 2026-08-10).
 do
     session.phase, session.controlMode = "target_select", nil
     session.staged = { g = { mode = "attack", armed = false } }
@@ -58,15 +80,8 @@ do
     local eventsBefore = #fix.uiTriggeredEvents
     assert(fix.API.engageTarget(99),
         "attacking pilot: engageTarget must succeed (live result 2026-08-10 disproves vanilla overwrite)")
-    -- The group must be in attackenemies: the mode is now a constant.
-    local s = fix.API.getSession()
-    local grpMode = fix.C.SetTurretMode and s.groups[1].mode
-        -- setMode calls the FFI; check via getSession group state.
-        -- The fixture stubs setMode effects through group.mode mutations.
-        -- The real assertion is that emitDirectFallback ran (see below).
-    -- A direct_fallback event must have been raised. Without attackenemies the
-    -- old emitDirectFallback guard would have returned false here, giving the
-    -- turret no fallback list at all.
+    -- The attackenemies policy must still issue its fallback list when the
+    -- player's pilot is already fighting.
     local sawFallback = false
     for i = eventsBefore + 1, #fix.uiTriggeredEvents do
         if fix.uiTriggeredEvents[i].control == "direct_fallback" then

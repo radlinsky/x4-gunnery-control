@@ -1,102 +1,112 @@
 -- Test Lab scenario spec: the fixture the next live test needs.
 --
--- THIS FILE IS AN AGENT-AUTHORED INPUT. The directing agent edits it between
--- tests; the owner then clicks Reload UI once in Test Lab and the fixture
--- spawns. Keep it plain: literal fields only, no logic, no requires.
---
--- Reload rule: docs/RELOADING.md puts all of testlab/ in the "restart" row, so
--- restart unless the owner relaxes that rule. This is a `ui/*.lua` entry in
--- ui.xml, so a spec-body edit arguably needs only install + Reload UI, but that
--- narrower claim is unconfirmed in game; see
--- .agents/skills/spawn-gunnery-scenario/SKILL.md before relying on it.
+-- THIS FILE IS AGENT-AUTHORED INPUT. Keep it plain: literal fields only, no
+-- logic and no requires.
 --
 -- Fields
---   id        string   Change this whenever the fixture changes. The MD spawns
---                      a spec only once per id; leaving the id alone means a
---                      Reload UI during an unrelated test spawns nothing twice.
---   enabled   boolean  false leaves the spec in place but inert.
---   setup     table    Required for Create test scenario. Preflights the exact
---                      ship/loadout and selects the exact turret group.
+--   id        string   Change when fixture meaning changes.
+--   enabled   boolean  false leaves the repository fixture inert.
+--   location  table    Optional absolute remote-sector anchor.
+--     sectorMacro string Exact sector macro name.
+--     x/y/z       number Anchor position in sector coordinates, metres.
+--   setup     table    Exact player ship/turret selection for Create.
+--     remote          boolean Spawn the setup ship remotely, then arm it only
+--                             after the owner teleports aboard.
 --     shipMacro       string  Required player ship macro.
---     shipLabel       string  Exact visible required ship name (trimmed).
---     turretGroup     string  Raw group id, not the display label.
+--     shipLabel       string  Exact visible ship name (trimmed).
+--     turretGroup     string  Named-group selector: raw turret group id.
+--                             Required for selectAll; when selectAll is false
+--                             it is mutually exclusive with singleTurretMacro.
+--     singleTurretMacro string Optional exact equipment macro of a production
+--                             kind="single" turret entry. Selects that one
+--                             turret; requires expectedTurrets = 1.
 --     turretLabel     string  Human-readable group label.
 --     expectedTurrets number  Exact operational-member count.
---     selectAll       boolean Select every mutable turret group and verify the
---                             aggregate member count instead of one raw group.
+--     expectedMemberMacros list Optional exact sorted member-macro multiset.
+--     selectAll       boolean Optional; select every mutable turret group and
+--                             verify the aggregate member count.
 --   groups    list     One entry per batch of identical ships.
 --     label     string   Spawned name prefix and log label.
 --     macro     string   Ship macro name, without the "macro." prefix.
 --     faction   string   Faction id, e.g. "player", "xenon", "argon".
---     count     integer  How many to create (1-12).
---     distance  number   Metres forward of the player ship (negative = astern).
---     spread    number   Optional. Metres of extra scatter beyond `distance`;
---                        omit or 0 puts them all at the same range.
---     x         number   Optional. Metres right of the player ship (positive =
---                        right, negative = left). Default 0.
---     y         number   Optional. Metres above the player ship (positive = up,
---                        negative = down). Default 0.
---                        Axes: positive x = right, positive y = up,
---                        positive z (distance) = forward.
---     behaviour string   "wait"  = hold position (a patient target)
---                        "attack"= fly at and shoot the player ship
---                        "none"  = no order at all (default faction AI)
---     hostile   boolean  Optional. true adds a kill-relation boost against the
---                        player so turret autoassist will engage it.
---     holdFire boolean   Keep every turret in HOLD FIRE and repeatedly cease
---                        fire; READY requires the live safety census to pass.
---     stripDefenceUnits boolean Remove all carried defence drones before the
---                        hostile relation is applied.
---     repairGuard boolean Restore the ship and struck component after each
---                        player-ship hit without making either indestructible.
---   stations  list     Deterministic equipped stations. Readiness is withheld
---                      until MD reports the required operational census.
---     label           string  Exact station name.
---     recipe          string  Supported recipe; currently "xen_defence".
---     faction         string  Owner faction id.
---     distance/x/y    number  Player-ship-local placement in metres.
---     spread          number  Optional safepos scatter; use 0 for fixtures.
---     hostile         boolean Add a temporary kill-relation boost.
---     expectedModules number  Exact operational module count required.
---     minSurfaces     number  Minimum modules + operational turrets, missile
---                            turrets, shields, and engines required.
---     holdFire       boolean Keep all station weapons in HOLD FIRE and refuse
---                            READY unless the live mode census proves it.
---
--- Issue #1 experiment: compare the same ticked upper turret group against a
--- candidate whose LINE OF FIRE is BLOCKED by a named, player-owned capital ship, a clear-sky control,
--- and an OUT OF RANGE control. Mark each target in Test Lab and compare
--- [X4GC TEST SOLUTION] against [X4GC TEST HIT].
+--     count     integer  1-12.
+--     distance  number   Forward offset in metres; negative is astern.
+--     spread    number   Optional local safepos scatter. Use 0 for exact work.
+--     x/y       number   Optional right/up offsets in metres.
+--     behaviour string   "wait", "attack", or "none".
+--     hostile   boolean  Optional temporary kill-relation boost vs player.
+--     holdFire  boolean  Repeatedly force all fixture weapons to HOLD FIRE;
+--                        READY requires the live safety census to pass.
+--     stripDefenceUnits boolean Remove carried defence drones before hostility.
+--     repairGuard boolean Restore the ship and struck component after hits from
+--                        the player shooter, without making them invulnerable.
+--     yaw/pitch/roll number Optional spawn orientation in degrees.
+--     preserveOrientation boolean Preserve authored orientation for Wait orders.
+--     role      string   Optional "shooter" role. A shooter must have a named
+--                        deterministic loadout and is kept dormant until armed.
+--     loadout   string   Optional exact <loadout id> from libraries/loadouts.xml.
+--                        Any group may use one; there is no Lua/MD whitelist.
+--     expectedWeapons / expectedTurrets / expectedMissileTurrets
+--                        Required non-negative exact operational totals whenever
+--                        loadout is set. READY fails if any loaded ship differs.
 
--- Published as a global because X4 loads ui.xml <file> entries for their side
--- effects and discards their return value; the `return` at the end is what the
--- offline tests read.
 X4GunneryTestLabScenarioSpec = {
-    id      = "pr-2-solution-competing-osakas-r7",
+    id      = "issue-205-m-xl-hologram-validation-v1",
     enabled = false,
-    setup   = {
-        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
-        shipLabel       = "Ray",
-        turretGroup     = "group_front_up_left",
-        turretLabel     = "All Turrets",
-        expectedTurrets = 14,
-        selectAll       = true,
+
+    location = {
+        sectorMacro = "Cluster_01_Sector001_macro",
+        x = 0,
+        y = 100000,
+        z = 0,
     },
+
+    setup = {
+        remote          = true,
+        shipMacro       = "ship_arg_xl_carrier_02_a_macro",
+        shipLabel       = "I205 XL COLOSSUS E 1",
+        turretGroup     = "group_front_left_up",
+        turretLabel     = "Front Upper Left",
+        expectedTurrets = 2,
+        expectedMemberMacros = {
+            "turret_arg_m_beam_02_mk1_macro",
+            "turret_arg_m_beam_02_mk1_macro",
+        },
+    },
+
     groups = {
-        -- Two separated, stationary capital targets distinguish shots aimed at
-        -- the selected primary from ordinary autonomous fire at a distractor.
-        -- Both remain attackable under exact-hit repair and cannot return fire.
-        { label = "PR2 PRIMARY LEFT OSAKA - REPAIRED HOLD FIRE",
-          macro = "ship_ter_l_destroyer_01_a_macro", faction = "xenon",
-          count = 1, distance = 3500, x = -900, y = 0, spread = 0,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true },
-        { label = "PR2 DISTRACTOR RIGHT OSAKA - REPAIRED HOLD FIRE",
-          macro = "ship_ter_l_destroyer_01_a_macro", faction = "xenon",
-          count = 1, distance = 3500, x = 900, y = 0, spread = 0,
-          behaviour = "wait", hostile = true, holdFire = true,
-          stripDefenceUnits = true, repairGuard = true },
+        {
+            label                 = "I205 XL COLOSSUS E",
+            macro                 = "ship_arg_xl_carrier_02_a_macro",
+            faction               = "player",
+            count                 = 1,
+            distance              = 0,
+            x                     = -10000,
+            spread                = 0,
+            behaviour             = "wait",
+            preserveOrientation   = true,
+            role                  = "shooter",
+            loadout               = "x4gc_testlab_arg_xl_carrier_02_beam_plasma",
+            expectedWeapons       = 4,
+            expectedTurrets       = 4,
+            expectedMissileTurrets = 0,
+        },
+        {
+            label                 = "I205 M CERBERUS VANGUARD",
+            macro                 = "ship_arg_m_frigate_01_a_macro",
+            faction               = "player",
+            count                 = 1,
+            distance              = 0,
+            x                     = 10000,
+            spread                = 0,
+            behaviour             = "wait",
+            preserveOrientation   = true,
+            loadout               = "x4gc_testlab_arg_m_frigate_01_beam",
+            expectedWeapons       = 4,
+            expectedTurrets       = 4,
+            expectedMissileTurrets = 0,
+        },
     },
-    stations = {},
 }
+
 return X4GunneryTestLabScenarioSpec

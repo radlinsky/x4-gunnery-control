@@ -11,6 +11,44 @@
   control group reported to UI Lua is `gunnercontrol`; do not compare them as
   the same identifier.
 
+### Colossus E's resolved bridge carries the full gunner-control station
+- X4: 9.00
+- Status: shipped-source
+- Source: `assets/units/size_xl/macros/ship_arg_xl_carrier_02_a_macro.xml` (05.cat),
+  `assets/units/size_xl/ship_arg_xl_carrier_02.xml` (01.cat),
+  `assets/interiors/bridges/macros/bridge_arg_xl_01_macro.xml` (01.cat),
+  `assets/interiors/bridges/bridge_arg_xl_01.xml` (01.cat), freshly extracted
+  from the installed X4 9.00 Steam catalogs
+- Live test: no — presence established from shipped source 2026-08-23; the
+  Colossus E gunner chair is untested live
+- Finding: `ship_arg_xl_carrier_02_a_macro` (class `ship_xl`) references
+  component `ship_arg_xl_carrier_02` and mounts `bridge_arg_xl_01_macro`
+  (class `cockpit`, component `bridge_arg_xl_01`, geometry
+  `bridge_arg_xl_01_data`) at its only `con_cockpit_01` connection. The
+  component declares exactly one `con_cockpit` connection tagged
+  `cockpit component groups = gunnertrigger`, and the same component carries
+  a five-connection `gunnercontrol` group: `Connection34` (physical
+  `part_console_gunner` console part with `bridge_arg_xl_gunner` sound),
+  `Connection109` (terminal display part), `con_UI002` (`uianchor`),
+  `con_tochair004` (`tochair` seat), and `con_commander002` (`npc service`
+  `stand_terminal_forward`). That is the complete gunner-control station
+  structure, matching the `gunnercontrol` identifier this mod's UI gates on
+  (`ui/gunnery_control.lua` checks `controlGroup() == "gunnercontrol"`), so
+  the Colossus E is a source-supported candidate for the physical gunner
+  chair.
+  Decision for issue #67: SOURCE-SUPPORTED CANDIDATE — presence only. The
+  chair's live clickability/sit behavior on this hull remains untested; do
+  not treat this as a live-tested or working console.
+- Context: every Argon XL macro (builder 01 a/b, carrier 01 a/b, carrier 02 a,
+  resupplier 01 a/b) mounts the same `bridge_arg_xl_01_macro`, so this result
+  covers the whole Argon XL family. The in-install L bridge
+  (`bridge_arg_l_01.xml`) contrasts: its `con_cockpit` carries NO
+  `gunnertrigger` and its `gunnercontrol` group has no `tochair` seat or UI
+  anchor, only a console part and an NPC service connection. The intended
+  known-working contrast hull, the Boron L destroyer ("Ray" in prior live
+  tests), is DLC content absent from this base-game installation, so the
+  contrast was taken from the in-install L bridge instead.
+
 ### Secondary controls may lack an occupied-ship ID
 - X4: 9.00
 - Status: shipped-source
@@ -92,6 +130,28 @@
   suppression method works.
 
 ## Targets and surface elements
+
+### GetRelativeAimOffset is unusable from Gunnery Control's pre-selection target browser
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: live session 2026-09-20, extension `x4_gunnery_control` tested at
+  `6e54e58bd3f33b1c057af052e82e9a7e4ad6517d`, Test Lab scenario
+  `issue-184-relative-aim-preselect-r1`; game `debug.log`
+- Live test: yes — two unselected hostile Osaka candidates
+- Finding: calling `GetRelativeAimOffset(candidateID)` from Gunnery Control
+  while the Direct-control target browser is evaluating candidates does not
+  produce an aim point. In both calls Gunnery Control was still in
+  `phase=target_select`, `session.aimTargetID` was unset, and X4's soft target
+  was `0ULL`. X4 logged:
+  `Invalid case. GetRelativeAimOffset() was called without the player controlling anything atm. Aborting function call.`
+  and returned a zero `PosRot` (`x/y/z/yaw/pitch/roll = 0`).
+- Consequence: this getter cannot be used as Issue #184's pre-selection
+  aim-point source. A successful Lua/FFI return is not proof of a valid aim
+  result; the all-zero value in this state is an engine abort result.
+- Scope: this does not establish what the getter returns while the player is
+  actively controlling a weapon/object. That path has no current Issue #184
+  consumer because Gunnery Control needs the answer before target selection.
+
 
 ### Soft targets preserve component IDs and connection names
 - X4: 9.00
@@ -301,6 +361,55 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   destroys it. Map *suspension* itself works correctly; it is the resume path that is
   lost. Closing the Map with `M` or with `Esc` follows the same path.
 
+### Cleanly closing a vanilla menu (e.g. the Map) from Lua
+- X4: 9.00
+- Status: live-tested
+- Source: extracted `ui/addons/ego_detailmonitor/menu_map.lua` (from `08.dat`) plus
+  game session 2026-09-04, extension `x4_gunnery_control`, branch
+  `issue-68-onboard-map-ingress` commit `d41a3b3`, Windows, X4 9.00 Steam
+- Live test: yes — onboard Map ingress on 2026-09-04
+- Finding: to fully close another menu (the Map) from Lua, call its own
+  `menu.onCloseElement("close")` (get the object via `Helper.getMenu("MapMenu")`).
+  In `menu_map.lua` that runs `Helper.closeMenu(menu, "close")` **and**
+  `menu.cleanup()` and clears any context menu/panels — the same routine any close
+  key runs, so it is keybind-agnostic (invokes the close *action*, not a key). Two
+  wrong approaches, both reproduced live: a bare `Helper.closeMenu(map, ...)` skips
+  `cleanup()` and leaves the map half-alive (menu flashes then dies); and
+  `closeMenuAndOpenNewMenu(map, ...)` opens the replacement *before* the map tears
+  down and corrupts the new menu's dropdown widgets (per-frame
+  `SetDropDownCurOption(): invalid passed dropdownID` spam, blurred menuless view).
+
+### On-foot onboard gunnery control works via the Map interact menu
+- X4: 9.00
+- Status: live-tested
+- Source: game sessions 2026-09-03 / 2026-09-04, branch `issue-68-onboard-map-ingress`
+- Live test: yes — 2026-09-03 (standing turret camera) and 2026-09-04 (full ingress)
+  on a chair-capable ship and an Argon Behemoth E (`ship_arg_l_destroyer_02_a_macro`)
+- Finding: a player on foot inside a player-owned ship can open Gunnery Control via
+  Map → right-click that ship → action, with no gunner chair. The turret target-view
+  camera (`SetPlayerCameraTargetView`) works while standing and restores with
+  `SetPlayerCameraCockpitView(true)`. `player.container` resolves to any ship the
+  player is standing in regardless of hull size, so eligibility is "an owned ship you
+  occupy that has an operational turret group", not a size/interior restriction.
+
+### SirNukes Interact Menu API: adding a Map right-click action
+- X4: 9.00
+- Status: live-tested
+- Source: extracted `sn_mod_support_apis` `md/interact_menu_api.xml` (extension content
+  id `ws_2042901274`) plus game session 2026-09-04
+- Live test: yes — 2026-09-04
+- Finding: subscribe an instantiated cue to `md.Interact_Menu_API.Get_Actions`, check
+  `event.param.$object`, then `signal_cue_instantly cue="md.Interact_Menu_API.Add_Action"
+  param="table[$id=..., $section='interaction', $text={page,id}, $callback=CueName]"`.
+  The API clones `event.param` and logs "Error: missing $id ... args: null" if the
+  table failed to build. Gotchas: (1) the content dependency id is `ws_2042901274`;
+  the folder name `sn_mod_support_apis` is NOT a content id. (2) MD expressions are not
+  Lua — use `{page, id}` for text, never `ReadText(...)`; an invalid MD expression fails
+  to parse and delivers a null `event.param` at runtime, and neither `xmllint` nor
+  `luac` catch it. (3) reference the callback cue by bare name. (4) `$section` is `main`
+  or `interaction`; `$keep_open` (default false) closes only the right-click menu, not
+  the underlying Map.
+
 ### Generic 3D mouse scene picking is not established
 - X4: 9.00
 - Status: inference
@@ -468,6 +577,11 @@ false), and `closeOnUnhandledClick` (default false). Two mechanisms govern
   "no such function exists" conclusion in this knowledge base was derived from
   what vanilla *declares*, not from what the engine *exposes*, and must be read
   with that scope.
+- Inventory correction 2026-09-28: the installed executable pinned in
+  [native-analysis.md](native-analysis.md) has **2,378 named exports**. The
+  historical 2493/1885/609 counts above are stale; the undeclared-call count
+  was not reproduced. See [object-configuration-map-anchors.md](object-configuration-map-anchors.md)
+  for the current scoped export/Lua search. Names still do not establish ABI.
 - Notable undeclared camera exports, absent from vanilla and from
   kuertee-ui-extensions-all alike: `SetPlayerCameraExternalView` and
   `SetPlayerCameraFloatingView`. Also undeclared and relevant to this project:

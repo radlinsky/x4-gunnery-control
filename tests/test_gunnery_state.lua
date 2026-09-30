@@ -13,6 +13,14 @@ eq(State.turretGroupLabel("group_front_inside"), "Front Inner", "inside label")
 eq(State.turretGroupLabel("group_front_left_inside"), "Front Left Inner", "lateral and radial labels remain distinct")
 eq(State.turretGroupLabel("group_front_front_up_upper_left_left"), "Front Upper Left", "repeated directions deduplicate")
 eq(State.turretGroupLabel("group01"), nil, "opaque group has no label")
+
+-- Labels must not repeat equipment from the group heading or truncate names
+-- containing punctuation when reused by the camera header and hover.
+eq(State.turretLabel({ group = "group_front_up_left", displayName = "Front Upper Left: Plasma" },
+    { displayName = "Plasma: Mk 2" }), "Front Upper Left; Plasma: Mk 2", "shared turret label")
+eq(State.turretLabel({ group = "group01", positionLabel = "Group 3" },
+    { displayName = "Beam" }), "Group 3; Beam", "opaque group uses supplied position fallback")
+eq(State.turretLabel(nil, { displayName = "Beam" }), "Beam", "missing group retains turret name")
 assert(not State.isEngagementTargetAllowed(99, 99), "occupied ship is excluded")
 assert(not State.isEngagementTargetAllowed("99", 99), "ID representation does not bypass exclusion")
 assert(not State.isEngagementTargetAllowed(99, 0), "zero target is excluded")
@@ -42,7 +50,7 @@ eq(State.normID("77ll"), "77", "normID strips lowercase ll")
 assert(State.isReturnablePlayerView("firstperson"), "first-person chair view resumes")
 assert(State.isReturnablePlayerView("externalfirstperson"), "external first-person view resumes")
 assert(State.isReturnablePlayerView("cockpit"), "cockpit view resumes")
-assert(not State.isReturnablePlayerView("map"), "map is a suspended menu mode")
+assert(not State.isReturnablePlayerView("map"), "map is not a returnable player view")
 local groups = {
   { key = "g1", members = { { componentID = 1, operational = false } } },
   { key = "g2", members = { { componentID = 2, operational = true } } },
@@ -50,14 +58,10 @@ local groups = {
 local session = State.newSession(99, "gunnercontrol")
 eq(session.lifecycle, State.lifecycle.owned, "new session owns its view")
 assert(State.isOwned(session), "new session is owned")
-State.setLifecycle(session, State.lifecycle.suspendingMap)
-assert(State.isMapSuspended(session), "map suspension is recognized")
-assert(not State.isOwned(session), "suspended map session no longer owns a view")
-State.setLifecycle(session, State.lifecycle.suspendedMap)
-assert(State.isMapSuspended(session), "fully suspended map session is recognized")
 State.setLifecycle(session, State.lifecycle.reopening)
-assert(State.isMapSuspended(session), "map reopen remains an explicit suspension path")
+assert(not State.isOwned(session), "reopening session does not own a view")
 State.setLifecycle(session, State.lifecycle.owned)
+assert(State.isOwned(session), "reopened session returns to owned")
 State.retainSelection(session, groups); eq(session.selectedGroupKey, "g2", "first usable group"); eq(session.selectedMemberID, 2, "first usable member")
 session.selectedGroupKey, session.selectedMemberID = "g2", 2
 State.retainSelection(session, groups); eq(session.selectedGroupKey, "g2", "selection is retained")
@@ -104,9 +108,7 @@ eq(s2.aimTargetID, nil, "newSession: aimTargetID nil")
 eq(s2.autoNextTarget, true, "newSession: autoNextTarget defaults on")
 eq(s2.surfaceTypeFilter, "any", "newSession: surface type filter defaults to Any")
 eq(s2.surfaceMacroFilter, "any", "newSession: surface macro filter defaults to Any")
-eq(s2.surfaceBrowser.pageSize, 20, "newSession: surface browser page size is bounded to 20")
-eq(s2.surfaceBrowser.autoRefresh, false, "newSession: surface auto-refresh defaults off")
-assert(type(s2.surfaceBrowser.pageResults) == "table", "newSession: page results are session-local")
+eq(s2.surfaceBrowser.pageSize, 10, "newSession: surface browser leaves room for the hologram")
 assert(s2.committedBaseline ~= nil, "newSession: committedBaseline exists")
 assert(type(s2.committedBaseline) == "table", "newSession: committedBaseline is table")
 assert(s2.staged ~= nil, "newSession: staged exists")

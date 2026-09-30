@@ -4,8 +4,7 @@ local ffi = require("ffi")
 local C = ffi.C
 local State = X4GunneryState
 local Persistence = X4GunneryPersistence
-local TurretArcLimits = X4GunneryTurretArcLimits or {}
-
+local Hologram = X4GunneryHologram
 ffi.cdef[[
 typedef uint64_t UniverseID;
 typedef struct { UniverseID softtargetID; const char* softtargetConnectionName; uint32_t messageID; } SofttargetDetails2;
@@ -42,30 +41,42 @@ uint32_t GetStationModules(UniverseID* result, uint32_t resultlen, UniverseID st
 ]]
 
 local menu = { name = "X4GunneryMenu", uixID = "x4_gunnery_control" }
-local runtimeBuild = "2026-08-18-auto-next-async-1"
--- The upper-left element panel's own frame layer; every frame registers a view
--- named "Helper" .. layer, so it must differ from the default 4 used elsewhere.
+-- Layer 0 is practical, not reserved; View layers remain globally shared.
+local engagedOverlayLayer = 0
+-- Direct keeps a layer-3 browser frame; both engaged descriptors share one View registration.
 local elementFrameLayer = 3
+local engagedOverlayID = "X4GunneryOverlay"
+local engagedOverlayType = "X4GunneryOverlay"
+-- Owned layers for cleanup; runtime frame indices come from View entry.layers.
+local engagedOverlayLayers = { engagedOverlayLayer }
 local session, redirectPending, nextRefresh = nil, false, 0
+local physicalIngressPendingShip
 local persistence
 local testLabCallbacks
 local testCameraFailures = {}
 -- Declared before enterCamera: a successful turret gate applies the caller's
 -- final POV only after X4 has accepted the temporary turret placement.
 local applyPov
-local dockedHookRegistered, mapHookRegistered, hookAttempts = false, false, 0
-local resumePending, endingSession = false, false
+local dockedHookRegistered, hookAttempts = false, 0
+local resumePending, resumeOpenPending, endingSession = false, false, false
 -- Defined next to leaveChair, but every teardown route needs it.
 local clearOwnShipSofttarget
 local seatLeaving = false
 local sessionEpoch = 0
-local engageabilitySerial, engageabilityCache, engageabilityRequests = 0, {}, {}
-local engageabilityRepaintSerial, engageabilityRepaintPending = 0, nil
-local surfacePinnedUpdatePending = false
-local reopenSuspendedSession
+local Range = { serial = 0, cache = {}, targets = {}, order = {}, members = {},
+    totalWork = 0, peakWork = 0 }
+local rangeTargetLimit = 20
+local redirectDockedMenu
+local completeReleasedOnboardHandoff
+local reopenPendingSession
 local activeExternalMenuName
+local engagedOnUpdate
+local engagedUpdaterInstalled = false
+local suspendedOverlayRegistration
+local engagedOverlayRefreshPending = false
+local suggestedTestEngagement
 local cameraMismatchLogged = false
-local mapReopenFailureLogged = false
+local reopenFailureLogged = false
 local containedShipsFailureLogged, containedStationsFailureLogged = false, false
 local cutsceneNoTurretFailureLogged = false
 
@@ -119,11 +130,16 @@ end
 -- State.newSession is pure Lua and cannot read the ship's name. It is recorded
 -- because it is the only identifier of the ship that survives a save/load: every
 -- id is reassigned, so a restore has nothing else to check the payload against.
-local function newSession(ship)
-    engageabilityCache, engageabilityRequests = {}, {}
-    engageabilityRepaintPending = nil
-    surfacePinnedUpdatePending = false
-    local session = State.newSession(ship, "gunnercontrol")
+local function newSession(ship, origin)
+    Range.automatic, Range.status, Range.nextSweepAt, Range.nextSortAt = nil, nil, nil, nil
+    Range.cache, Range.targets, Range.order, Range.active = {}, {}, {}, nil
+    Range.signature, Range.members, Range.selectedKey = nil, {}, nil
+    Range.memberIndex, Range.targetIndex, Range.sweepStarted, Range.passStarted = 1, 1, nil, nil
+    Range.totalWork, Range.peakWork = 0, 0
+    Range.nextBrowserMembershipAt, Range.nextSurfaceMembershipAt = nil, nil
+    engagedOverlayRefreshPending = false
+    Range.consoleGroupSignature = nil
+    local session = State.newSession(ship, "gunnercontrol", origin or "chair")
     session.shipName = str(C.GetComponentName(ship))
     return session
 end
@@ -188,6 +204,21 @@ local function isInGunnerChair()
     return controlGroup() == "gunnercontrol" and playerShip() ~= 0
 end
 
+local function ownedByPlayer(ship)
+    return ship ~= 0 and componentData(ship, "isplayerowned")
+end
+
+-- Single source of truth for whether the current session still matches the
+-- player's physical/control context.
+-- chair: same ship + gunnercontrol seat.
+-- onboard: same ship + player ownership; no seat required.
+local function sessionContextValid()
+    if not session then return false end
+    if not sameID(playerShip(), session.shipID) then return false end
+    if session.origin == "onboard" then return ownedByPlayer(session.shipID) end
+    return controlGroup() == "gunnercontrol"
+end
+
 -- Every registered View entry, as id/owning-menu-name. A view that outlives its
 -- menu keeps the engine in menu-input mode, which would explain Esc doing
 -- nothing after get-up until another menu opens and closes. View is a global
@@ -235,16 +266,231 @@ end
 local function transitionLifecycle(nextLifecycle, reason, quiet)
     if not session then return end
     local previous = session.lifecycle or "none"
+    if nextLifecycle ~= State.lifecycle.owned and session.targetFallback then
+        Range.cancelAutomatic()
+        session.targetFallback = nil
+        session.autoNextParked = true
+    end
     State.setLifecycle(session, nextLifecycle)
     if not quiet then
         logSession("lifecycle " .. previous .. " -> " .. nextLifecycle .. ": " .. reason)
     end
 end
 
-local function ownedByPlayer(ship)
-    -- Ownership is intentionally conservative. The player must be seated in the
-    -- vessel they are controlling; this excludes station/remote contexts.
-    return ship ~= 0 and componentData(ship, "isplayerowned")
+local function findEngagedOverlayRegistration()
+    if not View or not View.menus then return nil end
+    for _, entry in ipairs(View.menus) do
+        if entry.id == engagedOverlayID then return entry end
+    end
+end
+
+local function installEngagedUpdater()
+    if engagedUpdaterInstalled or not engagedOnUpdate then return end
+    if type(SetScript) ~= "function" then return end
+    SetScript("onUpdate", engagedOnUpdate)
+    engagedUpdaterInstalled = true
+end
+
+local function removeEngagedUpdater()
+    if not engagedUpdaterInstalled then return end
+    if type(RemoveScript) ~= "function" then return end
+    RemoveScript("onUpdate", engagedOnUpdate)
+    engagedUpdaterInstalled = false
+end
+
+-- Rebind retained Helper handles after View recreates runtime frame/widget IDs.
+-- The caller selects each frame ID through View's recorded layer map.
+local function rebindEngagedOverlayFrame(framehandle, frameid)
+    if not framehandle or not frameid then
+        log("engaged overlay descriptor could not be restored")
+        return
+    end
+    framehandle.id = frameid
+    local layer = framehandle.properties.layer
+    menu.frames = menu.frames or {}
+    menu.frames[layer] = frameid
+    local children = table.pack(GetChildren(frameid))
+    Helper.setScripts(menu, layer, frameid, children)
+    for index, widgetid in ipairs(children) do
+        local widget = framehandle.content[index]
+        local oldWidgetID = widget.id
+        widget.id = widgetid
+        if widget.type == "table" then
+            local rowData = menu.rowDataMap[oldWidgetID]
+            menu.rowDataMap[oldWidgetID] = nil
+            menu.rowDataMap[widgetid] = rowData
+            for rowidx, row in ipairs(widget.rows) do
+                for cellidx, cell in ipairs(row) do
+                    if cell.colspan ~= 0 then
+                        cell.id = GetCellContent(widgetid, rowidx, cellidx)
+                        local triggerid = cell.properties.uiTriggerID or nil
+                        if cell.type == "checkbox" then
+                            Helper.setCheckBoxScript(menu, triggerid, widgetid, rowidx, cellidx,
+                                cell.handlers.onClick)
+                        elseif cell.type == "button" then
+                            Helper.setButtonScript(menu, triggerid, widgetid, rowidx, cellidx,
+                                cell.handlers.onClick, cell.handlers.onRightClick,
+                                cell.handlers.onDoubleClick)
+                        elseif cell.type == "dropdown" then
+                            Helper.setDropDownScript(menu, triggerid, widgetid, rowidx, cellidx,
+                                cell.handlers.onDropDownActivated, cell.handlers.onDropDownConfirmed,
+                                cell.handlers.onDropDownRemoved, cell.handlers.onDropDownDeactivated)
+                        end
+                    end
+                end
+            end
+            if widget.properties.prevTable ~= 0 then
+                C.SetTablePreviousConnectedTable(widgetid, children[widget.properties.prevTable])
+            end
+            if widget.properties.nextTable ~= 0 then
+                C.SetTableNextConnectedTable(widgetid, children[widget.properties.nextTable])
+            end
+            if widget.properties.prevHorizontalTable ~= 0 then
+                C.SetTablePreviousHorizontalConnectedTable(widgetid,
+                    children[widget.properties.prevHorizontalTable])
+            end
+            if widget.properties.nextHorizontalTable ~= 0 then
+                C.SetTableNextHorizontalConnectedTable(widgetid,
+                    children[widget.properties.nextHorizontalTable])
+            end
+        end
+    end
+    if menu.viewCreated then menu.viewCreated(layer, table.unpack(children)) end
+end
+
+local engagedOverlayRestoreRetryAt
+
+-- Merge per-layer Helper registrations into one custom overlay. `layers` is only
+-- ownership/cleanup order; callback frame order comes from entry.layers.
+-- The first layer is the layer-0 primary entry.
+local function claimEngagedOverlayRegistration(layers, framehandles)
+    if not View or not View.menus then return false end
+    local primary, descriptors, descriptorCount, absorbed = nil, {}, 0, {}
+    local registeredLayers, registeredFrames = {}, {}
+    local registeredIDs = {}
+    for _, layer in ipairs(layers) do
+        local found
+        for index, entry in ipairs(View.menus) do
+            if entry.id == "Helper" .. layer and entry.name == menu.name then
+                found = entry
+                if layer ~= engagedOverlayLayer then absorbed[#absorbed + 1] = index end
+                break
+            end
+        end
+        if not found then
+            log("engaged overlay registration was not found after frame display")
+            for _, registeredID in ipairs(registeredIDs) do
+                View.unregisterMenu(registeredID, true)
+            end
+            return false
+        end
+        registeredIDs[#registeredIDs + 1] = found.id
+        if layer == engagedOverlayLayer then primary = found end
+        for descriptorLayer, descriptor in pairs(found.framedescriptors or {}) do
+            descriptors[descriptorLayer] = descriptor
+            descriptorCount = descriptorCount + 1
+            registeredFrames[#registeredFrames + 1] =
+                found.frames[found.layers[descriptorLayer]]
+            registeredLayers[descriptorLayer] = #registeredFrames
+        end
+    end
+    -- Splice the absorbed entries out directly: View.unregisterMenu() would
+    -- destroy their live frames and release descriptors this registration keeps.
+    table.sort(absorbed, function(a, b) return a > b end)
+    for _, index in ipairs(absorbed) do table.remove(View.menus, index) end
+    primary.id = engagedOverlayID
+    primary.type = engagedOverlayType
+    primary.numframes = descriptorCount
+    primary.framedescriptors = descriptors
+    primary.layers = registeredLayers
+    primary.frames = registeredFrames
+    -- View traverses framedescriptors with pairs(), so descriptor order is
+    -- undefined; it records the authoritative layer -> runtime frame index in
+    -- the registration's own `layers` table (X4 9.00 viewhelper.lua). Read that
+    -- from the CURRENT registration at callback time -- the entry is recreated
+    -- on every re-registration -- instead of sorting layers or assuming frames[1].
+    primary.callback = function(frames)
+        local entry = findEngagedOverlayRegistration()
+        local layerIndex = entry and entry.layers or {}
+        for layer, framehandle in pairs(framehandles) do
+            rebindEngagedOverlayFrame(framehandle, frames[layerIndex[layer]])
+        end
+    end
+    engagedOverlayLayers = layers
+    suspendedOverlayRegistration = nil
+    return true
+end
+
+local function clearSuspendedOverlayDescriptor()
+    if not suspendedOverlayRegistration then return end
+    for _, descriptor in pairs(suspendedOverlayRegistration.framedescriptors or {}) do
+        ReleaseDescriptor(descriptor)
+    end
+    suspendedOverlayRegistration = nil
+    engagedOverlayRestoreRetryAt = nil
+end
+
+local function removeEngagedOverlay(releaseDescriptor)
+    local entry = findEngagedOverlayRegistration()
+    if entry then
+        for _, layer in ipairs(engagedOverlayLayers) do
+            Helper.removeAllWidgetScripts(menu, layer)
+            Helper.removeAllMenuScripts(menu, layer)
+        end
+        if releaseDescriptor == false then
+            suspendedOverlayRegistration = {
+                type = entry.type, callback = entry.callback,
+                clearCallback = entry.clearCallback,
+                framedescriptors = entry.framedescriptors,
+                name = entry.name, properties = entry.properties,
+            }
+            engagedOverlayRestoreRetryAt = nil
+        end
+        View.unregisterMenu(engagedOverlayID, releaseDescriptor)
+    elseif releaseDescriptor ~= false then
+        clearSuspendedOverlayDescriptor()
+    end
+    if menu.frames then
+        for _, layer in ipairs(engagedOverlayLayers) do menu.frames[layer] = nil end
+    end
+    if releaseDescriptor ~= false then
+        engagedOverlayLayers = { engagedOverlayLayer }
+        menu.elementFrame = nil
+    end
+end
+
+local function hideEngagedOverlayForTakeover()
+    if suspendedOverlayRegistration or not findEngagedOverlayRegistration() then return end
+    Hologram.close()
+    engagedOverlayRefreshPending = true
+    removeEngagedOverlay(false)
+    logSession("engaged overlay hidden for fullscreen takeover")
+end
+
+local function restoreEngagedOverlayAfterTakeover()
+    local registration = suspendedOverlayRegistration
+    if not registration or not session or session.phase ~= "engaged" then return end
+    local now = GetCurRealTime()
+    if engagedOverlayRestoreRetryAt and now < engagedOverlayRestoreRetryAt then return end
+    View.registerMenu(engagedOverlayID, registration.type, registration.callback,
+        registration.clearCallback, registration.framedescriptors,
+        registration.name, registration.properties)
+    if not findEngagedOverlayRegistration() then
+        log("engaged overlay registration could not be restored after fullscreen takeover")
+        engagedOverlayRestoreRetryAt = now + 0.5
+        return
+    end
+    suspendedOverlayRegistration = nil
+    engagedOverlayRestoreRetryAt = nil
+    logSession("engaged overlay restored after fullscreen takeover")
+    if engagedOverlayRefreshPending then
+        engagedOverlayRefreshPending = false
+        menu.display()
+    end
+end
+
+local function fullscreenTakeoverDisplayed()
+    return C.IsFullscreenMenuDisplayed(true, "") == true
 end
 
 local function memberName(componentID, ordinal)
@@ -306,12 +552,13 @@ local function readGroups(ship)
             end
             if not entry then
                 entry = { key = State.singleKey(component), kind = "single", componentID = component, totalCount = 1,
-                    operationalCount = 0, members = {}, mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
+                    macro = componentData(component, "macro") or "", operationalCount = 0, members = {},
+                    mode = str(C.GetWeaponMode(component)), armed = C.IsWeaponArmed(component),
                     displayName = memberName(component, slot) }
                 groups[#groups + 1] = entry
             end
             entry.members[#entry.members + 1] = { componentID = component, componentKey = State.memberKey(component),
-                macro = entry.macro or "", displayName = memberName(component, #entry.members + 1),
+                displayName = memberName(component, #entry.members + 1),
                 operational = C.IsComponentOperational(component), cameraSupported = C.IsPlayerCameraTargetViewPossible(component, true) }
             if entry.kind == "single" and entry.members[#entry.members].operational then entry.operationalCount = 1 end
         end
@@ -319,10 +566,9 @@ local function readGroups(ship)
     local labelCounts = {}
     for index, entry in ipairs(groups) do
         if entry.kind == "group" then
-            local position = State.turretGroupLabel(entry.group)
-            local equipment = (entry.macro ~= "" and GetMacroData(entry.macro, "shortname")) or ""
-            local base = position or (text(4) .. " " .. tostring(index))
-            if equipment ~= "" then base = base .. ": " .. equipment end
+            entry.positionLabel = State.turretGroupLabel(entry.group) or (text(4) .. " " .. tostring(index))
+            -- Position only; member rows carry the turret names.
+            local base = entry.positionLabel
             labelCounts[base] = (labelCounts[base] or 0) + 1
             entry.displayName = base .. (labelCounts[base] > 1 and (" · " .. tostring(labelCounts[base])) or "")
         end
@@ -556,9 +802,16 @@ local function restoreDirect(reason)
     end, false, getElapsedTime() + 0.5)
 end
 
+-- Standing onboard sessions restore the normal player view without GetUp().
+local function restoreStandingCamera()
+    C.SetPlayerCameraCockpitView(true)
+end
+
 local function returnToConsole(reason)
     if not session then return end
-    C.SetPlayerCameraCockpitView(true)
+    if session.origin == "onboard" then restoreStandingCamera() else C.SetPlayerCameraCockpitView(true) end
+    Range.cancelAutomatic()
+    session.targetFallback = nil
     State.returnToConsole(session)
     menu.display()
 end
@@ -567,9 +820,11 @@ end
 -- removed its frame. Keep it separate from endSession(), which additionally
 -- asks Helper to close the tracked menu.
 local function discardSession(reason)
+    Hologram.close()
     if not session then return end
+    removeEngagedUpdater()
     cameraMismatchLogged = false
-    mapReopenFailureLogged = false
+    reopenFailureLogged = false
     containedShipsFailureLogged, containedStationsFailureLogged = false, false
     cutsceneNoTurretFailureLogged = false
     -- Read controlMode BEFORE restoreDirect may clear it. The notify emission
@@ -578,15 +833,19 @@ local function discardSession(reason)
     -- discardSession rather than leaveChair so the playerGetUp/playerUndock
     -- route (endForMovement -> endSession) is also covered.
     local hadDirectControl = session.controlMode == "direct"
+    Range.cancelAutomatic()
     sessionEpoch = sessionEpoch + 1
-    engageabilityCache, engageabilityRequests = {}, {}
-    engageabilityRepaintPending = nil
-    resumePending = false
+    Range.active, Range.targets, Range.order = nil, {}, {}
+    resumePending, resumeOpenPending = false, false
     transitionLifecycle("ending", reason)
     clearOwnShipSofttarget()
     restoreDirect(reason)
     AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
-    if not seatLeaving then C.SetPlayerCameraCockpitView(true) end
+    if session.origin == "onboard" then
+        restoreStandingCamera()
+    elseif not seatLeaving then
+        C.SetPlayerCameraCockpitView(true)
+    end
     session = nil
     logSession("session discarded: " .. reason)
     -- ponytail: this popup is a real user-facing feature AND is load-bearing.
@@ -635,10 +894,10 @@ local function endSession(reason)
     if not session and not menu.shown then return end
     endingSession = true
     discardSession(reason)
-    menu.elementFrame = nil
     -- Use the full helper even after another menu hid this frame: clearMenu()
     -- alone does not remove X4's tracked-menu record.
     Helper.closeMenu(menu, "close", false, false)
+    removeEngagedOverlay(true)
     endingSession = false
 end
 
@@ -646,15 +905,21 @@ end
 -- without consulting menu.onCloseElement(). Treat any such unplanned loss of
 -- ownership as a safety event, never as an active gunnery session.
 function menu.cleanup()
-    menu.frame = nil
     local externalMenu = activeExternalMenuName and activeExternalMenuName()
-    if session and not endingSession and externalMenu == "MapMenu" and State.isOwned(session) then
-        -- Helper's automatic onHide route bypasses onCloseElement(). Map is the
-        -- only external menu for which we have a verified cleanup callback, so
-        -- preserve the session here before Helper clears menu.shown.
-        transitionLifecycle(State.lifecycle.suspendedMap, "automatic MapMenu frame hide")
+    if session then logSession("menu cleanup; external=" .. tostring(externalMenu)) end
+    if session and not endingSession and session.phase == "engaged"
+            and (externalMenu or fullscreenTakeoverDisplayed()) then
+        -- A legitimate external overlay/takeover does not surrender the active
+        -- session. The independent updater owns validity checks until Gunnery
+        -- is again the ordinary active menu.
         session.autoHideAt = nil
-    elseif session and not endingSession and not State.isMapSuspended(session) then
+        if fullscreenTakeoverDisplayed() then hideEngagedOverlayForTakeover() end
+        return
+    end
+    menu.frame = nil
+    menu.elementFrame = nil
+    Hologram.close()
+    if session and not endingSession and session.lifecycle == State.lifecycle.owned then
         -- Do not destroy immediately: X4 may still be finishing a same-tick
         -- view replacement. The global watchdog confirms that ownership did
         -- not return before restoring the directed group.
@@ -718,11 +983,32 @@ local function leaveChair(reason)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         -- Not endSession(): the session is already gone, and its
         -- "nothing to do" guard would skip the frame teardown entirely.
-        menu.elementFrame = nil
         Helper.closeMenu(menu, "close", false, false)
+        removeEngagedOverlay(true)
         seatLeaving = false
     end, false, getElapsedTime() + 0.05)
     return true
+end
+
+-- Onboard counterpart to leaveChair: same teardown, but the player is standing,
+-- so there is no GetUp() and seatLeaving is never set.
+local function leaveOnboard(reason)
+    AddUITriggeredEvent("X4GunneryControl", "cutscene_aim_stop", {})
+    discardSession(reason)
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        Helper.closeMenu(menu, "close", false, false)
+        removeEngagedOverlay(true)
+    end, false, getElapsedTime() + 0.05)
+    return true
+end
+
+-- Single exit dispatcher used by every UI/close call site so the seat vs. foot
+-- difference lives in one place.
+local function leaveSession(reason)
+    if session and session.origin == "onboard" then
+        return leaveOnboard(reason)
+    end
+    return leaveChair(reason)
 end
 
 local targetRoot, isEligibleEngagementTarget, cycleTarget
@@ -812,11 +1098,6 @@ local function startAutoEngage(groups)
     local member = cameraMember()
     if not member then State.returnToConsole(session); return false end
     if not enterCamera(member) then State.returnToConsole(session); return false end
-    -- Auto-engage was never parked, so a save/load or a UI reload during it
-    -- dropped the player back at the console. It overrides no turret modes and
-    -- so needs no safety record, but the camera, the checked groups and the
-    -- phase are worth just as much here as in Direct control, and the payload
-    -- already carries controlMode.
     persistSession()
     -- Finish the button callback before replacing the blurred console frame.
     -- Rebuilding a view during the click dispatch can leave the old frame
@@ -854,6 +1135,18 @@ local function startTargetSelection(groups)
     -- keep the browser open instead of bouncing back to the console.
     local cameraOptions = { onFailure = function() log("target selection continues without a camera") end }
     if not enterCamera(member, cameraOptions) then State.returnToConsole(session); return false end
+    -- Unchecked groups restored to a Direct baseline would attack with no target
+    -- chosen; hold them in their staged mode until engageTarget.
+    local held = false
+    for _, snapshot in ipairs(session.committedBaseline or {}) do
+        local g = State.isDirectedMode(snapshot.mode) and sameID(snapshot.shipID, session.shipID)
+            and findSnapshotGroup(snapshot)
+        local s = g and session.staged and session.staged[g.key]
+        if s and State.canMutate(g) and not session.checkedGroupKeys[g.key] then
+            setMode(g, s.mode); held = true
+        end
+    end
+    if held then persistSession() end
     local expectedSession, expectedEpoch = session, sessionEpoch
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if currentSession(expectedSession, expectedEpoch) and session.phase == "target_select" then menu.display() end
@@ -863,6 +1156,7 @@ end
 
 local function openTargetBrowser()
     if not session or session.controlMode ~= "direct" then return false end
+    Range.cancelAutomatic()
     session.targetFallback = nil
     session.phase = "target_select"
     menu.display()
@@ -924,7 +1218,9 @@ local function engageTarget(targetID)
     -- the planner made this call or the player cycled or picked a target.
     session.aimTargetID = target
     session.targetObjectID = targetRoot(target)
+    Range.cancelAutomatic()
     session.targetFallback = nil
+    session.autoNextPov = nil
     if session.surfaceBrowser then
         session.surfaceBrowser.pendingReason = "open"
     end
@@ -950,13 +1246,63 @@ local function engageTarget(targetID)
             menu.display()
         end
     end, false, getElapsedTime() + 0.01)
+    -- A controlled interaction test must exercise the same operator click as
+    -- normal Direct control. Test Lab may mark the exact qualified component,
+    -- but it must never designate it on the owner's behalf. Notify Test Lab
+    -- only after engageTarget has accepted that exact manual click and updated
+    -- the live Direct-control session.
+    local suggestion = suggestedTestEngagement
+    if suggestion and currentSession(suggestion.session, suggestion.epoch)
+            and sameID(target, suggestion.target) then
+        suggestedTestEngagement = nil
+        log("operator selected suggested Test Lab engagement target=" .. tostring(target))
+        if suggestion.callback then
+            local ok, err = pcall(suggestion.callback, true, "")
+            if not ok then log("suggested Test Lab engagement callback failed: " .. tostring(err)) end
+        end
+    end
     return true
+end
+
+-- Test-only recommendation: retain the exact qualified component and its root
+-- so Gunnery can label both manual choices. This deliberately performs no
+-- SetSofttarget call and does not enter Direct control.
+local function suggestTestEngagement(targetID, callback)
+    if targetID == nil or not session then return false end
+    local target = id(targetID)
+    if target == 0 or not isEligibleEngagementTarget(target) then return false end
+    suggestedTestEngagement = {
+        target = target, root = targetRoot(target), callback = callback,
+        session = session, epoch = sessionEpoch,
+    }
+    log("marked Test Lab engagement for manual selection target=" .. tostring(target)
+        .. " root=" .. tostring(suggestedTestEngagement.root))
+    return true
+end
+
+local function currentTestEngagementSuggestion()
+    local suggestion = suggestedTestEngagement
+    if suggestion and currentSession(suggestion.session, suggestion.epoch) then return suggestion end
+    return nil
 end
 
 -- Forward-declared above restoreDirect; see the contract comment there.
 refresh = function()
     if not session then return end
     State.retainSelection(session, readGroups(session.shipID))
+end
+
+function Range.groupDisplaySignature()
+    local parts = {}
+    for _, group in ipairs(session.groups or {}) do
+        parts[#parts + 1] = table.concat({ group.key, group.displayName or "",
+            tostring(group.operationalCount), tostring(group.totalCount),
+            group.mode or "", tostring(group.armed) }, ":")
+        for _, member in ipairs(group.members or {}) do
+            parts[#parts + 1] = State.normID(member.componentID) .. ":" .. tostring(member.operational)
+        end
+    end
+    return table.concat(parts, "|")
 end
 
 -- "Update turret behavior" commit. Writes the staged config to every mutable
@@ -1023,218 +1369,198 @@ local function checkedOperationalTurrets()
     return members
 end
 
--- Lua owns exact checkbox membership and MD owns the raycast. Flat scalar
--- events avoid relying on unproven nested-table transport: selected turret ids
--- are streamed once, followed by at most 20 target ids for the batch.
-local engageabilityBatchSize = 20
-local function requestEngageabilities(targets, purpose)
-    local results = {}
-    if not session then return results end
-    local members, signatureParts = checkedOperationalTurrets(), {}
-    for _, member in ipairs(members) do
-        signatureParts[#signatureParts + 1] = State.normID(member.componentID)
-    end
-    local signature = table.concat(signatureParts, ",")
-    local now, pending, seen = getElapsedTime(), {}, {}
-    -- Normally MD follows the final result immediately with batch completion.
-    -- If only that aggregate event is lost, retain the empty request briefly so
-    -- a late completion can still be audited, then reclaim it before the next
-    -- completed-result cache refresh.
-    for nonce, request in pairs(engageabilityRequests) do
-        if request.resultsCompleteAt and now - request.resultsCompleteAt >= 1 then
-            engageabilityRequests[nonce] = nil
-        end
-    end
-    for position, target in ipairs(targets or {}) do
-        if not State.isNullID(target) then
-            local targetKey = State.normID(target)
-            local key = tostring(sessionEpoch) .. ":" .. targetKey
-            local cached = engageabilityCache[key]
-            if cached and cached.signature == signature then
-                if cached.pending and now - cached.requestedAt < 2 then
-                    results[position] = cached
-                elseif not cached.pending and now - cached.requestedAt < 1 then
-                    results[position] = cached
-                end
-            end
-            if not results[position] then
-                if #members == 0 then
-                    cached = { engageable = 0, total = 0, signature = signature, requestedAt = now }
-                    engageabilityCache[key] = cached
-                else
-                    -- Supersede only this target in an older batch. The older
-                    -- request remains alive for its other correlated targets.
-                    if cached and cached.pendingNonce then
-                        local previousNonce = cached.pendingNonce
-                        local previous = engageabilityRequests[previousNonce]
-                        if previous then
-                            previous.targets[targetKey] = nil
-                            if next(previous.targets) == nil then engageabilityRequests[previousNonce] = nil end
-                        end
-                    end
-                    cached = cached and cached.signature == signature and cached or {}
-                    cached.signature, cached.requestedAt, cached.pending, cached.total,
-                        cached.engageable, cached.known = signature, now, true, #members, nil, nil
-                    engageabilityCache[key] = cached
-                    if not seen[targetKey] then
-                        seen[targetKey] = true
-                        pending[#pending + 1] = { target = target, targetKey = targetKey, key = key, cached = cached }
-                    end
-                end
-                results[position] = cached
-            end
-        end
-    end
-
-    for first = 1, #pending, engageabilityBatchSize do
-        local last = math.min(first + engageabilityBatchSize - 1, #pending)
-        engageabilitySerial = engageabilitySerial + 1
-        local nonce = tostring(sessionEpoch) .. "_" .. tostring(engageabilitySerial)
-        local request = {
-            epoch = sessionEpoch, signature = signature, selectedTotal = #members,
-            targets = {}, requested = last - first + 1, purpose = purpose,
-        }
-        engageabilityRequests[nonce] = request
-        AddUITriggeredEvent("X4GunneryControl", "engageability_begin", {
-            nonce = nonce, members = #members, targets = request.requested,
-        })
-        for _, member in ipairs(members) do
-            -- GetUpgradeGroupInfo2.currentmacro is the authoritative installed
-            -- equipment macro. Live surface components can return an empty
-            -- The component-data macro field can be blank for installed surface
-            -- components, so use that fallback only for ungrouped
-            -- singleton weapons whose group metadata has no macro.
-            local macro = tostring(member.macro or "")
-            if macro == "" then macro = tostring(componentData(member.componentID, "macro") or "") end
-            local arc = TurretArcLimits[macro]
-            AddUITriggeredEvent("X4GunneryControl", "engageability_member", {
-                nonce = nonce, weapon = id(member.componentID), arcknow = arc and 1 or 0,
-                arcmin = arc and arc[1] or 0, arcmax = arc and arc[2] or 0 })
-        end
-        for index = first, last do
-            local entry = pending[index]
-            entry.cached.pendingNonce = nonce
-            request.targets[entry.targetKey] = entry.key
-            AddUITriggeredEvent("X4GunneryControl", "engageability_target", {
-                nonce = nonce, target = id(entry.target),
-            })
-        end
-        AddUITriggeredEvent("X4GunneryControl", "engageability_commit", { nonce = nonce })
-        log("event=engageability_batch action=request nonce=" .. nonce
-            .. " requested=" .. tostring(request.requested)
-            .. " selected_total=" .. tostring(#members)
-            .. " selected_signature=" .. string.format("%q", signature))
-    end
-    return results
+-- Range counts are estimates, not firing permission.
+function Range.rangeText(result)
+    local total = result and result.total or #Range.members
+    return tostring(result and result.count or 0) .. " / " .. tostring(total) .. " IN RANGE"
 end
 
-local function requestEngageability(target, purpose)
-    return requestEngageabilities({ target }, purpose)[1]
+-- Pass the eligible ship to MD, where maxspeed is a supported property.
+-- A stationary ship with working engines still receives the native allowance.
+function Range.rangeSpeedShip(target)
+    local object = id(target)
+    if C.IsComponentClass(object, "ship") then return object end
+    if C.IsComponentClass(object, "engine") then
+        local ship = C.GetContextByClass(object, "container", true)
+        if ship ~= 0 and C.IsComponentClass(ship, "ship") then return id(ship) end
+    end
 end
 
-local function engageabilityText(result)
-    if not result then return "-" end
-    if result.pending and result.engageable == nil then return "… / " .. tostring(result.total) end
-    local label = tostring(result.engageable or 0) .. " / " .. tostring(result.total or 0)
-    local unknown = math.max(0, (result.total or 0) - (result.known or 0))
-    if unknown > 0 then return label .. "  " .. tostring(unknown) .. " " .. text(100) end
-    if (result.total or 0) > 0 and result.engageable == result.total then return label .. "  " .. text(89) end
-    return label
+function Range.setRangeTargets(targets, selected, automatic)
+    if session.targetFallback and not automatic then return end
+    local members, parts = checkedOperationalTurrets(), {}
+    for _, member in ipairs(members) do parts[#parts + 1] = State.normID(member.componentID) end
+    local signature = table.concat(parts, ",")
+    local wanted, order = {}, {}
+    local function add(target)
+        if isNullID(target) then return end
+        local key = State.normID(target)
+        if wanted[key] then return end
+        wanted[key] = { target = target, key = key }
+        order[#order + 1] = wanted[key]
+    end
+    add(selected)
+    for _, target in ipairs(targets or {}) do add(target) end
+    local keys = {}
+    for _, entry in ipairs(order) do keys[#keys + 1] = entry.key end
+    local page = table.concat(keys, ",")
+    local selectedKey = not isNullID(selected) and State.normID(selected) or nil
+    if signature ~= Range.signature or page ~= Range.page or selectedKey ~= Range.selectedKey then
+        Range.active, Range.memberIndex, Range.targetIndex, Range.sweepStarted = nil, 1, 1, nil
+        Range.passStarted = nil
+        Range.nextSweepAt, Range.nextSortAt = nil, nil
+        Range.totalWork, Range.peakWork = 0, 0
+        if signature ~= Range.signature then
+            if Range.signature ~= nil then log("event=in_range action=cache_reset reason=turret_membership") end
+            Range.cache = {}
+        end
+        for key in pairs(Range.cache) do if not wanted[key] then Range.cache[key] = nil end end
+    end
+    Range.signature, Range.page, Range.selectedKey = signature, page, selectedKey
+    Range.members, Range.targets, Range.order = members, wanted, order
 end
 
-local function engageabilityAudit(result)
-    if not result then return "unavailable", "-", 0, 0 end
-    if result.pending then return "pending", "-", 0, result.total or 0 end
-    return "complete", result.engageable or 0, result.known or 0, result.total or 0
+function Range.rangeResult(target)
+    return Range.cache[State.normID(target)]
 end
 
--- A target/surface render can issue dozens of independent MD requests. Their
--- replies commonly arrive in the same UI tick; rebuilding the complete menu
--- for every reply makes enumeration and audit logging quadratic in row count.
--- One tokenized callback repaints the whole accepted batch. A token survives
--- stale callbacks safely when session teardown resets the pending marker.
-local function scheduleEngageabilityRepaint(purpose)
-        if purpose == "surface_pinned" then
-        if surfacePinnedUpdatePending then return end
-        surfacePinnedUpdatePending = true
-        local expectedSession, expectedEpoch = session, sessionEpoch
-        Helper.addDelayedOneTimeCallbackOnUpdate(function()
-            surfacePinnedUpdatePending = false
-            if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
-            if session.phase == "engaged" and session.controlMode == "direct" and menu.elementFrame then
-                local browser = session.surfaceBrowser
-                local pinnedID = session.aimTargetID or session.targetObjectID
-                local result = browser and browser.pinnedResult
-                local state, engageable, known, total = engageabilityAudit(result)
-                local shielded, shieldpercent, hullpercent = surfaceHealth(pinnedID)
-                log("event=surface_pinned action=refresh component=" .. tostring(pinnedID)
-                    .. " engageability_state=" .. state .. " engageability_engageable=" .. tostring(engageable)
-                    .. " engageability_known=" .. tostring(known)
-                    .. " engageability_total=" .. tostring(total)
-                    .. " distance=" .. tostring(browser and browser.pinnedDistance or -1)
-                    .. " shield_capacity=" .. tostring(shielded)
-                    .. " shield_percent=" .. tostring(shieldpercent)
-                    .. " hull_percent=" .. tostring(hullpercent))
-                menu.elementFrame:update()
-            end
-        end, false, getElapsedTime() + 0.01)
+function Range.cancelAutomatic()
+    if not Range.automatic then return end
+    Range.automatic, Range.status, Range.active = nil, nil, nil
+    Range.signature, Range.page, Range.selectedKey = nil, nil, nil
+    Range.order, Range.targets, Range.cache = {}, {}, {}
+end
+
+function Range.startAutomatic(targets)
+    Range.cancelAutomatic()
+    Range.setRangeTargets(targets, nil, true)
+    Range.cache = {}
+    Range.automatic, Range.status = true, "pending"
+    Range.active, Range.memberIndex, Range.targetIndex = nil, 1, 1
+    Range.sweepStarted, Range.passStarted, Range.nextSweepAt = nil, nil, nil
+    Range.runRangeSweep(getElapsedTime())
+end
+
+function Range.runRangeSweep(now)
+    if Range.automatic and (not session or not session.targetFallback
+            or session.autoNextTarget == false or session.controlMode ~= "direct") then
+        Range.cancelAutomatic()
         return
     end
-    if engageabilityRepaintPending then return end
-    engageabilityRepaintSerial = engageabilityRepaintSerial + 1
-    local token = engageabilityRepaintSerial
-    engageabilityRepaintPending = token
-    local expectedSession, expectedEpoch = session, sessionEpoch
-    Helper.addDelayedOneTimeCallbackOnUpdate(function()
-        if engageabilityRepaintPending ~= token then return end
-        engageabilityRepaintPending = nil
-        if not currentSession(expectedSession, expectedEpoch) or not menu.shown then return end
-        if session.phase == "target_select"
-                or (session.phase == "engaged" and session.controlMode == "direct") then
-            menu.display()
+    if Range.automatic and Range.status ~= "pending" then return end
+    if C.IsGamePaused() or not session or (session.phase ~= "target_select"
+            and not (session.phase == "engaged" and session.controlMode == "direct")) then return end
+    if Range.active then
+        if now - Range.active.started < 2 then return end
+        log("event=in_range action=timeout turret=" .. Range.active.memberKey)
+        Range.active = nil
+        if Range.automatic then Range.status = "failed"; return end
+    end
+    if Range.nextSweepAt and now < Range.nextSweepAt then return end
+    if #Range.order == 0 then return end
+    if #Range.members == 0 then
+        for _, entry in ipairs(Range.order) do
+            Range.cache[entry.key] = { count = 0, total = 0, receivedAt = now }
         end
-    end, false, getElapsedTime() + 0.01)
+        if Range.automatic then Range.status = "complete" end
+        Range.nextSweepAt = now + 1
+        return
+    end
+    if not Range.sweepStarted then Range.sweepStarted = now end
+    local member = Range.members[Range.memberIndex]
+    if not Range.passStarted then Range.passStarted = now end
+    local memberKey = State.normID(member.componentID)
+    local first = Range.targetIndex
+    local count = math.min(rangeTargetLimit, #Range.order - first + 1)
+    Range.serial = Range.serial + 1
+    local nonce = tostring(sessionEpoch) .. "_" .. tostring(Range.serial)
+    Range.active = { nonce = nonce, memberKey = memberKey, signature = Range.signature,
+        page = Range.page, selectedKey = Range.selectedKey, first = first,
+        count = count, started = now, session = session }
+    Range.totalWork = Range.totalWork + count
+    Range.peakWork = math.max(Range.peakWork, count)
+    AddUITriggeredEvent("X4GunneryControl", "in_range_begin", {
+        nonce = nonce, weapon = id(member.componentID), weaponid = memberKey, targets = count })
+    for index = first, first + count - 1 do
+        local entry = Range.order[index]
+        AddUITriggeredEvent("X4GunneryControl", "in_range_target", {
+            nonce = nonce, target = id(entry.target),
+            speedship = Range.rangeSpeedShip(entry.target) or 0 })
+    end
+    AddUITriggeredEvent("X4GunneryControl", "in_range_commit", { nonce = nonce })
 end
 
-local function onEngageabilityResult(_, param)
-    local nonce, targetKey, engageable, known, total = tostring(param or ""):match(
-        "^x4gce3:([^:]+):([^:]+):(%d+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    engageable, known, total = tonumber(engageable), tonumber(known), tonumber(total)
-    if total ~= request.selectedTotal or known > total or engageable > known then return end
-    targetKey = State.normID(targetKey)
-    local key = request.targets[targetKey]
-    local cached = key and engageabilityCache[key]
-    if not cached or cached.signature ~= request.signature or cached.pendingNonce ~= nonce then return end
-    cached.engageable, cached.known, cached.total, cached.pending, cached.pendingNonce, cached.receivedAt =
-        engageable, known, total, false, nil, getElapsedTime()
-    request.targets[targetKey] = nil
-    if next(request.targets) == nil then request.resultsCompleteAt = cached.receivedAt end
-    if session.phase == "target_select" or (session.phase == "engaged" and session.controlMode == "direct") then
-        scheduleEngageabilityRepaint(request.purpose)
+function Range.onRangeResult(_, param)
+    local nonce, memberKey, bits = tostring(param or ""):match("^x4gcr2:([^:]+):([^:]+):([01]+)$")
+    local active = Range.active
+    local liveMembers, liveParts = session and checkedOperationalTurrets() or {}, {}
+    for _, member in ipairs(liveMembers) do
+        liveParts[#liveParts + 1] = State.normID(member.componentID)
     end
-end
-
-
-local function onEngageabilityBatchComplete(_, param)
-    local nonce, accepted, completed = tostring(param or ""):match("^x4gce2c:([^:]+):(%d+):(%d+)$")
-    local request = nonce and engageabilityRequests[nonce]
-    if not request or not session or request.epoch ~= sessionEpoch then return end
-    local unresolved = 0
-    for _, key in pairs(request.targets) do
-        local cached = engageabilityCache[key]
-        if cached and cached.signature == request.signature and cached.pendingNonce == nonce then
-            cached.pendingNonce = nil
-            unresolved = unresolved + 1
+    local liveSignature = table.concat(liveParts, ",")
+    local liveSelected
+    if session and session.phase == "target_select" then
+        local soft = C.GetSofttarget2().softtargetID
+        liveSelected = not isNullID(soft) and State.normID(soft) or nil
+    elseif session and session.phase == "engaged" then
+        local selected = session.aimTargetID or session.targetObjectID
+        liveSelected = not isNullID(selected) and State.normID(selected) or nil
+    end
+    if Range.automatic then liveSelected = nil end
+    if Range.automatic and (not session or not session.targetFallback
+            or session.autoNextTarget == false or session.controlMode ~= "direct") then
+        Range.cancelAutomatic(); return
+    end
+    if not session or not active or liveSelected ~= active.selectedKey
+            or liveSignature ~= active.signature or session ~= active.session or nonce ~= active.nonce
+            or memberKey ~= active.memberKey or active.signature ~= Range.signature
+            or active.page ~= Range.page or active.selectedKey ~= Range.selectedKey
+            or not Range.members[Range.memberIndex]
+            or State.normID(Range.members[Range.memberIndex].componentID) ~= memberKey
+            or not bits or #bits ~= active.count then return end
+    local now = getElapsedTime()
+    for offset = 1, active.count do
+        local entry = Range.order[active.first + offset - 1]
+        local result = Range.cache[entry.key] or { contributions = {}, count = 0, total = #Range.members }
+        local previous = result.contributions[memberKey] or 0
+        local value = tonumber(bits:sub(offset, offset))
+        result.contributions[memberKey] = value
+        result.count = result.count - previous + value
+        result.total, result.receivedAt = #Range.members, now
+        Range.cache[entry.key] = result
+    end
+    Range.active = nil
+    Range.targetIndex = active.first + active.count
+    if Range.targetIndex > #Range.order then
+        Range.targetIndex = 1
+        Range.memberIndex = Range.memberIndex + 1
+        local selectedResult = Range.selectedKey and Range.cache[Range.selectedKey]
+        log("event=in_range action=turret_pass member=" .. memberKey
+            .. " elapsed_ms=" .. tostring(math.floor((now - Range.passStarted) * 1000))
+            .. " roundtrip_ms=" .. tostring(math.floor((now - active.started) * 1000))
+            .. " checks=" .. tostring(#Range.order)
+            .. " selected_count=" .. tostring(selectedResult and selectedResult.count or "pending")
+            .. " selected_bit=" .. tostring(selectedResult and selectedResult.contributions[memberKey] or 0))
+        Range.passStarted = nil
+        if Range.memberIndex > #Range.members then
+            log("event=in_range action=sweep elapsed_ms="
+                .. tostring(math.floor((now - Range.sweepStarted) * 1000))
+                .. " checks=" .. tostring(Range.totalWork)
+                .. " peak_checks_per_update=" .. tostring(Range.peakWork))
+            if Range.automatic then Range.status = "complete" end
+            Range.memberIndex, Range.sweepStarted = 1, nil
+            Range.nextSweepAt = now + 1
+            Range.totalWork, Range.peakWork = 0, 0
+            if not Range.automatic and session.phase == "target_select" and (not Range.nextSortAt or now >= Range.nextSortAt) then
+                Range.nextSortAt = now + 5
+                local expectedSession, expectedEpoch = session, sessionEpoch
+                Helper.addDelayedOneTimeCallbackOnUpdate(function()
+                    if currentSession(expectedSession, expectedEpoch) and menu.shown
+                            and session.phase == "target_select" then menu.display() end
+                end, false, now + 0.01)
+            end
         end
     end
-    engageabilityRequests[nonce] = nil
-    log("event=engageability_batch action=complete nonce=" .. nonce
-        .. " requested=" .. tostring(request.requested)
-        .. " accepted=" .. tostring(accepted)
-        .. " completed=" .. tostring(completed)
-        .. " unresolved=" .. tostring(unresolved))
 end
 
 targetRoot = function(component)
@@ -1425,11 +1751,9 @@ local function rebuildSurfaceSnapshot(reason)
     for _, surface in ipairs(alternatives) do
         browser.orderedIDs[#browser.orderedIDs + 1] = State.normID(surface.componentID)
     end
-    browser.pageResults, browser.pinnedResult = {}, nil
     browser.page = math.max(1, tonumber(browser.page) or 1)
     local _, normalizedPage, pageCount = State.surfacePage(browser.orderedIDs, browser.page, browser.pageSize)
     browser.page = normalizedPage
-    if browser.autoRefresh then browser.nextAutoRefreshAt = getElapsedTime() + 10 end
     log("event=surface_snapshot action=create reason=" .. tostring(reason or "open")
         .. " root=" .. tostring(root)
         .. " generation=" .. tostring(browser.generation)
@@ -1465,7 +1789,7 @@ function TestAPI.getSessionEpoch()
 end
 
 local function copyCurrentShipSweep(groups)
-    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    if not session or not sessionContextValid() then return nil, "not seated in gunnery control" end
     local ship = session.shipID
     local result = { id = tostring(ship), name = str(C.GetComponentName(ship)), macro = componentData(ship, "macro"), groups = {} }
     for _, group in ipairs(groups or {}) do
@@ -1491,7 +1815,7 @@ end
 -- Fresh hardware view for scenario preflight/revalidation. Unlike refresh(),
 -- this must not reconcile or otherwise mutate the parked Gunnery session.
 function TestAPI.getCurrentShipSweepReadOnly()
-    if not session or not isInGunnerChair() then return nil, "not seated in gunnery control" end
+    if not session or not sessionContextValid() then return nil, "not seated in gunnery control" end
     return copyCurrentShipSweep(readGroups(session.shipID))
 end
 
@@ -1512,6 +1836,9 @@ end
 -- the requested session POV is applied.
 function TestAPI.enterCamera(member, options) return enterCamera(member, options) end
 function TestAPI.engageTarget(targetID) return engageTarget(targetID) end
+function TestAPI.suggestTestEngagement(targetID, callback)
+    return suggestTestEngagement(targetID, callback)
+end
 
 function TestAPI.getCameraFocus()
     return tostring(C.GetExternalTargetViewComponent())
@@ -1684,59 +2011,20 @@ local function chooseAimTarget()
     return nil
 end
 
--- One planner page is one MD batch: never let a fallback page span the
--- engageability batch size.
-local fallbackPageSize = engageabilityBatchSize
-
--- Session-scoped asynchronous resolution of a Direct surface loss
--- (Issue #45 Task 5). onDirectTargetLost() refreshes the root's surface
--- snapshot, records the ranked unfiltered same-root surfaces in
--- session.targetFallback (page 1), issues the page-1 ENGAGEABLE query at
--- once, and returns without choosing anything. Each later 0.25 s tick,
--- updateTargetFallback() re-queries the current stage's batch through the
--- standard engageability path and applies one State.planEngageFallback
--- decision: ranked surfaces in pages, then the target's hull, then ranked
--- other objects. Only accepted results reach the planner:
--- requestEngageabilities() owns epoch, signature and staleness (a stale
--- reading comes back as a fresh pending entry, and the planner yields "wait"
--- for it), so no second staleness model lives here.
-
--- Asks the checked turrets' ENGAGEABLE for `ids` and reshapes the positional
--- cache entries into the normID -> accepted result map the planner consumes.
-local function queryFallbackBatch(ids)
-    local raw = requestEngageabilities(ids, "auto_next_fallback")
-    local results = {}
-    for position, target in ipairs(ids) do
-        local cached = raw[position]
-        if cached ~= nil and not State.isNullID(target) then
-            results[State.normID(target)] = cached
-        end
-    end
-    return results
+-- Automatic replacements use one fresh, complete IN RANGE sweep at a time.
+-- Surface pages retain browser metadata ordering; browser objects use distance.
+local function automaticTargetAllowed(component)
+    if not C.IsComponentOperational(id(component)) then return false end
+    local eligible, root = isEligibleEngagementTarget(component)
+    local enemy, hostile = componentData(root, "isenemy", "ishostile")
+    return eligible and (enemy or hostile)
 end
 
--- The ranked other-objects fallback list: readTargetCandidates()'s own order
--- with the lost root and every non-operational candidate dropped, so a dead
--- object neither enters orderedIDs nor burns an ENGAGEABLE batch slot.
-local function rankFallbackObjects(root)
-    local objects = {}
-    for _, candidate in ipairs(readTargetCandidates()) do
-        local component = candidate.componentID
-        if not sameID(component, root)
-                and C.IsComponentOperational(id(component)) then
-            objects[#objects + 1] = component
-        end
-    end
-    return objects
-end
-
--- Last resort for both fallback paths: reset the view, clear the engagement,
--- hand the choice back at the target browser.
 local function fallbackToBrowser()
-    -- applyPov() only acts while the phase is still "engaged", so reset the view
-    -- before openTargetBrowser() moves the phase on.
+    session.autoNextPov = nil
     session.aimTargetID, session.targetObjectID = nil, nil
     session.povAnchor, session.povMode = "turret", "manual"
+    Range.cancelAutomatic()
     session.targetFallback = nil
     applyPov()
     openTargetBrowser()
@@ -1744,230 +2032,195 @@ local function fallbackToBrowser()
     logSession("engaged target lost; back to target selection")
 end
 
--- Ordinary object-level loss (aimTargetID == targetObjectID), or a surface
--- fallback aborted on a dead root: the existing object sweep, then the
--- browser. With Auto-next Target off there is no sweep at all.
-local function handleObjectLoss()
-    local nextTarget
-    if session.autoNextTarget ~= false then
-        nextTarget = chooseAimTarget()
-    end
-    if nextTarget and engageTarget(nextTarget) then
-        if (session.povMode or "manual") == "cinematic" then
-            -- A running cutscene cannot be re-aimed; same stop/restart cut the
-            -- auto-engage retarget path takes.
-            sendCutsceneAimStop()
-            sendCutsceneAimStart(session.povAnchor or "turret")
+local function browserReplacementCandidates()
+    local ids = {}
+    for _, candidate in ipairs(readTargetCandidates()) do
+        local object = id(candidate.componentID)
+        if (C.IsComponentClass(object, "ship") or C.IsComponentClass(object, "station"))
+                and automaticTargetAllowed(object) then
+            ids[#ids + 1] = candidate.componentID
         end
-        logSession("engaged target lost; auto-next engaged " .. tostring(nextTarget))
-        return
     end
+    return ids
+end
+
+local function startFallbackScan(fb)
+    if fb.stage == "objects" then
+        fb.orderedIDs = browserReplacementCandidates()
+        if #fb.orderedIDs == 0 or fb.attempts >= 3 then
+            fallbackToBrowser()
+            return
+        end
+        fb.attempts = fb.attempts + 1
+        fb.scanIDs = fb.orderedIDs
+    else
+        fb.scanIDs = State.surfacePage(fb.orderedIDs, fb.page, 20)
+    end
+    fb.scanning = true
+    log("event=auto_next action=scan stage=" .. fb.stage
+        .. " page=" .. tostring(fb.page or 1)
+        .. " attempt=" .. tostring(fb.attempts or 0)
+        .. " targets=" .. tostring(#fb.scanIDs))
+    Range.startAutomatic(fb.scanIDs)
+end
+
+local function startBrowserAutoNext()
+    local fb = { stage = "objects", attempts = 0 }
+    session.targetFallback = fb
+    startFallbackScan(fb)
+end
+
+local function handleObjectLoss()
+    local pov = { anchor = session.povAnchor, mode = session.povMode }
     fallbackToBrowser()
+    if session.autoNextTarget == false then return end
+    -- The browser shows Turret POV manual; Auto-next restores the player's view.
+    session.autoNextPov = pov
+    startBrowserAutoNext()
 end
 
 local function startTargetFallback(lostID, root)
-    -- Task 5A: the loss tick refreshes the root's surface snapshot through
-    -- the browser's own rebuild path (fresh generation, logged reason),
-    -- then ranks the UNFILTERED same-root alternatives of that snapshot's
-    -- allSurfaces -- the user's browser filters never narrow auto-next --
-    -- under the same cross-type policy the browser sorts with, starting at
-    -- page 1. The page-1 batch enters the standard ENGAGEABLE path
-    -- immediately; the loss tick itself still makes no choice.
+    Range.cancelAutomatic()
     local browser = rebuildSurfaceSnapshot("auto_next")
-    local alternatives = State.surfaceAlternatives(browser.allSurfaces,
-        lostID, "any", "any")
+    local alternatives = State.surfaceAlternatives(browser.allSurfaces, lostID, "any", "any")
     table.sort(alternatives, function(a, b)
         return State.surfaceMetadataLess(a, b, surfaceCrossTypePolicy)
     end)
-    local orderedIDs = {}
+    local ids = {}
     for _, surface in ipairs(alternatives) do
-        orderedIDs[#orderedIDs + 1] = State.normID(surface.componentID)
+        if automaticTargetAllowed(surface.componentID) then
+            ids[#ids + 1] = surface.componentID
+        end
     end
-    session.targetFallback = {
-        stage = "surfaces", root = root, lostID = lostID,
-        orderedIDs = orderedIDs, page = 1,
-    }
-    local pageIDs = State.surfacePage(orderedIDs, 1, fallbackPageSize)
-    queryFallbackBatch(pageIDs)
-    log("event=auto_next_fallback action=start root=" .. tostring(root)
-        .. " lost=" .. tostring(lostID)
-        .. " surfaces=" .. tostring(#orderedIDs)
-        .. " snapshot_generation=" .. tostring(browser.generation))
+    local fb = { stage = "surfaces", root = root, lostID = lostID,
+        orderedIDs = ids, page = 1 }
+    session.targetFallback = fb
+    if #ids > 0 then startFallbackScan(fb) end
 end
 
--- Direct-control lost what it was engaging. Setting aimTargetID alone would
--- move only the camera and leave every checked group armed against a wreck,
--- so the replacement always goes through engageTarget(), which repoints the
--- soft target, targetObjectID and camera together. When the lost aim was a
--- surface element (lost ID differs from the root) and Auto-next Target is on,
--- the choice is deferred to the asynchronous resolution; everything else
--- keeps the ordinary object fallback. With Auto-next off -- or on with
--- nothing left to shoot -- reset the view and hand the choice back to the
--- player at the target browser.
 local function onDirectTargetLost()
     local lostID, root = session.aimTargetID, session.targetObjectID
-    if session.autoNextTarget ~= false
-            and not isNullID(lostID) and not isNullID(root)
-            and not sameID(lostID, root) then
+    session.targetLostAt = getElapsedTime()
+    if session.autoNextTarget ~= false and not isNullID(lostID) and not isNullID(root)
+            and not sameID(lostID, root) and automaticTargetAllowed(root) then
         startTargetFallback(lostID, root)
-        return
+    else
+        handleObjectLoss()
     end
-    handleObjectLoss()
 end
 
--- Runs on every 0.25 s update tick while session.targetFallback is set.
--- One planner decision per tick; a "wait" simply re-queries on the next tick,
--- so pending and stale readings settle without a dedicated timer.
+-- The candidate nothing else can outrank: the nearest attackable object, or the
+-- first attackable entry in surface/hull order.
+local function topAutomaticCandidate(fb)
+    local top, nearest = nil, math.huge
+    for _, target in ipairs(fb.scanIDs) do
+        if automaticTargetAllowed(target) then
+            if fb.stage ~= "objects" then return target end
+            local distance = tonumber(C.GetDistanceBetween(session.shipID, id(target))) or -1
+            if distance < 0 then distance = math.huge end
+            if not top or distance < nearest or (distance == nearest
+                    and State.normID(target) < State.normID(top)) then
+                top, nearest = target, distance
+            end
+        end
+    end
+    return top
+end
+
+local function engageAutomaticReplacement(chosen)
+    local pov = session.autoNextPov
+    if pov then session.povAnchor, session.povMode = pov.anchor, pov.mode end
+    if (session.povMode or "manual") == "cinematic" then
+        -- enterCamera must validate the turret view before the cinematic restarts
+        -- (its finish() applies the POV). Not yet seen, so the watcher cannot read
+        -- the gap as the player's Esc.
+        sendCutsceneAimStop()
+        session.cinematicSeen = nil
+    end
+    if engageTarget(chosen) then
+        logSession("engaged target lost; auto-next engaged " .. tostring(chosen))
+    else fallbackToBrowser() end
+end
+
 local function updateTargetFallback()
     local fb = session.targetFallback
     if not fb then return end
-    -- Leaving Direct cancels the resolution quietly: the mode switch itself
-    -- owns the hand-off, so no browser transition of our own. Checked before
-    -- the Auto-next-off path so a session that left Direct while the checkbox
-    -- was off is not forced into a browser it never asked for.
     if session.controlMode ~= "direct" then
-        session.targetFallback = nil
-        return
+        Range.cancelAutomatic(); session.targetFallback = nil; return
     end
-    -- Task 5C: the player switched Auto-next Target off while a resolution
-    -- was in flight. Cancel the automatic resolution and hand the choice
-    -- back at the browser through the existing browser-fallback path; never
-    -- engage a replacement after the switch.
-    if session.autoNextTarget == false then
-        log("event=auto_next_fallback action=auto_next_off_cancel root="
-            .. tostring(fb.root) .. " stage=" .. tostring(fb.stage))
-        fallbackToBrowser()
-        return
+    if session.autoNextTarget == false then fallbackToBrowser(); return end
+    if fb.stage ~= "objects" and not automaticTargetAllowed(fb.root) then
+        handleObjectLoss(); return
     end
-    -- The whole chain is evidence about this one root: if the root itself is
-    -- gone mid-resolution the surface and hull evidence is stale, so abort to
-    -- the ordinary object loss.
-    if not C.IsComponentOperational(id(fb.root)) then
-        log("event=auto_next_fallback action=root_lost_abort root=" .. tostring(fb.root))
-        session.targetFallback = nil
-        handleObjectLoss()
-        return
-    end
-    -- A dead objects-stage candidate whose ENGAGEABLE evidence is still
-    -- pending (or was never queried this epoch) can never settle, and the
-    -- planner would keep yielding "wait" for the whole page even while a
-    -- surviving sibling proved positive (5B2c). A dead candidate whose
-    -- evidence SETTLED TO ZERO is equally stale: the planner would read its
-    -- zero from the outdated list, conclude "none", and fall to the browser
-    -- even though a newly operational object now exists (5B2c). Only a dead
-    -- candidate whose cached result is settled and ENGAGEABLE-positive stays
-    -- on the ordinary path, where the engage-time recheck (5B2b) re-verifies
-    -- and restarts. A restart rebuilds the ranked list exactly as the stage
-    -- entry does (the dead object drops out, any new operational object
-    -- ranks) and lets ordinary evaluation resume from page 1 on the next
-    -- tick.
-    if fb.stage == "objects" then
-        local deadParts = {}
-        for _, componentID in ipairs(fb.orderedIDs) do
-            if not C.IsComponentOperational(id(componentID)) then
-                local cached = engageabilityCache[
-                    tostring(sessionEpoch) .. ":" .. State.normID(componentID)]
-                -- Settled and positive is the only dead evidence that may
-                -- keep its batch slot (5B2b owns it); anything else --
-                -- missing, pending, or settled zero -- is a stale list.
-                if cached == nil or cached.pending
-                        or (cached.engageable or 0) <= 0 then
-                    deadParts[#deadParts + 1] = tostring(componentID)
+    if fb.scanning then
+        local parts = {}
+        for _, member in ipairs(checkedOperationalTurrets()) do
+            parts[#parts + 1] = State.normID(member.componentID)
+        end
+        if table.concat(parts, ",") ~= Range.signature then
+            Range.active, Range.status = nil, "failed"
+        end
+        if Range.status == "pending" then
+            -- ponytail: re-rank once per MD request rather than every frame.
+            if fb.earlySerial == Range.serial then return end
+            fb.earlySerial = Range.serial
+            local top = topAutomaticCandidate(fb)
+            local result = top and Range.rangeResult(top)
+            if not (result and result.count > 0) then return end
+            log("event=auto_next action=choose stage=" .. fb.stage
+                .. " early=true chosen=" .. tostring(top))
+            engageAutomaticReplacement(top)
+            return
+        end
+        log("event=auto_next action=result stage=" .. fb.stage
+            .. " attempt=" .. tostring(fb.attempts or 0)
+            .. " status=" .. tostring(Range.status))
+        if Range.status == "complete" then
+            -- Recheck eligibility immediately before normal engagement. A lost
+            -- candidate is skipped; the others keep this sweep's fresh results.
+            local chosen, nearest, positive, lost = nil, math.huge, 0, 0
+            for _, target in ipairs(fb.scanIDs) do
+                local result = Range.rangeResult(target)
+                if not automaticTargetAllowed(target) then
+                    lost = lost + 1
+                elseif result and result.count > 0 then
+                    positive = positive + 1
+                    if fb.stage ~= "objects" then chosen = target; break end
+                    -- Measure again after the sweep: moving candidates may
+                    -- have exchanged places while the turrets were scanned.
+                    local distance = tonumber(C.GetDistanceBetween(session.shipID, id(target))) or -1
+                    if distance < 0 then distance = math.huge end
+                    if not chosen or distance < nearest or (distance == nearest
+                            and State.normID(target) < State.normID(chosen)) then
+                        chosen, nearest = target, distance
+                    end
                 end
             end
-        end
-        if #deadParts > 0 then
-            fb.orderedIDs = rankFallbackObjects(fb.root)
-            fb.page = 1
-            log("event=auto_next_fallback action=stale_object_list_restart root="
-                .. tostring(fb.root) .. " dead=" .. table.concat(deadParts, ",")
-                .. " ranked=" .. tostring(#fb.orderedIDs))
-            return
-        end
-    end
-    local orderedIDs = fb.orderedIDs
-    local decision
-    if fb.stage == "hull" then
-        decision = State.planEngageFallback("hull", orderedIDs, 1, fallbackPageSize,
-            queryFallbackBatch(orderedIDs))
-    else
-        local pageIDs, page = State.surfacePage(orderedIDs, fb.page, fallbackPageSize)
-        fb.page = page
-        decision = State.planEngageFallback(fb.stage, orderedIDs, page, fallbackPageSize,
-            queryFallbackBatch(pageIDs))
-    end
-    if decision.action == "wait" then return end
-    if decision.action == "engage" then
-        -- A positive reading proves the surface was ENGAGEABLE when the
-        -- answer was accepted, not that it is alive on this tick: the surface
-        -- may have died in between. Re-verify immediately before committing.
-        -- A dead surface is neither engaged nor a proven zero, so there is no
-        -- hull/browser fallthrough: restart the same-root surface stage from
-        -- a fresh snapshot, where the dead surface has dropped out of the
-        -- ranking and the new page 1 is requested at once (5A behaviour).
-        if fb.stage == "surfaces"
-            and not C.IsComponentOperational(id(decision.targetID)) then
-            log("event=auto_next_fallback action=stale_surface_restart root="
-                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID))
-            startTargetFallback(fb.lostID, fb.root)
-            return
-        end
-        -- The same stale-proof for objects-stage targets (5B2b): a positive
-        -- reading proves ENGAGEABLE at acceptance, not on this tick. A dead
-        -- object is neither engaged nor a proven zero, so there is no browser
-        -- fallthrough either: rebuild the ranked objects list exactly as the
-        -- stage entry does and resume the ordinary evaluation from page 1.
-        if fb.stage == "objects"
-            and not C.IsComponentOperational(id(decision.targetID)) then
-            fb.orderedIDs = rankFallbackObjects(fb.root)
-            fb.page = 1
-            log("event=auto_next_fallback action=stale_object_restart root="
-                .. tostring(fb.root) .. " dead=" .. tostring(decision.targetID)
-                .. " ranked=" .. tostring(#fb.orderedIDs))
-            return
-        end
-        if engageTarget(decision.targetID) then
-            -- engageTarget cleared the fallback state; log from fb while it
-            -- is still in hand.
-            if (session.povMode or "manual") == "cinematic" then
-                sendCutsceneAimStop()
-                sendCutsceneAimStart(session.povAnchor or "turret")
+            log("event=auto_next action=choose stage=" .. fb.stage
+                .. " positive=" .. positive .. " lost=" .. lost
+                .. " chosen=" .. tostring(chosen))
+            if chosen then
+                engageAutomaticReplacement(chosen)
+                return
             end
-            log("event=auto_next_fallback action=engage stage=" .. fb.stage
-                .. " target=" .. tostring(decision.targetID))
-            logSession("engaged target lost; auto-next engaged " .. tostring(decision.targetID))
+        else
+            -- Failed/incomplete original-root checks retry the same stage;
+            -- browser failures consume one of its three attempts.
+            startFallbackScan(fb)
             return
         end
-        -- The planner's pick could not be engaged (eligibility or camera
-        -- refusal): hand the choice back the way a failed sync engage did.
-        fallbackToBrowser()
+        Range.cancelAutomatic()
+        fb.scanning = nil
+    end
+    if fb.stage == "objects" then startFallbackScan(fb); return end
+    if fb.stage == "surfaces" then
+        local _, _, pages = State.surfacePage(fb.orderedIDs, fb.page, 20)
+        if #fb.orderedIDs > 0 and fb.page < pages then fb.page = fb.page + 1
+        else fb.stage, fb.page, fb.orderedIDs = "hull", 1, { fb.root } end
+        startFallbackScan(fb)
         return
     end
-    if decision.action == "next_page" then
-        fb.page = fb.page + 1
-        log("event=auto_next_fallback action=next_page stage=" .. fb.stage
-            .. " page=" .. tostring(fb.page))
-        return
-    end
-    if decision.action == "hull" then
-        fb.stage, fb.page = "hull", 1
-        fb.orderedIDs = { fb.root }
-        log("event=auto_next_fallback action=stage stage=hull root=" .. tostring(fb.root))
-        return
-    end
-    if decision.action == "objects" then
-        -- Keep readTargetCandidates() ranking intact; the planner must not
-        -- burn an ENGAGEABLE batch slot on a candidate that is already dead,
-        -- so a non-operational candidate is dropped alongside the lost root.
-        fb.stage, fb.page = "objects", 1
-        fb.orderedIDs = rankFallbackObjects(fb.root)
-        log("event=auto_next_fallback action=stage stage=objects ranked="
-            .. tostring(#fb.orderedIDs))
-        return
-    end
-    -- "none": every stage proved zero engageable; nothing left to shoot.
-    log("event=auto_next_fallback action=exhausted root=" .. tostring(fb.root))
-    fallbackToBrowser()
+    handleObjectLoss()
 end
 
 -- Fired by MD (X4GunneryControl.DirectTargetLost) when the engaged target's
@@ -2000,25 +2253,43 @@ end
 -- Updates session.aimTargetID and restarts the cinematic when the target changes.
 local nextAimScan = 0
 local function updateAimTarget()
-    if not session or session.phase ~= "engaged" then return end
-    -- A surface-loss resolution in flight (Issue #45 Task 5) owns the tick:
-    -- each 0.25 s refresh walks the planner exactly one decision.
+    if not session then return end
+    -- Automatic resolution also runs while the target browser is visible.
     if session.targetFallback ~= nil then
         updateTargetFallback()
         return
     end
+    if session.phase ~= "engaged" then return end
     local prev = session.aimTargetID
     local now = getElapsedTime()
     local hadTarget = not isNullID(prev)
     if hadTarget and not C.IsComponentOperational(id(prev)) and session.controlMode == "direct" then
         return onDirectTargetLost()
     end
+    if session.controlMode == "direct" then
+        local selection = C.GetSofttarget2()
+        local selected = selection.softtargetID
+        if sameID(selected, prev) then return end
+
+        local root, eligible, isenemy, ishostile
+        eligible, isenemy, ishostile = false, false, false
+        if not isNullID(selected) then
+            eligible, root = isEligibleEngagementTarget(selected)
+            isenemy, ishostile = componentData(root, "isenemy", "ishostile")
+        end
+        local engageAttempted = eligible and (isenemy or ishostile)
+        if engageAttempted and engageTarget(selected) then
+            return
+        end
+
+        restoreSofttarget(prev, "")
+        return
+    end
     if not isNullID(prev) and C.IsComponentOperational(id(prev)) then
         -- Direct-control keeps the ordered target even when it drifts out of
         -- range. Auto-engage may switch to something better, but each scan is a
         -- whole-sector sweep (readTargetCandidates enumerates every ship and
         -- station), so it runs on a 5 s cadence rather than the 4 Hz refresh.
-        if session.controlMode == "direct" then return end
         if now < nextAimScan then return end
     end
     nextAimScan = now + 5
@@ -2053,18 +2324,10 @@ local function updateAimTarget()
     end
 end
 
--- Opening the Test Lab closes this menu, and menu.cleanup() treats an unplanned
--- close as an orphaned session: it queues autoHideAt, the watchdog restores the
--- directed group, and the reopen discards the session at chair ingress. That
--- destroys an engaged session the moment the player reaches for a reload button.
--- Reuse the Map suspend/resume route instead — it is the one path already proven
--- to hand a live session across an external menu, and its `resuming` branch in
--- onShowMenu is also what re-enters the turret camera on the way back.
--- The Test Lab's operator Close and Abort paths explicitly reopen this menu;
--- player-context and load teardown suppress that handoff because this session
--- is ending independently. Keep those companion exits paired with this parked
--- ownership contract or resumePending would have no menu to consume it.
+-- Test Lab parks the live session in `reopening` while this menu is closed.
+-- Close/Abort reopen Gunnery; teardown paths suppress that handoff.
 local function openTestLab()
+    Hologram.close()
     if session then
         -- The reload buttons live behind this menu, and a reload wipes all Lua
         -- state. Park the session now so there is something to come back to,
@@ -2072,6 +2335,14 @@ local function openTestLab()
         persistSession()
         transitionLifecycle(State.lifecycle.reopening, "Test Lab opened")
         resumePending = true
+        -- Test Lab's Helper.closeMenuAndOpenNewMenu leaves a real interval with
+        -- this menu hidden and its menu not shown yet. Without this marker the
+        -- generic watchdog reads that gap as a finished external-menu cleanup
+        -- and reopens Gunnery on top of the Test Lab. Runtime-only: set after
+        -- persistSession() so it never reaches the saved envelope.
+        session.testLabHandoffPending = true
+        removeEngagedUpdater()
+        removeEngagedOverlay(true)
     end
     testLabCallbacks.open()
 end
@@ -2080,24 +2351,28 @@ function TestAPI.updateAimTarget() updateAimTarget() end
 function TestAPI.cycleTarget(delta) return cycleTarget(delta) end
 function TestAPI.readGroups(ship) return readGroups(ship) end
 function TestAPI.readTargetCandidates() return readTargetCandidates() end
-function TestAPI.requestEngageability(target) return requestEngageability(target) end
-function TestAPI.requestEngageabilities(targets) return requestEngageabilities(targets) end
-function TestAPI.engageabilityText(result) return engageabilityText(result) end
+function TestAPI.setRangeTargets(targets, selected) return Range.setRangeTargets(targets, selected) end
+function TestAPI.rangeResult(target) return Range.rangeResult(target) end
+function TestAPI.runRangeSweep(now) return Range.runRangeSweep(now) end
+function TestAPI.rangeSpeedShip(target) return Range.rangeSpeedShip(target) end
+function TestAPI.rangeText(result) return Range.rangeText(result) end
 
 function menu.onShowMenu()
     -- Helper tracks every menu; vanilla floating/interact menus explicitly
     -- mark themselves non-fullscreen so they do not behave like a full map
     -- menu. This is a runtime behavior gate and must remain live-tested.
     C.SetTrackedMenuFullscreen(menu.name, false)
-    if not isInGunnerChair() then
+    -- A fresh chair sit-down still requires the seat. An onboard session in
+    -- flight (parked by onOpenOnboard, reopened when the Map closes) is allowed
+    -- through even though the player is standing; sessionContextValid() re-checks
+    -- it on the next onUpdate.
+    if not (session and session.origin == "onboard") and not isInGunnerChair() then
         endSession("menu opened after leaving chair")
         return
     end
     local ship = playerShip()
     local resuming = resumePending and session and session.lifecycle == State.lifecycle.reopening
-    local mapSuspendResume = not resuming and session and sameID(session.shipID, ship)
-        and State.isMapSuspended(session)
-    resumePending = false
+    resumePending, resumeOpenPending = false, false
     if not session then
         session = newSession(ship)
         resuming = false
@@ -2108,34 +2383,30 @@ function menu.onShowMenu()
         -- normal ingress receives an empty state response, which is silent by
         -- design because it is the common no-save path.
         if persistence then persistence.request() end
-    elseif not sameID(session.shipID, ship) or (not resuming and not mapSuspendResume) then
+    elseif not sameID(session.shipID, ship) or not resuming then
         -- A fresh chair interaction must never inherit a hidden direct
-        -- snapshot. Only the explicit Map callback below may resume a session,
-        -- or a map-suspended session for the same ship (DockedMenu beat the
-        -- reopen path: the player never left the chair).
+        -- snapshot. Only an explicit pre-open/Test Lab handoff may resume one.
         discardSession("stale session at chair ingress")
         resuming = false
-        mapSuspendResume = false
         session = newSession(ship)
     else
-        transitionLifecycle(State.lifecycle.owned, "Map resume shown")
+        session.testLabHandoffPending = nil
+        transitionLifecycle(State.lifecycle.owned, "parked session shown")
     end
-    -- A displayed menu proves this reopen episode succeeded. Only this genuine
-    -- handover (or a fresh session) clears the failure latch; retry attempts do
-    -- not, so a broken Map handoff cannot fill the log at watchdog cadence.
-    mapReopenFailureLogged = false
     -- The lifecycle transition above is intentionally before camera setup:
-    -- delayed camera work must see an owned session. A map-suspend resume
-    -- already made that transition, so only a fresh ingress needs this one.
-    if not resuming and not mapSuspendResume then
+    -- delayed camera work must see an owned session.
+    if not resuming then
         transitionLifecycle(State.lifecycle.owned, "fresh console shown")
     end
+    -- A displayed menu proves this reopen episode succeeded. Retry attempts do
+    -- not clear the latch, so a broken external-menu handoff stays log-silent.
+    reopenFailureLogged = false
     refresh()
     -- Seed committedBaseline and staged from the ship's live modes at sit-down.
     -- A restored session already carries its baseline from the payload; only a
-    -- fresh (or discarded-and-replaced) session needs seeding. Map resumes and
-    -- Test Lab reopens carry the existing session through without re-seeding.
-    if not resuming and not mapSuspendResume
+    -- fresh (or discarded-and-replaced) session needs seeding. Explicit
+    -- handoffs carry the existing session through without re-seeding.
+    if not resuming
         and #(session.committedBaseline or {}) == 0 then
         State.seedBaseline(session, session.groups)
     end
@@ -2146,7 +2417,7 @@ function menu.onShowMenu()
             log("could not restore suspended gunnery camera; returning to console")
         end
     end
-    -- Both resume routes (Test Lab reopen and Map suspend) re-enter the engaged
+    -- Reopen flows such as Test Lab re-enter the engaged
     -- view without re-applying the engine soft target. Only the MD restore path
     -- ever set repointTargetID, so a plain close-and-reopen lost the target
     -- reticule while a Reload UI (which goes through the restore path) kept it.
@@ -2154,43 +2425,71 @@ function menu.onShowMenu()
     -- in attemptRepoint applies. Auto mode deliberately never sets a soft target,
     -- so the mode guard is required: dropping it would create a reticule Auto
     -- never otherwise shows.
-    -- This explicit resume handoff also grants the one bounded retry: live Task
-    -- 6 runs showed the engine refusing the resume's first SetSofttarget while
-    -- it settles after the menu transition, then accepting the same write
-    -- moments later. Granting it only here keeps the generic refusal-abandons
-    -- contract for every other re-point origin (restore envelope, tests).
-    if (resuming or mapSuspendResume) and session.phase == "engaged"
+    -- A Test Lab resume can transiently refuse the first SetSofttarget while
+    -- the menu transition settles, so grant one bounded retry only on this handoff.
+    -- Other re-point origins keep the normal refusal-abandons contract.
+    if resuming and session.phase == "engaged"
         and session.controlMode == "direct" and not isNullID(session.aimTargetID) then
         session.repointTargetID = session.aimTargetID
         session.repointResumeRetry = session.aimTargetID
     end
     menu.display()
+    -- Parking cancelled a browser Auto-next scan; start a fresh one.
+    local restartAutoNext = resuming and session.autoNextParked
+    session.autoNextParked = nil
+    if restartAutoNext and session.phase == "target_select"
+            and session.controlMode == "direct" and session.autoNextTarget ~= false then
+        startBrowserAutoNext()
+    end
 end
 
 function menu.display()
+    if session and session.phase == "engaged" and fullscreenTakeoverDisplayed() then
+        hideEngagedOverlayForTakeover()
+        engagedOverlayRefreshPending = true
+        return
+    end
+    Hologram.refresh()
+    -- Entering the persistent engaged overlay replaces, rather than refreshes, the
+    -- normal console/browser frame. Remove only that Gunnery-owned Helper view;
+    -- clearDataForRefresh() deliberately leaves its registration intact.
+    if session and session.phase == "engaged" and not findEngagedOverlayRegistration()
+            and menu.frame and menu.frame.properties and View and View.menus then
+        local previousLayer = menu.frame.properties.layer or 4
+        for _, entry in ipairs(View.menus) do
+            if entry.id == "Helper" .. previousLayer and entry.name == menu.name then
+                Helper.clearFrame(menu, previousLayer)
+                break
+            end
+        end
+    end
     -- Rebuild the current frame without untracking the menu. Helper.clearMenu()
     -- tears down menu.shown and its update/close ownership; vanilla menus use
     -- clearDataForRefresh() when replacing a live frame on the same layer.
     Helper.clearDataForRefresh(menu)
-    -- The element panel is rebuilt below only in direct mode. clearDataForRefresh
-    -- leaves menu.frames alone, so a leftover panel stays registered as its own
-    -- view ("Helper" .. layer) and keeps rendering over the next phase until the
-    -- whole menu closes — unregister it explicitly.
-    if menu.elementFrame then
-        Helper.clearFrame(menu, elementFrameLayer)
-        menu.elementFrame = nil
-    end
+    -- The engaged frame uses a custom registry ID, so Helper's refresh helpers
+    -- cannot unregister it. Release that registration explicitly before a
+    -- rebuild or phase change.
+    removeEngagedOverlay(true)
     -- Every call path into display() holds a live session: callers either guard
     -- with `if session then` or return early when it is nil. Stated once here so
     -- nothing below has to repeat the check.
-    if not session then return end
+    if not session then Hologram.close(); return end
     if session.phase == "engaged" then
-        -- One compact upper-right panel for both controlModes (step 7).
-        -- Frame properties match the old direct panel exactly so the contract
-        -- test grep for viewFrame.properties.height still passes.
-        local width = Helper.scaleX(460)
+        engagedOverlayRefreshPending = false
+        installEngagedUpdater()
+        -- Two frames on two layers, merged into one View registration by
+        -- claimEngagedOverlayRegistration(): compact controls upper right,
+        -- surface browser upper left.
+        local controlsWidth = Helper.scaleX(460)
+        local elemWidth = Helper.scaleX(680)
+        local hasElementPanel = session.controlMode == "direct" and session.targetObjectID ~= nil
+        if not hasElementPanel then Hologram.close() end
+        local width = controlsWidth
         session.viewSofttargetKey = softtargetKey()
         local viewFrame = Helper.createFrameHandle(menu, {
+            layer = engagedOverlayLayer,
+            viewHelperType = engagedOverlayType,
             x = Helper.viewWidth - width - Helper.scaleX(32),
             y = Helper.scaleY(32),
             width = width, standardButtons = { back = true, close = true },
@@ -2210,12 +2509,11 @@ function menu.display()
         viewFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
         local controls = viewFrame:addTable(2, {
             tabOrder = 1, x = Helper.borderSize, y = Helper.borderSize,
-            width = width - 2 * Helper.borderSize,
+            width = controlsWidth - 2 * Helper.borderSize,
         })
-        -- Header row: current turret name + its group name.
+        -- Header row uses the same position/name label as the list and hover.
         local cm, cmGroup = cameraMember()
-        local headerText = (cm and cm.displayName or text(29))
-            .. (cmGroup and (": " .. cmGroup.displayName) or "")
+        local headerText = cm and State.turretLabel(cmGroup, cm) or text(29)
         local headerRow = controls:addRow(false, { bgColor = Color["row_title_background"] })
         headerRow[1]:setColSpan(2):createText(headerText, { halign = "center" })
         -- Six buttons in three rows of two (step 7).
@@ -2277,7 +2575,7 @@ function menu.display()
             -- the same action: this stands the player up. It read "Cease
             -- Engagement" while it dropped back to the console, which it no
             -- longer does.
-            directRow[2]:createButton({}):setText(text(14))
+            directRow[2]:createButton({}):setText(session.origin == "onboard" and text(103) or text(14))
             -- Cease Engagement now stands the player up rather than dropping
             -- back to the console. Revert is bound to leaving the chair, so this
             -- is the only seated action that can still restore the turrets --
@@ -2285,7 +2583,7 @@ function menu.display()
             -- seated player who wants to stand the guns down unticks and presses
             -- "Update turret behavior" instead.
             directRow[2].handlers.onClick = function()
-                leaveChair("compact cease button")
+                leaveSession("compact cease button")
             end
             local canCycleTarget = hasMultipleTargets()
             local pRow4 = controls:addRow("cycle_target", {})
@@ -2329,58 +2627,53 @@ function menu.display()
             testLabRow[1]:setColSpan(2):createButton({}):setText(text(32))
             testLabRow[1].handlers.onClick = openTestLab
         end
-        -- Auto-size frame height like the old direct panel (contract grep).
-        viewFrame.properties.height = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
+        local controlsHeight = controls.properties.y + controls:getVisibleHeight() + 2 * Helper.borderSize
+        viewFrame.properties.height = controlsHeight
         viewFrame:display()
-        -- Element panel: top-left, only for direct mode with an engaged object.
-        if session.controlMode == "direct" and session.targetObjectID then
-            local elemWidth = Helper.scaleX(680)
+        local overlayLayers, overlayFrames = { engagedOverlayLayer }, { [engagedOverlayLayer] = viewFrame }
+        -- Element panel: its own upper-left frame on its own layer, only for
+        -- Direct mode with an engaged object.
+        if hasElementPanel then
             local elemFrame = Helper.createFrameHandle(menu, {
-                -- Every frame registers its view as "Helper" .. layer, so a
-                -- second frame on the default layer 4 would replace the panel
-                -- above instead of appearing beside it (vanilla gives each of
-                -- Map's frames its own layer: menu_map.lua:1052-1055).
                 layer = elementFrameLayer,
-                x = Helper.scaleX(32), y = Helper.scaleY(32),
-                width = elemWidth,
+                x = Helper.scaleX(32), y = Helper.scaleY(32), width = elemWidth,
                 exclusiveInteractions = false, closeOnUnhandledClick = false,
                 playerControls = true, startAnimation = false, blurBackground = false,
                 enableDefaultInteractions = true,
+                -- Must agree with the controls frame; see keepHUDVisible above.
                 keepHUDVisible = true, keepCrosshairVisible = false,
                 showTickerPermanently = false,
             })
             menu.elementFrame = elemFrame
             elemFrame:setBackground("solid", { color = Color["frame_background_semitransparent"] })
+            overlayLayers[#overlayLayers + 1] = elementFrameLayer
+            overlayFrames[elementFrameLayer] = elemFrame
+            local holoHeight = Helper.scaleY(220)
+            Hologram.mount(menu, elemFrame, session, {
+                x = Helper.borderSize, y = Helper.borderSize,
+                w = elemWidth - 2 * Helper.borderSize, h = holoHeight,
+            }, true, function(member)
+                if member.operational and member.cameraSupported then
+                    session.cameraMemberID = member.componentID
+                    session.povAnchor, session.povMode = "turret", "manual"
+                    if enterCamera(member) then persistSession(); menu.display() end
+                end
+            end)
             local elemTable = elemFrame:addTable(5, {
-                tabOrder = 2, x = Helper.borderSize, y = Helper.borderSize,
+                tabOrder = 2, x = Helper.borderSize, y = holoHeight + Helper.standardTextHeight + 2 * Helper.borderSize,
                 width = elemWidth - 2 * Helper.borderSize,
             })
             -- Header: target name (falls back to text(51) when empty).
             local tgtName = str(C.GetComponentName(id(session.targetObjectID)))
             local elemHeader = elemTable:addRow(false, { bgColor = Color["row_title_background"] })
             elemHeader[1]:setColSpan(5):createText(tgtName ~= "" and tgtName or text(51), { halign = "center" })
-            local elemRefresh = elemTable:addRow("surface_refresh", {})
-            elemRefresh[1]:setColSpan(5):createButton({}):setText(text(15))
-            elemRefresh[1].handlers.onClick = function()
-                log("event=surface_browser action=refresh location=top target=" .. tostring(session.targetObjectID))
-                session.surfaceBrowser.pendingReason = "manual"
-                refresh(); menu.display()
-            end
             local pendingReason = session.surfaceBrowser and session.surfaceBrowser.pendingReason
             if session.surfaceBrowser then session.surfaceBrowser.pendingReason = nil end
             local browser = rebuildSurfaceSnapshot(pendingReason)
-            local allSurfaces = browser.allSurfaces
-            local autoRefreshRow = elemTable:addRow("surface_auto_refresh", {})
-            autoRefreshRow[1]:createCheckBox(browser.autoRefresh == true,
-                { width = Helper.standardTextHeight, height = Helper.standardTextHeight })
-            autoRefreshRow[1].handlers.onClick = function()
-                browser.autoRefresh = not browser.autoRefresh
-                browser.nextAutoRefreshAt = browser.autoRefresh and (getElapsedTime() + 10) or nil
-                log("event=surface_refresh action=toggle automatic=" .. tostring(browser.autoRefresh)
-                    .. " root=" .. tostring(session.targetObjectID))
-                menu.display()
+            if not Range.nextSurfaceMembershipAt then
+                Range.nextSurfaceMembershipAt = getElapsedTime() + 10
             end
-            autoRefreshRow[2]:setColSpan(4):createText(text(97))
+            local allSurfaces = browser.allSurfaces
             local typeOptions = {
                 { id = "any", text = text(86), icon = "", displayremoveoption = false },
                 { id = "turret", text = text(46), icon = "", displayremoveoption = false },
@@ -2436,10 +2729,7 @@ function menu.display()
             -- refreshes independently from the frozen alternative pages.
             local pinnedID = session.aimTargetID or session.targetObjectID
             local pinnedSurface = surfaceMetadata(browser, pinnedID)
-            if not browser.pinnedResult then
-                browser.pinnedDistance = surfaceDistance(pinnedID)
-                browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
-            end
+            browser.pinnedDistance = surfaceDistance(pinnedID)
             local pinnedName = pinnedSurface and pinnedSurface.name or tgtName
             local pinnedKind = pinnedSurface and pinnedSurface.kind or text(92)
             local pinnedTitle = elemTable:addRow("surface_pinned_title", { bgColor = Color["row_title_background"] })
@@ -2447,11 +2737,11 @@ function menu.display()
             local surfaceHeader = elemTable:addRow("surface_header", { bgColor = Color["row_background_unselectable"] })
             surfaceHeader[1]:setColSpan(2):createText(text(59))
             surfaceHeader[3]:createText(text(50))
-            surfaceHeader[4]:createText(text(89))
+            surfaceHeader[4]:createText("IN RANGE")
             local pinnedRow = elemTable:addRow("surface_pinned", {})
             pinnedRow[1]:setColSpan(2):createText(pinnedKind)
             pinnedRow[3]:createText(function() return surfaceDistanceText(browser.pinnedDistance) end)
-            pinnedRow[4]:createText(function() return engageabilityText(browser.pinnedResult) end)
+            pinnedRow[4]:createText(function() return Range.rangeText(Range.rangeResult(pinnedID)) end)
             pinnedRow[5]:createText(function() return surfaceShieldText(pinnedID) end)
             local pinnedHullRow = elemTable:addRow("surface_pinned_hull", {})
             pinnedHullRow[5]:createText(function() return surfaceHullText(pinnedID) end)
@@ -2469,30 +2759,12 @@ function menu.display()
             local pageEntries, page, pageCount, firstIndex, lastIndex =
                 State.surfacePage(ordered, browser.page, browser.pageSize)
             browser.page = page
-            local pageKey = State.surfacePageKey(browser.generation, pageEntries)
-            local pageCache = browser.pageResults[pageKey]
-            if not pageCache then
-                local pageIDs = {}
-                for _, surface in ipairs(pageEntries) do pageIDs[#pageIDs + 1] = surface.componentID end
-                local pageMembers, signatureParts = checkedOperationalTurrets(), {}
-                for _, member in ipairs(pageMembers) do
-                    signatureParts[#signatureParts + 1] = State.normID(member.componentID)
-                end
-                pageCache = {
-                    results = requestEngageabilities(pageIDs, "surface_page"), audited = false,
-                    distances = {},
-                    selectedTotal = #pageMembers, selectedSignature = table.concat(signatureParts, ","),
-                }
-                for position, surface in ipairs(pageEntries) do
-                    pageCache.distances[position] = surfaceDistance(surface.componentID)
-                end
-                browser.pageResults[pageKey] = pageCache
-                log("event=surface_page action=request generation=" .. tostring(browser.generation)
-                    .. " page=" .. tostring(page) .. " first=" .. tostring(firstIndex)
-                    .. " last=" .. tostring(lastIndex) .. " requested=" .. tostring(#pageIDs)
-                    .. " selected_total=" .. tostring(pageCache.selectedTotal)
-                    .. " selected_signature=" .. string.format("%q", pageCache.selectedSignature))
+            local pageIDs, pageDistances = {}, {}
+            for position, surface in ipairs(pageEntries) do
+                pageIDs[#pageIDs + 1] = surface.componentID
+                pageDistances[position] = surfaceDistance(surface.componentID)
             end
+            Range.setRangeTargets(pageIDs, pinnedID)
             local pageControls = elemTable:addRow("surface_page_controls", {})
             pageControls[1]:createButton({ active = page > 1 }):setText(text(94))
             pageControls[1].handlers.onClick = function()
@@ -2508,34 +2780,19 @@ function menu.display()
                 menu.display()
             end
             if #pageEntries > 0 then
-                local complete = true
                 for position, surface in ipairs(pageEntries) do
-                    local result = pageCache.results[position]
-                    if not result or result.pending then complete = false end
-                    if complete and not pageCache.audited then
-                        local engageabilityState, engageabilityEngageable, engageabilityKnown, engageabilityTotal = engageabilityAudit(result)
-                        log(string.format("event=surface_browser action=row target=%s component=%s name=%q kind=%s macro=%q size=%s size_source=%s distance=%s snapshot_distance=%s position=%d page=%d pinned=false engageability_state=%s engageability_engageable=%s engageability_known=%s engageability_total=%s engageability_text=%q",
-                            tostring(session.targetObjectID), tostring(surface.componentID), surface.name,
-                            surface.kindKey, surface.macro, surface.size, surface.sizeSource,
-                            tostring(pageCache.distances[position]),
-                            tostring(surface.distance), position, page,
-                            engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
-                            tostring(engageabilityTotal), engageabilityText(result)))
-                    end
                     local surfRow = elemTable:addRow(tostring(surface.componentID), {})
-                    surfRow[1]:setColSpan(2):createText(surface.name)
-                    surfRow[3]:createText(surfaceDistanceText(pageCache.distances[position]))
-                    surfRow[4]:createText(engageabilityText(result))
+                    local suggestion = currentTestEngagementSuggestion()
+                    local surfaceName = surface.name
+                    if suggestion and sameID(surface.componentID, suggestion.target) then
+                        surfaceName = "[TEST TARGET] " .. surfaceName
+                    end
+                    surfRow[1]:setColSpan(2):createText(surfaceName)
+                    surfRow[3]:createText(surfaceDistanceText(pageDistances[position]))
+                    local targetID = surface.componentID
+                    surfRow[4]:createText(function() return Range.rangeText(Range.rangeResult(targetID)) end)
                     surfRow[5]:createButton({}):setText(text(60))
                     surfRow[5].handlers.onClick = function() engageTarget(surface.componentID) end
-                end
-                if complete and not pageCache.audited then
-                    pageCache.audited = true
-                    log("event=surface_page action=complete generation=" .. tostring(browser.generation)
-                        .. " page=" .. tostring(page) .. " requested=" .. tostring(#pageEntries)
-                        .. " accepted=" .. tostring(#pageEntries) .. " completed=" .. tostring(#pageEntries)
-                        .. " selected_total=" .. tostring(pageCache.selectedTotal)
-                        .. " selected_signature=" .. string.format("%q", pageCache.selectedSignature))
                 end
             else
                 local noSurfRow = elemTable:addRow(false, {})
@@ -2544,11 +2801,20 @@ function menu.display()
             elemFrame.properties.height = elemTable.properties.y + elemTable:getVisibleHeight() + 2 * Helper.borderSize
             elemFrame:display()
         end
+        if not claimEngagedOverlayRegistration(overlayLayers, overlayFrames) then
+            removeEngagedUpdater()
+            restoreDirect("engaged overlay registration incomplete")
+            session.engagePending, session.engagePendingSince = nil, nil
+            returnToConsole("engaged overlay registration incomplete")
+        end
         return
     end
 
+    removeEngagedUpdater()
+
     local targetBrowser = session.phase == "target_select"
-    local frameWidth = Helper.scaleX(targetBrowser and 760 or 1100)
+    if targetBrowser then Hologram.close() end
+    local frameWidth = math.min(Helper.viewWidth, Helper.scaleX(targetBrowser and 760 or 1500))
     local frameHeight = Helper.scaleY(targetBrowser and 620 or 700)
     local frame = Helper.createFrameHandle(menu, {
         width = frameWidth, height = frameHeight,
@@ -2568,17 +2834,27 @@ function menu.display()
     -- edge; the console frame starts at x = 0.
     local tablePad = Helper.scaleX(20)
     local tableWidth = frameWidth - 2 * tablePad
+    if not targetBrowser then
+        local holoWidth = math.min(Helper.scaleX(600), frameWidth * 0.40)
+        tableWidth = tableWidth - holoWidth - tablePad
+        Hologram.mount(menu, frame, session, {
+            x = tablePad + tableWidth + tablePad, y = Helper.scaleY(70),
+            w = holoWidth, h = Helper.scaleY(520),
+        }, false, function(_, group)
+            if State.canMutate(group) then
+                local staged = session.staged and session.staged[group.key]
+                local armed = group.armed
+                if staged then armed = staged.armed end
+                State.toggleGroup(session, group.key, armed)
+                menu.display()
+            end
+        end)
+    end
 
     if session.phase == "target_select" then
         local tableView = frame:addTable(12, { tabOrder = 1, x = tablePad, width = tableWidth })
         local title = tableView:addRow(false, { bgColor = Color["row_title_background"] })
         title[1]:setColSpan(12):createText(text(33), Helper.headerRowCenteredProperties)
-        local topActions = tableView:addRow("target_refresh_top", {})
-        topActions[1]:setColSpan(12):createButton({}):setText(text(15))
-        topActions[1].handlers.onClick = function()
-            log("event=target_browser action=refresh location=top")
-            refresh(); menu.display()
-        end
         local explanation = tableView:addRow(false, {})
         explanation[1]:setColSpan(12):createText(text(34), { wordwrap = true })
         local current = C.GetSofttarget2()
@@ -2587,21 +2863,27 @@ function menu.display()
             row[1]:setColSpan(9):createText(text(35) .. ": " .. str(C.GetComponentName(current.softtargetID)))
             row[10]:setColSpan(3):createButton({}):setText(text(36))
             row[10].handlers.onClick = function() engageTarget(current.softtargetID) end
+            local selectedID = current.softtargetID
+            local detail = tableView:addRow("current_detail", { bgColor = Color["row_background_unselectable"] })
+            detail[1]:setColSpan(12):createText(function() return Range.rangeText(Range.rangeResult(selectedID)) end)
         end
         local header = tableView:addRow(false, { bgColor = Color["row_background_unselectable"] })
         header[1]:setColSpan(2):createText(text(37)); header[3]:createText(text(84))
         header[4]:setColSpan(2):createText(text(38)); header[6]:createText(text(49))
-        header[7]:createText(text(50)); header[8]:setColSpan(2):createText(text(90)); header[10]:setColSpan(3):createText("")
+        header[7]:createText(text(50)); header[8]:setColSpan(2):createText("IN RANGE"); header[10]:setColSpan(3):createText("")
         local candidates = readTargetCandidates()
+        if not Range.nextBrowserMembershipAt then
+            Range.nextBrowserMembershipAt = getElapsedTime() + 5
+        end
         local classValues, typeValues = 0, 0
         local candidateIDs = {}
         for _, candidate in ipairs(candidates) do candidateIDs[#candidateIDs + 1] = candidate.componentID end
-        local candidateEngageabilities = requestEngageabilities(candidateIDs)
-        for index, candidate in ipairs(candidates) do candidate.engageability = candidateEngageabilities[index] end
+        Range.setRangeTargets(candidateIDs, current.softtargetID ~= 0 and current.softtargetID or nil)
         table.sort(candidates, function(a, b)
-            local aEngageable = a.engageability and a.engageability.total > 0 and a.engageability.engageable == a.engageability.total or false
-            local bEngageable = b.engageability and b.engageability.total > 0 and b.engageability.engageable == b.engageability.total or false
-            if aEngageable ~= bEngageable then return aEngageable end
+            local aRange, bRange = Range.rangeResult(a.componentID), Range.rangeResult(b.componentID)
+            local aAll = aRange and aRange.total > 0 and aRange.count == aRange.total or false
+            local bAll = bRange and bRange.total > 0 and bRange.count == bRange.total or false
+            if aAll ~= bAll then return aAll end
             if a.priority ~= b.priority then return a.priority < b.priority end
             if a.distance ~= b.distance then
                 if a.distance < 0 then return false end
@@ -2618,17 +2900,21 @@ function menu.display()
             .. " class_values=" .. tostring(classValues)
             .. " type_values=" .. tostring(typeValues))
         for position, candidate in ipairs(candidates) do
-            local engageabilityState, engageabilityEngageable, engageabilityKnown, engageabilityTotal = engageabilityAudit(candidate.engageability)
-            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d engageability_state=%s engageability_engageable=%s engageability_known=%s engageability_total=%s engageability_text=%q",
+            log(string.format("event=target_browser action=row component=%s name=%q class=%q type=%q macro=%q position=%d",
                 tostring(candidate.componentID), candidate.name, candidate.class, candidate.typeName,
-                candidate.macro, position, engageabilityState, tostring(engageabilityEngageable), tostring(engageabilityKnown),
-                tostring(engageabilityTotal), engageabilityText(candidate.engageability)))
+                candidate.macro, position))
             local row = tableView:addRow(tostring(candidate.componentID), {})
-            row[1]:setColSpan(2):createText(candidate.name ~= "" and candidate.name or text(51))
+            local candidateName = candidate.name ~= "" and candidate.name or text(51)
+            local suggestion = currentTestEngagementSuggestion()
+            if suggestion and sameID(candidate.componentID, suggestion.root) then
+                candidateName = "[TEST TARGET] " .. candidateName
+            end
+            row[1]:setColSpan(2):createText(candidateName)
             row[3]:createText(candidate.class); row[4]:setColSpan(2):createText(candidate.typeName)
             row[6]:createText(candidate.relation)
             row[7]:createText(candidate.distance >= 0 and string.format("%.1f km", candidate.distance / 1000) or "-")
-            row[8]:setColSpan(2):createText(engageabilityText(candidate.engageability))
+            local targetID = candidate.componentID
+            row[8]:setColSpan(2):createText(function() return Range.rangeText(Range.rangeResult(targetID)) end)
             row[10]:setColSpan(3):createButton({}):setText(text(52))
             row[10].handlers.onClick = function() engageTarget(candidate.componentID) end
         end
@@ -2637,11 +2923,6 @@ function menu.display()
             row[1]:setColSpan(12):createText(text(53), { color = Color["text_error"] })
         end
         local actions = tableView:addRow("actions", {})
-        actions[1]:setColSpan(3):createButton({}):setText(text(15))
-        actions[1].handlers.onClick = function()
-            log("event=target_browser action=refresh location=bottom")
-            refresh(); menu.display()
-        end
         if testLabCallbacks and testLabCallbacks.open then
             actions[4]:setColSpan(2):createButton({}):setText(text(32))
             actions[4].handlers.onClick = openTestLab
@@ -2658,6 +2939,7 @@ function menu.display()
     end
 
     -- Console: 8-column table.
+    Range.consoleGroupSignature = Range.groupDisplaySignature()
     -- Columns: [1] checkbox [2] group name+status [3] count [4] mode [5] armed
     --          [6..7] spacer [8] (unused — held for column width balance)
     local tableView = frame:addTable(8, { tabOrder = 1, x = tablePad, width = tableWidth })
@@ -2782,25 +3064,21 @@ function menu.display()
     end
     local actions = tableView:addRow("actions", {})
     if testLabCallbacks and testLabCallbacks.open then
-        -- 8 cols: [1-2] Auto-engage [3-4] Direct-control [5-6] Refresh [7] TestLab [8] GetUp
+        -- 8 cols: Auto-engage, Direct-control, Test Lab, Get Up.
         actions[1]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(68))
         actions[1].handlers.onClick = function() startAutoEngage(State.checkedGroups(session)) end
         actions[3]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(69))
         actions[3].handlers.onClick = function() startTargetSelection(State.checkedGroups(session)) end
-        actions[5]:setColSpan(2):createButton({}):setText(text(15))
-        actions[5].handlers.onClick = function() refresh(); menu.display() end
-        actions[7]:createButton({}):setText(text(32))
-        actions[7].handlers.onClick = openTestLab
-        actions[8]:createButton({}):setText(text(14)); actions[8].handlers.onClick = function() leaveChair("get up button") end
+        actions[5]:setColSpan(3):createButton({}):setText(text(32))
+        actions[5].handlers.onClick = openTestLab
+        actions[8]:createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[8].handlers.onClick = function() leaveSession("get up button") end
     else
-        -- 8 cols: [1-2] Auto-engage [3-4] Direct-control [5-6] Refresh [7-8] GetUp
+        -- 8 cols: Auto-engage, Direct-control, Get Up.
         actions[1]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(68))
         actions[1].handlers.onClick = function() startAutoEngage(State.checkedGroups(session)) end
         actions[3]:setColSpan(2):createButton({ active = anyMutableChecked }):setText(text(69))
         actions[3].handlers.onClick = function() startTargetSelection(State.checkedGroups(session)) end
-        actions[5]:setColSpan(2):createButton({}):setText(text(15))
-        actions[5].handlers.onClick = function() refresh(); menu.display() end
-        actions[7]:setColSpan(2):createButton({}):setText(text(14)); actions[7].handlers.onClick = function() leaveChair("get up button") end
+        actions[5]:setColSpan(4):createButton({}):setText(session.origin == "onboard" and text(103) or text(14)); actions[5].handlers.onClick = function() leaveSession("get up button") end
     end
     -- "Update turret behavior" (id 83): permanent commit. Writes staged to the
     -- ship AND advances committedBaseline. Greyed while staged == committedBaseline;
@@ -2813,7 +3091,8 @@ function menu.display()
     frame:display()
 end
 
-function menu.viewCreated()
+function menu.viewCreated(layer, ...)
+    Hologram.viewCreated(layer, ...)
     -- Helper invokes this only after X4 created the replacement frame. It is
     -- the nearest available confirmation that an Engage transition obtained
     -- visible input ownership.
@@ -2826,16 +3105,15 @@ function menu.viewCreated()
     end
 end
 
-function menu.onUpdate()
+local function updateSessionRuntime()
     if not session then return end
-    if not isInGunnerChair() or not sameID(playerShip(), session.shipID) then
+    if not sessionContextValid() then
         endSession("left chair or ship")
         return
     end
     local now = getElapsedTime()
     -- X4 can continue delivering UI updates while simulation time is paused.
-    -- Do not let those updates turn a frozen elapsed-time deadline into a
-    -- recursive pinned-engageability request/repaint loop.
+    -- Keep the pinned distance refresh on unpaused simulation time.
     if not C.IsGamePaused()
             and session.phase == "engaged" and session.controlMode == "direct"
             and session.targetObjectID and session.surfaceBrowser then
@@ -2844,20 +3122,38 @@ function menu.onUpdate()
             browser.pinnedRefreshAt = now + 1
             local pinnedID = session.aimTargetID or session.targetObjectID
             browser.pinnedDistance = surfaceDistance(pinnedID)
-            browser.pinnedResult = requestEngageability(pinnedID, "surface_pinned")
-        end
-        if browser.autoRefresh and browser.nextAutoRefreshAt and now >= browser.nextAutoRefreshAt then
-            browser.nextAutoRefreshAt = now + 10
-            browser.pendingReason = "automatic"
-            log("event=surface_refresh action=fire reason=automatic root=" .. tostring(session.targetObjectID)
-                .. " page=" .. tostring(browser.page))
-            menu.display()
         end
     end
+    Range.runRangeSweep(now)
     if now > nextRefresh then
         nextRefresh = now + 0.25; refresh()
+        if #Range.order > 0 then
+            local targets = {}
+            for _, entry in ipairs(Range.order) do targets[#targets + 1] = entry.target end
+            local selected = Range.selectedKey and id(Range.selectedKey) or nil
+            if session.phase == "target_select" then
+                local soft = C.GetSofttarget2().softtargetID
+                selected = not isNullID(soft) and soft or nil
+            end
+            Range.setRangeTargets(targets, selected)
+        end
+        if session.phase == "console" then
+            local signature = Range.groupDisplaySignature()
+            if Range.consoleGroupSignature and signature ~= Range.consoleGroupSignature then menu.display() end
+            Range.consoleGroupSignature = signature
+        elseif session.phase == "target_select" and Range.nextBrowserMembershipAt
+                and now >= Range.nextBrowserMembershipAt then
+            Range.nextBrowserMembershipAt = now + 5
+            menu.display()
+        elseif session.phase == "engaged" and session.controlMode == "direct"
+                and session.surfaceBrowser and Range.nextSurfaceMembershipAt
+                and now >= Range.nextSurfaceMembershipAt then
+            Range.nextSurfaceMembershipAt = now + 10
+            session.surfaceBrowser.pendingReason = "automatic"
+            menu.display()
+        end
         -- Auto-retarget runs on the same tick as the data refresh.
-        if session.phase == "engaged" then updateAimTarget() end
+        if session.phase == "engaged" or session.targetFallback then updateAimTarget() end
         -- The player's first Esc during a cinematic goes to the cutscene, not to
         -- our frame, so the engine ends it behind our back. Notice that and
         -- return to the default view here; otherwise the panel keeps claiming
@@ -2868,9 +3164,13 @@ function menu.onUpdate()
                 session.cinematicSeen = true
             elseif session.cinematicSeen then
                 session.cinematicSeen = nil
-                session.povAnchor, session.povMode = "turret", "manual"
-                applyPov()
-                menu.display()
+                -- MD stops the cutscene itself when its target dies; only a stop
+                -- later than that is the player's Esc.
+                if not (session.targetLostAt and now - session.targetLostAt < 1) then
+                    session.povAnchor, session.povMode = "turret", "manual"
+                    applyPov()
+                    menu.display()
+                end
             end
         end
         -- Only while the camera is meant to be ON the turret. Target POV points
@@ -2892,8 +3192,10 @@ function menu.onUpdate()
             end
         end
     end
-    if menu.frame then menu.frame:update() end
-    if menu.elementFrame then menu.elementFrame:update() end
+    if menu.frame and not suspendedOverlayRegistration then
+        menu.frame:update()
+        if menu.elementFrame then menu.elementFrame:update() end
+    end
 end
 
 activeExternalMenuName = function()
@@ -2904,24 +3206,62 @@ activeExternalMenuName = function()
     end
 end
 
+-- Helper owns the ordinary menu updater and changes that owner as menus open.
+-- Keep console/browser work there, while a stable addon callback carries the
+-- already-engaged session whenever another menu owns Helper's slot.
+function menu.onUpdate()
+    if session and session.phase == "engaged" then
+        -- Defensive fallback for an environment without the addon script slot;
+        -- normal X4 runtime installs it before the engaged frame is displayed.
+        if not engagedUpdaterInstalled then engagedOnUpdate() end
+        return
+    end
+    Hologram.update()
+    updateSessionRuntime()
+end
+
+engagedOnUpdate = function()
+    if not session or session.phase ~= "engaged" or not State.isOwned(session) then
+        removeEngagedUpdater()
+        return
+    end
+    if fullscreenTakeoverDisplayed() then
+        hideEngagedOverlayForTakeover()
+    else
+        restoreEngagedOverlayAfterTakeover()
+        Hologram.update()
+    end
+    updateSessionRuntime()
+end
+
+function menu.onRenderTargetMouseDown() Hologram.mouseDown() end
+function menu.onRenderTargetMouseUp() Hologram.mouseUp() end
+function menu.onRenderTargetSelect() Hologram.select() end
+function menu.onRenderTargetCombinedScrollDown(step) Hologram.zoom(step) end
+function menu.onRenderTargetCombinedScrollUp(step) Hologram.zoom(-step) end
+
 function menu.onCloseElement(dueToClose)
     local externalMenu = activeExternalMenuName()
-    if session and externalMenu then
-        if externalMenu == "MapMenu" then
-            -- Map is the one external menu with a verified UI Extensions
-            -- cleanup callback. Preserve only this explicit, epoch-guarded
-            -- resume route; guessing at all other menu lifecycles caused
-            -- orphaned gunnery input frames.
-            transitionLifecycle(State.lifecycle.suspendingMap, "MapMenu opened")
-            Helper.closeMenu(menu, "close", false, false)
-            if session then transitionLifecycle(State.lifecycle.suspendedMap, "MapMenu owns the view") end
-        else
-            logSession("unsupported external menu replaces Gunnery Control: " .. externalMenu)
-            endSession("unsupported external menu " .. externalMenu)
-        end
+    if session and session.phase == "engaged" and externalMenu then
+        -- External names are deliberately not an allowlist. Floating menus sit
+        -- above the persistent overlay; fullscreen menus temporarily take only
+        -- its visual/input registration away. Neither path touches session or
+        -- camera state.
+        if fullscreenTakeoverDisplayed() then hideEngagedOverlayForTakeover() end
         return
     end
     if session and not State.isOwned(session) then return end
+    if session and externalMenu then
+        -- Another menu is replacing the console or target browser (M opens the
+        -- Map from the browser, which keeps player controls). Park like the
+        -- Test Lab handoff; the watchdog reopens this view once no external
+        -- menu remains. Handling it as Back redrew the console under the Map
+        -- and left a hidden session that refused every later entry.
+        transitionLifecycle(State.lifecycle.reopening, "parked for " .. externalMenu)
+        resumePending = true
+        Helper.closeMenu(menu, "close", false, false)
+        return
+    end
     if session and session.phase == "engaged" then
         -- Target brackets call CloseMenusUponMouseClick() as they change the
         -- soft target. Re-register the transparent/compact frame for that
@@ -2938,16 +3278,14 @@ function menu.onCloseElement(dueToClose)
             return
         end
         local expectedSession, expectedEpoch = session, sessionEpoch
-        local controlMode, previousTarget = session.controlMode, session.viewSofttargetKey
+        local previousTarget = session.viewSofttargetKey
         Helper.addDelayedOneTimeCallbackOnUpdate(function()
             if not currentSession(expectedSession, expectedEpoch) or session.phase ~= "engaged" then return end
             local targetClick = dueToClose == "auto" or softtargetKey() ~= previousTarget
             if targetClick then
                 menu.display()
-            elseif session.controlMode == "direct" and dueToClose ~= "close" then
-                openTargetBrowser()
             elseif session.controlMode == "direct" then
-                endSession("Engage compact panel closed")
+                openTargetBrowser()
             else
                 returnToConsole("Watch closed")
             end
@@ -2960,35 +3298,71 @@ function menu.onCloseElement(dueToClose)
         return
     end
     if session then
-        leaveChair("console closed")
+        leaveSession("console closed")
     else
         Helper.closeMenu(menu, dueToClose, false, false)
     end
 end
 
-local function redirectDockedMenu()
+completeReleasedOnboardHandoff = function(reason)
+    if not session or not session.physicalReleasePending or menu.shown then return false end
+    if session.origin ~= "onboard" or session.lifecycle ~= State.lifecycle.reopening
+            or not resumePending then return false end
+    if not sessionContextValid() then
+        endSession("released onboard context invalid")
+        return false
+    end
+    local externalMenu = activeExternalMenuName()
+    if externalMenu then
+        -- Vanilla DockedMenu closes from playerGetUp. Wait for that normal
+        -- cleanup instead of replacing it in the middle of the seat-release
+        -- transition. Any unrelated menu cancels this one-shot handoff.
+        if externalMenu ~= "DockedMenu" then
+            endSession("released onboard blocked by " .. externalMenu)
+        end
+        return false
+    end
+    session.physicalReleasePending = nil
+    logSession("physical release opening Gunnery Control: " .. tostring(reason))
+    OpenMenu(menu.name, { 0, 0 }, nil)
+    return true
+end
+
+-- Validity is checked only while Gunnery updates, so a session hidden behind
+-- another menu survives a teleport and would block every later entry. Only an
+-- explicit new entry replaces it, never an external menu or takeover (#117).
+local function clearStaleSession(route)
+    if session and not sessionContextValid() then
+        endSession("stale session replaced by " .. route)
+    end
+    return session == nil
+end
+
+redirectDockedMenu = function()
+    -- A late DockedMenu callback after release only rechecks the handoff; while
+    -- DockedMenu is still visible completion waits for vanilla playerGetUp
+    -- cleanup. The watchdog opens Gunnery once no external menu remains.
+    if session and session.physicalReleasePending then
+        completeReleasedOnboardHandoff("DockedMenu callback")
+        return
+    end
+    if physicalIngressPendingShip then return end
     local observedGroup = controlGroup()
     local ship = playerShip()
     if redirectPending or observedGroup ~= "gunnercontrol" or ship == 0 then return end
     redirectPending = true
-    -- Deferring avoids opening two menus in the same DockedMenu render pass.
+    -- Deferring leaves the DockedMenu render pass before anything moves the player.
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         redirectPending = false
-        if isInGunnerChair() then
-            local docked = Helper.getMenu("DockedMenu")
-            if docked then
-                -- Open the replacement before closing DockedMenu and suppress
-                -- its automatic vanilla-menu fallback. Calling closeMenu()
-                -- directly races TopLevelMenu against this custom menu.
-                Helper.closeMenuAndOpenNewMenu(docked, "X4GunneryMenu", { 0, 0 }, true)
-            else
-                log("could not redirect: DockedMenu is unavailable")
-            end
+        -- Leave the gunner control position through vanilla's Get Up path.
+        -- X4's playerGetUp event confirms completion and starts the handoff.
+        if isInGunnerChair() and sameID(playerShip(), ship) and clearStaleSession("physical console") then
+            if C.GetUp() then physicalIngressPendingShip = ship end
         end
     end, false, getElapsedTime() + 0.05)
 end
 
--- Both UI hooks exist only because kuertee UI Extensions adds registerCallback
+-- The DockedMenu hook exists only because kuertee UI Extensions adds registerCallback
 -- to the vanilla menu objects. That dependency is declared optional="true" on
 -- purpose -- UI Extensions ships under a different extension id on Nexus and on
 -- the Workshop, so a hard dependency would disable this mod for whichever half
@@ -2998,8 +3372,8 @@ end
 local function hookTimeoutMessage(docked)
     if docked and not docked.registerCallback then
         return "kuertee UI Extensions is not loaded (DockedMenu has no registerCallback)."
-            .. " The console still opens from the gameplanchange fallback, but it will not"
-            .. " reopen after closing the Map. Install UI Extensions."
+            .. " The console still opens from the gameplanchange fallback. Install UI Extensions"
+            .. " for the physical-console redirect."
     end
     return "UI hook registration timed out"
 end
@@ -3013,24 +3387,7 @@ local function registerUIHooks()
             dockedHookRegistered = true
         end
     end
-    if not mapHookRegistered then
-        local map = Helper.getMenu("MapMenu")
-        if map and map.registerCallback then
-            -- Kuertee UI Extensions exposes this Map-only lifecycle callback.
-            -- It is deliberately not generalized to arbitrary menus.
-            map.registerCallback("on_menu_cleanup", function()
-                local expectedSession, expectedEpoch = session, sessionEpoch
-                if not expectedSession or expectedSession.lifecycle ~= State.lifecycle.suspendedMap then return end
-                Helper.addDelayedOneTimeCallbackOnUpdate(function()
-                    if sameSession(expectedSession, expectedEpoch) and session.lifecycle == State.lifecycle.suspendedMap then
-                        reopenSuspendedSession("MapMenu callback")
-                    end
-                end, false, getElapsedTime() + 0.02)
-            end, menu.uixID)
-            mapHookRegistered = true
-        end
-    end
-    if not dockedHookRegistered or not mapHookRegistered then
+    if not dockedHookRegistered then
         if hookAttempts == 1 then log("UI host menus unavailable during init; retrying hook registration") end
         if hookAttempts < 40 then
             Helper.addDelayedOneTimeCallbackOnUpdate(registerUIHooks, false, getElapsedTime() + 0.25)
@@ -3040,23 +3397,23 @@ local function registerUIHooks()
     end
 end
 
-reopenSuspendedSession = function(reason)
-    if resumePending or not session or session.lifecycle ~= State.lifecycle.suspendedMap or menu.shown or activeExternalMenuName() then return end
-    if not isInGunnerChair() or not sameID(playerShip(), session.shipID) then
-        endSession("suspended session no longer seated")
+reopenPendingSession = function(reason)
+    if not resumePending or resumeOpenPending or not session
+            or session.lifecycle ~= State.lifecycle.reopening
+            or menu.shown or activeExternalMenuName() then return end
+    if not sessionContextValid() then
+        endSession("parked session context invalid")
         return
     end
-    resumePending = true
+    resumeOpenPending = true
     local expectedSession, expectedEpoch = session, sessionEpoch
-    transitionLifecycle(State.lifecycle.reopening, "Map cleanup: " .. reason, true)
     OpenMenu("X4GunneryMenu", { 0, 0 }, nil)
     Helper.addDelayedOneTimeCallbackOnUpdate(function()
         if sameSession(expectedSession, expectedEpoch) and resumePending and not menu.shown then
-            resumePending = false
-            transitionLifecycle(State.lifecycle.suspendedMap, "Map reopen did not display; retrying", true)
-            if not mapReopenFailureLogged then
-                mapReopenFailureLogged = true
-                log("Map reopen did not display; retrying")
+            resumeOpenPending = false
+            if not reopenFailureLogged then
+                reopenFailureLogged = true
+                log("parked session reopen did not display; retrying: " .. tostring(reason))
             end
         end
     end, false, getElapsedTime() + 0.50)
@@ -3065,7 +3422,7 @@ end
 -- Re-points the engine soft target at a restored target. A normal success is
 -- intentionally silent. Refusal handling depends on origin:
 --
--- A Direct engaged resume (Test Lab reopen / Map reopen) carries
+-- A Direct engaged resume (Test Lab reopen / Map-origin handoff) carries
 -- session.repointResumeRetry. The engine refuses the FIRST SetSofttarget of
 -- such a resume while it is still settling after the menu transition, and
 -- accepts the identical write on the next watchdog tick. So the first normal
@@ -3110,6 +3467,12 @@ end
 TestAPI.attemptRepoint = attemptRepoint
 
 local function sessionWatchdog()
+    -- UIX normally delivers DockedMenu's display callback. Poll only a released
+    -- handoff here so module init stays inert while merely sitting in a chair.
+    -- Release completion itself is the playerGetUp event handled below.
+    if session and session.physicalReleasePending then
+        completeReleasedOnboardHandoff("watchdog")
+    end
     if session then
         -- The resume re-point retry grant is bound to the exact aim target and
         -- Direct control mode it was granted for (attemptRepoint). Any drift
@@ -3128,16 +3491,19 @@ local function sessionWatchdog()
         -- the soft target under the player while they are picking things on it
         -- would fight them for their own selection.
         if session.repointTargetID and session.phase == "engaged"
-            and not State.isMapSuspended(session) then
+            and not fullscreenTakeoverDisplayed() then
             attemptRepoint()
         end
-        if session.lifecycle == State.lifecycle.suspendedMap and not menu.shown and not activeExternalMenuName() then
-            reopenSuspendedSession("MapMenu cleanup")
+        if session.lifecycle == State.lifecycle.reopening and resumePending
+                and not menu.shown and not activeExternalMenuName()
+                and not session.testLabHandoffPending then
+            reopenPendingSession("external menu cleanup")
         elseif session.lifecycle == State.lifecycle.owned and not menu.shown
             and session.autoHideAt and GetCurRealTime() - session.autoHideAt > 0.05 then
             -- A Helper auto-hide bypassed onCloseElement. Do not leave an armed
             -- snapshot or a stale table that blocks a later chair redirect.
             discardSession("orphaned menu detected by watchdog")
+            removeEngagedOverlay(true)
         elseif session.lifecycle == State.lifecycle.owned and session.controlMode == "direct"
             and session.engagePending
             and session.engagePendingSince and GetCurRealTime() - session.engagePendingSince > 2 then
@@ -3153,6 +3519,61 @@ local function sessionWatchdog()
 end
 
 TestAPI.runSessionWatchdog = sessionWatchdog
+TestAPI.sessionContextValid = function() return sessionContextValid() end
+
+-- Map-origin ingress is revalidated in Lua before a fresh onboard session is
+-- parked. This is pre-open handoff, not suspension of an active engagement.
+local function onOpenOnboard(_, shipComponent)
+    local function ignored(reason) log("onboard ingress ignored: " .. reason) end
+    if not clearStaleSession("Map entry") then return ignored("session already open") end
+    local ship = id(shipComponent)
+    if ship == 0 then return ignored("no ship") end
+    if not sameID(playerShip(), ship) then return ignored("player not aboard") end
+    if not ownedByPlayer(ship) then return ignored("not player-owned") end
+    local groups = readGroups(ship)
+    if #groups == 0 then return ignored("no turret groups") end
+    session = newSession(ship, "onboard")
+    session.groups = groups
+    -- Seed now: the pre-open handoff treats this as a resume and skips
+    -- seeding, so committedBaseline must already be populated.
+    State.seedBaseline(session, groups)
+    if persistence then persistence.request() end
+    resumePending = true
+    transitionLifecycle(State.lifecycle.reopening, "onboard ingress parked until origin menu closes")
+    logSession("onboard ingress accepted; parked until Map closes")
+    -- Use MapMenu's own close handler so its normal cleanup runs before the
+    -- parked-session reopen. Defer one frame to leave the interact render pass.
+    local expectedSession, expectedEpoch = session, sessionEpoch
+    Helper.addDelayedOneTimeCallbackOnUpdate(function()
+        if not sameSession(expectedSession, expectedEpoch)
+                or session.lifecycle ~= State.lifecycle.reopening then return end
+        local mapMenu = Helper.getMenu("MapMenu")
+        if mapMenu and mapMenu.onCloseElement then mapMenu.onCloseElement("close") end
+    end, false, getElapsedTime() + 0.05)
+end
+
+TestAPI.onOpenOnboard = onOpenOnboard
+
+-- Physical-console ingress has a different predecessor menu than Map ingress.
+-- Enter here only after vanilla Get Up succeeds and playerGetUp confirms the
+-- release, then park the session for the actual vanilla DockedMenu cleanup.
+local function startPhysicalIngress(shipComponent)
+    if session then return end
+    local ship = id(shipComponent)
+    if ship == 0 then return end
+    if not sameID(playerShip(), ship) then return end
+    if not ownedByPlayer(ship) then return end
+    local groups = readGroups(ship)
+    if #groups == 0 then return end
+    session = newSession(ship, "onboard")
+    session.groups = groups
+    State.seedBaseline(session, groups)
+    if persistence then persistence.request() end
+    session.physicalReleasePending = true
+    resumePending = true
+    transitionLifecycle(State.lifecycle.reopening, "physical control position released")
+    logSession("physical release accepted; awaiting DockedMenu replacement")
+end
 
 local function init()
     Menus = Menus or {}; table.insert(Menus, menu)
@@ -3164,6 +3585,20 @@ local function init()
         seatLeaving = true
         endSession("global movement event")
         seatLeaving = false
+    end
+    local function onPlayerGetUp()
+        if physicalIngressPendingShip then
+            local ship = physicalIngressPendingShip
+            physicalIngressPendingShip = nil
+            startPhysicalIngress(ship)
+            return
+        end
+        -- Onboard sessions are deliberately not seat-bound. The physical
+        -- launcher can deliver playerGetUp around the same release that creates
+        -- the onboard session, and a normal Map-origin onboard session is also
+        -- valid while standing. Only chair-origin sessions use get-up as teardown.
+        if session and session.origin == "onboard" then return end
+        endForMovement()
     end
     -- Exposed for unit tests only: lets tests drive the playerGetUp/playerUndock
     -- route without a live RegisterEvent delivery.
@@ -3177,28 +3612,29 @@ local function init()
     -- Exposed for unit tests only: the missing-UI-Extensions diagnosis, without
     -- having to drive registerUIHooks through all 40 retries.
     TestAPI.hookTimeoutMessage = hookTimeoutMessage
-    RegisterEvent("playerGetUp", endForMovement)
-    RegisterEvent("playerUndock", endForMovement)
+    RegisterEvent("playerGetUp", onPlayerGetUp)
+    RegisterEvent("playerUndock", function()
+        physicalIngressPendingShip = nil
+        endForMovement()
+    end)
     -- Ownership-change replacement for vanilla's cease_fire. MD fires this when
     -- the engaged target's owner changes to a faction the ship can no longer
     -- attack (capital.xml:1070 condition). The handler re-issues emitDirectFallback
     -- so directed turrets roll to the next hostile instead of holding fire.
     -- The handler's own guards silently drop events for stale sessions.
+    RegisterEvent("X4GunneryControl.OpenOnboard", onOpenOnboard)
     RegisterEvent("X4GunneryControl.DirectTargetLost", onDirectTargetOwnerChanged)
-    RegisterEvent("X4GunneryControl.EngageabilityResult", onEngageabilityResult)
-    RegisterEvent("X4GunneryControl.EngageabilityBatchComplete", onEngageabilityBatchComplete)
+    RegisterEvent("X4GunneryControl.InRangeResult", Range.onRangeResult)
     registerForEvent("gameplanchange", getElement("Scene.UIContract"), function(_, mode)
         -- Vanilla opens DockedMenu from this event when entering any secondary
         -- control post. This is an independent fallback if UIX loads its menu
         -- object after this extension's first registration attempt.
-        if isInGunnerChair() and not menu.shown and not activeExternalMenuName()
-            and (not session or not State.isMapSuspended(session)) then
+        local externalMenu = activeExternalMenuName()
+        if isInGunnerChair() and not menu.shown
+            and (not externalMenu or externalMenu == "DockedMenu")
+            and (not session or session.lifecycle ~= State.lifecycle.reopening) then
             if session then discardSession("stale session before chair redirect") end
             redirectDockedMenu()
-        elseif session and session.lifecycle == State.lifecycle.suspendedMap and State.isReturnablePlayerView(mode) then
-            Helper.addDelayedOneTimeCallbackOnUpdate(function()
-                reopenSuspendedSession("returned to " .. tostring(mode))
-            end, false, getElapsedTime() + 0.05)
         end
     end)
     -- The adapter releases only a matching target/session pair. Build a
@@ -3216,8 +3652,12 @@ local function init()
         -- has never been observed to fire across the 2026-08-08 runs. Nothing is
         -- lost if it ever does -- MD still holds the payload and chair ingress
         -- asks again -- but do not treat the deferral as a tested route.
-        if not isInGunnerChair() then
-            log("restore deferred; player is not in a gunner chair")
+        -- An onboard session restores while the player is standing, so the gate
+        -- is "aboard a ship", not "seated". restoreState's ship-name match and the
+        -- post-build sessionContextValid() check below enforce identity/origin, so
+        -- a chair payload restored off the seat (or a mismatched ship) is refused.
+        if playerShip() == 0 then
+            log("restore deferred; player is not aboard a ship")
             return
         end
         local candidate = newSession(playerShip())
@@ -3243,6 +3683,14 @@ local function init()
         -- restore continuation, now operating on the accepted live candidate.
         sessionEpoch = sessionEpoch + 1
         session = candidate
+        -- Final identity/origin gate: a chair payload restored off the seat, or a
+        -- session whose ship/container no longer matches, is dropped rather than
+        -- resumed onto the wrong context.
+        if not sessionContextValid() then
+            session = nil
+            log("restore refused; context invalid for this origin")
+            return
+        end
         log("restore accepted; phase=" .. tostring(session.phase))
         if session.phase ~= "engaged" then
             -- Target selection can be entered from Direct-control. Its
@@ -3301,7 +3749,7 @@ local function init()
             -- The load/reload route: the DockedMenu redirect opens the menu a
             -- tick later, and onShowMenu discards any session it did not create
             -- itself ("stale session at chair ingress"). Hand it over through
-            -- the same resume route the Map and Test Lab paths use, or the
+            -- the same parked-session route used by Map-origin and Test Lab handoffs, or the
             -- restore is undone milliseconds after it succeeds.
             transitionLifecycle(State.lifecycle.reopening, "restored session awaiting its menu")
             resumePending = true
@@ -3323,6 +3771,6 @@ local function init()
         persistence.request(true)
     end)
     sessionWatchdog()
-    log("UI initialized; build=" .. runtimeBuild)
+    log("UI initialized")
 end
 init()

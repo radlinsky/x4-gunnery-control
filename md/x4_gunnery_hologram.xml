@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdscript xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" name="X4GunneryHologram" xsi:noNamespaceSchemaLocation="../../../#modding/xsd/md.xsd">
+  <cues>
+    <cue name="HologramState">
+      <cues>
+        <cue name="HologramOpen" instantiate="true" namespace="this">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryHologram'" control="'open'"/>
+          </conditions>
+          <actions>
+            <do_if value="@HologramState.$view">
+              <cancel_cue cue="HologramState.$view"/>
+            </do_if>
+            <set_value name="HologramState.$view" exact="this"/>
+            <set_value name="$nonce" exact="event.param3.$nonce"/>
+            <set_value name="HologramState.$nonce" exact="$nonce"/>
+            <set_value name="$ship" exact="event.param3.$ship"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
+            <do_if value="typeof $ship != datatype.component and $ship">
+              <set_value name="$ship" exact="component.{$ship}"/>
+            </do_if>
+            <do_if value="typeof $target != datatype.component and $target">
+              <set_value name="$target" exact="component.{$target}"/>
+            </do_if>
+            <set_value name="$turrets" exact="[]"/>
+            <set_value name="$selected" exact="[]"/>
+            <set_value name="$expected" exact="event.param3.$count"/>
+            <set_value name="$combat" exact="event.param3.$combat"/>
+            <set_value name="$fired" exact="table[]"/>
+            <set_value name="$hit" exact="table[]"/>
+            <set_value name="$last" exact="''"/>
+            <set_value name="$lease" exact="player.age + 5s"/>
+            <create_group groupname="$weapons"/>
+            <do_if value="$ship and $ship.exists">
+              <!-- Strings preserve sub-metre values; numeric Lua event params truncate. -->
+              <raise_lua_event name="'X4GunneryHologram.Data'" param="'x4gh1:' + $nonce + ':size:' + $ship.size"/>
+            </do_if>
+            <do_else>
+              <cancel_cue cue="this"/>
+            </do_else>
+          </actions>
+          <cues>
+            <!-- Scalar roster messages use the already verified Lua/MD bridge;
+                 commit installs event listeners only after the roster is complete. -->
+            <cue name="HologramMember" instantiate="true">
+              <conditions>
+                <event_ui_triggered screen="'X4GunneryHologram'" control="'member'"/>
+                <check_value value="event.param3.$nonce == $nonce and event.param3.$index == $turrets.count + 1 and $turrets.count lt $expected"/>
+              </conditions>
+              <actions>
+                <set_value name="$turret" exact="event.param3.$turret"/>
+                <do_if value="typeof $turret != datatype.component and $turret">
+                  <set_value name="$turret" exact="component.{$turret}"/>
+                </do_if>
+                <append_to_list name="$turrets" exact="$turret"/>
+                <append_to_list name="$selected" exact="@event.param3.$selected == true"/>
+                <do_if value="$turret and $turret.exists and $turret.container == $ship">
+                  <set_value name="$position" exact="$turret.relativeposition.{$ship}"/>
+                  <raise_lua_event name="'X4GunneryHologram.Data'" param="'x4gh1:' + $nonce + ':position:' + $turrets.count + ':' + $position.x + ':' + $position.y + ':' + $position.z"/>
+                  <debug_text text="'[X4GC HOLO] roster nonce=' + $nonce + ' index=' + $turrets.count + ' turret=' + $turret + ' selected=' + event.param3.$selected + ' target=' + $target"/>
+                  <do_if value="$combat and event.param3.$selected">
+                    <add_to_group groupname="$weapons" object="$turret"/>
+                  </do_if>
+                </do_if>
+              </actions>
+            </cue>
+            <cue name="HologramLease">
+              <delay exact="1s"/>
+              <actions>
+                <do_if value="player.age ge $lease or not $ship.exists">
+                  <remove_value name="HologramState.$view"/>
+                  <remove_value name="HologramState.$nonce"/>
+                  <cancel_cue cue="HologramOpen"/>
+                </do_if>
+                <do_else>
+                  <reset_cue cue="this"/>
+                </do_else>
+              </actions>
+            </cue>
+            <cue name="HologramReady">
+              <conditions>
+                <event_ui_triggered screen="'X4GunneryHologram'" control="'commit'"/>
+                <check_value value="event.param3.$nonce == $nonce and $turrets.count == $expected"/>
+              </conditions>
+              <cues>
+                <cue name="HologramFired" instantiate="true">
+                  <conditions>
+                    <event_weapon_fired group="$weapons"/>
+                  </conditions>
+                  <actions>
+                    <set_value name="$fired.{event.object}" exact="player.age + 1500ms"/>
+                  </actions>
+                </cue>
+                <cue name="HologramHit" instantiate="true">
+                  <conditions>
+                    <event_object_attacked_object object="$ship"/>
+                    <check_value value="$combat and $target and (event.param == $target or @event.param3.{1} == $target)"/>
+                  </conditions>
+                  <actions>
+                    <!-- Ordinary weapon attribution is per turret. Recorded missile
+                     impacts name the launcher ship, so do not infer a turret. -->
+                    <set_value name="$weapon" exact="@event.param3.{2}"/>
+                    <set_value name="$index" exact="$turrets.indexof.{$weapon}"/>
+                    <do_if value="$index and $selected.{$index} and $weapon and $weapon.exists and not $weapon.isclass.missileturret">
+                      <set_value name="$hit.{$weapon}" exact="player.age + 1500ms"/>
+                    </do_if>
+                  </actions>
+                </cue>
+                <cue name="HologramSnapshot">
+                  <!-- A resetting checkinterval cue can spin within one frame.
+                   Delay is required on every snapshot cycle. -->
+                  <delay exact="500ms"/>
+                  <actions>
+                    <set_value name="$bits" exact="''"/>
+                    <do_all exact="$turrets.count" counter="$i">
+                      <set_value name="$turret" exact="$turrets.{$i}"/>
+                      <set_value name="$state" exact="'0'"/>
+                      <do_if value="$combat and $selected.{$i} and $turret.exists">
+                        <do_if value="@$hit.{$turret} gt player.age and not $turret.isclass.missileturret">
+                          <set_value name="$state" exact="'2'"/>
+                        </do_if>
+                        <do_elseif value="@$fired.{$turret} gt player.age">
+                          <set_value name="$state" exact="'1'"/>
+                        </do_elseif>
+                      </do_if>
+                      <set_value name="$bits" exact="$bits + $state"/>
+                    </do_all>
+                    <do_if value="$bits != $last">
+                      <set_value name="$last" exact="$bits"/>
+                      <raise_lua_event name="'X4GunneryHologram.Data'" param="'x4gh1:' + $nonce + ':activity:' + $bits"/>
+                      <debug_text text="'[X4GC HOLO] snapshot nonce=' + $nonce + ' t=' + player.age + ' states=' + $bits"/>
+                    </do_if>
+                    <reset_cue cue="this"/>
+                  </actions>
+                </cue>
+              </cues>
+            </cue>
+          </cues>
+        </cue>
+        <cue name="HologramHeartbeat" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryHologram'" control="'heartbeat'"/>
+          </conditions>
+          <actions>
+            <do_if value="@HologramState.$view and @HologramState.$nonce == event.param3.$nonce">
+              <set_value name="HologramState.$view.$lease" exact="player.age + 5s"/>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="HologramClose" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryHologram'" control="'close'"/>
+          </conditions>
+          <actions>
+            <do_if value="@HologramState.$view and @HologramState.$nonce == event.param3.$nonce">
+              <cancel_cue cue="HologramState.$view"/>
+              <remove_value name="HologramState.$view"/>
+              <remove_value name="HologramState.$nonce"/>
+            </do_if>
+          </actions>
+        </cue>
+      </cues>
+    </cue>
+  </cues>
+</mdscript>

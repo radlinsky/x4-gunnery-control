@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 
 md=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_observe.xml
 scenario=testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml
+loadouts=testlab/x4_gunnery_control_testlab/libraries/loadouts.xml
+testlab_ui=testlab/x4_gunnery_control_testlab/ui/testlab.lua
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 # A live Gunnery Control session's AimTarget is authoritative. The free-play
@@ -34,18 +36,41 @@ fi
 if ! [[ "$hit_aim" -lt "$hit_soft" && "$hit_soft" -lt "$hit_player" ]]; then
   fail "HIT target precedence is not AimTarget > soft target > player.target"
 fi
+fired_aim=$(printf '%s\n' "$fired_target" | grep -F 'AimTarget? and' | cut -d: -f1)
+fired_soft=$(printf '%s\n' "$fired_target" | grep -F 'SoftTarget? and' | cut -d: -f1)
+fired_player=$(printf '%s\n' "$fired_target" | grep -F 'player.target?' | cut -d: -f1)
+if ! [[ "$fired_aim" -lt "$fired_soft" && "$fired_soft" -lt "$fired_player" ]]; then
+  fail "FIRED target precedence is not AimTarget > soft target > player.target"
+fi
 
 # A firing event must measure the projectile's actual angular error to the
 # selected component. Global UI aim state alone cannot identify a turret's
 # engagement target, which is the ambiguity this diagnostic exists to remove.
 grep -Fq "name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.param} else null\"" "$md" \
-  || fail "FIRED observer does not derive projectile-local target bearing"
+  || fail "FIRED observer lost projectile-local target bearing"
+grep -Fq "name=\"\$TargetMountBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.object} else null\"" "$md" \
+  || fail "FIRED observer does not derive target bearing from the exact firing weapon"
 grep -Fq "' aim_error_yaw='" "$md" || fail "FIRED observer does not log target yaw error"
 grep -Fq "' aim_error_pitch='" "$md" || fail "FIRED observer does not log target pitch error"
 
+# Missile hit payloads name the launcher ship, so own-hull clearance must be
+# checked from the exact fired missile object before it disappears. A surviving
+# missile farther from the ship after 500 ms is the direct dumbfire control.
+grep -Fq '<cue name="ObserveMissileFlight" instantiate="true">' "$md" \
+  || fail "missile-flight observer cue is missing"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveMissileFlight']/delay[@exact='500ms'])" "$md") == "1" ]] \
+  || fail "missile-flight observer must have one cue-level 500 ms delay"
+[[ $(xmllint --xpath "count(//actions/delay)" "$md") == "0" ]] \
+  || fail "MD delay must be a cue modifier between conditions and actions, not an action node"
+grep -Fq "name=\"\$Target\" exact=\"@\$Missile.target\"" "$md" \
+  || fail "missile-flight observer does not retain the missile intended target"
+grep -Fq "' shipdist_500ms='" "$md" \
+  || fail "missile-flight observer does not log delayed distance from the firing ship"
+
 # The candidate mechanical-arc bearing uses the target's weapon-consistent aim
 # point in the turret mount's local frame; keep it diagnostic until live proof.
-aimlocal=$(grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>" "$md")
+aimlocal=$(awk '/<cue name="ObserveMark"/{inside=1} /<cue name="ObserveState"/{inside=0} inside' "$md" \
+  | grep -Fc "<position object=\"\$Weapon\" space=\"\$Weapon\"/>")
 [[ "$aimlocal" -eq 2 ]] || fail "expected local aim orientation in both weapon snapshot loops, found $aimlocal"
 
 # A selected surface component is a valid aim target. The hit event carries
@@ -58,12 +83,12 @@ grep -Fq "event.param == \$Aimed or @event.param3.{1} == \$Aimed" "$md" \
 # regular weapons/turrets and the separate missile-turret property list.
 weapons=$(grep -Fc 'in="player.ship.weapons.operational.list"' "$md")
 missiles=$(grep -Fc 'in="player.ship.missileturrets.operational.list"' "$md")
-ship_weapons=$(grep -Fc "in=\"\$Ship.weapons.operational.list\"" "$md")
-ship_missiles=$(grep -Fc "in=\"\$Ship.missileturrets.operational.list\"" "$md")
 [[ "$weapons" -eq 1 ]] || fail "expected one player weapons snapshot loop, found $weapons"
 [[ "$missiles" -eq 1 ]] || fail "expected one player missile-turret snapshot loop, found $missiles"
-[[ "$ship_weapons" -eq 1 ]] || fail "expected one census weapons loop, found $ship_weapons"
-[[ "$ship_missiles" -eq 1 ]] || fail "expected one census missile-turret loop, found $ship_missiles"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.weapons.operational.list'])" "$md") == "1" ]] \
+  || fail "expected one census weapons loop"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveCensus']//do_for_each[@in='\$Ship.missileturrets.operational.list'])" "$md") == "1" ]] \
+  || fail "expected one census missile-turret loop"
 
 # Issue #54 Task 2: inrange must mirror shipped combat-AI reachability —
 # bounding-box distance under maxfirerange, no size term — in both snapshot
@@ -79,10 +104,8 @@ if grep -Fq "distance plus half the target" "$md"; then
   fail "stale comment still claims distance plus half the target's size is the in-range definition"
 fi
 
-# The scenario owns both a persistent group of safe fixtures and a numeric
-# acknowledgement count. Reusing one MD variable name for both would serialize
-# the group into x4gct4, so Lua would reject the acknowledgement and never arm
-# this observer—the exact failure this contract guards.
+# Scenario READY carries generic numeric census fields. Keep the persistent
+# groups separate from their serialized counts so acknowledgements stay flat.
 grep -Fq "name=\"\$SafeObjectCount\" exact=\"0\"" "$scenario" \
   || fail "safe-fixture numeric census is missing"
 grep -Fq "':' + \$SafeObjectCount + ':' + \$SafeWeapons" "$scenario" \
@@ -90,19 +113,213 @@ grep -Fq "':' + \$SafeObjectCount + ':' + \$SafeWeapons" "$scenario" \
 if grep -Fq "':' + \$SafeObjects + ':' + \$SafeWeapons" "$scenario"; then
   fail "scenario acknowledgement serializes the safe-fixture group"
 fi
-grep -Fq "':' + \$UnsafeWeapons + ':' + \$DefenceUnits" "$scenario" \
-  || fail "scenario acknowledgement omits the remaining defence-unit census"
-grep -Fq "':' + \$DefenceUnits + ':' + \$Hostiles" "$scenario" \
-  || fail "scenario acknowledgement omits the attackable-hostile census"
-grep -Fq "'x4gct6:'" "$scenario" \
-  || fail "scenario acknowledgement does not use repair-aware protocol x4gct6"
-grep -Fq "':' + \$Hostiles + ':' + \$RepairObjectCount" "$scenario" \
-  || fail "scenario acknowledgement omits the repair-guard census"
+grep -Fq "'x4gct9:'" "$scenario" \
+  || fail "scenario acknowledgement does not use the current generic census protocol"
+grep -Fq "':' + \$UnsafeWeapons + ':' + \$DefenceUnits + ':' + \$Hostiles + ':' + \$RepairObjectCount" "$scenario" \
+  || fail "scenario acknowledgement omits reusable safety/repair counts"
+grep -Fq "':' + \$ShooterCount + ':' + \$ShooterWeapons + ':' + \$ShooterTurrets + ':' + \$ShooterMissileTurrets" "$scenario" \
+  || fail "scenario acknowledgement omits the generic shooter census"
+grep -Fq "':' + (\$LoadoutFailures + \$UnsafeDormantShooterWeapons) + ':' + \$LocationFailures" "$scenario" \
+  || fail "scenario acknowledgement omits loadout or placement failures"
+
+# Reusable fixture safety and repair attribution must survive the simplification.
 grep -Fq "groupname=\"ScenarioRoot.\$RepairObjects\" object=\"\$Ship\"" "$scenario" \
   || fail "repair-guard fixtures are not registered during spawn"
-grep -Fq "<event_object_attacked_object object=\"\$Ship\"/>" "$scenario" \
-  || fail "repair guard is not driven by attributed player-ship hits"
+grep -Fq "groupname=\"ScenarioRoot.\$PlayerShooters\" object=\"player.ship\"" "$scenario" \
+  || fail "local scenarios do not attribute repair hits to the current player ship"
+grep -Fq "groupname=\"ScenarioRoot.\$PlayerShooters\" object=\"\$Ship\"" "$scenario" \
+  || fail "remote scenarios do not attribute repair hits to their spawned shooter"
+grep -Fq "<event_object_attacked_object group=\"ScenarioRoot.\$PlayerShooters\"/>" "$scenario" \
+  || fail "repair guard is not driven by the unified local/remote shooter group"
 grep -Fq '<set_object_hull object="event.param3.{1}" exact="100"/>' "$scenario" \
   || fail "repair guard does not restore the exact struck component"
+grep -Fq "not (ScenarioRoot.\$Spawned? and ScenarioRoot.\$Spawned.indexof.{player.ship})" "$scenario" \
+  || fail "scenario replacement and cleanup do not guard the occupied spawned ship"
+grep -Fq '<cue name="ScenarioCommitOccupiedReject" instantiate="true">' "$scenario" \
+  || fail "MD has no defensive rejection path for occupied-fixture replacement"
+grep -Fq '<cue name="DespawnScenarioOccupiedReject" instantiate="true">' "$scenario" \
+  || fail "MD has no defensive rejection path for occupied-fixture cleanup"
+
+# A remote shooter remains dormant until the owner teleports, and placement is
+# checked in sector coordinates against the authored remote anchor.
+grep -Fq "<set_value name=\"\$DormantShooterWeapons\" operation=\"add\"/>" "$scenario" \
+  || fail "remote shooter is not held dormant while the owner teleports"
+grep -Fq "<set_value name=\"\$UnsafeDormantShooterWeapons\" operation=\"add\"/>" "$scenario" \
+  || fail "remote shooter HOLD FIRE failure is not part of readiness"
+grep -Fq "<find_sector name=\"\$ScenarioSector\" macro=\"macro.{\$SectorMacroName}\"" "$scenario" \
+  || fail "remote fixture does not resolve the exact requested sector macro"
+grep -Fq "x=\"ScenarioRoot.\$PendingAnchorX + \$Def.\$x\"" "$scenario" \
+  || fail "remote fixture does not use absolute sector-anchor placement"
+grep -Fq "<create_position name=\"\$ShipSectorPosition\" object=\"\$Ship\" space=\"\$ScenarioSector\"/>" "$scenario" \
+  || fail "remote placement validation does not convert the ship position to sector coordinates"
+grep -Fq "\$ShipSectorPosition.x lt \$ExpectedSectorX - 10m" "$scenario" \
+  || fail "remote placement validation does not compare sector-coordinate x against the expected position"
+if grep -Fq "\$Ship.position.x lt ScenarioRoot.\$PendingAnchorX" "$scenario"; then
+  fail "remote placement validation compares a zone-local ship position against the sector anchor"
+fi
+
+# Deterministic equipment remains data. Protect the proven equipment semantics
+# under descriptive library ids rather than historical issue-numbered branches.
+python3 - "$loadouts" <<'PY'
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+
+def loadout(loadout_id):
+    match = re.search(r'<loadout id="' + re.escape(loadout_id) + r'"[^>]*>(.*?)</loadout>', text, re.DOTALL)
+    if not match:
+        raise SystemExit(f"FAIL: missing deterministic loadout {loadout_id}")
+    return match.group(1)
+
+dual = loadout("x4gc_testlab_par_l_destroyer_01_beam_plasma")
+for entry in (
+    '<turrets macro="turret_par_l_plasma_01_mk1_macro" group="group_front_up_mid2" exact="1"/>',
+    '<turrets macro="turret_par_l_beam_01_mk1_macro" group="group_rear_down_mid" exact="1"/>',
+):
+    if entry not in dual:
+        raise SystemExit(f"FAIL: beam/plasma deterministic loadout lost {entry}")
+PY
+
+grep -Fq 'expectedMemberMacros' "$testlab_ui" \
+  || fail "Test Lab no longer accepts exact expected member macros"
+grep -Fq "<param name=\"skipalignment\" value=\"\$Def.\$preserveorientation\"/>" "$scenario" \
+  || fail "Wait fixtures no longer preserve authored orientation when requested"
+
+# Raw observer contract: Lua owns the two auto-marks (initial on a
+# newly accepted aim target, settled at 20 active seconds with paused time
+# excluded), and the MD records stay raw and independent — the solution line
+# keeps its own fields, not a derived verdict.
+grep -Fq '<cue name="ObserveMark" instantiate="true">' "$md" \
+  || fail "ObserveMark observer cue is missing"
+grep -Fq '<cue name="ObserveFired" instantiate="true">' "$md" \
+  || fail "ObserveFired observer cue is missing"
+grep -Fq '<cue name="ObserveHit" instantiate="true">' "$md" \
+  || fail "ObserveHit observer cue is missing"
+
+# The disposable geometry capture is one bounded, rate-agnostic raw sampler.
+for obsolete in LastFired Complete Done BurstCount ObserveAutoGeometry ObserveAutoGeometrySample1 ObserveAutoGeometrySample2 ObserveAutoGeometrySample3; do
+  ! grep -Fq "$obsolete" "$md" || fail "obsolete shot-timed AUTOGEO state/cue remains: $obsolete"
+done
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler' and @instantiate='true' and @checkinterval='100ms'])" "$md") == "1" ]] \
+  || fail "AUTOGEO sampler does not use instantiate=true checkinterval=100ms"
+[[ $(xmllint --xpath "count(//cue[@name='ObserveGeometrySampler']//reset_cue | //cue[@name='ObserveGeometrySampler']/cues | //cue[@name='ObserveGeometrySampler']//event_cue_completed | //cue[@name='ObserveGeometrySampler']//delay)" "$md") == "0" ]] \
+  || fail "AUTOGEO sampler contains self-reset, nested, completion-event, or delay pacing"
+for reset in \
+  "GeometryCaptureActive:true" \
+  "GeometryTick:0" \
+  "LastGeometrySample:player.age - 1s"; do
+  state=${reset%%:*}
+  value=${reset#*:}
+  [[ $(xmllint --xpath "count(//cue[@name='ObserveToggle']/actions/do_if[@value='ObserveRoot.\$Enabled']/set_value[@name='ObserveRoot.\$$state' and @exact='$value'])" "$md") == "1" ]] \
+    || fail "observation enable does not start AUTOGEO with \$$state"
+done
+[[ $(grep -Fc 'GeometryCaptureActive" exact="true' "$md") == 1 && $(grep -Fc 'GeometryTick" exact="0' "$md") == 2 ]] \
+  || fail "AUTOGEO capture can start or restart outside observation enable"
+sampler=$(xmllint --xpath "//cue[@name='ObserveGeometrySampler']" "$md")
+printf '%s\n' "$sampler" | grep -Fq "ObserveRoot.\$GeometryTick lt 600" \
+  || fail "AUTOGEO sampler is not bounded to 600 ticks"
+printf '%s\n' "$sampler" | grep -Fq "player.age gt ObserveRoot.\$LastGeometrySample" \
+  || fail "AUTOGEO sampler lacks duplicate-player.age protection"
+for field in "t=" "tick=" "weapon=" "macro=" "tgt=" "mode=" "ready=" "aim_yaw=" "aim_pitch=" "barrel_x=" "barrel_y=" "barrel_z="; do
+  printf '%s\n' "$sampler" | grep -Fq "$field" || fail "AUTOGEO raw log lost field: $field"
+done
+
+# Lua: a newly accepted aim target (different from lastObservedAimTarget) emits
+# the same observe_mark event the Mark button emits and logs auto_mark_initial.
+grep -Fq 'and aimTarget ~= lastObservedAimTarget then' "$testlab_ui" \
+  || fail "initial auto-mark no longer keys off lastObservedAimTarget"
+[[ $(grep -Fc 'AddUITriggeredEvent("X4GunneryTestLabObserve", "observe_mark")' "$testlab_ui") -ge 2 ]] \
+  || fail "observe_mark must be emitted for both the initial and the settled auto-mark"
+grep -Fq 'log("observe", { action = "auto_mark_initial", target = aimTarget })' "$testlab_ui" \
+  || fail "initial auto-mark does not log action=auto_mark_initial"
+# Lua: the new target restarts the active-second clock, paused game time is
+# excluded via bridge.isGamePaused, and at >= 20 active seconds the target is
+# marked again, settled, with active_seconds logged.
+grep -Fq 'observedAimActiveSeconds, observedAimLastTick, observedAimSettled = 0, now, false' "$testlab_ui" \
+  || fail "does not restart the active-second clock for a new aim target"
+grep -Fq 'if not (bridge.isGamePaused and bridge.isGamePaused()) then' "$testlab_ui" \
+  || fail "active-second clock does not exclude paused game time via bridge.isGamePaused"
+grep -Fq 'if observedAimActiveSeconds >= 20 then' "$testlab_ui" \
+  || fail "settled auto-mark does not wait for 20 active seconds"
+grep -Fq 'observedAimSettled = true' "$testlab_ui" \
+  || fail "does not mark the aim target settled"
+grep -Fq 'log("observe", { action = "auto_mark_settled", target = aimTarget, active_seconds = observedAimActiveSeconds })' "$testlab_ui" \
+  || fail "settled auto-mark does not log action=auto_mark_settled with active_seconds"
+observer_lua_line() { { grep -Fn "$1" "$testlab_ui" || true; } | head -n 1 | cut -d: -f1; }
+observer_initial_line=$(observer_lua_line 'action = "auto_mark_initial"')
+observer_threshold_line=$(observer_lua_line 'if observedAimActiveSeconds >= 20 then')
+observer_settled_line=$(observer_lua_line 'action = "auto_mark_settled"')
+[[ -n "$observer_initial_line" && -n "$observer_threshold_line" && -n "$observer_settled_line" && "$observer_initial_line" -lt "$observer_threshold_line" && "$observer_threshold_line" -lt "$observer_settled_line" ]] \
+  || fail "auto-mark logs are not ordered initial -> 20 s threshold -> settled"
+
+# MD ObserveMark: the solution record keeps raw, independent fields; nothing
+# may replace them with a derived verdict.
+mark_cue=$(awk '/<cue name="ObserveMark"/{inside=1} inside{print} /<\/cue>/{if (inside) exit}' "$md")
+fired_cue=$(awk '/<cue name="ObserveFired"/{inside=1} inside{print} /<\/cue>/{if (inside) exit}' "$md")
+hit_cue=$(awk '/<cue name="ObserveHit"/{inside=1} inside{print} /<\/cue>/{if (inside) exit}' "$md")
+for field in "+ ' weapon=' + \$Weapon" \
+  "+ ' macro=' + \$Weapon.macro" \
+  "+ ' mode=' + \$Weapon.mode" \
+  "+ ' ready=' + \$Weapon.isreadytofire" \
+  "+ ' rel_pitch=' + \$Relative.rotation.pitch" \
+  "+ ' aim_pitch=' + \$AimLocal.pitch" \
+  "+ ' muzzle_los_ex=' + \$MuzzleLosEx" \
+  "+ ' muzzle_los_self=' + \$MuzzleLosSelf"; do
+  printf '%s\n' "$mark_cue" | grep -Fq "$field" \
+    || fail "ObserveMark solution record lost the raw field: $field"
+done
+[[ $(printf '%s\n' "$mark_cue" | grep -Fc "' inrange=' + (\$Weapon.bboxdistanceto.{\$Target} le \$Weapon.maxfirerange)") -eq 2 ]] \
+  || fail "ObserveMark must log the raw inrange/bbox solution in both snapshot loops"
+
+# MD ObserveFired: listens on the armed firing-weapon group and logs the exact
+# emitter (event.object), the aimed target, and the exact aim error.
+printf '%s\n' "$fired_cue" | grep -Fq "<event_weapon_fired group=\"\$FiringWeapons\"/>" \
+  || fail "ObserveFired no longer listens to event_weapon_fired on \$FiringWeapons"
+printf '%s\n' "$fired_cue" | grep -Fq "+ ' weapon=' + event.object" \
+  || fail "FIRED does not log the exact emitter as weapon=event.object"
+printf '%s\n' "$fired_cue" | grep -Fq "+ ' aimed=' + (if \$Aimed then \$Aimed else 'none')" \
+  || fail "FIRED does not log the aimed target"
+printf '%s\n' "$fired_cue" | grep -Fq "+ ' aim_error_yaw=' + (if \$TargetBearing then \$TargetBearing.rotation.yaw else 'none')" \
+  || fail "FIRED lost the exact yaw aim-error field"
+printf '%s\n' "$fired_cue" | grep -Fq "+ ' aim_error_pitch=' + (if \$TargetBearing then \$TargetBearing.rotation.pitch else 'none')" \
+  || fail "FIRED lost the exact pitch aim-error field"
+
+# FIRED must capture the two raw runtime measurements needed for the later
+# controlled discriminator: the exact firing weapon's barrel position and the
+# aimed target's bearing in that weapon's local/mount frame. Keep target fields
+# survivable when the fallback chain resolves to no target.
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$Barrel\" exact=\"event.object.barrelposition\"/>" \
+  || fail "FIRED does not read the exact firing weapon barrelposition"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$Aimed\" exact=\"null\"/>" \
+  || fail "FIRED does not initialize its aimed target for the no-target fallback"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$TargetBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.param} else null\"/>" \
+  || fail "FIRED lost projectile-local target bearing"
+printf '%s\n' "$fired_cue" | grep -Fq "<set_value name=\"\$TargetMountBearing\" exact=\"if \$Aimed then \$Aimed.relativeposition.{event.object} else null\"/>" \
+  || fail "FIRED does not derive aimed-target bearing from the exact firing weapon"
+for field in \
+  "+ ' barrel_x=' + \$Barrel.x" \
+  "+ ' barrel_y=' + \$Barrel.y" \
+  "+ ' barrel_z=' + \$Barrel.z" \
+  "+ ' target_mount_yaw=' + (if \$TargetMountBearing then \$TargetMountBearing.rotation.yaw else 'none')" \
+  "+ ' target_mount_pitch=' + (if \$TargetMountBearing then \$TargetMountBearing.rotation.pitch else 'none')"; do
+  printf '%s\n' "$fired_cue" | grep -Fq "$field" \
+    || fail "FIRED lost required raw measurement field: $field"
+done
+
+# MD ObserveHit: one line per hit on the exact armed ship, attributing the
+# weapon, the exact struck component, the aimed target, and istgt.
+printf '%s\n' "$hit_cue" | grep -Fq "<event_object_attacked_object object=\"\$Ship\"/>" \
+  || fail "ObserveHit no longer listens to event_object_attacked_object on \$Ship"
+printf '%s\n' "$hit_cue" | grep -Fq "<set_value name=\"\$Weapon\" exact=\"@event.param3.{2}\"/>" \
+  || fail "HIT no longer attributes the weapon from event.param3.{2}"
+printf '%s\n' "$hit_cue" | grep -Fq "+ ' weapon=' + (if \$Weapon then \$Weapon else 'none')" \
+  || fail "HIT does not log the attributed weapon"
+printf '%s\n' "$hit_cue" | grep -Fq "+ ' hitcomp=' + (if @event.param3.{1} then event.param3.{1} else 'none')" \
+  || fail "HIT does not log the exact struck component"
+printf '%s\n' "$hit_cue" | grep -Fq "+ ' aimed=' + (if \$Aimed then \$Aimed else 'none')" \
+  || fail "HIT does not log the aimed target"
+printf '%s\n' "$hit_cue" | grep -Fq "+ ' istgt=' + (\$Aimed? and (event.param == \$Aimed or @event.param3.{1} == \$Aimed))" \
+  || fail "HIT istgt is not component-aware"
 
 echo "testlab observability contract tests passed"

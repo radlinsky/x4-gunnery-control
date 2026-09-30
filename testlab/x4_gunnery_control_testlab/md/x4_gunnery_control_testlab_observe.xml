@@ -26,26 +26,30 @@
        out of 7252.  Only excludeself="true" carries signal, and by itself it
        cannot separate a turret that held fire from one that had no shot.
 
-  event_object_attacked_object replaces all of it.  common.xsd:13058 documents
-  param3 as [attacked component, weapon], so event.param3.{2} IS the turret
-  that landed the hit - the attribution lastattacker could not give.  Shipped
-  proof that param3.{2} really is the weapon and not something else:
+  event_object_attacked_object replaces the polling path for ordinary turret
+  hits. common.xsd:13058 documents param3 as [attacked component, weapon], and
+  ordinary projectile captures return the turret in event.param3.{2}. Shipped
+  proof that param3.{2} has the weapon role:
   md/notifications.xml:1515 reads that exact slot and passes it straight into
   change_relation_on_attack weapon=, whose weapon attribute is common.xsd:21620.
   object= is the ATTACKER, not the victim: common.xsd:13058 says so and
   md/cover.xml:271-273 pairs it with event_object_attacked under the comment
   "if we either attack something or are attacked by something".
 
-  So one HIT line now carries what the entire sweep could not: which turret
-  fired, what mode it was in, and what it hit.  A Defend turret hitting the
-  preferred target is a single greppable line.
+  This is kill-method-dependent. In the 2026-08-23 issue #65 capture,
+  hitbymissile returned the LAUNCHER SHIP in param3.{2}, not the missile turret.
+  FIRED still names the exact turret and missile object. One ordinary HIT line
+  can therefore carry what the sweep could not, but a missile HIT line cannot
+  be used for per-turret attribution.
 
-  WHAT IS DELIBERATELY NOT HERE
-  event_weapon_fired (common.xsd:16836) would also catch shots that MISS, and
-  diffing it against the hits would give a per-turret hit rate.  It is left out:
-  it fires on every trigger pull, so fourteen turrets in a sustained engagement
-  would swamp the log, and the only row it would help with (NO FIRING SOLUTION) is not
-  one of the open ones.  Add it if that row ever matters.
+  MISSILE FLIGHT CHECK
+  event_weapon_fired (common.xsd:16836) names the exact emitter in event.object
+  and the fired missile in event.param. For missile turrets a second listener
+  records that missile after 500 ms: survival plus increasing distance from the
+  firing ship is the own-hull-clearance check. missile.target records the
+  intended target; it does not prove impact. The general hit event omits the
+  missile object, so launch and arbitrary-target missile impact remain separate
+  signals.
 
   THE CENSUS, AND WHY IT SURVIVED THE REWRITE
   Hits are positive evidence only.  The Hold fire row needs the opposite: proof
@@ -113,6 +117,9 @@
              (suffix s, scriptproperties.xml:2396) and comparing a time against
              a plain number is a type error, not a false. -->
         <set_value name="$LastSample" exact="player.age - 1s"/>
+        <set_value name="$GeometryCaptureActive" exact="false"/>
+        <set_value name="$GeometryTick" exact="0"/>
+        <set_value name="$LastGeometrySample" exact="player.age - 1s"/>
       </actions>
       <cues>
 
@@ -128,8 +135,39 @@
           </conditions>
           <actions>
             <set_value name="ObserveRoot.$Enabled" exact="@event.param3.$enabled == true"/>
+            <!-- A loaded save can already contain ObserveRoot and therefore
+                 skip newly added conditionless root actions after refreshmd.
+                 Restart the bounded capture on every user-driven enable. -->
+            <do_if value="ObserveRoot.$Enabled">
+              <set_value name="ObserveRoot.$GeometryCaptureActive" exact="true"/>
+              <set_value name="ObserveRoot.$GeometryTick" exact="0"/>
+              <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age - 1s"/>
+            </do_if>
             <debug_text text="'[X4GC TEST OBSERVE] enabled=' + ObserveRoot.$Enabled + ' t=' + player.age"/>
             <reset_cue cue="ObserveArm"/>
+          </actions>
+        </cue>
+
+        <!-- Temporary box-property discriminator; authored aim points are
+             compared offline, not presented as runtime point measurements. -->
+        <cue name="ObserveIssue171OriginInsideBox" checkinterval="1s">
+          <conditions>
+            <check_value value="md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? and md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId == 'issue-171-origin-inside-box-r1'"/>
+          </conditions>
+          <delay exact="5s"/>
+          <actions>
+            <do_for_each name="$Macro" in="[macro.engine_tfm_xl_carrier_02_allround_01_mk1_macro, macro.ship_arg_xl_carrier_02_a_macro]">
+              <debug_text text="'[X4GC TEST ISSUE171 MACROBBOX] spec=issue-171-origin-inside-box-r1 t=' + player.age
+                + ' macro=' + $Macro.id
+                + ' exists=' + $Macro.boundingbox.exists
+                + ' center_x=' + $Macro.boundingbox.center.x
+                + ' center_y=' + $Macro.boundingbox.center.y
+                + ' center_z=' + $Macro.boundingbox.center.z
+                + ' max_x=' + $Macro.boundingbox.max.x
+                + ' max_y=' + $Macro.boundingbox.max.y
+                + ' max_z=' + $Macro.boundingbox.max.z"/>
+            </do_for_each>
+            <debug_text text="'[X4GC TEST ISSUE171 COMPLETE] spec=issue-171-origin-inside-box-r1 records=2 t=' + player.age"/>
           </actions>
         </cue>
 
@@ -204,6 +242,7 @@
                   <set_value name="$Dist" exact="$Weapon.distanceto.{$Target}"/>
                   <set_value name="$Relative" exact="$Target.relativeposition.{$Weapon}"/>
                   <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                  <set_value name="$Origin" exact="$Weapon.relativeposition.{player.ship}"/>
                   <!-- Compare the raw component-origin bearing with the XSD's
                        weapon-consistent aim-target bearing. The local-space
                        form is the candidate production pitch predicate; this
@@ -234,6 +273,9 @@
                     + ' barrel_x=' + $Barrel.x
                     + ' barrel_y=' + $Barrel.y
                     + ' barrel_z=' + $Barrel.z
+                    + ' origin_ship_x=' + $Origin.x
+                    + ' origin_ship_y=' + $Origin.y
+                    + ' origin_ship_z=' + $Origin.z
                     + ' inrange=' + ($Weapon.bboxdistanceto.{$Target} le $Weapon.maxfirerange)
                     + ' bboxdist=' + $Weapon.bboxdistanceto.{$Target}
                     + ' dist=' + $Dist
@@ -310,6 +352,91 @@
           </actions>
         </cue>
 
+        <!-- TurretMapPosition
+             AddUITriggeredEvent("X4GunneryTestLabObserve", "turretmap_position",
+               {ship =, turret =, idx =})
+             Throwaway issue #205 feasibility probe for a graph-widget turret
+             map. Lua has no MD-free route to a turret's real mount position;
+             relativeposition.{$component} is the same primitive the existing
+             ObserveMark snapshot already uses for $Aimed.relativeposition.{...}.
+             One event per turret, answered once, synchronously; the Lua side
+             counts replies against its point list to know when it can draw. -->
+        <!-- HoloSize (issue #205 hologram probe): the object-configuration
+             holomap's camera distance unit was fitted as 521 m on the Ray;
+             log every bounding-box size MD exposes so a second ship can show
+             which one that unit follows. -->
+        <cue name="HoloSize" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'holo_size'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <do_if value="$Ship? and $Ship.exists">
+              <debug_text text="'[X4GC TEST HOLOSIZE] ship=' + $Ship + ' macro=' + $Ship.macro
+                + ' size=' + $Ship.size + ' length=' + $Ship.length + ' width=' + $Ship.width + ' height=' + $Ship.height
+                + ' bbox_max=' + @$Ship.macro.boundingbox.max + ' bbox_center=' + @$Ship.macro.boundingbox.center"/>
+              <!-- The fitted holomap distance unit is size / 2 (bounding-sphere radius). -->
+              <raise_lua_event name="'X4GunneryTestLab.HoloSize'" param="'x4ghs1:' + $Ship.size"/>
+            </do_if>
+          </actions>
+        </cue>
+
+        <cue name="TurretMapPosition" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'turretmap_position'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <set_value name="$Turret" exact="@event.param3.$turret"/>
+            <set_value name="$Idx" exact="event.param3.$idx"/>
+            <do_if value="$Ship? and $Ship.exists and $Turret? and $Turret.exists">
+              <set_value name="$Pos" exact="$Turret.relativeposition.{$Ship}"/>
+              <debug_text text="'[X4GC TEST TURRETMAP] idx=' + $Idx
+                + ' turret=' + $Turret
+                + ' macro=' + $Turret.macro
+                + ' x=' + $Pos.x
+                + ' y=' + $Pos.y
+                + ' z=' + $Pos.z"/>
+              <raise_lua_event name="'X4GunneryTestLab.TurretMapPosition'"
+                param="'x4gtm1:' + $Idx + ':' + $Pos.x + ':' + $Pos.y + ':' + $Pos.z"/>
+            </do_if>
+            <do_else>
+              <debug_text text="'[X4GC TEST TURRETMAP] idx=' + $Idx + ' failed: ship or turret missing'"/>
+              <raise_lua_event name="'X4GunneryTestLab.TurretMapPosition'"
+                param="'x4gtm1:' + $Idx + ':fail'"/>
+            </do_else>
+          </actions>
+        </cue>
+
+        <!-- Disposable issue 205 anchor capture. One serialized request; values
+             cross as numbers, never through MD's rounded string conversion. -->
+        <cue name="HoloAnchorGeometry" instantiate="true">
+          <conditions>
+            <event_ui_triggered screen="'X4GunneryTestLabObserve'" control="'holo_anchor_geometry'"/>
+          </conditions>
+          <actions>
+            <set_value name="$Ship" exact="@event.param3.$ship"/>
+            <set_value name="$Turret" exact="@event.param3.$turret"/>
+            <set_value name="$Request" exact="event.param3.$request"/>
+            <set_value name="$Slot" exact="event.param3.$slot"/>
+            <do_if value="$Ship? and $Ship.exists and $Turret? and $Turret.exists">
+              <set_value name="$Position" exact="$Turret.relativeposition.{$Ship}"/>
+              <set_value name="$Spec" exact="if md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId? then md.X4GunneryTestLabScenario.ScenarioRoot.$SpawnedSpecId else 'none'"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryHeader'" param="$Request + ':' + $Slot + ':' + $Spec"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryShip'" param="$Ship"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryTurret'" param="$Turret"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Ship.size / 2"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.x"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.y"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryNumber'" param="$Position.z"/>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryEnd'" param="$Request"/>
+            </do_if>
+            <do_else>
+              <raise_lua_event name="'X4GunneryAnchor.GeometryEnd'" param="$Request + ':fail'"/>
+            </do_else>
+          </actions>
+        </cue>
+
         <!-- ObserveArm
              The gate.  Its children only exist while it has fired, so switching
              logging off genuinely detaches both listeners rather than leaving
@@ -362,7 +489,9 @@
                 <do_elseif value="player.target?">
                   <set_value name="$Aimed" exact="player.target"/>
                 </do_elseif>
+                <set_value name="$Barrel" exact="event.object.barrelposition"/>
                 <set_value name="$TargetBearing" exact="if $Aimed then $Aimed.relativeposition.{event.param} else null"/>
+                <set_value name="$TargetMountBearing" exact="if $Aimed then $Aimed.relativeposition.{event.object} else null"/>
                 <debug_text text="'[X4GC TEST FIRED] t=' + player.age
                   + ' weapon=' + event.object
                   + ' macro=' + event.object.macro
@@ -374,20 +503,55 @@
                   + ' aimed=' + (if $Aimed then $Aimed else 'none')
                   + ' aim_error_yaw=' + (if $TargetBearing then $TargetBearing.rotation.yaw else 'none')
                   + ' aim_error_pitch=' + (if $TargetBearing then $TargetBearing.rotation.pitch else 'none')
-                  + ' aim_distance=' + (if $TargetBearing then $TargetBearing.length else 'none')"/>
+                  + ' aim_distance=' + (if $TargetBearing then $TargetBearing.length else 'none')
+                  + ' barrel_x=' + $Barrel.x
+                  + ' barrel_y=' + $Barrel.y
+                  + ' barrel_z=' + $Barrel.z
+                  + ' target_mount_yaw=' + (if $TargetMountBearing then $TargetMountBearing.rotation.yaw else 'none')
+                  + ' target_mount_pitch=' + (if $TargetMountBearing then $TargetMountBearing.rotation.pitch else 'none')"/>
+              </actions>
+            </cue>
+
+            <!-- A dumbfire launch alone does not prove that ignoring the
+                 firing ship in a diagnostic ray is safe: the missile could
+                 immediately collide with its own hull. Preserve the exact
+                 turret/missile pair from event_weapon_fired, wait long enough
+                 to clear the mount but far less than the fixture flight time,
+                 then report survival and displacement. missile.target is a
+                 direct launch-to-intended-target link, not an impact link. -->
+            <cue name="ObserveMissileFlight" instantiate="true">
+              <conditions>
+                <event_weapon_fired group="$FiringWeapons"/>
+              </conditions>
+              <delay exact="500ms"/>
+              <actions>
+                <do_if value="event.object.class == class.missileturret">
+                  <set_value name="$Weapon" exact="event.object"/>
+                  <set_value name="$Missile" exact="event.param"/>
+                  <set_value name="$Guided" exact="@$Missile.isguided"/>
+                  <set_value name="$Target" exact="@$Missile.target"/>
+                  <debug_text text="'[X4GC TEST MISSILE FLIGHT] t=' + player.age
+                    + ' weapon=' + $Weapon
+                    + ' macro=' + $Weapon.macro
+                    + ' missile=' + $Missile
+                    + ' guided=' + $Guided
+                    + ' target=' + (if $Target then $Target else 'none')
+                    + ' exists=' + @$Missile.exists
+                    + ' shipdist_500ms=' + (if @$Missile.exists then $Missile.distanceto.{$Ship} else 'none')"/>
+                </do_if>
               </actions>
             </cue>
 
             <!-- ObserveHit
-                 The whole point of the rewrite.  One line per hit landed BY the
-                 player ship, naming the weapon that landed it.
+                 One line per hit landed BY the player ship. For ordinary
+                 projectiles this names the turret; hitbymissile names the
+                 launcher ship and must be read with FIRED/FLIGHT lines.
 
                  event.param3.{2} is the weapon, event.param3.{1} the component
                  of the victim that was struck, event.param the victim itself,
-                 event.param2 the kill method (common.xsd:13058).  param3.{2} is
-                 read through @ because a hit with no weapon attribution is
-                 survivable - a missing turret id is worth one line saying so,
-                 not a dead cue.
+                 event.param2 the kill method (common.xsd:13058). param3.{2} is
+                 read through @ because missing or ship-level attribution is
+                 survivable and worth logging, not a dead cue.
 
                  istgt is the field the open rows turn on: it is true when the
                  thing this weapon hit is the target Direct-control was aiming
@@ -479,6 +643,70 @@
                   + ' hardtgt=' + (if player.target then player.target else 'none')
                   + ' softtgt=' + (if ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget then ObserveRoot.$SoftTarget else 'none')
                   + ' modes=' + $Census"/>
+              </actions>
+            </cue>
+
+            <!-- Observation enable starts one raw 100 ms capture, before any
+                 target is assigned. Firing does not influence its clock. -->
+            <cue name="ObserveGeometrySampler" instantiate="true" checkinterval="100ms">
+              <conditions>
+                <check_value value="ObserveRoot.$GeometryCaptureActive
+                                 and ObserveRoot.$GeometryTick lt 600
+                                 and player.age gt ObserveRoot.$LastGeometrySample"/>
+              </conditions>
+              <actions>
+                <set_value name="ObserveRoot.$LastGeometrySample" exact="player.age"/>
+                <set_value name="ObserveRoot.$GeometryTick" exact="ObserveRoot.$GeometryTick + 1"/>
+                <set_value name="$Target" exact="null"/>
+                <do_if value="ObserveRoot.$AimTarget? and ObserveRoot.$AimTarget.exists">
+                  <set_value name="$Target" exact="ObserveRoot.$AimTarget"/>
+                </do_if>
+                <do_elseif value="ObserveRoot.$SoftTarget? and ObserveRoot.$SoftTarget.exists">
+                  <set_value name="$Target" exact="ObserveRoot.$SoftTarget"/>
+                </do_elseif>
+                <do_elseif value="player.target?">
+                  <set_value name="$Target" exact="player.target"/>
+                </do_elseif>
+                <do_for_each name="$Weapon" in="$Ship.weapons.operational.list">
+                  <do_if value="$Weapon.macro == macro.turret_par_l_beam_01_mk1_macro">
+                    <set_value name="$Barrel" exact="$Weapon.barrelposition"/>
+                    <do_if value="$Target">
+                      <create_orientation name="$AimLocal" orientation="look_at" refobject="$Target" useaimtarget="true">
+                        <position object="$Weapon" space="$Weapon"/>
+                      </create_orientation>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' tick=' + ObserveRoot.$GeometryTick
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' tgt=' + $Target
+                        + ' tgtname=' + $Target.knownname
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' aim_yaw=' + $AimLocal.yaw
+                        + ' aim_pitch=' + $AimLocal.pitch
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                    </do_if>
+                    <do_else>
+                      <debug_text text="'[X4GC TEST AUTOGEO] t=' + player.age
+                        + ' tick=' + ObserveRoot.$GeometryTick
+                        + ' weapon=' + $Weapon
+                        + ' macro=' + $Weapon.macro
+                        + ' tgt=none'
+                        + ' mode=' + $Weapon.mode
+                        + ' ready=' + $Weapon.isreadytofire
+                        + ' aim_yaw=none'
+                        + ' aim_pitch=none'
+                        + ' barrel_x=' + $Barrel.x
+                        + ' barrel_y=' + $Barrel.y
+                        + ' barrel_z=' + $Barrel.z"/>
+                    </do_else>
+                  </do_if>
+                </do_for_each>
+                <do_if value="ObserveRoot.$GeometryTick ge 600">
+                  <set_value name="ObserveRoot.$GeometryCaptureActive" exact="false"/>
+                </do_if>
               </actions>
             </cue>
 

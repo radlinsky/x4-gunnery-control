@@ -40,8 +40,12 @@
 -- fix.clock                  — shared time value; assign to advance getElapsedTime
 -- fix.fireEvent(name,payload) — fire a RegisterEvent handler recorded during load
 -- fix.registeredEvents       — handlers indexed by RegisterEvent name
--- fix.registeredEventCalls   — ordered {name,handler} RegisterEvent captures
 -- fix.uiTriggeredEvents      — ordered {screen,control,params} UI-event captures
+-- fix.View                   — X4 View registry with frame-limit accounting
+-- fix.getOnUpdateCallback()  — inspect the installed addon onUpdate callback
+-- fix.invokeOnUpdate()       — invoke that callback, if installed
+-- fix.setFullscreenMenuDisplayed(value)
+--                           — control C.IsFullscreenMenuDisplayed(true, "")
 --
 -- ── RegisterEvent / fireEvent ────────────────────────────────────────────────
 -- The production code calls RegisterEvent(name, handler) during init. The old
@@ -85,6 +89,7 @@ function M.load()
     ffiStub.string = function(p) return tostring(p) end
     ffiStub.new    = function(spec, count) return {} end
 
+    local fullscreenMenuDisplayed = false
     local C = setmetatable({
         -- Explicit stubs for everything reachable from load path, init, and
         -- logSession.  The __index fallback returns a numeric-safe zero stub.
@@ -99,6 +104,10 @@ function M.load()
             return { softtargetID = 0, softtargetConnectionName = "" }
         end,
         GetUp                           = function() return true end,
+        IsFullscreenMenuDisplayed      = function(anymenu, menuname)
+            if anymenu == true and menuname == "" then return fullscreenMenuDisplayed end
+            return false
+        end,
         -- Everything else returns 0 (safe for numeric contexts).
     }, { __index = function(t, k) return function(...) return 0 end end })
 
@@ -210,6 +219,92 @@ function M.load()
     -- Teardown calls in order: "clear<layer>" / "close". Ordering is the whole
     -- point: helper.lua untracks the menu before unregistering its views.
     local teardownTrace     = {}
+    local nextFrameID       = 1000
+
+    -- View.registerMenu creates fresh runtime ids from retained descriptors.
+    -- Model X4's global frame limit and per-registration accounting; no
+    -- compositor, child-widget, or input behavior is simulated.
+    local View = { currentFrames = 0, maxFrames = 5, menus = {} }
+
+    local function allocateFrame()
+        nextFrameID = nextFrameID + 1
+        return nextFrameID
+    end
+
+    function View.unregisterMenu(id, releaseDescriptor)
+        for index = #View.menus, 1, -1 do
+            local entry = View.menus[index]
+            if entry.id == id then
+                table.remove(View.menus, index)
+                View.currentFrames = View.currentFrames - entry.numframes
+                if releaseDescriptor ~= false then
+                    for _, descriptor in pairs(entry.framedescriptors or {}) do
+                        ReleaseDescriptor(descriptor)
+                    end
+                end
+            end
+        end
+    end
+
+    function View.registerMenu(id, registeredType, callback, clearCallback,
+            framedescriptors, name, properties)
+        local numframes = 0
+        for _ in pairs(framedescriptors or {}) do numframes = numframes + 1 end
+        local replacedFrames = 0
+        for _, entry in ipairs(View.menus) do
+            if entry.id == id then replacedFrames = entry.numframes end
+        end
+        if numframes + View.currentFrames - replacedFrames > View.maxFrames then
+            return nil
+        end
+        View.unregisterMenu(id, true)
+        local entry = {
+            id = id, type = registeredType, callback = callback,
+            numframes = numframes,
+            clearCallback = clearCallback, framedescriptors = framedescriptors,
+            name = name, properties = properties,
+        }
+        View.menus[#View.menus + 1] = entry
+        View.currentFrames = View.currentFrames + numframes
+        -- framedescriptors is a layer-keyed map traversed with pairs(), so
+        -- descriptor order is undefined; View records the layer -> runtime frame
+        -- index it actually used as entry.layers[layer]. Model that with a
+        -- deliberately DESCENDING traversal so anything that assumes ascending
+        -- layer order (or frames[1]) fails here.
+        local layers = {}
+        for layer in pairs(framedescriptors or {}) do layers[#layers + 1] = layer end
+        table.sort(layers, function(a, b) return a > b end)
+        local frames = {}
+        entry.layers = {}
+        for index, layer in ipairs(layers) do
+            frames[index] = allocateFrame()
+            entry.layers[layer] = index
+        end
+        entry.frames = frames
+        if callback then callback(frames) end
+        return entry
+    end
+
+    function View.clearMenus(types)
+        for index = #View.menus, 1, -1 do
+            local entry = View.menus[index]
+            if types[entry.type] then View.unregisterMenu(entry.id, true) end
+        end
+    end
+
+    _G.View = View
+    ReleaseDescriptor = function() end
+    table.pack = table.pack or function(...) return { n = select("#", ...), ... } end
+    table.unpack = table.unpack or unpack
+    GetChildren = function() end
+
+    local addonOnUpdate
+    SetScript = function(script, callback)
+        if script == "onUpdate" then addonOnUpdate = callback end
+    end
+    RemoveScript = function(script, callback)
+        if script == "onUpdate" and addonOnUpdate == callback then addonOnUpdate = nil end
+    end
 
     -- Expose the mutable bookkeeping on the module so test code can do
     --   fix.clearedFrames = {}  (reset)  or  #fix.pendingCallbacks  (read).
@@ -229,7 +324,7 @@ function M.load()
     local LABEL_ID = {
         armed = 6, disarmed = 7, getUp = 14, backToGunnery = 54,
         autoEngage = 68, nextTurret = 71, prevTurret = 72,
-        nextTarget = 75, prevTarget = 76, updateBehavior = 83, engageable = 89,
+        nextTarget = 75, prevTarget = 76, updateBehavior = 83,
     }
     local LABEL = {}
     for name, id in pairs(LABEL_ID) do LABEL[name] = "text:20991:" .. id end
@@ -263,12 +358,10 @@ function M.load()
     -- registered handler away.  This stub records them so tests can fire events
     -- through fix.fireEvent(name, payload).
     local registeredEvents = {}   -- { [name] = { handler, ... } }
-    local registeredEventCalls = {}
     local registeredUIEvents = {}
     RegisterEvent = function(name, handler)
         if not registeredEvents[name] then registeredEvents[name] = {} end
         registeredEvents[name][#registeredEvents[name] + 1] = handler
-        registeredEventCalls[#registeredEventCalls + 1] = { name = name, handler = handler }
     end
 
     local function fireEvent(name, payload)
@@ -283,6 +376,7 @@ function M.load()
 
     -- ── 6. Helper stub ───────────────────────────────────────────────────────
     local Helper = {
+        standardTextHeight = 20,
         registerMenu            = function() end,
         clearDataForRefresh     = function()
             frameCount        = 0
@@ -296,6 +390,7 @@ function M.load()
         clearFrame              = function(m, layer)
             clearedFrames[#clearedFrames + 1] = layer
             teardownTrace[#teardownTrace + 1] = "clear" .. tostring(layer)
+            View.unregisterMenu("Helper" .. layer, true)
             if m and m.frames then m.frames[layer] = nil end
         end,
         createFrameHandle       = function(menu, props)
@@ -305,15 +400,24 @@ function M.load()
             frameProps[frameCount] = props
             local record = { props = props, background = false }
             allFrames[#allFrames + 1] = record
+            local layer = props.layer or 4
             local frame
             frame = {
-                display    = function() end,
+                content    = {},
+                display    = function(self)
+                    View.registerMenu("Helper" .. layer, props.viewHelperType or "Helper",
+                        function(frames)
+                            self.id = frames[1]
+                            menu.frames[layer] = frames[1]
+                        end, nil, { [layer] = { frame = self } }, menu.name, props)
+                end,
                 update     = function() end,
                 setBackground = function(self)
                     record.background = true
                     return self
                 end,
-                properties = setmetatable({}, {
+                addRenderTarget = function() end,
+                properties = setmetatable({ layer = layer }, {
                     __newindex = function(t, k, v) rawset(t, k, v) end,
                     __index    = function() return 0 end,
                 }),
@@ -382,7 +486,7 @@ function M.load()
             -- helper.lua keys menu.frames by layer; unregisterOwnFrames() walks it.
             menu.frames = menu.frames or {}
             -- helper.lua defaults an omitted layer to Helper.defaultFrameLayer (4).
-            menu.frames[props.layer or 4] = frame
+            menu.frames[layer] = frame
             return frame
         end,
         -- Counts Helper.closeMenu calls; the get-up path must defer that one tick.
@@ -411,6 +515,9 @@ function M.load()
                 ran = false,
             }
         end,
+        setScripts              = function() end,
+        removeAllWidgetScripts = function() end,
+        removeAllMenuScripts   = function() end,
     }
     _G.Helper = Helper
 
@@ -487,9 +594,9 @@ function M.load()
 
     -- X4GunneryState must be set before gunnery_control.lua loads
     -- (line 5: local State = X4GunneryState).
-    dofile("ui/turret_arc_limits.lua")
     X4GunneryState = dofile("ui/gunnery_state.lua")
     X4GunneryPersistence = dofile("ui/gunnery_persistence.lua")
+    X4GunneryHologram = dofile("ui/gunnery_hologram.lua")
     -- The control module deliberately reuses this table in game across a UI
     -- reload. A fixture load promises a fresh environment instead, so discard
     -- the previous test's closures before loading the next module instance.
@@ -527,6 +634,7 @@ function M.load()
         gcMenu            = gcMenu,
         API               = API,
         C                 = C,
+        View              = View,
         ffiStub           = ffiStub,
         logContains       = logContains,
         buttonByText      = buttonByText,
@@ -538,11 +646,16 @@ function M.load()
         callbackCheckpoint = callbackCheckpoint,
         drainCallbacksSince = drainCallbacksSince,
         runCallback       = runCallback,
+        getOnUpdateCallback = function() return addonOnUpdate end,
+        invokeOnUpdate    = function()
+            if addonOnUpdate then return addonOnUpdate() end
+        end,
+        setFullscreenMenuDisplayed = function(value)
+            fullscreenMenuDisplayed = value and true or false
+        end,
         -- tables (reference — mutations visible both ways)
         pendingCallbacks  = pendingCallbacks,
         registeredEvents  = registeredEvents,
-        registeredEventCalls = registeredEventCalls,
-        registeredUIEvents = registeredUIEvents,
         uiTriggeredEvents = uiTriggeredEvents,
         allFrames         = allFrames,
         -- scalars that tests only READ (not write) can be proxied via __index

@@ -9,15 +9,13 @@ cd "$(dirname "$0")/.."
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-# Whole-task guidance must scope the strictest-category rule to what X4 has not
-# loaded yet. Otherwise a restart-only file changed once in a PR incorrectly
+# Authoritative guidance must scope the strictest-category rule to what X4 has
+# not loaded yet. Otherwise a restart-only file changed once in a PR incorrectly
 # forces another restart after every later UI-only fix in the same live session.
 grep -Fq "whole not-yet-loaded delta" AGENTS.md \
   || fail "AGENTS.md must scope strictest reload category to the not-yet-loaded delta"
 grep -Fq "not-yet-loaded delta" docs/RELOADING.md \
   || fail "RELOADING.md must define the loaded-baseline comparison"
-grep -Fq "compute the reset from the files changed since the exact head" .agents/skills/spawn-gunnery-scenario/SKILL.md \
-  || fail "spawn skill must distinguish repeat-run deltas from the full PR diff"
 
 expect_contains() {
   local path=$1 needle=$2
@@ -47,7 +45,7 @@ expect_contains "aiscripts/example.xml" "Reload AI"
 # owner asked for these steps by name after being told just the button.
 expect_contains "ui/gunnery_control.lua" "sit at a gunnery console"
 expect_contains "ui/gunnery_control.lua" "Test Lab"
-expect_contains "ui/gunnery_control.lua" "runtimeBuild"
+expect_contains "ui/gunnery_control.lua" "UI initialized"
 expect_contains "md/x4_gunnery_control.xml" "sit at a gunnery console"
 
 # And "the Test Lab button" is still ambiguous: there are three, on the console

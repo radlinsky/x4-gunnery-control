@@ -41,19 +41,338 @@
 
 ## Turret firing solutions from MD
 
-### Per-turret firing solution is computable from MD
+### Behemoth E Front Upper Mid uses `con_turret_m_03` and `_04`
 - X4: 9.00
 - Status: shipped-source
-- Source: `schemas-9.00/libraries/common.xsd:21691` (the `check_line_of_sight` action element); combat range gates `aiscripts/move.attack.object.capital.xml:656,657` (main target) and `:680,681` (station module); the sole mining-approach range gate `aiscripts/mining.collect.ship.capital.xml:229,230`; distance/size property docs `props-9.00/libraries/scriptproperties.xml:66,76,80`
-- Live test: no — untested as of 2026-08-09
-- Finding: `check_line_of_sight` is an MD/AI action that performs ray casts. Its `object` attribute accepts a turret component, so line of sight can be tested per individual turret against a target. Attributes include `object`, `objectoffset`, `target`, `targetoffset`, `useaimtarget`, `excludeself`, and `name`. Setting `useaimtarget="true"` uses the object's aim targets as the raycast destination, consistent with weapon aiming.
-- **Range geometry — CORRECTED 2026-08-18 against the extracted X4 9.00 tree.** The original text claimed both combat and mining AI define "this turret can engage this target" as line of sight AND `turret.distanceto.{target} + (target.size/2) < turret.maxfirerange`. That attributed the MINING form to combat. Shipped source shows two different range tests:
-  - **Combat weapon-fire reachability** — capital-ship combat script, `aiscripts/move.attack.object.capital.xml:656`: `$locweapon.bboxdistanceto.{$target} le $locweapon.maxfirerange`, with `check_line_of_sight` at `:657`; the station-module branch repeats the same test against a module component (`:680`, LOS at `:681`). The distance is bounding-box-to-bounding-box, compared directly against `maxfirerange`, with NO size term. The loop iterates `weapons.operational.list` (`:644`), and turrets are stripped from it unless `$frontweapon == 3` (`:648`).
-  - **Asteroid-mining approach** — `aiscripts/mining.collect.ship.capital.xml:230`: `($turrets.{$i}.distanceto.{$target} + ($target.size/2)) lt $turrets.{$i}.maxfirerange`, after `check_line_of_sight` at `:229`, over the ship's mining-mode turrets found at `:224`. This is the ONLY `distanceto + size/2` range gate in the shipped AI tree: a full census (`grep -rn maxfirerange` over `aiscripts/` and `md/`) finds the property on exactly five lines in exactly these two files — `move.attack.object.capital.xml:647,656,679,680` and `mining.collect.ship.capital.xml:230`. The gate answers "can any mining turret mine this asteroid from the current approach position"; if none passes, the ship keeps moving (`:236`).
-  - Property semantics, `props-9.00/libraries/scriptproperties.xml`: `distanceto.{$component}` is "Distance to other component" (`:76`) — the point distance; `bboxdistanceto.{$component}` is "Distance from this component's bounding box to other component's bounding box" (`:80`); `size` is "Size (based on bounding box)" (`:66`). Shipped scripts treat `size/2` as an object's radius: `move.gate.xml:622` labels `$exitgate.size / 2.0` "gate radius", and `move.attack.object.capital.xml:586` subtracts `$target.size/2m` from `distanceto` to form a surface distance. **Inference** (anchored in those shipped usages, not stated in the property docs): the combat form measures the NEAR-surface gap between the two bounding boxes, while the mining form adds the target's radius to the center distance — i.e. the distance to the target's FAR edge, passing only if the asteroid's whole bounding extent fits inside `maxfirerange`. The two forms can differ by up to a full target size; the mining form is the stricter.
-  - Egosoft's own caveat on the combat form (`move.attack.object.capital.xml:409`): "NB: accuracy of bboxdistanceto depends on which object is bigger"; their movement code therefore forms distances as `bboxdistanceto.[$sector,$position] - target.size/2m` (`:410`).
-- Vanilla does NOT perform any separate gimbal or traverse-arc test; LOS from the weapon component plus the applicable range test is the engine's own working definition of a firing solution. The vanilla loops answer only "does ANY weapon (combat) / ANY mining turret (mining) have a solution" — both break on the first hit — so an N-of-total count is strictly more expensive than anything shipped code does.
-- Scope of that claim, added 2026-08-10 so it is not over-read: this establishes what VANILLA computes, from shipped source. It has never been run by this project and says nothing about detecting the LINE OF FIRE BLOCKED condition — a turret trained on a target with the ship's OWN hull in the line of fire. Whether `check_line_of_sight` can answer that is UNRESOLVED and untested: the ray from a turret to its target begins inside the firing ship's own hull, so `excludeself` plausibly decides the result in both directions (true and it cannot see own-hull masking at all; false and it may report every shot blocked), but the exact `excludeself` semantics have not been verified against the engine. Not pursued, because LINE OF FIRE BLOCKED was confirmed live on 2026-08-09 to be unrecoverable regardless — the engine's preferred-target fallback never rolls off a LINE OF FIRE BLOCKED target, so knowing the condition would not let a mod act on it. Do not cite this entry as evidence either that the technique works for LINE OF FIRE BLOCKED or that it cannot.
+- Source: `assets/units/size_l/ship_arg_l_destroyer_02.xml:490-500`;
+  `libraries/loadouts.xml:405-446` (`scenario_combat_arg_destroyer`)
+- Live test: no — the corrected singular assignments are not yet reproduced
+- Finding: Behemoth E macro `ship_arg_l_destroyer_02_a_macro` references hull
+  component `ship_arg_l_destroyer_02`. Its two `group_front_up_mid` medium
+  turret connections are exactly `con_turret_m_03` and `con_turret_m_04`.
+  Names such as `con_turret_005` and `con_turret_006` do not occur on this hull.
+  The same hull exposes engines `con_engine_01..03`, large shields
+  `con_shield_l_01..03`, and two medium shields in `group_front_up_mid`; those
+  engine, shield, software, and thruster selections match the shipped
+  `scenario_combat_arg_destroyer` loadout. The `_02` Argon M beam and plasma
+  components expose `turret medium standard hittable component combat` tags,
+  matching the hull's `combat hittable medium missile standard turret` slots
+  on the relevant compatibility dimensions.
+
+### Colossus E exposes eight STANDARD/HITTABLE medium turret groups of two slots each
+- X4: 9.00
+- Status: shipped-source
+- Source: `assets/units/size_xl/ship_arg_xl_carrier_02.xml:707-808` (component
+  referenced by `assets/units/size_xl/macros/ship_arg_xl_carrier_02_a_macro.xml`);
+  group-name corroboration `libraries/loadouts.xml` (`scenario_combat_arg_carrier_02`)
+- Live test: no — source enumeration only, as of 2026-08-23
+- Finding: the Colossus E component has exactly 76 connections, of which 17 are
+  turret connections: 16 medium plus 1 large, and there are no `small` tagged
+  connections. All 16 medium connections carry the exact tag set
+  `combat hittable medium missile standard turret`; the large one
+  (`con_turret_l_01`) carries `combat large missile standard turret` (no
+  `hittable`). The 16 medium connections form exactly eight groups of two.
+  Raw group IDs carry padding whitespace; the vanilla Colossus loadout
+  references all eight names in trimmed form, so the trimmed name is the
+  usable group ID:
+
+  | raw group ID (exact) | connections | position (x / y / z, m) |
+  |---|---|---|
+  | `"        group_front_right_down  "` | `con_turret_m_09`, `con_turret_m_01` | +270.40 / −24.62 / +720.62, +808.64 |
+  | `"       group_front_left_up "` | `con_turret_m_06`, `con_turret_m_14` | −295.70 / +118.89 / +720.62, +808.64 |
+  | `"       group_front_right_up  "` | `con_turret_m_08`, `con_turret_m_16` | +295.70 / +118.89 / +720.62, +808.64 |
+  | `"       group_front_left_down  "` | `con_turret_m_07`, `con_turret_m_15` | −270.40 / −24.62 / +720.62, +808.64 |
+  | `"      group_rear_left_up "` | `con_turret_m_02`, `con_turret_m_10` | −372.95…−372.98 / +116.31…+116.38 / −616.02, −535.32 |
+  | `"       group_rear_right_up "` | `con_turret_m_03`, `con_turret_m_11` | +372.95…+372.99 / +116.31…+116.37 / −616.02, −535.32 |
+  | `"      group_rear_left_down  "` | `con_turret_m_04`, `con_turret_m_12` | −343.86…−343.88 / −48.63…−48.71 / −616.06, −535.22 |
+  | `"       group_rear_right_down  "` | `con_turret_m_05`, `con_turret_m_13` | +343.85…+343.89 / −48.64…−48.71 / −616.06, −535.22 |
+
+  Geometry, with +Z the bow and +Y up: front groups at z≈+721/+809 m, rear
+  groups at z≈−535/−616 m (each group's two slots are ~88 m apart front, ~81 m
+  apart rear, longitudinally); `*_up` groups at y≈+116…+119 m (upper deck),
+  `*_down` at y≈−25…−49 m; left is negative x, right positive x. The L turret
+  sits at (0, +159.33, −245.59). Front mount quaternions are near-identity
+  with a mirrored ~10° tilt about the longitudinal axis, e.g.
+  `con_turret_m_06` `qx=-8.47e-08 qy=3.147e-07 qz=-0.08715479 qw=-0.9961948`,
+  `con_turret_m_08` `qx=-1.38e-07 qy=2.952e-07 qz=0.08715667 qw=-0.9961947`.
+  The bow assignment (+Z = front) is an inference, not a coordinate
+  document: the Behemoth E's bow main guns `con_weapon_01/02` sit at z=+327.6
+  (`assets/units/size_l/ship_arg_l_destroyer_02.xml:526-530`), and Egosoft's
+  own `group_front_*` / `group_rear_*` names here agree with that reading.
+- Fixture-design inference, not an engine claim: for #67 the pair
+  `group_front_left_up` (beam) + `group_front_right_up` (plasma) is the
+  simplest choice — both on the upper deck, in the bow hemisphere, mirrored
+  across the centerline, so one forward target placement can exercise both
+  groups without repositioning the ship.
+
+### Colossus E live-mounts the `_02_mk1` beam and plasma; `_01_mk1` rejection remains inferred
+- X4: 9.00
+- Status: live-tested
+- Bound: the `_02_mk1` positive is live-tested on Colossus E. The `_01_mk1`
+  negative is still inferred from shipped tag geometry and was not live-tried.
+- Source: `assets/props/WeaponSystems/energy/turret_arg_m_beam_02_mk1.xml:328`
+  (socket `con_beam_turret_01`), `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_02_mk1.xml:331`
+  (socket `con_plasma_turret`); macros `turret_arg_m_beam_02_mk1_macro` and
+  `turret_arg_m_plasma_02_mk1_macro` (each a `class="turret"` macro referencing
+  exactly that component); negative: `assets/props/WeaponSystems/energy/turret_arg_m_beam_01_mk1.xml:11`
+  and `assets/props/WeaponSystems/heavy/turret_arg_m_plasma_01_mk1.xml:11`; family
+  census over all Argon M/L turret components in `01.cat`; vanilla loadouts
+  `scenario_combat_arg_carrier_02` and `scenario_combat_arg_destroyer` in
+  `libraries/loadouts.xml`; controlled Test Lab runs
+  `issue-67-arc-barrel-two-phase-r3` at `f230345` and r9 at `b751b4f`, game
+  `debug.log`, 2026-08-24
+- Live test: yes — two fresh X4 processes produced the exact operational
+  Colossus census of two `turret_arg_m_beam_02_mk1_macro` and two
+  `turret_arg_m_plasma_02_mk1_macro` in the intended four slot paths, with no
+  other weapons or missile turrets. In r9 all four emitted FIRED events and
+  produced attributed hits on the clear A control.
+- Finding: the positive compatibility is no longer inference: the exact
+  `_02_mk1` pair mounts and fires on Colossus E. The tag facts that predicted it
+  are shipped-source: the slot tag set
+  `combat hittable medium missile standard turret` matches
+  `turret_arg_m_beam_02_mk1` (socket tags
+  `turret medium standard component hittable combat`) and
+  `turret_arg_m_plasma_02_mk1` (socket tags
+  `turret medium standard hittable component combat`) on every
+  tag-comparison axis: kind `turret`, size `medium`, generation `standard`,
+  durability `hittable`, and a weapon-family axis on which the slot
+  advertises BOTH `combat` and `missile` and the equipment carries `combat`.
+  The extra `component` tag appears only on equipment sides. The compatibility
+  rule inferred from those tags remains **inference** (matching is engine-side
+  C++ and no shipped script states it): the family axis is two-valued on the
+  slot and single-valued on the
+  equipment — Argon M missile turrets (`turret_arg_m_guided_02_mk1`,
+  `turret_arg_m_dumbfire_02_mk1`) are tagged `turret medium missile component
+  hittable standard` (no `combat`) and the vanilla Colossus loadout mounts
+  them in these very front groups, while the energy/heavy M turrets (beam,
+  plasma, laser, flak, gatling, shotgun `_02_mk1`) carry `combat` without
+  `missile`, and the vanilla Behemoth loadout mounts the M laser in the
+  identical slot tag set. Subset matching in either direction is therefore
+  false for these slots; missing `missile` (or `combat`) on the equipment side
+  does not exclude it. L-slot evidence matches the same model: the
+  `combat large missile standard turret` slots accept `turret_arg_l_beam_01_mk1`
+  (`turret large standard component combat`, no `hittable`, none required by
+  the slot) and `turret_arg_l_guided_01_mk1` / `turret_arg_l_dumbfire_01_mk1`
+  (`turret large missile component standard`). The `_01_mk1` rejection — and
+  the "only the `_02_mk1` fits" conclusion built on it — is inference, not
+  engine fact: the `_01_mk1` beam and plasma sockets are tagged
+  `advanced combat component medium turret unhittable`, wrong on both the
+  generation axis (`advanced` vs `standard`) and the durability axis
+  (`unhittable` vs `hittable`), and the Colossus hull has no `advanced`
+  connection tags at all; under the inferred rule only the `_02_mk1`
+  standard/hittable variants can fit these slots on this hull.
+
+### Issue #67 zero-barrel premise did not reproduce for the tested `_02` M turrets
+- X4: 9.00
+- Status: live-tested
+- Source: Behemoth E issue-67 spawn-time preflight, full-restart run on SHA
+  `d7e3870`; Colossus E run `issue-67-arc-barrel-two-phase-r9` at `b751b4f`,
+  game `debug.log`, 2026-08-24
+- Live test: yes — the same exact beam/plasma macros reported nonzero barrel
+  positions on Behemoth E and on an operational Colossus E in separate X4
+  processes; the Colossus turrets also fired and hit the clear A control
+- Finding: at spawn-time preflight the tested `_02` Argon M turrets reported
+  clearly nonzero `weapon.barrelposition` — beam ≈ `(-2.39787, 2.59794,
+  2.69955)`, plasma ≈ `(-2.44541, 2.47571, 3.40943)` — on both hulls. The r9
+  values then changed substantially as the Colossus turrets trained on A, B,
+  and C; for example, the settled A values were approximately
+  `(-2.68, 5.64, 6.06)` for the beams and `(-4.24, 5.76, 5.84)` for the
+  plasmas. Thus the exact zero/degenerate premise in #67 is a reproduced
+  negative for these macros, and `barrelposition` must not be assumed static.
+  No speculative production line-of-fire change follows from a zero-barrel
+  condition that was not observed.
+- Bound: the nonzero result is macro-specific. The changing Colossus values
+  were observed in one r9 session and are experimental as a claim about their
+  exact relationship to turret animation; reproduce that behavior before
+  generalizing it to other turrets or hulls.
+
+### A remote operational station can receive exact turret and shield equipment synchronously
+- X4: 9.00
+- Status: live-tested
+- Source: `libraries/common.xsd:24586-24614` (`apply_loadout`; `object` is
+  documented as either a ship or a station module); controlled Test Lab runs
+  `issue-67-arc-barrel-two-phase-r5`, r6, and r9, game `debug.log`, 2026-08-24;
+  fixture implementation
+  `testlab/x4_gunnery_control_testlab/md/x4_gunnery_control_testlab_scenario.xml`
+- Live test: yes — r6 and r9 reproduced the successful exact census in two
+  fresh X4 9.00 processes from the same disposable save;
+  the player began in Two Grand while Test Lab created the station in
+  Hatikvah's Choice I, then the player teleported to the remote fixture
+- Finding: local station creation is NOT required for the tested path.
+  `create_station sector=... state="componentstate.operational"
+  constructionplan="'xen_defence'"` created the five-module shell remotely.
+  Test Lab selected one operational
+  `xenon_small_station_01_base_macro` module and applied an exact loadout to
+  that MODULE, not the station root. In both r6 and r9 the immediate
+  same-action-list census was exactly 5 modules, 2
+  `turret_xen_m_laser_02_mk1_macro` standard lasers,
+  4 `shield_xen_m_standard_02_mk1_macro` shields, 0 missile turrets, and 0
+  engines. A cue delayed by 1 ms reported the same census while still remote;
+  the post-teleport in-system census also matched and returned `equipped=1`.
+  Thus neither local creation nor a later MD tick was needed for this exact
+  station-module loadout. The geometry test still failed independently because
+  all four shooter turrets reported the same arc classification for station
+  root and aim point (`splits=0`).
+
+  The r5 rejected control matters: the four shields appeared immediately, but
+  a group-targeted `turret_xen_m_gatling_01_mk1_macro` request produced no
+  turrets at any phase. Shipped source marks that gatling `integrated="1"` and
+  uses it through singular path-targeted `<turret>` entries; the successful
+  standard laser is non-integrated and is used through group-targeted
+  `<turrets>` entries. It is therefore a source-backed compatibility candidate,
+  not evidence that remote turret creation failed. Scope remains one
+  `xen_defence` module and these exact macros; arbitrary module/loadout
+  combinations remain untested.
+
+### Vanilla populates `md.$EquipmentTable` and applies generated station loadouts per module
+- X4: 9.00
+- Status: shipped-source
+- Source: `md/setup.xml:85-99` initializes `md.$EquipmentTable` and includes
+  `faction.xenon`; `md/finalisestations.xml:114-135` reads that pool, generates
+  per-sequence-entry loadouts, and applies each by sequence/index;
+  `libraries/constructionplans.xml` plan `id="xen_defence"`; historical Test Lab
+  revision `5444018` generated with `macro="$Station.macro"
+  module="$Module.macro"` and applied with `object="$Module"`
+- Live test: partial — the historical local 2026-08-13 run reported five
+  modules, 120 turrets, and 60 shields; r6 independently proves the exact
+  module-object application route remotely, but the full generated faction
+  loadout was not repeated remotely
+- Finding: the prior statement that `md.$EquipmentTable` was populated nowhere
+  was false; it confused this repository's assignments with the vanilla MD
+  global established during game setup. The `xen_defence` plan contains one
+  dock module and four `xenon_small_station_01_base_macro` defence modules.
+  Equipment slots live in each module component, and `apply_loadout object=`
+  must target a station module. For a full faction loadout, either use the
+  vanilla construction-sequence generation/application route or iterate the
+  operational modules, generate for each station/module macro pair, and apply
+  the result to that module. For a bounded deterministic fixture, construct an
+  exact compatible loadout and apply it to the selected module directly; no
+  `md.$EquipmentTable` lookup is needed for that exact route.
+
+### Official extensions register loadout entries with a full root, and MD can consume an extension-defined ID
+- X4: 9.00
+- Status: shipped-source
+- Source: installed official `ego_dlc_boron`, `ego_dlc_split`,
+  `ego_dlc_terran`, `ego_dlc_pirate`, `ego_dlc_timelines`, `ego_dlc_mini_01`,
+  and `ego_dlc_mini_02` `ext_03.cat!libraries/loadouts.xml`; in particular,
+  `ego_dlc_mini_01/ext_03.cat!libraries/loadouts.xml` and
+  `!md/story_hyperion.xml:1021,1034`
+- Live test: no — source inspection only, as of 2026-08-23
+- Finding: each of the seven installed official extensions that contains
+  `libraries/loadouts.xml` declares a complete `<loadouts>` root with direct
+  `<loadout id="...">` children; none uses a `<diff>` root in that file. The
+  Hyperion Pack defines `story_hyperion_reward_special` in its own library and
+  uses `<loadout ref="story_hyperion_reward_special"/>` inside its own MD
+  `create_ship` actions. This proves the extension-defined-ID route, including
+  the full-root registration shape, in current shipped content. The MD schema
+  also describes `get_loadout` as lookup by ID and accepts an optional macro
+  (`libraries/common.xsd:24489-24523`).
+- Load-order bound: an extension must be enabled and meet its base-version
+  dependency. `content.xml` comments in the installed official extensions say
+  dependencies are loaded first; use an explicit dependency when one extension
+  consumes content supplied by another. The official same-extension library/MD
+  pair has no self-dependency, so the inspected source does not establish any
+  additional intra-extension ordering declaration.
+
+### Issue #67 custom static named loadout resolves and applies its per-group turret census on the Test Lab route
+- X4: 9.00
+- Status: live-tested
+- Source: full-restart Issue #67 run on SHA d7e3870 (superseding an earlier
+  2026-08-23 run); installed
+  `extensions/x4_gunnery_control_testlab/libraries/loadouts.xml` matching the
+  repository file; Test Lab MD
+  `x4_gunnery_control_testlab_scenario.xml:376-432`
+- Live test: yes — a full-X4-restart run reached the `static_ref` branch and
+  created a Behemoth E (macro `ship_arg_l_destroyer_02_a_macro`) using
+  `<loadout ref="x4gc_testlab_issue67_behemoth_arc_barrel"/>`; the resulting
+  ship reported the exact expected census — weapons=4, turrets=4, beam=2,
+  plasma=2, loadout_failures=0. An EARLIER 2026-08-23 run had reported 0
+  weapons and 0 turrets with no identified log error; that zero result is
+  unexplained and is SUPERSEDED by this later full-restart run.
+- Finding: a static `<loadout ref>` to a full-root, extension-defined loadout
+  DOES resolve and apply its per-group turret census on this Test Lab route.
+  The earlier zero-turret run is treated as an unexplained EARLIER run, not a
+  route failure. Established for the Behemoth E macro; no other hull has been
+  live-mounted on this route.
+- Bound: proves the route resolves and applies for this loadout/macro pair;
+  does not establish the cause of the earlier zero run, nor generalize the
+  per-group census result to any other hull (e.g. Colossus compatibility
+  remains inference).
+
+### Issue #67 static-ref structure matches the shipped registration shape and the route is now shown to work
+- X4: 9.00
+- Status: inference
+- Bound: source comparison plus the live-tested result above; no source
+  inspected exposes the engine's loadout-registration diagnostic or the
+  per-entry apply decision, so the cause of the earlier zero run stays unknown
+- Source: Test Lab `libraries/loadouts.xml:5-31`; vanilla
+  `libraries/loadouts.xml:405-451`; official extension census in the preceding
+  record
+- Live test: no — this is an inference from the current source and the
+  live-tested run above, not a new reproduction
+- Finding: the Test Lab file uses the same full `<loadouts>` root and direct
+  ID form as official extensions, and its ID is referenced inside the
+  corresponding `create_ship`, as in shipped scenarios. Its macro,
+  engine/shield paths, and `groups` form also have shipped counterparts. The
+  live-tested run above shows the route resolves and applies the per-group
+  census, so the earlier zero result is not attributable to a structural
+  registration or application defect on the current evidence; its cause is not
+  source-proven and no root cause is claimed. The pre-spawn MD `get_loadout`
+  probe (custom ID plus a shipped control ID, logging whether each result is
+  present) remains staged to separate ID lookup/registration from a later
+  create/apply outcome should the earlier zero ever recur. Do not infer a
+  corrective XML change from the current evidence.
+
+### Singular-turret loadouts are unreliable on the Behemoth E (both transient and static-ref routes)
+- X4: 9.00
+- Status: live-tested
+- Source: Test Lab `debug.log` at game times 248864.65 and 249183.19 on
+  2026-08-23 (transient route); Issue #67 r14 arc-survey Create at game time
+  248874.28 on 2026-08-25 (static-ref route), `debug.log`
+  `[X4GC TEST] action=failed ... loadout_failures=1 ... plasma=0 shooter_turrets=0`;
+  `x4_gunnery_control_testlab_scenario.xml`,
+  `libraries/loadouts.xml`
+- Live test: yes — three creation attempts across two X4 processes; the
+  2026-08-23 pair used source-verified `con_turret_m_03`/`con_turret_m_04`, and
+  the 2026-08-25 run used a static named `<loadout ref>` with one singular
+  `<turret macro="turret_arg_m_plasma_02_mk1_macro" path="../con_turret_m_04"/>`
+- Finding: a singular per-slot `<turret ... path="..."/>` entry produces an
+  EMPTY Behemoth E on BOTH loadout routes. The transient route — an MD
+  `<create_loadout>` result through
+  `<create_ship><loadout loadout="$Issue67BehemothLoadout"/></create_ship>` —
+  produced zero operational engines, shields, weapons, and turrets (correcting
+  the paths did not help). The static named-loadout `ref` route — proven to
+  equip this hull cleanly when its turrets are mounted as GROUP-TARGETED
+  `<turrets group="..." exact="N"/>` entries (see the arc-barrel static-ref
+  result above, turrets=4) — ALSO failed (`loadout_failures=1`, empty shooter)
+  the moment a single turret was moved to a singular `<turret path>` entry under
+  `<macros>`; replacing it with
+  `<turrets macro="turret_arg_m_plasma_02_mk1_macro" group="group_front_up_mid" exact="2"/>`
+  under `<groups>` is the fix. So the defect is specific to singular `<turret>`
+  entries, not the loadout route: shipped `scenario_combat_arg_destroyer`
+  (`libraries/loadouts.xml:405-451`) mounts every turret via `<turrets group=>`
+  and mounts only engines, large shields, and main `<weapon>` guns via singular
+  `<... path>` under `<macros>`. Consequence: a group with two medium slots
+  (`group_front_up_mid` = `con_turret_m_03` + `con_turret_m_04`) can only be
+  armed with two identical turrets; isolate the one under test by per-turret hit
+  attribution, not by mounting a single slot. Bound: established for the
+  Behemoth E macro `ship_arg_l_destroyer_02_a_macro`; not generalized to other
+  hulls.
+
+### Per-turret line of sight and the shipped AI range heuristics
+- X4: 9.00
+- Status: shipped-source
+- Source: `schemas-9.00/libraries/common.xsd:21691` (the `check_line_of_sight` action element); capital-combat positioning loop `aiscripts/move.attack.object.capital.xml:629-706` (range tests `:656`, `:680`; LOS `:657`, `:681`); mining approach `aiscripts/mining.collect.ship.capital.xml:224-236`; property docs `libraries/scriptproperties.xml:62-84,1453`; base plus seven official DLC `md/` and `aiscripts/` census 2026-09-24
+- Live test: no — the script facts are source-only; the range geometry is resolved natively in [turret-fire-range-gate.md](turret-fire-range-gate.md)
+- Finding: `check_line_of_sight` is an MD/AI action that performs ray casts. Its `object` attribute accepts a turret component, so line of sight can be tested per individual turret against a target. Attributes include `object`, `objectoffset`, `target`, `targetoffset`, `useaimtarget`, `excludeself`, and `name`. Setting `useaimtarget="true"` uses the object's aim targets as the raycast destination.
+- Shipped scripts contain exactly two per-weapon range tests, and neither one fires a turret. `maxfirerange` appears only on `move.attack.object.capital.xml:647,656,679,680` and `mining.collect.ship.capital.xml:230`.
+  - **Capital-combat positioning.** The loop sits in the "STATE 2: in range, stay here" movement branch. For each operational weapon (turrets are removed unless `$frontweapon == 3`, `:648`) it tests `$locweapon.bboxdistanceto.{$target} le $locweapon.maxfirerange` and then `check_line_of_sight ... useaimtarget="true"`. It stops at the first success. The result only decides whether the ship holds position (`$holdposition`), counts a no-LOS attempt and repositions to another quadrant, or switches `$target` to a station module that some weapon can see. No firing command follows from it: turret firing is decided in native code.
+  - **Asteroid-mining approach.** `($turrets.{$i}.distanceto.{$target} + ($target.size/2)) lt $turrets.{$i}.maxfirerange` after `check_line_of_sight`, over the ship's mining-mode turrets. If no turret passes, the ship keeps moving (`:236`). This is the only `distanceto + size/2` range test in the shipped AI.
+  - Other shipped range checks are ship-level: `this.ship`/`this.station`/`this.assignedcontrolled.bboxdistanceto.{target}` compared with `maxcombatrange.*` in approach, station-defence and laser-tower scripts.
+- Property docs as shipped: `distanceto.{$component}` is "Distance to other component"; `bboxdistanceto.{$component}` is "Distance from this component's bounding box to other component's bounding box"; `size` is "Size (based on bounding box)"; `maxfirerange` is "Maximum firing range". The `bboxdistanceto` doc text does not describe the implementation; see the next record. Egosoft's own comment on it (`move.attack.object.capital.xml:409`) is "NB: accuracy of bboxdistanceto depends on which object is bigger".
+- Shipped scripts perform no gimbal or traverse-arc test. These loops are not a definition of X4's turret firing solution; they are movement heuristics that answer "does ANY weapon have script LOS and script range from here".
+
+- Scope of that claim, added 2026-08-10 so it is not over-read: this establishes what VANILLA SCRIPTS compute, from shipped source. It has never been run by this project and says nothing about detecting the LINE OF FIRE BLOCKED condition — a turret trained on a target with the ship's OWN hull in the line of fire. Whether `check_line_of_sight` can answer that is UNRESOLVED and untested: the ray from a turret to its target begins inside the firing ship's own hull, so `excludeself` plausibly decides the result in both directions (true and it cannot see own-hull masking at all; false and it may report every shot blocked), but the exact `excludeself` semantics have not been verified against the engine. Not pursued, because LINE OF FIRE BLOCKED was confirmed live on 2026-08-09 to be unrecoverable regardless — the engine's preferred-target fallback never rolls off a LINE OF FIRE BLOCKED target, so knowing the condition would not let a mod act on it. Do not cite this entry as evidence either that the technique works for LINE OF FIRE BLOCKED or that it cannot.
 - RESOLVED 2026-08-11, the `excludeself` half only: `excludeself="false"` is useless
   from a turret mounted on the firing ship. In a Test Lab capture that called both
   variants back to back on the same turret/target pair every sample,
@@ -73,6 +392,13 @@
   did not stage a LINE OF FIRE BLOCKED condition, and it never established what
   `excludeself="true"` blocked results actually correspond to. Do not read
   "1803 blocked" as "1803 masked".
+- Mechanism, added 2026-09-24 (native inference, X4 9.00 build 611726): both
+  capture calls passed no `objectoffset`, so they started at the turret
+  component origin, not the muzzle. `excludeself="true"` removes the turret's
+  own meshes **and** the meshes tagged with its ancestors, including the firing
+  ship's hull, at the per-sub-shape filter. It therefore cannot detect own-hull
+  masking. `false` keeps both. See
+  [selected-target-line-of-fire.md](selected-target-line-of-fire.md).
 - WHY it behaves that way, added 2026-08-11 from shipped source (not live-tested):
   the schema contradicts itself about this attribute. `common.xsd:21722` declares
   `<xs:attribute name="excludeself" ... default="false" use="optional">`, while
@@ -92,6 +418,92 @@
   The attribute name invites the opposite reading and this project acted on it;
   it selects a destination, never an origin or a bore direction.
 
+### What `bboxdistanceto` computes and where turret range is actually gated
+- X4: 9.00 build 611726
+- Status: inference
+- Source: native trace recorded in [turret-fire-range-gate.md](turret-fire-range-gate.md)
+- Live test: no
+- Finding: `A.bboxdistanceto.{B}` is **not** box-to-box. It is the exact distance from A's own oriented bounding box to B's origin, minus B's box radius (half its box diagonal) only when B is class `object` (ship, station, asteroid), clamped at zero. So `$turret.bboxdistanceto.{$ship_or_station}` measures to the target's centre and then subtracts its half-diagonal, while `$target.bboxdistanceto.{$turret}` measures from the target's own box to the turret's origin with no subtraction. The turret firing decision is native: the common pre-fire gate permits range when either the muzzle-to-aim-point distance or the turret-origin-to-target-box distance is below `maxfirerange`, extended by X4's AI shot-range allowance for some targets. The gate also has its own aim-alignment and obstruction stages. Do not cite the capital-combat loop above as the engine's range or firing rule.
+
+### Missile guidance is a shipped fire-control discriminator, but missile-turret launch LOS is engine-side
+- X4: 9.00
+- Status: shipped-source
+- Source: `props-9.00/libraries/scriptproperties.xml:1443,1455,1463,2150`
+  (`weapon.ammo.macro`, `weapon.isguided`, the `missileturret` datatype, and
+  `macro.isguided`) and
+  `aiscripts/fight.attack.object.bigtarget.xml:398-425,993-1117` (fixed-launcher
+  guidance branches). A full `check_line_of_sight` census over shipped
+  `aiscripts/` finds the action in exactly five scripts: lockbox collection,
+  mass-traffic police/watchdog, capital mining, and capital movement/attack;
+  none is the missile firing path.
+- Live test: no — this record is the shipped-source boundary; see the following
+  live record for guided missile turrets.
+- Finding: loaded ammunition exposes its missile macro and `isguided` flag.
+  Vanilla uses that flag as a real fire-control discriminator for fixed missile
+  launchers: an unguided launcher tightens ship aim tolerance to 4 degrees
+  against capitals or 8 degrees otherwise, while guided missile handling takes
+  separate branches. Turret weapons are explicitly skipped by that ship-aim
+  calculation, so shipped scripts do not reveal the engine's missile-turret
+  launch test. There is no shipped AI-script LOS gate that can be copied as a
+  missile-turret rule.
+- Design consequence (inference, now partly corroborated by the live record
+  below): do not apply the conventional direct muzzle-to-target ray uniformly
+  to missile turrets. Guidance is the available discriminator. Missing ammo or
+  modded ammo without affirmative `isguided` data must not be promoted to the
+  guided branch.
+
+### Guided missiles launch through an own-hull-masked direct ray and reach the designated surface
+- X4: 9.00
+- Status: live-tested
+- Source: controlled Test Lab run 2026-08-23, scenario
+  `issue-65-remote-odysseus-e-r1`, game `debug.log`; detailed run record in
+  `testing-experiments.md`.
+- Live test: yes — one X4 9.00 session, one player-owned Odysseus E, one Xenon K
+  turret surface selected under `autoassist`.
+- Finding: the initial simultaneous diagnostic against selected surface
+  `0x18c351` returned `los=0` for all 16 missile turrets; 15 returned
+  `los_noself=1`. Eight guided turrets whose direct rays were self-masked then
+  emitted 16 attributed missile launches. Missile impact events landed on the
+  designated surface (four `hitcomp=0x18c351`, including three while the
+  designation was still active) and on adjacent components through splash.
+  This establishes that a guided missile turret can have a valid launch and
+  engagement path even when `check_line_of_sight excludeself="false"` rejects
+  the direct muzzle ray. For an ENGAGEABLE predicate, a guided missile turret
+  should retain bearing and range gates but must not require that direct ray.
+- Boundary: R1 did NOT answer the unguided case. All seven dumbfire turrets were
+  outside their elevation limits against the chosen surface. That question was
+  subsequently resolved by the R2/R6 record below.
+
+### Unguided missile LIVE test proves launches under Gunnery-masked rays, not an engine own-hull exemption
+- X4: 9.00
+- Status: live-tested
+- Source: controlled Test Lab runs 2026-08-23, scenarios
+  `issue-65-remote-odysseus-e-r2` and `r6`, game `debug.log`; detailed run and
+  rejected-control history in `testing-experiments.md`.
+- Live test: yes — one exact player-owned Odysseus E loadout, clear Xenon K
+  hull control and fully Asgard-masked Xenon P control.
+- Finding: in the clear lane, three dumbfire components whose Gunnery Control
+  muzzle-to-target rays were blocked only by the Odysseus's own hull launched
+  92 missiles; all 92 exact missiles still existed after 500 ms while retaining
+  the intended K target. R2 did not record X4's own pre-fire ray endpoints, so
+  this does not prove that X4's pre-fire obstruction check ignored the firing
+  ship's hull.
+- In the final blocked lane, the P was wholly hidden by a solid Asgard, all
+  seven dumbfire turrets were within range, and every Gunnery Control muzzle ray
+  returned `muzzle_los_ex=0`. ENGAGEABLE fell to 8/16 because Gunnery
+  Control's predicate rejected all seven dumbfire turrets. R6 did not observe
+  X4 withholding an unguided launch, so it does not prove that an external
+  blocker suppresses launch.
+- Later native analysis in
+  `weapon-path-obstruction-groups.md` found no unguided-specific own-hull
+  exemption: conventional and unguided fire use the same pre-fire obstruction
+  query and filters, and the firing ship's hull is a candidate blocker for both.
+  Do not cite R2 as proof that X4 ignores its own hull, or R6 as proof that X4
+  rejects an unguided launch behind an external blocker.
+- Boundary: this record proves the observed launches and Gunnery Control ray
+  results only. It does not establish the missile's post-launch collision rule
+  with its firing ship.
+
 ### Modular targets, attackable defence modules, and the per-module LOS fallback
 - X4: 9.00
 - Status: shipped-source
@@ -101,12 +513,27 @@
   - `.defensible` is a base `component` property returning the component's containing defensible context. For a surface element (a turret/shield/engine component) it resolves to the PARENT ship or station, not the element itself. On a whole-object root, `$target == $target.defensible` holds (vanilla treats the two interchangeably, e.g. `move.attack.object.capital.xml:718` passes `$target.defensible` where `$target` is the attack target). This equality is the reliable root-vs-sub-element discriminator.
   - Two DISTINCT engine notions of "has separately-targetable parts": `ismodular` is true for STATIONS built from modules (production/storage/dock/**defence**/build). `canhaveattackablemodules` is a **ship-only** property (`ship` datatype) — "true iff the ship is defined to contain a defence module which indicates it may have targetable modules". A `defencemodule` is its own component class (`type="module"`); the disc/tube/claim defence-platform structures, the Khaak hive cluster, and asteroid turret bases are `defencemodule`-class. `.defencemodules` lists them.
   - Vanilla's per-module LOS retarget fallback (`move.attack.object.capital.xml:664`) is gated ONLY on `$target.defensible.ismodular and modules.operational.count gt 1`; when the root ray is blocked it iterates modules and RETARGETS the weapon to the first visible one (`$target = $locmodule`, `:684`). It does NOT reference `canhaveattackablemodules`. The `canhaveattackablemodules` gate lives in higher-level TARGET SELECTION (`lib.target.selection.xml:306-347`), which acquires a module as the target via `find_module`/`find_object_component` with `match module="ismodular or canhaveattackablemodules"` — a different mechanism than the move-script's retarget.
+  - That fallback is explicit AI-script retargeting, not proof that the
+    engine-side shoot controller automatically converts a station-root
+    `set_turret_targets` designation into a module designation. An ENGAGEABLE
+    implementation may mirror the geometry as a design choice, but must not
+    describe that approximation as observed engine behavior. Test
+    root-to-module behavior by logging the exact designated component and the
+    firing/hit component separately.
   - CONSEQUENCE for an ENGAGEABLE-style per-module fallback (#62): mirroring the vanilla `ismodular` fallback but running it against a player-selected SURFACE ELEMENT over-counts, because that element's `.defensible` is the whole modular station, so any weapon that can see ANY station module gets counted as engageable against the one element. Fix: gate the fallback on `$target == $target.defensible` (whole root only). Extending the gate with `or @$target.canhaveattackablemodules` (always `@`-guarded — the property errors on a non-ship, so a station root must read it via `@`) admits the rare capital ships that embed a defence module, matching vanilla target selection; it is inert where a ship's defence modules are not exposed through `.modules.operational.list`.
   - Subsystem taxonomy (Allectus mod, community `third-party-technique`, corroborates the engine grouping): SHIP subsystems are engines, missile launchers, S/M turrets, L/XL turrets, shield generators, and main (fixed) batteries; STATION subsystems are dock/storage/production/defence/shipyard modules. The mod also notes capital attackers only accept subsystems within line of sight at order start — the same LOS constraint this project models in ENGAGEABLE.
 
+### Reading `maxspeed` on a wrecked ship fails the lookup in MD
+- X4: 9.00
+- Status: live-tested
+- Source: owner's X4 debug log, 2026-09-29 (game time 249077.26): `Error in MD cue md.X4GunneryControl.InRangeCommit: Property lookup failed: $speedship.maxspeed` with `$speedship` a `class=ship_s, state=wreck` drone. Live log observation only, not engine source.
+- Live test: yes, one log observation (#208); the `@` guard is not yet live-confirmed to silence it.
+- Finding:
+  - Reading `maxspeed` on a ship in `state=wreck` raises "Property lookup failed" in MD. The `do_if` evaluates false and the action block continues (the same cue completed its Lua pass normally). Guard such reads with `@`, e.g. `@$speedship.maxspeed gt 0`, as with `@$target.canhaveattackablemodules` above.
+
 ## Per-turret attribution from MD events
 
-### `event_object_attacked_object` param3 carries the firing WEAPON — this is the per-turret attribution route
+### `event_object_attacked_object` documents a firing WEAPON, but the runtime value is kill-method-dependent
 - X4: 9.00
 - Status: shipped-source
 - Source: `schemas-9.00/libraries/common.xsd:13055` (the event element; its
@@ -115,24 +542,41 @@
   Shipped proof the second element really is the weapon: `md/notifications.xml:1515`
   passes `event.param3.{2}` straight into `change_relation_on_attack weapon=`,
   whose `weapon` attribute is declared at `common.xsd:21620` (element at `:21611`)
-- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Live test: yes — ordinary turret hits have produced a turret component in
+  controlled captures; missile-hit behaviour is split into the correction below.
 - Finding: the event's `param3` is a two-element list, `[attacked component,
-  weapon]`. `event.param3.{2}` is therefore the weapon component that landed the
-  hit — on a turreted ship, the individual turret. Vanilla's own use is the
-  corroboration: `notifications.xml` does not inspect or reinterpret the value, it
-  forwards it as the `weapon` argument of a relation-change action that is typed
-  to take a weapon. This is a HIT signal, delivered to a listener, rather than a
-  property that can be polled.
+  weapon]`. Vanilla's own use corroborates the documented role:
+  `notifications.xml` does not inspect or reinterpret `event.param3.{2}`, but
+  forwards it as the `weapon` argument of a relation-change action. This is a
+  HIT signal, delivered to a listener, rather than a property that can be
+  polled. The schema does NOT guarantee that the runtime component is always an
+  individual turret; the missile correction below is a demonstrated exception.
 - **This supersedes the `lastattacker` dead end.** `lastattacker` is ship-scoped
   by design and cannot attribute a hit to a turret (live capture 2026-08-11, see
   the attacker-attribution record in `ui-lua-menu-camera.md`). Per-turret
-  attribution is available — just from an event payload, not from a property read.
-  Anyone landing on the negative result should come here.
+  attribution can be available from event payloads rather than a property read,
+  but the exact event must be validated for the kill method. Anyone landing on
+  the negative result should come here and the missile exception below.
 - Related but distinct, do not conflate: `md/x4ep1_mentor_subscription.xml:7138`
   tests `event.param3.isclass.bullet and event.param3.launcher`, but that is a
   condition on `event_player_ship_hit`, a different event whose `param3` is the
   BULLET itself rather than a two-element list. It is evidence for the
   `bullet.launcher` route below, not for this event's payload shape.
+
+### `hitbymissile` reports the launcher ship, not the individual missile turret
+- X4: 9.00
+- Status: live-tested
+- Source: controlled Test Lab run 2026-08-23, scenario
+  `issue-65-remote-odysseus-e-r1`, game `debug.log`.
+- Live test: yes — 16 launches from eight guided missile turrets and their
+  subsequent impacts in one X4 9.00 session.
+- Finding: for every observed `event_object_attacked_object` record with
+  `method=hitbymissile`, `event.param3.{2}` resolved to Odysseus launcher ship
+  `0x18c2de`, with `isturret=0`, rather than any of the missile-turret components
+  named by the corresponding FIRED events. Therefore missile impacts cannot be
+  attributed per turret through this payload. Use `event_weapon_fired` for the
+  exact missile turret that launched; correlate later impact only at ship or
+  missile-object level unless another live-verified identifier is available.
 
 ### `event_weapon_fired` fires per trigger pull and accepts a single weapon or a group
 - X4: 9.00
@@ -144,7 +588,8 @@
   `group`. Vanilla call sites, all group form:
   `aiscripts/move.attack.object.capital.xml:905`, `md/cinematiccamera.xml:3212`,
   `md/scenario_combat.xml:113` and `:300`
-- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Live test: yes for missile turrets — the 2026-08-23 run emitted 16 FIRED
+  events naming eight exact guided missile-turret components.
 - Finding: a mod can listen for the moment any specific weapon fires, scoped to
   one weapon or to a group it assembles. Turrets ARE weapons for this purpose and
   they DO appear in `<ship>.weapons.operational.list` — the proof is negative and
@@ -155,11 +600,22 @@
   `find_object_component class="class.weapon"` with a `<match class="class.turret"
   negate="true"/>` child. Both vanilla users of this event deliberately strip
   turrets out; a mod that wants turrets simply does not strip them.
-- Consequence worth recording: `event_object_attacked_object` fires on a HIT and
-  `event_weapon_fired` on every TRIGGER PULL. Listening to both and diffing per
-  weapon yields a per-turret hit rate — rounds sent versus rounds connecting —
-  which is a measurement neither signal gives alone. Untested; this is the design
-  consequence of the two schema records above, not an observed result.
+- Bounded consequence: for ordinary turret projectiles where the hit payload
+  has been verified to name the turret, listening to both events can yield a
+  per-turret hit rate. Do NOT apply that design to missiles: the launch event is
+  per turret, but `hitbymissile` reports the launcher ship (correction above).
+- Missile correlation boundary (shipped-source): the FIRED payload gives a
+  direct exact pair, `event.object` = missile turret and `event.param` = fired
+  missile. That missile exposes `.target`
+  (`props-9.00/libraries/scriptproperties.xml:894-897`), and
+  `event_object_incoming_missile` also exposes the same missile in `param2` plus
+  its target component in `param` (`common.xsd:14431-14444`). This directly
+  links turret -> missile -> intended target at launch. It still does NOT link
+  to an arbitrary-target impact: `event_object_attacked_object` omits the
+  missile object for `hitbymissile`. `event_player_ship_hit` does include the
+  projectile in `param3` (`common.xsd:15427-15440`), but only when the victim is
+  the player-controlled ship or ship context. No general-target equivalent has
+  been verified.
 - Note on list choice: `weapons.operational.list` (used here) and
   `turrets.operational.list` are different enumerations, and neither includes
   missile turrets (see the `missileturrets` record below). Pick deliberately.
@@ -227,18 +683,24 @@
   That is the structural reason the passive polling capture of 2026-08-11 failed
   (see `testing-experiments.md`).
 
-### `weapon.barrelposition` is a static muzzle offset, not an aim direction
+### `weapon.barrelposition` is a muzzle position, not an aim direction
 - X4: 9.00
 - Status: shipped-source
 - Source: `props-9.00/libraries/scriptproperties.xml:1452` ("The position of the
   weapon's barrel (may be 0,0,0 for weapons with no collision)", type `position`);
   vanilla's only meaningful use at `md/cinematiccamera.xml:3224`, which reads
   `$Anchor.barrelposition` and immediately takes `.z` to frame a camera shot
-- Live test: no — read from shipped source, untested by this project as of 2026-08-11
+- Live test: experimental — Issue #67 Colossus E r9 on 2026-08-24 logged
+  materially different values for the same four turrets after they trained on
+  different targets; this dynamic behavior has not yet been reproduced
 - Finding: the property is real, but it is a POSITION, not a direction, and the
-  one shipped consumer uses it as a static muzzle offset for camera framing on
-  fixed nose guns. Nothing indicates it tracks turret swivel, and it is
-  explicitly allowed to be `0,0,0`. Do not build aim-direction logic on it.
+  one shipped consumer uses its `.z` value for camera framing on fixed nose
+  guns. It is explicitly allowed to be `0,0,0`. The earlier inference that it
+  was static was wrong: r9 observed the values change as turrets trained. That
+  still does not make the property an aim direction or document its coordinate
+  frame. Do not build aim-direction logic on it, and do not classify a turret
+  as zero-barrel from an OOS or untrained sample without an in-system settled
+  measurement.
 
 ### No aiscript reads a turret's rotation
 - X4: 9.00
@@ -261,7 +723,7 @@
 - Status: inference
 - Source: `props-9.00/libraries/scriptproperties.xml` weapon/turret datatypes (~lines 1441–1461); ship component XML under `ships-comp-base-9.00`; turret macro XML under `cutscenes-9.00/assets/props/WeaponSystems/`; `schemas-9.00/libraries/common.xsd`
 - Live test: no — untested as of 2026-08-09
-- Finding: no arc, cone, or gimbal-limit property was found on the weapon or turret datatype. Turret macros expose `rotationspeed` and `rotationacceleration` only, not angular limits. This is a negative result bounded by the sources searched above. It does not matter in practice: finding 1 (check_line_of_sight) supersedes the need for arc data — the engine's own combat AI never tests an arc and uses LOS + range as its complete solution check.
+- Finding: no arc, cone, or gimbal-limit property was found on the weapon or turret datatype. Turret macros expose `rotationspeed` and `rotationacceleration` only, not angular limits. This is a negative result bounded by the sources searched above. Shipped AI scripts never test an arc; their LOS + range loops are movement heuristics (record above). Native firing is separate: the pre-fire gate has its own aim-alignment stage, and the joint solver clamps silently (see [turret-aim-feasibility-surface.md](turret-aim-feasibility-surface.md)). No script-visible arc exists.
 
 ### `$turret.rotation` is the mounted base orientation, not the live barrel
 - X4: 9.00
@@ -349,6 +811,40 @@
   no solution neither picks another target nor reverts to its own behaviour. It
   is the assignment that is exclusive, not merely the firing. This is the
   idle-turret cost of Direct-control.
+
+### Conventional autoassist turrets hold fire on a manually selected own-hull-masked ship surface
+- X4: 9.00 (611726)
+- Status: live-tested
+- Source: controlled Test Lab run 2026-08-24, scenario
+  `issue-67-direct-surface-mask-r11`, production build marker
+  `2026-08-24-testlab-manual-designation-1`, game `debug.log`; detailed run
+  record in `testing-experiments.md`
+- Live test: yes — one player-owned Colossus E, one stationary repaired/held-fire
+  Xenon K, two exact `turret_arg_m_plasma_02_mk1_macro` members, and one exact
+  manually selected `turret_xen_l_laser_01_mk1_macro` surface
+- Finding: the owner used the normal Direct-control flow to select the marked
+  Xenon K root and then the exact surface `0x1796eb`; Gunnery accepted that
+  component and only then armed observation. At both the initial and 20.874 s
+  settled snapshots, plasma turrets `0x179672` and `0x179673` were
+  `isreadytofire=1`, in range, and inside their generated -10/+90 degree arcs.
+  Each exact muzzle ray was clear with the firing ship excluded
+  (`muzzle_los_ex=1`) and blocked with it included (`muzzle_los_self=0`). The
+  observer recorded zero FIRED and zero HIT events throughout the interval.
+  Gunnery's independently recomputed pinned-surface result remained 0/2
+  ENGAGEABLE for the same selected component. For this controlled conventional
+  weapon case, X4's autoassist shoot controller therefore held fire on the
+  own-hull-masked surface, and the production self-inclusive line-of-fire gate
+  agreed with the observed firing result.
+- Consequence for #67: do not remove or self-exclude the conventional
+  projectile line-of-fire gate based on the earlier zero-barrel hypothesis.
+  The exact `_02` beam/plasma barrels were non-degenerate, and the existing
+  predicate correctly rejected this clean masking case.
+- Boundaries: one generated Colossus/K instance and two plasma turrets. This
+  does not establish every hull's collision behavior, station-root-to-module
+  retargeting, or the separate origin-versus-hittable-aim arc question. The
+  two earlier automated surface-designation failures are fixture failures, not
+  evidence that surface elements are invalid targets: the normal manual
+  root-then-surface path succeeded immediately.
 
 ### RETRACTED 2026-08-10: "A preferred target without a target list frees turrets from their mode"
 - X4: 9.00
@@ -457,6 +953,13 @@
   `hitcomp=` plus `istgt=1`), not a line-of-sight or firing-solution
   measurement. That is why this stands as a live-tested targeting result even
   though no firing-solution field was consulted.
+- Corroboration added 2026-08-23: on an Odysseus E, 16 guided missile launches
+  carried `aimed=0x18c351` for the directly selected Xenon K turret surface, and
+  missile-hit events registered that same component four times (three while the
+  designation remained active). Adjacent-component events at the same impact
+  times are splash and do not negate the direct surface hits. The missile HIT
+  payload named the launcher ship rather than the individual turret, so this is
+  surface-designation evidence, not per-turret impact attribution.
 - **This supersedes the earlier inference that station surface elements are
   inherently unusable as fire targets.** That inference grew out of a
   2026-08-17 research-branch run on a station under `attackenemies` (n=1): the
@@ -827,6 +1330,27 @@
   paths retain this gate when considering `player.target`; selecting a neutral,
   friendly, or player-owned object does not make normal turret AI fire on it.
 
+### `create_ship` macro and faction are independent parameters (mismatch has no shipped precedent)
+- X4: 9.00
+- Status: inference
+- Source: `libraries/common.xsd` (`create_ship`); scoped scan of extracted
+  vanilla 9.00 MD (306 `create_ship` instances: every literal macro/faction
+  pair matched, the remainder used variables — no literal mismatch); Test Lab
+  `md/x4_gunnery_control_testlab_scenario.xml` (the `surface_mask` target
+  branch passes `macro.{$Def.$macro}` and `<owner exact="$Owner"/>`
+  independently, with no `<pilot>` element); `ui/testlab.lua` (`validateSpec`
+  requires only non-empty macro/faction strings)
+- Live test: no — a mismatched spawn has not been reproduced
+- Finding: the hull macro and the owner/faction are supplied independently,
+  so e.g. an Argon hull under xenon ownership is structurally supported, with
+  attackability expected through the owner's kill relation (see the `mayattack`
+  record above). But no shipped 9.00 MD exhibits a literal macro/faction
+  mismatch, so treat such a spawn as unproven until a live reproduction. The
+  fail-closed detection path is the live hostiles census: MD increments the
+  hostile count only when `mayattack` is true, and the readiness check refuses
+  READY on a mismatch. Pair with the Osaka record in the spawn skill: a
+  relation boost alone did not legalize a friendly-owned target.
+
 ### Preferred turret targets do not legalize an attack
 - X4: 9.00
 - Status: shipped-source
@@ -923,3 +1447,96 @@ whole-object, engine, shield, turret, and station-module surface tests.
   issue #36 sessions (2026-08-13..16, X4 9.00, mixed-mode fixture). With no API found
   to clear a turret's supplied target list, the ship-wide override was removed
   entirely (issue #38) rather than shipped with an unreachable release.
+
+### Ship component connection-offset quaternions are stored inverted (child-to-parent)
+- X4: 9.00
+- Status: live-tested
+- Source: r16 Test Lab `debug.log` `WEAPONPOSE` instrumentation, request
+  55003123_q2 at game time 248895.15 on 2026-08-26;
+  `assets/units/size_l/ship_par_l_destroyer_01.xml` con_turret_laser_l_01
+  quaternion `(-0.1274921,0,0,-0.9918396)` vs measured weapon
+  `rotation.pitch=-0.25568` rad; 70-surface pitch cross-check
+- Live test: yes — one instrumented run; the conjugate of the raw XML
+  connection quaternion predicted all 70 measured surface pitches with zero
+  error (rmse 0.000 deg), while the as-given form erred up to 27 deg
+- Finding: to get an equipment component's live orientation frame from a ship
+  component XML connection offset, use the CONJUGATE of the stored quaternion
+  (the stored value maps child frame to parent). Position offsets are direct.
+  The earlier Colossus E r13 calibration could not detect this because that
+  mount's quaternion was a pure boresight roll, invisible to pitch
+  measurements. Bound: verified for one turret mount on one hull; the
+  conjugation rule itself is consistent with all shipped loadouts observed.
+
+### X4 fires when a component's origin is outside a turret's authored pitch stop but its hittable aim point is inside
+- X4: 9.00
+- Status: live-tested
+- Source: r32 Test Lab `debug.log` on 2026-08-26, game time 248913-249157;
+  qualify `request_id=84394242_q2` (`group_front_up_mid2`, shooter ship
+  `1544423`, weapon `0x1790f5` `turret_par_l_plasma_01_mk1_macro`, authored
+  band {-5,+80} => +80 deg = 1.39626 rad); closes the open question left at
+  the own-hull masking record above
+- Live test: yes — one instrumented run, one arc-split case plus one
+  in-arc positive control, both manually designated through Direct control
+- Finding: the fixture qualified two exact `turret_arg_l_beam_01_mk1_macro`
+  surfaces on two Argon L destroyers. Arc-split case `SKY SURVEY A 000`
+  (`0x179112`) surface `0x17911d`: `origin_pitch=1.41806` (outside +80 deg),
+  `aim_pitch=1.37386` (inside), `arc_split=1 origin_outside=1 aim_inside=1
+  inrange=1 mayattack=1`. Positive control `SKY SURVEY A 100` (`0x179135`)
+  surface `0x179140`: `origin_pitch=1.22173 aim_pitch=1.21314 arc_split=0`.
+  With the predicate evaluating the `useaimtarget` bearing, both surfaces
+  rendered `1 / 1  ENGAGEABLE` (`0x179140` at 249125.95, `0x17911d` at
+  249148.82; pinned refresh of `1544477` still `engageable=1` at 249155.83).
+  The owner then destroyed both exact components: `0x179140` FIRED 249138.45
+  / HIT 249140.77 `hitcomp=0x179140 istgt=1`, `0x17911d` FIRED 249155.79 /
+  HIT 249156.10 `hitcomp=0x17911d istgt=1`, each row leaving the browser
+  immediately after (`all=4` -> `all=3`). X4 therefore does engage across an
+  authored pitch limit when the hittable aim point is inside it, so an
+  origin-based arc check refuses shots the engine will take.
+- Consequence: evaluate arc membership on the weapon-local `useaimtarget`
+  look_at bearing, not on `$target.relativeposition.{$weapon}.rotation.pitch`.
+- Note on granularity: ship-root and surface engageability legitimately
+  disagree under this geometry. At 249156.48 root `1544466` read `0 / 1`
+  while its own surface `1544477` read `1 / 1  ENGAGEABLE` — exactly the
+  `origin_outside=1 / aim_inside=1` split. Do not read a root row as a
+  verdict on its surfaces.
+- Boundaries: one shooter macro, one authored band, one target hull, pitch
+  axis only. Yaw stops and modded macros are untested. An unresolved
+  anomaly on a NON-designated component from the same run is tracked
+  separately: engine `0x179141` read `0 / 1` at 249125.03 (pinned,
+  `hull_percent=18`) yet was hit at 249125.11 and 249129.11 with
+  `aimed=0x179141 istgt=1` under `mode=autoassist`.
+
+### Turret animation state families have a shipped transition graph
+- X4: 9.00, installed official catalogs checked 2026-09-13
+- Status: shipped-source
+- Source: `libraries/animation_sequences.xml`, states `turret_inactive`
+  through `turret_deactivating`, and `turretloop_inactive` through
+  `turretloop_deactivating`
+- Live test: no — source lookup only
+- Finding: both families explicitly transition from activating to active.
+  The ordinary active state transitions to `gun_firing` on fire and returns
+  afterward; the loop family uses `turretloop_firing` and also declares an
+  active self-transition. Both families declare deactivation transitions.
+- Research route: inspect this library together with component animation
+  selectors and ANI descriptor identities before treating an unfamiliar
+  state-family name as a runtime-discovery requirement.
+- Boundary: the transition graph does not establish ANI channel composition,
+  interpolation, selector inheritance, instantaneous phase, or barrel endpoint
+  selection. Those require separate evidence.
+
+### MD length `raise_lua_event` params truncate to whole metres; string params keep ~6 digits
+- X4: 9.00 build 611726
+- Status: live-tested
+- Source: Test Lab `holo_anchor_geometry` cue raising `$Turret.relativeposition.{$Ship}`
+  `.x/.y/.z` and `$Ship.size / 2` as separate `raise_lua_event` params; debug.log
+  compared with native engine values captured in the same frames
+- Live test: yes — 2026-09-29, 12 records, 8 distinct turret positions and two
+  ship radii on an XL and an M ship
+- Finding: every value arrived as a Lua number truncated toward zero:
+  -295.700 → -295, 118.886 → 118, 1315.25 → 1315, 86.92 → 86, -35.08 → -35.
+  The same lengths concatenated into a string param (`'x4gtm1:' + $Pos.x`,
+  `'x4ghs1:' + $Ship.size`) arrived as -295.7, 118.886, 808.636 and 2630.5:
+  about six significant digits, so the MD expression itself is precise and the
+  loss is in the numeric param conversion. On the M ship at zoom 0.65 the
+  truncated values moved projected markers 0.024 NDC (~5 px); the string values
+  stayed within 3e-6 NDC. Send sub-metre geometry as a string.

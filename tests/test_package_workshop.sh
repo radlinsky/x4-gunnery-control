@@ -12,6 +12,7 @@ cd "$(dirname "$0")/.."
 #    and all OTHER attributes + <dependency> elements are byte-identical to the
 #    repo's content.xml.
 # 3. The repo's own content.xml is untouched after running the script.
+# 4. A present but unavailable wslpath does not abort staging.
 ###############################################################################
 
 SCRIPT="scripts/package-workshop.sh"
@@ -145,6 +146,15 @@ fi
 current_content=$(cat "$REPO_CONTENT_XML")
 if [[ "$current_content" != "$ORIGINAL_CONTENT_XML" ]]; then
   echo "FAIL: scripts/package-workshop.sh modified the repo's content.xml" >&2
+  exit 1
+fi
+
+###############################################################################
+# Test 4: an unusable wslpath falls back to Linux paths
+###############################################################################
+
+if ! grep -Fq "if windows_stage=\$(wslpath -w \"\$staged_abs\" 2>/dev/null); then" "$SCRIPT"; then
+  echo "FAIL: package-workshop.sh does not guard a failing wslpath conversion" >&2
   exit 1
 fi
 

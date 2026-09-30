@@ -1,0 +1,30 @@
+{
+  "issue": 78,
+  "round": "R5",
+  "tested_sha": "5225a36ecf7417b3088b9cd9e806ff7bb8efe07a",
+  "r1_baseline_metadata": "tests/fixtures/census_r1_baseline_metadata.json",
+  "normalization_version": "1",
+  "official_source_sets": [
+    "base",
+    "ego_dlc_split",
+    "ego_dlc_terran",
+    "ego_dlc_pirate",
+    "ego_dlc_boron",
+    "ego_dlc_timelines",
+    "ego_dlc_mini_01",
+    "ego_dlc_mini_02"
+  ],
+  "normalized_full_report_sha256": "20342692805d98b7cabddb30e088ce930b0d9811138a6afedd21c325833d6646",
+  "deterministic_run_count": 2,
+  "normalized_reports_byte_identical": true,
+  "matches_r1_baseline": true,
+  "accepted_counts": {
+    "equipment_macros": 147,
+    "combat_candidate_macros": 92,
+    "noncombat_utility_macros": 19,
+    "unresolved_no_ware_macros": 4,
+    "missileturret_excluded_macros": 32
+  },
+  "turret_active_changing_case_baseline_flag_enforced": true,
+  "full_reports_committed": false
+}

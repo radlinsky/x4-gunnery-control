@@ -6,4 +6,7 @@
        A hard dependency disables us for whichever half of users installed the other one.
        kuertee's own recommendation. Load order is still honoured when the id does match. -->
   <dependency id="kuerteeUIExtensionsAndHUD" version="900" optional="true" name="kuertee UI Extensions and HUD"/>
+  <!-- SirNukes Mod Support APIs is a separate optional extension that provides onboard Map
+       ingress. If absent, only that action is unavailable; chair ingress still works. -->
+  <dependency id="ws_2042901274" optional="true" name="SirNukes Mod Support APIs"/>
 </content>

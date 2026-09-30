@@ -1,285 +1,92 @@
 ---
 name: spawn-gunnery-scenario
-description: Build, install, and operate deterministic X4 Gunnery Control live-test fixtures through Test Lab. Use whenever a test needs named spawned ships, exact placement, exact turret-group selection, or an operator checklist with human-error controls.
+description: Prepare, install, and hand off deterministic X4 Gunnery Control live-test fixtures through Test Lab. Use when a test needs controlled spawned objects, exact placement/loadout identity, or a safe repeatable operator procedure.
 ---
 
-# Spawn a controlled gunnery scenario
+# Prepare a controlled gunnery scenario
 
-Turn a live-test requirement into one safe operator action. The owner drives X4;
-the agent owns every automatable prerequisite, fixture detail, installation
-check, and evidence check.
+Use Test Lab to turn a live-test requirement into the smallest deterministic
+fixture and owner procedure. The owner operates X4; the agent owns setup,
+validation, installation, and log review.
 
-## Non-negotiable outcome
+Prefer changing only
+`testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua`. Extend reusable Test
+Lab behavior only when the experiment cannot be expressed there; do not add
+helpers, APIs, logging, or tests for one scenario's convenience.
 
-The normal owner workflow is:
+Read only when relevant:
 
-1. Sit at the named ship's gunnery console.
-2. Open **Gunnery Control → Test Lab**.
-3. Confirm the displayed scenario id.
-4. Click **Create test scenario** once.
+- [references/equipment.md](references/equipment.md) before a custom or unusual
+  ship/turret loadout.
+- [references/remote-fixtures.md](references/remote-fixtures.md) when
+  `setup.remote = true` or the player must teleport into a spawned shooter.
 
-That button must:
+## 1. Define the proof
 
-- refuse a visible ship-name or macro mismatch, missing raw group, or wrong
-  operational-turret count;
-- leave the prior fixture and checkbox state untouched after a failed preflight;
-- clear the previous Test Lab fixture;
-- create and name every requested ship;
-- verify the acknowledged ship count;
-- keep checkbox/staged state unchanged until a matching acknowledgement, then
-  revalidate the ship/loadout, clear all groups, and tick only the specified one;
-- return to Gunnery Control only after successful acknowledgement.
+Control only the identities, counts, placement, behavior, safety state, and
+PASS/FAIL evidence the experiment needs. Give each meaningful control or treatment
+one named role and use deterministic placement.
 
-Do not ask the owner to position ships, identify unnamed ships, manually clear
-old fixtures, manually tick a group that the spec can identify, or infer whether
-spawning succeeded. Do not use **Reload UI**, **Re-run current spec**, or
-**Despawn test scenario** as a routine operator step.
+Before authoring a custom turret loadout, run
+[`scripts/turret_ship_compatibility.py`](../../../scripts/turret_ship_compatibility.py)
+for each exact turret macro and exact ship macro. Require `compatible` and enough
+compatible mounts for the requested count; otherwise stop before fixture edits or
+X4 launch.
 
-If the branch under test lacks the one-click setup API, stop and add/backport
-the Test Lab prerequisite. Do not compensate with a longer manual checklist.
+Never infer turret-to-ship compatibility from size, race, display name, similar
+variants, valid-looking group ids, or an official loadout using another turret
+macro. Do not create a local compatibility inventory.
 
-## Agent workflow
+For hostile fixtures, READY must depend on the relevant live safety/attackability
+census. Do not infer geometry or targeting state from an uncorrelated no-fire
+interval.
 
-### 1. Isolate the PR under test
+## 2. Author the smallest fixture
 
-- Work from that PR's exact branch/worktree, including only its merged bases.
-- Create fixtures only for the current PR. Later PRs may change while defects
-  are repaired.
-- Keep the live fixture uncommitted. The repository fixture must finish with
-  `enabled = false`.
+Treat `scenario_spec.lua` field comments as the fixture-schema authority. Use
+exact setup identity, fixed placement, and only the roles, behavior, and readiness
+fields required by the proof. Give the scenario a new id when its meaning changes.
+The Create path must fail closed on setup identity or census mismatch and must not
+require manual identity, cleanup, placement, or selection that the fixture can do
+exactly.
 
-### 2. Eliminate uncontrolled variables
+## 3. Validate and load
 
-Before editing, define:
+Run relevant focused validation, `./scripts/validate.sh`, and `git diff --check`.
+Install or launch Test Lab only through `scripts/install-dev.sh` with
+`X4GC_INSTALL_TESTLAB=1` (the Test Lab launcher sets it); this runs the required
+source-backed loadout preflight before installation.
+Follow [../../../docs/RELOADING.md](../../../docs/RELOADING.md) for the required
+reset.
 
-- exact player ship macro and visible ship name;
-- exact raw turret group id, visible label, and operational-member count;
-- one uniquely named group per test role;
-- deterministic `distance`, `x`, and `y` for every group;
-- expected row values, state changes, and log evidence;
-- conditions that keep fixtures alive and stationary.
+## 4. Give one exact live-test procedure
 
-Prefer `behaviour = "wait"`, `spread = 0`, and targets outside weapon range when
-the test only concerns menus. Use multiple roles only when each distinguishes a
-specific predicate. Never depend on the owner flying targets into position.
+The user launches and operates X4. Never ask them to inspect the raw log.
 
-Verify every macro against the installed/current X4 sources through
-`research-x4-modding`; do not trust memory for an untested macro.
+State:
 
-The proven Test Lab transport creates equipped ships. For stations, a
-`create_station` result, construction-plan module count, or visible shell is
-not evidence of an equipped surface-targeting fixture. Generate a faction
-loadout for each operational module, apply it, then withhold READY until the
-correlated live census confirms the expected modules and minimum operational
-turrets, missile turrets, shields, and engines. This path is reproduced for X4
-9.00's `xen_defence` plan: five modules, 120 turrets, 60 shields, and 185 total
-module/surface entries on the live fixture tested 2026-08-13.
+1. exact tested SHA and required setup/reset;
+2. required save, ship, seat, console, and other setup state;
+3. exact **Gunnery Control → Test Lab** path and scenario id;
+4. exactly one **Create test scenario** action and the ship, group, and role names
+   the fixture prepares;
+5. whether gameplay uses **Attack my current enemy** or default
+   **Attack any enemy** (selector: **Attack all enemies**);
+6. exact owner actions and expected visible result;
+7. exactly when to stop and upload the debug log, and what ChatGPT will inspect;
+8. explicit PASS and FAIL conditions.
 
-Do not use the equipped defence station as a clean per-turret arc fixture: it
-launches defence drones and clusters many surfaces at nearly the same bearing.
-Use it for pagination/performance and broad surface-browser tests. For exact
-fire attribution, prefer one stationary capital ship with carried defence
-units removed before hostility, all weapons held fire, and an isolated surface
-candidate.
+## 5. Review the evidence
 
-`hostile = true` is a requirement, not proof. A temporary object relation boost
-did not make a Terran-owned Osaka attackable by the player in the live 9.00
-test. Prefer a naturally hostile owner such as Xenon and withhold READY unless
-`player.ship.mayattack.{$Target}` is true for every requested hostile fixture.
+Offline validation proves only OFFLINE behavior; actual X4 runtime behavior needs
+LIVE evidence. A workflow using both is MIXED.
 
-### 3. Author the complete spec
+Inspect the uploaded log yourself. Correlate automated prerequisites with the same
+scenario/request identity, including spawn acknowledgement, readiness, and exact
+group/loadout state. Treat stale or mismatched acknowledgements as no proof.
 
-Edit only
-`testlab/x4_gunnery_control_testlab/ui/scenario_spec.lua` for the live fixture.
-Use a new id and include `setup`:
+For firing or targeting tests, prefer correlated shot/projectile/hit evidence. A
+geometry-qualified state proves geometry only, not actual turret targeting.
 
-```lua
-X4GunneryTestLabScenarioSpec = {
-    id      = "pr-number-purpose-r1",
-    enabled = true,
-    setup   = {
-        shipMacro       = "ship_bor_l_destroyer_01_a_macro",
-        shipLabel       = "Ray",
-        turretGroup     = "group_front_up_left",
-        turretLabel     = "Front Upper Left",
-        expectedTurrets = 2,
-    },
-    groups  = {
-        {
-            label     = "A CLEAR CONTROL",
-            macro     = "ship_xen_m_fighter_01_a_macro",
-            faction   = "xenon",
-            count     = 1,
-            distance  = 5000,
-            x         = 0,
-            y         = 1200,
-            spread    = 0,
-            behaviour         = "wait",
-            hostile           = true,
-            holdFire          = true,
-            stripDefenceUnits = true,
-            repairGuard       = true,
-        },
-    },
-}
-
-return X4GunneryTestLabScenarioSpec
-```
-
-Every spawned ship is named `<label> <index>`. Labels must state the test role,
-not merely `enemy` or `target`.
-
-For safe hostile capital targets, `holdFire=true` must add the ship to the
-persistent safety guard, set every operational turret/missile turret to HOLD
-FIRE, and repeatedly cease fire. `stripDefenceUnits=true` must remove carried
-defence units before hostility is applied. READY must report zero unsafe
-weapons, zero remaining defence units, and the expected attackable-hostile
-count.
-
-For repeated hit-attribution tests, `repairGuard=true` must keep the fixture
-attackable by repairing the victim ship and exact struck component after each
-player-ship hit. Do not substitute minimum-hull or invulnerability flags;
-vanilla target selection can exclude indestructible or invulnerable surfaces.
-READY must report the exact repair-guarded fixture count before the owner fires.
-
-Position uses ship-local axes: positive `distance` is forward, negative is
-astern, positive `x` is right, and positive `y` is up. Random spread cannot
-stage repeatable bearing, elevation, range, or masking controls.
-
-`behaviour`:
-
-- `wait`: hold position; default for controlled targets.
-- `attack`: approach and fire; use only when incoming fire is the variable.
-- `none`: no explicit order; normally for a player-owned platform/blocker.
-
-### 4. Validate without weakening the guard
-
-The repository test intentionally rejects an enabled committed fixture:
-
-1. Temporarily set `enabled = false` with `apply_patch`.
-2. Run `./scripts/validate.sh` and `git diff --check`.
-3. Restore `enabled = true` with `apply_patch`.
-4. Confirm `git diff` contains only the intended uncommitted fixture change.
-
-Never bypass or edit the disabled-fixture test.
-
-### 5. Install the exact worktree
-
-Discover the X4 root through `research-x4-modding`, then run from the PR's
-worktree:
-
-```bash
-X4GC_INSTALL_TESTLAB=1 ./scripts/install-dev.sh "<X4 root>"
-```
-
-Verify installation succeeded for both `x4_gunnery_control` and
-`x4_gunnery_control_testlab`. When asking for a reset, link the launcher from
-the same exact worktree—not another checkout.
-
-Follow repository reload policy. A change to Test Lab MD, translations,
-`ui.xml`, `content.xml`, a new/deleted X4-loaded file, or multiple reload
-categories requires a full restart. A scenario-spec-only edit remains governed
-by the repository hook/advice; do not carry a private exception from older
-experiments.
-
-For a repeat run, compute the reset from the files changed since the exact head
-already installed and loaded in the current X4 process—not from the PR's full
-base diff. If a prior restart already loaded an unchanged translation or
-structural file, a follow-up that changes only production/Test Lab `ui/*.lua`
-needs install + **Reload UI**, not another restart. Record the loaded head before
-iterating. If that baseline is unknown, X4 exited, another worktree was
-installed, or the gunnery menu may be broken, require the full restart.
-
-### 6. Give a complete operator handoff
-
-The final instruction before the live run must contain all of these, in order:
-
-1. Exact reset and exact worktree launcher.
-2. Required save, ship, seat, and console state.
-3. Exact menu path.
-4. Exact displayed scenario id.
-5. Exactly one setup action: **Create test scenario**.
-6. What success does automatically, including the selected turret group.
-7. Exact spawned names and expected distances/roles.
-8. Every test action in click order.
-9. Exact expected visible result for each action.
-10. What evidence the agent will inspect afterward.
-11. One failure instruction: stop, leave X4 open, and report the displayed
-    `FAILED:` text; do not improvise with reload/despawn buttons.
-
-Explicitly say which controls the owner must **not** touch. Never write “choose
-a group,” “pick a target,” “spawn the ships,” or “repeat as needed.” Name the
-single correct group, target, button, and expected result.
-
-### 7. Verify evidence before accepting
-
-The one-click path logs `[X4GC TEST] event=scenario_create`:
-
-- `event=scenario_runtime action=loaded`: engine time and loaded spec;
-- `action=requested`: exact request token, spec, expected count, group, turret ids;
-- `action=ready`: the same request token, acknowledged count, selected group;
-- `action=rejected|failed|timeout`: do not continue the gameplay checklist.
-
-MD logs `[X4GC TEST SCENARIO]` creation details and the final spawned count.
-After the owner reports completion, inspect logs yourself. Do not ask the owner
-to interpret raw logs. Keep owner observations experimental until reproduced.
-
-Before accepting, turn the operator checklist into an evidence matrix. Every
-required automated step must map to a distinct log event or correlated field.
-Count repeated actions explicitly (for example, two Create clicks require two
-different request tokens and two `ready` records). If any required record is
-missing, report the incomplete step and continue the live test; never accept a
-general “passed” report as proof of unlogged steps. If a manual visual assertion
-cannot be logged, label it as the owner's observation rather than automation.
-For hostile safety fixtures, also require the correlated READY fields for
-`safe_fixtures`, `safe_weapons`, `unsafe_weapons`, `defence_units`, and
-`hostiles`; a visible red/neutral label is not the primary check.
-
-### 8. Clean up
-
-- Restore `enabled = false` before any commit.
-- Run the full validation again.
-- Do not commit a PR-specific fixture unless the fixture itself is intentional
-  reusable test infrastructure and remains disabled.
-- Use **Despawn test scenario** only for explicit cleanup after testing, not as
-  a precondition for creating the next fixture.
-
-## Geometry guardrails
-
-- For a guaranteed `LINE OF FIRE BLOCKED` control, place a named stationary capital ship on
-  the segment between turret ship and candidate. Make it player-owned when it
-  must be excluded from the hostile browser. This establishes an intervening
-  obstruction, not own-hull masking.
-- Keep an `OUT OF RANGE` control independently clear of blockers. Confirm its
-  per-turret line of fire separately when the test needs that distinction.
-- Do not infer `CANNOT BEAR`, `LINE OF FIRE BLOCKED`, or `NO FIRING SOLUTION` from a no-fire interval.
-  Follow `turret-fire-control-language` and instrument the actual predicate.
-
-## Transport and evidence basis
-
-Lua streams flat scalar events because nested Lua tables are not a verified MD
-payload. `scenario_begin` carries the spec/request ids, each `scenario_group`
-carries one definition, and `scenario_commit` replaces then creates. MD returns
-a scalar acknowledgement containing an engine-monotonic request timestamp,
-request serial, spec id, and actual spawned count. Stale or
-mismatched replies are ignored. Despawn is
-disabled while a request is pending and defensively invalidates correlation.
-
-The spawner is XSD-validated against X4 9.00. `create_ship`, `safepos`, Wait and
-Attack orders, dynamic macro lookup, relation boosts, and guarded destruction
-are grounded in the extracted shipped scripts recorded by
-`research-x4-modding`. Dynamic `faction.{string}` remains an inference with a
-logged Xenon fallback.
-
-## Validation
-
-After Test Lab or skill changes run:
-
-```bash
-./scripts/validate.sh
-python3 /home/pc/.codex/skills/.system/skill-creator/scripts/quick_validate.py \
-  .agents/skills/spawn-gunnery-scenario
-```
-
-Also run `tests/test_research_x4_skill.sh` when this workflow changes research
-routing or evidence claims.
+If the evidence cannot isolate the cause of a failure, improve the evidence before
+changing behavior unless other evidence already proves the bug.

@@ -117,147 +117,65 @@
       </cues>
     </cue>
 
-    <!-- Exact selected-turret engageability service. Lua owns checkbox membership
-         and streams flat component ids; MD owns the per-turret range and
-         line-of-fire checks. Each batch repeats its selected members once and
-         accepts at most the declared 20 targets. Responses are packed because
-         raise_lua_event can carry only one scalar. -->
-    <cue name="EngageabilityService">
+    <!-- One selected turret visits each target once; only a compact result crosses back. -->
+    <cue name="InRangeService">
       <cues>
-        <cue name="EngageabilityBegin" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_begin'"/>
-          </conditions>
+        <cue name="InRangeBegin" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_begin'"/></conditions>
           <actions>
-            <set_value name="EngageabilityService.$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="EngageabilityService.$expectedmembers" exact="@event.param3.$members"/>
-            <set_value name="EngageabilityService.$expectedtargets" exact="[@event.param3.$targets, 20].min"/>
-            <set_value name="EngageabilityService.$weapons" exact="[]"/>
-            <set_value name="EngageabilityService.$arcknown" exact="[]"/>
-            <set_value name="EngageabilityService.$arcmins" exact="[]"/>
-            <set_value name="EngageabilityService.$arcmaxs" exact="[]"/>
-            <set_value name="EngageabilityService.$targets" exact="[]"/>
-            <set_value name="EngageabilityService.$targetids" exact="[]"/>
+            <set_value name="InRangeService.$nonce" exact="@event.param3.$nonce"/>
+            <set_value name="InRangeService.$weapon" exact="@event.param3.$weapon"/>
+            <do_if value="typeof InRangeService.$weapon != datatype.component and InRangeService.$weapon">
+              <set_value name="InRangeService.$weapon" exact="component.{InRangeService.$weapon}"/>
+            </do_if>
+            <set_value name="InRangeService.$weaponid" exact="@event.param3.$weaponid"/>
+            <set_value name="InRangeService.$expected" exact="@event.param3.$targets"/>
+            <set_value name="InRangeService.$targets" exact="[]"/>
+            <set_value name="InRangeService.$speedships" exact="[]"/>
           </actions>
         </cue>
-        <cue name="EngageabilityMember" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_member'"/>
-          </conditions>
+        <cue name="InRangeTarget" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_target'"/></conditions>
           <actions>
-            <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="$weapon" exact="@event.param3.$weapon"/>
-            <set_value name="$arcknow" exact="@event.param3.$arcknow"/>
-            <set_value name="$arcmin" exact="@event.param3.$arcmin"/>
-            <set_value name="$arcmax" exact="@event.param3.$arcmax"/>
-            <do_if value="typeof $weapon != datatype.component and $weapon">
-              <set_value name="$weapon" exact="component.{$weapon}"/>
-            </do_if>
-            <do_if value="$nonce == EngageabilityService.$nonce
-                          and EngageabilityService.$weapons.count lt EngageabilityService.$expectedmembers
-                          and typeof $weapon == datatype.component
-                          and not EngageabilityService.$weapons.indexof.{$weapon}">
-              <append_to_list name="EngageabilityService.$weapons" exact="$weapon"/>
-              <append_to_list name="EngageabilityService.$arcknown" exact="$arcknow"/>
-              <append_to_list name="EngageabilityService.$arcmins" exact="$arcmin"/>
-              <append_to_list name="EngageabilityService.$arcmaxs" exact="$arcmax"/>
-            </do_if>
-          </actions>
-        </cue>
-        <cue name="EngageabilityTarget" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_target'"/>
-          </conditions>
-          <actions>
-            <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <set_value name="$targetid" exact="@event.param3.$target"/>
-            <set_value name="$target" exact="$targetid"/>
+            <set_value name="$target" exact="@event.param3.$target"/>
             <do_if value="typeof $target != datatype.component and $target">
               <set_value name="$target" exact="component.{$target}"/>
             </do_if>
-            <do_if value="$nonce == EngageabilityService.$nonce
-                          and EngageabilityService.$targets.count lt EngageabilityService.$expectedtargets
-                          and typeof $target == datatype.component
-                          and not EngageabilityService.$targets.indexof.{$target}">
-              <append_to_list name="EngageabilityService.$targets" exact="$target"/>
-              <append_to_list name="EngageabilityService.$targetids" exact="$targetid"/>
+            <set_value name="$speedship" exact="@event.param3.$speedship"/>
+            <do_if value="typeof $speedship != datatype.component and $speedship">
+              <set_value name="$speedship" exact="component.{$speedship}"/>
+            </do_if>
+            <do_if value="@event.param3.$nonce == InRangeService.$nonce and InRangeService.$targets.count lt InRangeService.$expected and typeof $target == datatype.component">
+              <append_to_list name="InRangeService.$targets" exact="$target"/>
+              <append_to_list name="InRangeService.$speedships" exact="$speedship"/>
             </do_if>
           </actions>
         </cue>
-        <cue name="EngageabilityCommit" instantiate="true">
-          <conditions>
-            <event_ui_triggered screen="'X4GunneryControl'" control="'engageability_commit'"/>
-          </conditions>
+        <cue name="InRangeCommit" instantiate="true">
+          <conditions><event_ui_triggered screen="'X4GunneryControl'" control="'in_range_commit'"/></conditions>
           <actions>
             <set_value name="$nonce" exact="@event.param3.$nonce"/>
-            <do_if value="$nonce == EngageabilityService.$nonce">
-              <set_value name="$completed" exact="0"/>
-              <do_for_each name="$target" in="EngageabilityService.$targets" counter="$targetindex">
-                <set_value name="$engageable" exact="0"/>
-                <set_value name="$known" exact="0"/>
-                <do_for_each name="$weapon" in="EngageabilityService.$weapons" counter="$weaponindex">
-                  <!-- rotation_x restrictions in shipped turret components are
-                       pitch limits in this fixed mount-local reference frame.
-                       Unknown/modded macros remain UNKNOWN rather than being
-                       falsely promoted by range + line of fire alone. -->
-                  <do_if value="EngageabilityService.$arcknown.{$weaponindex} == 1">
-                    <set_value name="$known" operation="add"/>
-                    <set_value name="$aimpitch" exact="$target.relativeposition.{$weapon}.rotation.pitch"/>
-                    <do_if value="$aimpitch ge (EngageabilityService.$arcmins.{$weaponindex} * 1deg)
-                                  and $aimpitch le (EngageabilityService.$arcmaxs.{$weaponindex} * 1deg)
-                                  and $weapon.bboxdistanceto.{$target} le $weapon.maxfirerange">
-                      <!-- Start at the live muzzle and include the firing ship
-                           so its own hull can mask an otherwise clear ray. -->
-                      <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$target" excludeself="false" useaimtarget="true"/>
-                      <!-- A large ship/station root's aim point is its bounding-
-                           box centre (see check_line_of_sight useaimtarget in the
-                           9.00 XSD), which sits inside the hull, so the root ray
-                           self-blocks even while turrets fire at surface modules.
-                           Mirror vanilla move.attack.object.capital (9.00): on a
-                           modular target whose root has no line of fire, fall back
-                           to per-module line of fire. First visible module counts
-                           this weapon as engageable, matching engine behaviour.
-                           Only when $target IS the whole defensible root: vanilla
-                           only ever feeds this loop a whole-object attack target
-                           (it retargets to a visible module), and on a whole object
-                           .defensible is the object itself. A player-selected
-                           surface element's .defensible resolves to its parent
-                           station, so without this guard the fallback would count
-                           any weapon that can see ANY station module as engageable
-                           against that one element, inflating the count (#62).
-                           canhaveattackablemodules (ship datatype, @-guarded so a
-                           station root safely reads null) extends the same root
-                           fallback to the rare capital ships whose macro embeds a
-                           targetable defence module, matching vanilla target
-                           selection (lib.target.selection ismodular or
-                           canhaveattackablemodules); harmless where a ship's
-                           defence modules are not exposed via .modules. -->
-                      <do_if value="not $lineoffireclear
-                                    and $target == $target.defensible
-                                    and ($target.defensible.ismodular or @$target.canhaveattackablemodules)
-                                    and $target.defensible.modules.operational.count gt 1">
-                        <set_value name="$modules" exact="$target.defensible.modules.operational.list"/>
-                        <append_list_elements name="$modules" other="$target.defensible.modules.construction.list"/>
-                        <do_for_each name="$module" in="$modules">
-                          <do_if value="$weapon.bboxdistanceto.{$module} le $weapon.maxfirerange">
-                            <check_line_of_sight name="$lineoffireclear" object="$weapon" objectoffset="$weapon.barrelposition" target="$module" excludeself="false" useaimtarget="true"/>
-                            <do_if value="$lineoffireclear">
-                              <break/>
-                            </do_if>
-                          </do_if>
-                        </do_for_each>
-                        <remove_value name="$modules"/>
-                      </do_if>
-                      <do_if value="$lineoffireclear">
-                        <set_value name="$engageable" operation="add"/>
-                      </do_if>
+            <do_if value="$nonce == InRangeService.$nonce and InRangeService.$targets.count == InRangeService.$expected and typeof InRangeService.$weapon == datatype.component">
+              <set_value name="$range" exact="InRangeService.$weapon.maxfirerange"/>
+              <set_value name="$beam" exact="InRangeService.$weapon.isbeam"/>
+              <set_value name="$bits" exact="''"/>
+              <do_for_each name="$target" in="InRangeService.$targets" counter="$index">
+                <set_value name="$hit" exact="'0'"/>
+                <do_if value="$range gt 0m">
+                  <set_value name="$extra" exact="0m"/>
+                  <set_value name="$speedship" exact="InRangeService.$speedships.{$index}"/>
+                  <do_if value="not $beam and typeof $speedship == datatype.component">
+                    <do_if value="@$speedship.maxspeed gt 0">
+                      <set_value name="$extra" exact="[$range * 1.1, 500m].min"/>
                     </do_if>
                   </do_if>
-                </do_for_each>
-                <raise_lua_event name="'X4GunneryControl.EngageabilityResult'" param="'x4gce3:' + $nonce + ':' + EngageabilityService.$targetids.{$targetindex} + ':' + $engageable + ':' + $known + ':' + EngageabilityService.$expectedmembers"/>
-                <set_value name="$completed" operation="add"/>
+                  <do_if value="$target.bboxdistanceto.{InRangeService.$weapon} lt $range + $extra">
+                    <set_value name="$hit" exact="'1'"/>
+                  </do_if>
+                </do_if>
+                <set_value name="$bits" exact="$bits + $hit"/>
               </do_for_each>
-              <raise_lua_event name="'X4GunneryControl.EngageabilityBatchComplete'" param="'x4gce2c:' + $nonce + ':' + EngageabilityService.$targets.count + ':' + $completed"/>
+              <raise_lua_event name="'X4GunneryControl.InRangeResult'" param="'x4gcr2:' + $nonce + ':' + InRangeService.$weaponid + ':' + $bits"/>
             </do_if>
           </actions>
         </cue>
@@ -581,6 +499,58 @@
               </cues>
             </cue>
           </cues>
+        </cue>
+      </cues>
+    </cue>
+
+    <!-- #68 onboard Map ingress. Adds a "Gunnery Control" action to the Map
+         right-click menu of the one ship the player is physically inside via
+         SirNukes Mod Support APIs' Interact Menu API. If that API is absent,
+         Get_Actions never signals, this block is inert, and the chair path is
+         untouched. -->
+    <cue name="OnboardIngress">
+      <cues>
+        <cue name="AddAction" instantiate="true">
+          <conditions>
+            <event_cue_signalled cue="md.Interact_Menu_API.Get_Actions"/>
+          </conditions>
+          <actions>
+            <set_value name="$object" exact="@event.param.$object"/>
+            <!-- Only the exact player-owned ship currently containing the player,
+                 and only if it has at least one operational turret group. This
+                 excludes another owned ship, a subordinate, a docked-but-not-
+                 entered ship, and any station (all fail $object == player.container). -->
+            <do_if value="$object and $object.isclass.ship and $object.owner == faction.player and $object == player.container">
+              <find_object_component name="$turret" object="$object" class="class.turret" checkoperational="true" multiple="false"/>
+              <do_if value="$turret">
+                <!-- 'interaction' is the API section for an action on the
+                     player's own ship rather than an order on another object. -->
+                <signal_cue_instantly cue="md.Interact_Menu_API.Add_Action" param="table[
+                  $id       = 'x4gc_open_onboard',
+                  $section  = 'interaction',
+                  $text     = {20991, 104},
+                  $icon     = 'menu_weapon',
+                  $callback = OnSelected
+                ]"/>
+              </do_if>
+            </do_if>
+          </actions>
+        </cue>
+        <cue name="OnSelected" instantiate="true">
+          <conditions>
+            <event_cue_signalled/>
+          </conditions>
+          <actions>
+            <do_if value="event.param.$id == 'x4gc_open_onboard'">
+              <set_value name="$object" exact="event.param.$object"/>
+              <!-- Re-validate the exact ship on selection. Lua independently
+                   re-checks occupancy, ownership, and turrets, then closes the Map
+                   through its normal UI lifecycle before opening Gunnery Control. -->
+              <do_if value="$object and $object == player.container and $object.owner == faction.player">
+                <raise_lua_event name="'X4GunneryControl.OpenOnboard'" param="$object"/>
+              </do_if>
+            </do_if>
+          </actions>
         </cue>
       </cues>
     </cue>

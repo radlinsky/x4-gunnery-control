@@ -114,7 +114,14 @@ else
 fi
 
 is_wsl=false
-if [[ -r /proc/version ]] && grep -qi microsoft /proc/version && [[ "$tool" == *.exe ]] && command -v wslpath >/dev/null; then is_wsl=true; fi
+if [[ -r /proc/version ]] && grep -qi microsoft /proc/version && [[ "$tool" == *.exe ]] && command -v wslpath >/dev/null; then
+  # Restricted WSL sandboxes can expose wslpath while denying its interop
+  # socket. Probe an existing harmless path before using it for every argument;
+  # native test doubles and non-interop environments can still use POSIX paths.
+  if wslpath -w -- "$repo_dir" >/dev/null 2>&1; then
+    is_wsl=true
+  fi
+fi
 path_for_tool() {
   if "$is_wsl"; then wslpath -w -- "$1"; else printf '%s\n' "$1"; fi
 }

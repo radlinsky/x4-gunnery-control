@@ -16,8 +16,10 @@
 - Limitations: this repository's wrapper accepts only existing `.cat` inputs,
   a new directory output, and include/exclude filters. It forbids `-append`,
   `-diff`, catalog output, X4 installation output, and execution of unverified
-  tool archives. Do not run an untrusted Windows executable without separate
-  review.
+  tool archives. It probes `wslpath` before converting arguments because some
+  restricted WSL environments expose the command but deny Windows interop; in
+  that case it retains POSIX paths for native test doubles. Do not run an
+  untrusted Windows executable without separate review.
 
 ### WSL ZIP extraction may omit the executable bit
 - X4: tool workflow; independent of game version
@@ -27,3 +29,18 @@
 - Finding: a Windows-created tool ZIP can extract `XRCatTool.exe` without its
   POSIX executable bit. Mark only the ignored tool-cache copy executable before
   WSL interop; never modify the source ZIP or game files.
+
+### Extracting a single file from a packed .cat/.dat without a tool
+- X4: 9.00
+- Status: live-tested
+- Source: manual extraction of `ui/addons/ego_detailmonitor/menu_map.lua` and
+  `sn_mod_support_apis/md/interact_menu_api.xml` on WSL2, 2026-09-04
+- Live test: yes — used to diagnose #68 map-close and Interact Menu API
+- Finding: an `NN.cat` is a plain text index whose lines are
+  `path size timestamp md5`, and `NN.dat` is those files concatenated in index
+  order. A file's byte offset is the sum of all prior `size` fields; extract with
+  `dd if=NN.dat bs=1M iflag=skip_bytes,count_bytes skip=OFFSET count=SIZE`.
+  Parse fields **from the right** (`hash=$NF; ts=$(NF-1); size=$(NF-2); path=rest`)
+  because some asset paths contain spaces — parsing `$2` as size mis-sums and lands
+  mid-file. Sanity check: the summed sizes must equal the `.dat` byte size. `.sig`
+  entries live in the separate `NN_sig.cat`/`NN_sig.dat`, not the main `.dat`.

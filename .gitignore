@@ -10,6 +10,7 @@ dist/
 /*.log
 __folder_managed_by_vortex
 .DS_Store
+__pycache__/
 
 # Live-test artifacts and captured session material: savegames and screenshots
 # are large binaries, and the filtered log / chat transcript are per-run scratch.

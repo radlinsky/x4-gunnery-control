@@ -97,8 +97,14 @@ staged_abs="$(pwd)/$stage"
 # WorkshopTool is a Windows executable, so under WSL the Linux path it would be
 # handed is meaningless. Print the Windows form when we can produce one.
 if command -v wslpath >/dev/null 2>&1; then
-  staged_abs="$(wslpath -w "$staged_abs")"
-  [[ -n "$preview" ]] && preview="$(wslpath -w "$preview")"
+  if windows_stage=$(wslpath -w "$staged_abs" 2>/dev/null); then
+    staged_abs=$windows_stage
+    if [[ -n "$preview" ]] && windows_preview=$(wslpath -w "$preview" 2>/dev/null); then
+      preview=$windows_preview
+    fi
+  else
+    echo "WARNING: wslpath is present but unavailable; printing Linux staging paths." >&2
+  fi
 fi
 echo ""
 echo "Workshop staging ready: $staged_abs"
