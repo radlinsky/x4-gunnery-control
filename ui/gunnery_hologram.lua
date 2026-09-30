@@ -129,7 +129,8 @@ function H.mount(menu, frame, session, rect, combat, onClick)
             v.entries[#v.entries + 1], v.bySlot[slot] = entry, entry
             turrets[#turrets + 1] = luaID(component)
             selected[#selected + 1] = entry.selected
-            signature[#signature + 1] = uid(component) .. "/" .. tostring(entry.selected)
+            -- Console selection only recolours markers; combat subscribes by selection.
+            signature[#signature + 1] = uid(component) .. (combat and "/" .. tostring(entry.selected) or "")
         end
     end
     v.signature = table.concat(signature, ":")

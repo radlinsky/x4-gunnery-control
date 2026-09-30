@@ -565,8 +565,8 @@ local function readGroups(ship)
     end
     local labelCounts = {}
     for index, entry in ipairs(groups) do
-        entry.positionLabel = State.turretGroupLabel(entry.group) or (text(4) .. " " .. tostring(index))
         if entry.kind == "group" then
+            entry.positionLabel = State.turretGroupLabel(entry.group) or (text(4) .. " " .. tostring(index))
             -- Position only; member rows carry the turret names.
             local base = entry.positionLabel
             labelCounts[base] = (labelCounts[base] or 0) + 1
@@ -2100,6 +2100,7 @@ end
 
 local function onDirectTargetLost()
     local lostID, root = session.aimTargetID, session.targetObjectID
+    session.targetLostAt = getElapsedTime()
     if session.autoNextTarget ~= false and not isNullID(lostID) and not isNullID(root)
             and not sameID(lostID, root) and automaticTargetAllowed(root) then
         startTargetFallback(lostID, root)
@@ -3161,12 +3162,15 @@ local function updateSessionRuntime()
         if session.phase == "engaged" and (session.povMode or "manual") == "cinematic" then
             if C.IsFullscreenCutsceneActive() then
                 session.cinematicSeen = true
-            -- An Auto-next fallback owns the camera: MD stops the cutscene when its target dies.
-            elseif session.cinematicSeen and not session.targetFallback then
+            elseif session.cinematicSeen then
                 session.cinematicSeen = nil
-                session.povAnchor, session.povMode = "turret", "manual"
-                applyPov()
-                menu.display()
+                -- MD stops the cutscene itself when its target dies; only a stop
+                -- later than that is the player's Esc.
+                if not (session.targetLostAt and now - session.targetLostAt < 1) then
+                    session.povAnchor, session.povMode = "turret", "manual"
+                    applyPov()
+                    menu.display()
+                end
             end
         end
         -- Only while the camera is meant to be ON the turret. Target POV points

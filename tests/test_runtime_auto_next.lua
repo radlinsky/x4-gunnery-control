@@ -213,9 +213,16 @@ finish("0")
 assert(s.targetFallback.attempts == 3)
 now = now + 2.1; API.runRangeSweep(now); API.updateAimTarget()
 assert(s.phase == "target_select" and s.targetFallback == nil and #choices == 0)
+
 local begins = 0
 for _, event in ipairs(events) do if event.control == "in_range_begin" then begins = begins + 1 end end
 assert(begins == 4, "two failed attempts and one two-turret sweep, never a fourth attempt")
+
+-- A failed attempt's positive cannot feed the next attempt's early exit.
+objectSetup(); reply(pending(), "1")                 -- turret 1 positive on the sole (top) candidate
+API.runRangeSweep(now); now = now + 2.1; API.runRangeSweep(now) -- turret 2 times out: attempt fails
+API.updateAimTarget(); API.updateAimTarget()         -- consume the failure, then re-rank on attempt 2
+assert(#choices == 0 and s.targetFallback.attempts == 2, "a failed attempt's positive must not select")
 
 -- Disabling Auto-next, changing membership, manual engagement, and a new session reject late replies.
 objectSetup(); late = pending(); s.autoNextTarget = false

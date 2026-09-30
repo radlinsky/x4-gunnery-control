@@ -254,8 +254,6 @@ do
         "Test Lab's explicit return must restore the same session to owned")
 end
 
-print("runtime coverage tests passed")
-
 -- M in the target browser opens the Map, which closes Gunnery. The session
 -- parks and the same browser returns once the Map closes.
 do
@@ -278,3 +276,4 @@ do
     assert(fix.API.getSession() == session and session.lifecycle == "owned",
         "the reopened menu must resume the same session")
 end
+print("runtime coverage tests passed")
