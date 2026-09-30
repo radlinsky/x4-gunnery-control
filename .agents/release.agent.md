@@ -150,11 +150,13 @@ bump it — a second copy is what silently breaks CI one commit later.
 ## Step 5 — Review release notes
 
 Read `release/RELEASE_NOTES.md` and compare it to the current release entry in
-`NEWS.md` (the heading you just versioned in Step 4). Then read
+`NEWS.md` (the heading you just versioned in Step 4). Then read `README.md`,
 `release/nexus_description.txt` and `release/workshop-description.bbcode`
 solely to audit whether any **evergreen** content — current behaviour
 description, requirements, limitations, installation steps, or links — has
-become inaccurate since the last release.
+become inaccurate since the last release. Most of their text is shared, so fix
+all three together and keep the shared paragraphs word for word the same. Only
+markup, links and install steps differ between them.
 
 If `release/RELEASE_NOTES.md` does not match the current release entry in
 `NEWS.md`, update it so the two are aligned. Show the diff and ask the user to
